@@ -1,0 +1,12 @@
+[Unit]
+Description=Triage a RPIBoot Device, invoking the signed boot provisioner if it's a new device.
+# BindTo would cause the service to be stopped if the device disappears
+#BindTo=%i.device
+After=%i.device
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/triage.sh /%I
+EnvironmentFile=/etc/rpi-sb-provisioner/config
+# StandardOutput will fail if the file does not exist (consider tmpfiles.d or udev creation approach?)
+#StandardOutput=append:/var/log/rpi-sb-provisioner/%I/triage.log

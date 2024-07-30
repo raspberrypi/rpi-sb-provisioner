@@ -1,0 +1,4 @@
+*.deb
+
+# macOS Finder intermediates
+*.DS_Store
