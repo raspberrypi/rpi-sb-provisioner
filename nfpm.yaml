@@ -49,7 +49,7 @@ version_schema: semver
 # Setting metadata might interfere with version comparisons depending on the
 # packager. If the `version` is semver compatible, then this replaces the
 # version metadata component of the semver.
-version_metadata: git
+#version_metadata: git
 
 # Version Release, aka revision.
 # This will expand any env var you set in the field, e.g. release: ${VERSION_RELEASE}
