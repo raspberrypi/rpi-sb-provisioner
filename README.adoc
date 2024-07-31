@@ -50,10 +50,11 @@ First, ensure you are running an up-to-date version of Raspberry Pi OS on your p
 $ sudo apt update && sudo apt full-upgrade -y
 ----
 
-Now, install the `rpi-sb-provisioner` package:
+Now, install the `rpi-sb-provisioner` package from the releases area:
 
 ----
-$ sudo apt install -y rpi-sb-provisioner
+$ sudo dpkg -i rpi-sb-provisioner_foo.deb
+$ sudo apt --fix-broken install
 ----
 
 Copy the example configuration file into the expected location:
