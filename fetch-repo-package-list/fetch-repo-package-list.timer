@@ -1,0 +1,11 @@
+[Unit]
+Description=Regularly run the package downloader
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=6hours
+FixedRandomDelay=true
+Persistent=true
+
+[Install]
+WantedBy=timers.target

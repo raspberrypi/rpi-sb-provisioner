@@ -1,0 +1,15 @@
+[Unit]
+Description=Downloads latest packages from repo
+Wants=fetch-repo-package-list@%i.timer
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/rpi-sb-provisioner/config
+ExecStart=/usr/local/bin/fetch-repo-package-list "%I"
+#ConfigurationDirectory=rpi-sb-provisioner
+CacheDirectory=%n
+RuntimeDirectory=%n
+RuntimeDirectoryPreserve=true
+
+[Install]
+WantedBy=multi-user.target
