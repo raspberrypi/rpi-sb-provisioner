@@ -137,6 +137,9 @@ depends:
   - rpi-eeprom
   - rpiboot
   - coreutils
+  - curl
+  - bash
+  - gzip
 
 # Recommended packages. (overridable)
 # This will expand any env var you set in the field, e.g. ${RECOMMENDS_BLA}
@@ -206,6 +209,15 @@ contents:
 
   - src: key-writer/keywriter.sh
     dst: /usr/local/bin/keywriter.sh
+
+  - src: fetch-repo-package-list/fetch-repo-package-list.timer
+    dst: /usr/local/lib/systemd/system/fetch-repo-package-list@.timer
+
+  - src: fetch-repo-package-list/fetch-repo-package-list.service
+    dst: /usr/local/lib/systemd/system/fetch-repo-package-list@.service
+
+  - src: fetch-repo-package-list/fetch-repo-package-list
+    dst: /usr/local/bin/fetch-repo-package-list
 
   # This will add all files in some/directory or in subdirectories at the
   # same level under the directory /etc. This means the tree structure in
