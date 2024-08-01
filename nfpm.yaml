@@ -140,6 +140,9 @@ depends:
   - curl
   - bash
   - gzip
+  - dctrl-tools
+  - diffutils
+  - findutils
 
 # Recommended packages. (overridable)
 # This will expand any env var you set in the field, e.g. ${RECOMMENDS_BLA}
@@ -218,6 +221,12 @@ contents:
 
   - src: fetch-repo-package-list/fetch-repo-package-list
     dst: /usr/local/bin/fetch-repo-package-list
+
+  - src: rpi-package-download/rpi-package-download.service
+    dst: /usr/local/lib/systemd/system/rpi-package-download@.service
+
+  - src: rpi-package-download/rpi-package-download
+    dst: /usr/local/bin/rpi-package-download
 
   # This will add all files in some/directory or in subdirectories at the
   # same level under the directory /etc. This means the tree structure in
