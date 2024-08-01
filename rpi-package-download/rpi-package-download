@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+
+set -e
+
+# Usage: rpi-package-download <systemd escaped package>
+#   e.g. rpi-package-download 'alsa-utils'
+#   would download alsa-utils
+
+# deps:
+#   - dctrl-tools (grep-dctrl)
+#   - coreutils (mktemp,cut,sha1sum,sha256sum)
+#   - diffutils (cmp)
+#   - findutils (xargs)
+#   - curl
+
+REQUESTED_PACKAGE="${1}"
+
+REPOSITORY="${REPOSITORY:-https://archive.raspberrypi.org/debian}"
+RELEASE="${RELEASE:-bookworm}"
+ARCH="${ARCH:-arm64}"
+
+# Should be set by systemd
+SERVICE_NAME="rpi-package-download@$(systemd-escape ${REQUESTED_PACKAGE}).service"
+CACHE_DIRECTORY="${CACHE_DIRECTORY:=/var/cache/${SERVICE_NAME}}"
+RUNTIME_DIRECTORY="${RUNTIME_DIRECTORY:=/run/${SERVICE_NAME}}"
+
+# Assume that fetch-repo-package-list@.service RUNTIME_DIRECTORY is available relative to our RUNTIME_DIRECTORY
+PACKAGES_FILE="${RUNTIME_DIRECTORY}/../fetch-repo-package-list@$(systemd-escape ${REPOSITORY}).service/Packages"
+
+>&2 echo "Getting latest package information for ${REQUESTED_PACKAGE}"
+TMP_PKG_FILE="$(mktemp --tmpdir rpi-package-downloader.XXX)"
+
+grep-dctrl \
+	--field=Package \
+	--exact-match "${REQUESTED_PACKAGE}" \
+	"${PACKAGES_FILE}" \
+	> ${TMP_PKG_FILE}
+
+LATEST_DIR="${RUNTIME_DIRECTORY}/latest"
+LATEST_PKG_FILE="${LATEST_DIR}/Package"
+
+if cmp ${TMP_PKG_FILE} ${LATEST_PKG_FILE} 2>/dev/null; then
+	>&2 echo "Package up-to-date; nothing to do"
+	exit
+fi
+
+CHKSUM=$(sha1sum ${TMP_PKG_FILE} | cut -d " " -f 1)
+WORK_DIR="${CACHE_DIRECTORY}/${CHKSUM}"
+mkdir -p $WORK_DIR
+PACKAGE_FILE="${WORK_DIR}/Packages"
+mv "$TMP_PKG_FILE" "$PACKAGE_FILE"
+
+function get_dctrl_field() {
+	grep-dctrl \
+		--field=Package \
+		--exact-match "${1}" \
+		--no-field-names \
+		--show-field="${2}" \
+		"${PACKAGE_FILE}"
+}
+
+PACKAGE_PARTIAL_URL="$(get_dctrl_field ${REQUESTED_PACKAGE} Filename)"
+PACKAGE_FULL_URL="${REPOSITORY}/${PACKAGE_PARTIAL_URL}"
+PACKAGE_BASENAME="$(basename ${PACKAGE_PARTIAL_URL})"
+
+>&2 echo "Downloading package"
+curl \
+	"${PACKAGE_FULL_URL}" \
+	-o "${WORK_DIR}/${PACKAGE_BASENAME}" \
+	2> /dev/null
+
+>&2 echo -n "Verifying package checksum: "
+pushd "${WORK_DIR}" > /dev/null
+grep-dctrl \
+	--field=Package \
+	--exact-match "${REQUESTED_PACKAGE}" \
+	--show-field=SHA256,Filename \
+	--no-field-names \
+	"${PACKAGE_FILE}" | sed 's/.*\///' | xargs > "${PACKAGE_BASENAME}.sha256"
+
+sha256sum --check "${PACKAGE_BASENAME}".sha256
+popd > /dev/null
+
+>&2 echo "Updating symlinks"
+ln -sf "${WORK_DIR}/${PACKAGE_BASENAME}" "${WORK_DIR}/package.deb"
+ln -sf "${WORK_DIR}" "${CACHE_DIRECTORY}/latest"

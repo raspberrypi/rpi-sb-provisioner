@@ -1,0 +1,15 @@
+[Unit]
+Description=Downloads specified Raspberry Pi OS package
+After=fetch-repo-package-list@https:--archive.raspberrypi.org-debian.service
+
+[Service]
+Type=oneshot
+Environment=REPOSITORY="https://archive.raspberrypi.org/debian"
+EnvironmentFile=/etc/rpi-sb-provisioner/config
+ExecStart=/usr/local/bin/rpi-package-download "%I"
+CacheDirectory=%n
+RuntimeDirectory=%n
+RuntimeDirectoryPreserve=true
+
+[Install]
+WantedBy=multi-user.target
