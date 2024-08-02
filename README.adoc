@@ -114,6 +114,7 @@ Note that using this function will prevent Raspberry Pi engineers from being abl
 Set to any value to enable the JTAG restrictions.
 
 === RPI_DEVICE_EEPROM_WP_SET
+*Optional*
 
 Raspberry Pi devices that use an EEPROM as part of their boot flow can configure that EEPROM to enable write protection - preventing modification.
 
