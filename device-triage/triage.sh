@@ -35,8 +35,8 @@ if [ -e "${DEVICE_SERIAL_STORE}/${TARGET_DEVICE_SERIAL}" ]; then
     echo "If this is in error, delete ${DEVICE_SERIAL_STORE}/${TARGET_DEVICE_SERIAL}"
 
     # Start the boot provisioner service
-    mkdir -p /var/log/rpi-sb-provisioner/provisioner/
-    touch "/var/log/rpi-sb-provisioner/provisioner/${TARGET_DEVICE_SERIAL}.log"
+    mkdir -p /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/
+    touch "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/provisioner.log"
     systemctl start rpi-sb-provisioner@"${TARGET_DEVICE_SERIAL}"
 
     exit 0
@@ -45,8 +45,8 @@ else
     echo "Using keyfile at ${CUSTOMER_KEY_FILE_PEM}"
 
     # Start the keywriter service
-    mkdir -p /var/log/rpi-sb-provisioner/keywriter/
-    touch "/var/log/rpi-sb-provisioner/keywriter/${TARGET_DEVICE_SERIAL}.log"
+    mkdir -p /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/
+    touch "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/keywriter.log"
     systemctl start rpi-sb-keywriter@"${TARGET_DEVICE_SERIAL}"
     exit 0
 fi
