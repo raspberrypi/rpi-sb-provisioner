@@ -1,0 +1,43 @@
+Screen {
+    layout: vertical;
+    background: rgb(32, 0, 20);
+}
+
+Processing {
+    layout: horizontal;
+}
+Ended {
+    layout: horizontal;
+}
+FileSelector {
+    layout: horizontal;
+    height: 3;
+}
+
+LogScreen {
+    background: rgb(32, 0, 20);
+}
+
+.box {
+    height: 1fr;
+}
+
+.box2 {
+    height: 100%;
+    width: 1fr;
+    /* background: rgb(102, 1, 63); */
+    border: solid rgb(255, 0, 106);
+}
+.data_text {
+    height: 100%;
+    width: 1fr;
+    color: rgb(255, 160, 200);
+}
+.fileselectorbutton {
+    height: 3;
+    width: 1fr;
+    border: solid rgb(255, 0, 106);
+    margin-left: 1;
+    margin-right: 1;
+    background: rgb(167, 0, 69);
+}
