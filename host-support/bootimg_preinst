@@ -1,0 +1,6 @@
+#!/bin/sh
+
+if [ "$1" = install ]
+then
+    rm -f /boot/firmware/config.txt
+fi

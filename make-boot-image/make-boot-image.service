@@ -1,0 +1,10 @@
+[Unit]
+Description=Creates a signed boot image using a Raspberry Pi OS kernel / bootloader
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/make-boot-image-from-kernel "%I"
+CacheDirectory=%n
+
+[Install]
+WantedBy=multi-user.target

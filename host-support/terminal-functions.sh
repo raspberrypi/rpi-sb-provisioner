@@ -132,6 +132,22 @@ get_fastboot_config_file() {
     fi
 }
 
+get_internal_config_file() {
+    if [ -f /etc/rpi-sb-provisioner/ramdisk_internal_config.txt ]; then
+        echo "/etc/rpi-sb-provisioner/ramdisk_internal_config.txt"
+    else
+        echo "/var/lib/rpi-sb-provisioner/ramdisk_internal_config.txt"
+    fi
+}
+
+get_ramdisk_cmdline_file() {
+    if [ -f /etc/rpi-sb-provisioner/ramdisk_cmdline.txt ]; then
+        echo "/etc/rpi-sb-provisioner/ramdisk_cmdline.txt"
+    else
+        echo "/var/lib/rpi-sb-provisioner/ramdisk_cmdline.txt"
+    fi
+}
+
 get_signing_directives() {
     if [ -n "${CUSTOMER_KEY_PKCS11_NAME}" ]; then
         echo "${CUSTOMER_KEY_PKCS11_NAME} -engine pkcs11 -keyform engine"
@@ -147,5 +163,13 @@ get_signing_directives() {
             echo "Neither PKCS11 key name, or PEM key file specified. Aborting." >&2
             exit 1
         fi
+    fi
+}
+
+get_bootimg_preinst_file() {
+    if [ -f /etc/rpi-sb-provisioner/bootimg_preinst ]; then
+        echo "/etc/rpi-sb-provisioner/bootimg_preinst"
+    else
+        echo "/var/lib/rpi-sb-provisioner/bootimg_preinst"
     fi
 }
