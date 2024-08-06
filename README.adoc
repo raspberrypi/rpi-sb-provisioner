@@ -59,13 +59,20 @@ $ sudo reboot now
 Next, you will have to configure `rpi-sb-provisioner` by using the TUI. In a terminal, run: 
 
 ----
+<<<<<<< HEAD
 $ config.sh
+=======
+$ configure.sh
+>>>>>>> 584eb45 (Added an app to allow users to configure rpi-sb-provisioner)
 ----
 
 WARNING: This will not work if you have not reboot after installing the package! 
 
+<<<<<<< HEAD
 WARNING: `rpi-sb-provisioner' must be installed with `--install-suggests' for `config.sh' to work. This will require installation of `python3-textual' and `python3-rich' from Debian's Trixie release.
 
+=======
+>>>>>>> 584eb45 (Added an app to allow users to configure rpi-sb-provisioner)
 Running this command will open up a full screen text UI. The TUI supports mouse input or keyboard navigation! 
 Each of the boxes contains a name, text entry and help button. The steps for editing each parameter are as follows:
 
