@@ -53,19 +53,41 @@ Now, install the `rpi-sb-provisioner` package from the releases area:
 ----
 $ sudo dpkg -i rpi-sb-provisioner_foo.deb
 $ sudo apt --fix-broken install
+$ sudo reboot now
 ----
 
-Copy the example configuration file into the expected location:
+Next, you will have to configure `rpi-sb-provisioner` by using the TUI. In a terminal, run: 
 
 ----
-$ cp /etc/default/rpi-sb-provisioner /etc/rpi-sb-provisioner/config
+$ configure.sh
 ----
 
-Edit this configuration file with your editor of choice. For example:
+WARNING: This will not work if you have not reboot after installing the package! 
 
-----
-$ sudo nano /etc/rpi-sb-provisioner/config
-----
+Running this command will open up a full screen text UI. The TUI supports mouse input or keyboard navigation! 
+Each of the boxes contains a name, text entry and help button. The steps for editing each parameter are as follows:
+
+[pdfwidth=90%]
+.A parameter entry area
+image::docs/images/rpi-config-textfield.png[]
+
+
+*1 -* Click or use `tab` to click the help button to view the information about the parameter
+
+*2 -* Navigate to the text field and enter the value you wish
+
+*3 -* To stage this value for writing, you must click `return` on your keyboard. If the value is successfully verified, then the field will change color to green and a tick should appear. If validation fails, a warning popup should appear with some help text. A cross will also appear next to the parameter name.
+
+[pdfwidth=90%]
+.A successfully verified parameter
+image::docs/images/rpi-config-successfully-verified.png[]
+
+
+*4 -* Repeat the above steps to complete your required parameters (some are optional).
+
+*5 -* Write to the configuration file by pressing the `Write verified params to config file` button at the bottom of the screen
+
+Once you have followed all those steps, `rpi-sb-provisioner` should be correctly configured and ready to run.
 
 == Configuration fields
 
@@ -176,9 +198,10 @@ No further intervention is required in the success case.
 
 WARNING: `rpi-sb-provisioner` will not, by default, block JTAG access. If you wish to make use of this facility, you _must_ specify this in the Raspberry Pi Bootloader configuration pointed to by `RPI_DEVICE_BOOTLOADER_CONFIG_FILE`
 
-=== Monitoring via the app
+=== Monitoring via the monitoring application
 
-`rpi-sb-provisioner` also contains a monitoring TUI. This can be used to observe how far through the process each device is. It also allows for easy introspection of the log files and lists all completed and failed devices.
+`rpi-sb-provisioner` also contains a monitoring application. This can be used to observe the progress of a device as it is being provisioned. It also allows for easy introspection of the log files and lists all completed and failed devices.
+The monitoring application supports both mouse or keyboard input. Navigation between boxes can be acheived by using the `tab` key or by clicking on the desired area.
 
 To run, type into a terminal window:
 
@@ -186,8 +209,10 @@ To run, type into a terminal window:
 $ monitor.sh
 ----
 
-The TUI will start up with 3 sections, triaging, keywriting and provisoning. If a device is connected, you will be able to watch it progress through each of the sections.
-The TUI also has two areas at the bottom, one for successfully completed provisions and one for failed provisions. Clicking on the device name will open up a log window, along with options to view the log files for each step of the provisioning service.
+The TUI will intialise with 2 rows, the top one showing the progress of a device throughout the process, with each of the columns being for devices in the following stages: triaging, keywriting and provisoning.
+When a device is connected, you will be able to watch it progress through each of the sections.
+The second row of the TUI also has two boxes at the bottom, the left being successfully completed provisions and the right for failed provisions.
+Clicking on the device name will open up a second window, with buttons to view the log files for each step of the provisioning service.
 To return to the main monitoring screen, just press the key `m`.
 To quit the app use the key combination `CTRL-C` or `q`.
 

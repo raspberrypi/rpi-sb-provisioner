@@ -237,6 +237,21 @@ contents:
   - src: monitor/monitor.css
     dst: /usr/share/rpi-sb-provisioner/monitor/monitor.css
 
+  - src: config/config.sh
+    dst: /usr/local/bin/config.sh
+
+  - src: config/config.py
+    dst: /usr/share/rpi-sb-provisioner/config/config.py
+
+  - src: config/validator.py
+    dst: /usr/share/rpi-sb-provisioner/config/validator.py
+
+  - src: config/config_app.css
+    dst: /usr/share/rpi-sb-provisioner/config/config_app.css
+
+  - src: config/config_app.helper
+    dst: /usr/share/rpi-sb-provisioner/config/config_app.helper
+
   # This will add all files in some/directory or in subdirectories at the
   # same level under the directory /etc. This means the tree structure in
   # some/directory will not be replicated.
@@ -356,11 +371,11 @@ contents:
 umask: 0o002
 
 # Scripts to run at specific stages. (overridable)
-# scripts:
-#   preinstall: ./scripts/preinstall.sh
-#   postinstall: ./scripts/postinstall.sh
-#   preremove: ./scripts/preremove.sh
-#   postremove: ./scripts/postremove.sh
+scripts:
+  # preinstall: ./scripts/preinstall.sh
+  postinstall: ./scripts/postinstall.sh
+  # preremove: ./scripts/preremove.sh
+  # postremove: ./scripts/postremove.sh
 
 # All fields above marked as `overridable` can be overridden for a given
 # package format in this section.
