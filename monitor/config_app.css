@@ -36,8 +36,8 @@ HelpScreen {
 
 #dialog {
     padding: 0 1;
-    width: 40;
-    height: 11;
+    width: 50%;
+    height: 50%;
     border: thick rgb(138, 68, 100) 80%;
     background: rgb(138, 68, 100);
 }

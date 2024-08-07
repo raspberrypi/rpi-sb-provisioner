@@ -30,15 +30,19 @@ class MainScreen(Screen):
                 yield ParamWidget(paramname=param, paramvalue=defaultparams[param], currentval=initialparams[param])
 
 
-class HelpScreen(ModalScreen):
-    def __init__(self, paramname, defaultvalue, currentvalue):
+class HelpScreen(Screen):
+    def __init__(self, paramname, defaultvalue, currentvalue, optional, helptext):
         self.paramname = paramname
         self.defaultvalue = defaultvalue
         self.currentvalue = currentvalue
+        self.optional = optional
+        self.helptext = helptext
+        if self.defaultvalue == "":
+            self.defaultvalue = "None"
         super().__init__()
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
-        yield Static("This is some help text for" + self.paramname, id="dialog")
+        yield Container(Static(self.paramname + "\n"), Static(self.optional + "\n"), Static(self.helptext + "\n"), Static("Default Value: " + self.defaultvalue + "\n"), Button("OK", id="close_help_screen"), id="dialog")
 
 
 
@@ -60,7 +64,9 @@ class App(App):
     def on_button_pressed(self, event: Button.Pressed) -> None:  
         if "helpbutton" in event.button.id:
             paramname = event.button.id.replace("_helpbutton", "")
-            self.push_screen(HelpScreen(paramname, "idk", "idk"))
+            self.push_screen(HelpScreen(paramname, defaultparams[paramname], "idk", required[paramname], helper[paramname]))
+        if "close_help_screen" in event.button.id: 
+            self.pop_screen()
 
 ### initially need to open the default config files
 defaultparams = {}
@@ -93,14 +99,17 @@ for param in defaultparams:
 
 ### Load helper descriptor!
 helper = {}
+required = {}
 f = open("config_app.helper")
 contents_by_param = f.read().split("\n")
 for line in contents_by_param:
     if len(line.split("|")) > 1:
-        helper.update([(line.split("|")[0], line.split("|")[1])])
+        helper.update([(line.split("|")[0], line.split("|")[2])])
+        required.update([(line.split("|")[0], line.split("|")[1])])
     else:
         print("Error - unable to correctly parse helper line: " + line)
-
+print(helper)
+print(required)
 if __name__ == "__main__":
     app = App()
     app.run()
