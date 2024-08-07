@@ -143,6 +143,7 @@ depends:
   - dctrl-tools
   - diffutils
   - findutils
+  - python3-textual
 
 # Recommended packages. (overridable)
 # This will expand any env var you set in the field, e.g. ${RECOMMENDS_BLA}
