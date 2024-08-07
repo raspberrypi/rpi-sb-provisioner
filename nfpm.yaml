@@ -204,10 +204,6 @@ contents:
   - src: host-support/make-boot-image
     dst: /usr/local/bin/make-boot-image
 
-  - src: target-support/
-    dst: /etc/rpi-sb-provisioner/target-support
-    type: tree
-
   - src: key-writer/rpi-sb-keywriter.service
     dst: /usr/local/lib/systemd/system/rpi-sb-keywriter@.service
 
