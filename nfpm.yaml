@@ -190,16 +190,16 @@ contents:
     dst: /usr/local/bin/terminal-functions.sh
 
   - src: host-support/cryptroot_initramfs
-    dst: /usr/share/misc/cryptroot_initramfs
+    dst: /usr/share/rpi-sb-provisioner/cryptroot_initramfs
 
   - src: host-support/boot_ramdisk_config.txt
-    dst: /usr/share/misc/boot_ramdisk_config.txt
+    dst: /usr/share/rpi-sb-provisioner/boot_ramdisk_config.txt
 
   - src: host-support/bootloader.config.default
-    dst: /usr/share/misc/bootloader.config
+    dst: /usr/share/rpi-sb-provisioner/bootloader.config
 
   - src: host-support/fastboot-gadget.img
-    dst: /usr/share/misc/fastboot-gadget.img
+    dst: /usr/share/rpi-sb-provisioner/fastboot-gadget.img
 
   - src: host-support/make-boot-image
     dst: /usr/local/bin/make-boot-image

@@ -204,9 +204,9 @@ case ${RPI_DEVICE_FAMILY} in
         ;;
 esac
 
-cp /usr/share/misc/fastboot-gadget.img "${RPI_SB_WORKDIR}"/boot.img
+cp /usr/share/rpi-sb-provisioner/fastboot-gadget.img "${RPI_SB_WORKDIR}"/boot.img
 
-cp /usr/share/misc/boot_ramdisk_config.txt "${RPI_SB_WORKDIR}"/config.txt
+cp /usr/share/rpi-sb-provisioner/boot_ramdisk_config.txt "${RPI_SB_WORKDIR}"/config.txt
 
 #boot.sig generation
 sha256sum "${RPI_SB_WORKDIR}"/boot.img | awk '{print $1}' > "${RPI_SB_WORKDIR}"/boot.sig
@@ -294,8 +294,8 @@ if [[ -z $(check_file_is_expected "${RPI_SB_WORKDIR}"/bootfs-temporary.img "img"
     # We supply a pre-baked Raspberry Pi Pre-boot-authentication initramfs, which we insert here.
     # This image is maintained by Raspberry Pi, with sources available on our GitHub pages.
     announce_start "Insert pre-boot authentication initramfs"
-    cp /usr/share/misc/cryptroot_initramfs "${TMP_DIR}"/rpi-boot-img-mount/initramfs8
-    cp /usr/share/misc/cryptroot_initramfs "${TMP_DIR}"/rpi-boot-img-mount/initramfs_2712
+    cp /usr/share/rpi-sb-provisioner/cryptroot_initramfs "${TMP_DIR}"/rpi-boot-img-mount/initramfs8
+    cp /usr/share/rpi-sb-provisioner/cryptroot_initramfs "${TMP_DIR}"/rpi-boot-img-mount/initramfs_2712
     announce_stop "Insert pre-boot authentication initramfs"
 
     announce_start "Initramfs modification"
@@ -368,7 +368,7 @@ if [[ -z $(check_file_is_expected "${RPI_SB_WORKDIR}"/bootfs-temporary.img "img"
     announce_stop "config.txt modification"
 
     announce_start "boot.img creation"
-    cp /usr/share/misc/boot_ramdisk_config.txt "${TMP_DIR}"/config.txt
+    cp /usr/share/rpi-sb-provisioner/boot_ramdisk_config.txt "${TMP_DIR}"/config.txt
 
     make-boot-image -b "pi${RPI_DEVICE_FAMILY}" -d "${TMP_DIR}"/rpi-boot-img-mount -o "${TMP_DIR}"/boot.img
     announce_stop "boot.img creation"
