@@ -1,0 +1,2 @@
+CUSTOMER_KEY_FILE_PEM|Mandatory|The fully qualified path to your signing key, encoded in PEM format. This file is expected to contain an RSA 2048-bit Private Key.
+GOLD_MASTER_OS_FILE|Mandatory|This should be your 'gold master' OS image. No customisation should be present in this image that you would not expect to be deployed to your entire fleet. rpi-sb-provisioner assumes this image has been created using pi-gen, and using a non-pi-gen image may produce undefined behaviour

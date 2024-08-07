@@ -1,0 +1,43 @@
+Screen {
+    layout: vertical;
+    background: rgb(32, 0, 20);
+}
+
+ParamWidget {
+    layout: horizontal;
+    height: 5;
+    border: solid rgb(255, 0, 106);
+}
+
+.paramname {
+    margin-top: 1;
+    margin-right: 3;
+    height: 3;
+    text-align: right;
+    width: 0.6fr;
+    /* background: rgb(102, 1, 63); */
+}
+.paramentry {
+    height: 3;
+    width: 1fr;
+    color: white;
+    background: rgb(138, 68, 100);
+}
+.parambutton {
+    height: 3;
+    width: 8;
+    /* background: rgb(102, 1, 63); */
+}
+
+HelpScreen {
+    align: center middle;
+    background: rgba(0, 0, 0, 0.60);
+}
+
+#dialog {
+    padding: 0 1;
+    width: 50%;
+    height: 50%;
+    border: thick rgb(138, 68, 100) 80%;
+    background: rgb(138, 68, 100);
+}
