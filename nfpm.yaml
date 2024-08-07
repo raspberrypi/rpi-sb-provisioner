@@ -233,13 +233,13 @@ contents:
     dst: /usr/local/bin/monitor.sh
 
   - src: monitor/monitor.py
-    dst: /usr/share/rpi-sb-provisioner/monitor.py
+    dst: /usr/share/rpi-sb-provisioner/monitor/monitor.py
 
   - src: monitor/systemctl_python.py
-    dst: /usr/share/rpi-sb-provisioner/systemctl_python.py
+    dst: /usr/share/rpi-sb-provisioner/monitor/systemctl_python.py
 
   - src: monitor/monitor.css
-    dst: /usr/share/rpi-sb-provisioner/monitor.css
+    dst: /usr/share/rpi-sb-provisioner/monitor/monitor.css
 
   # This will add all files in some/directory or in subdirectories at the
   # same level under the directory /etc. This means the tree structure in

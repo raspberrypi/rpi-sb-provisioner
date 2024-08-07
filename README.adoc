@@ -180,7 +180,11 @@ WARNING: `rpi-sb-provisioner` will not, by default, block JTAG access. If you wi
 
 `rpi-sb-provisioner` also contains a monitoring TUI. This can be used to observe how far through the process each device is. It also allows for easy introspection of the log files and lists all completed and failed devices.
 
-To run, type into a terminal window: `monitor.sh`
+To run, type into a terminal window:
+
+----
+$ monitor.sh
+----
 
 The TUI will start up with 3 sections, triaging, keywriting and provisoning. If a device is connected, you will be able to watch it progress through each of the sections.
 The TUI also has two areas at the bottom, one for successfully completed provisions and one for failed provisions. Clicking on the device name will open up a log window, along with options to view the log files for each step of the provisioning service.
