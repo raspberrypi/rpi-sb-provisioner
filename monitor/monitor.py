@@ -172,7 +172,7 @@ class LogScreen(Screen):
 
 class App(App):
     """A Textual app to manage stopwatches."""
-    CSS_PATH = "layout.css"
+    CSS_PATH = "monitor.css"
     BINDINGS = [("m", "mainscreen", "Main Screen"), ("q", "quit", "Quit")]
     SCREENS = {"MainScreen": MainScreen(), "LogScreen": LogScreen("unknown-serial")}    
 
