@@ -3,7 +3,7 @@ from textual.containers import ScrollableContainer, Container
 from textual.widgets import Header, Footer, DataTable, Static, Button, Input
 from textual.reactive import reactive
 from textual.message import Message
-from textual.screen import Screen
+from textual.screen import Screen, ModalScreen
 from textual.widget import Widget
 from textual import on
 from textual import events
@@ -19,7 +19,7 @@ class ParamWidget(Widget):
         """Create child widgets for the app."""
         yield Static(self.paramname, classes="paramname")
         yield Input(placeholder=self.paramvalue, classes="paramentry", value=self.currentval)
-        yield Button("Help!", classes="paramhelp")
+        yield Button("Help!", classes="paramhelp", id=self.paramname + "_helpbutton")
 
 class MainScreen(Screen):
     def compose(self) -> ComposeResult:
@@ -28,10 +28,18 @@ class MainScreen(Screen):
             yield Footer()
             for param in defaultparams:
                 yield ParamWidget(paramname=param, paramvalue=defaultparams[param], currentval=initialparams[param])
-    
-    @on(Button.Pressed)
-    def on_button_pressed(self, event: Button.Pressed) -> None:  
-        ## Add handler here!
+
+
+class HelpScreen(ModalScreen):
+    def __init__(self, paramname, defaultvalue, currentvalue):
+        self.paramname = paramname
+        self.defaultvalue = defaultvalue
+        self.currentvalue = currentvalue
+        super().__init__()
+    def compose(self) -> ComposeResult:
+        """Create child widgets for the app."""
+        yield Static("This is some help text for" + self.paramname, id="dialog")
+
 
 
 class App(App):
@@ -47,7 +55,12 @@ class App(App):
     def action_mainscreen(self):
         self.pop_screen()
         self.push_screen(MainScreen())
-
+    
+    @on(Button.Pressed)
+    def on_button_pressed(self, event: Button.Pressed) -> None:  
+        if "helpbutton" in event.button.id:
+            paramname = event.button.id.replace("_helpbutton", "")
+            self.push_screen(HelpScreen(paramname, "idk", "idk"))
 
 ### initially need to open the default config files
 defaultparams = {}
@@ -80,14 +93,13 @@ for param in defaultparams:
 
 ### Load helper descriptor!
 helper = {}
-f = open("config_app_helper.json")
+f = open("config_app.helper")
 contents_by_param = f.read().split("\n")
 for line in contents_by_param:
     if len(line.split("|")) > 1:
         helper.update([(line.split("|")[0], line.split("|")[1])])
     else:
         print("Error - unable to correctly parse helper line: " + line)
-helper.pop("")
 
 if __name__ == "__main__":
     app = App()

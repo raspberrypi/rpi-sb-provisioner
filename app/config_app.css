@@ -28,3 +28,16 @@ ParamWidget {
     width: 8;
     /* background: rgb(102, 1, 63); */
 }
+
+HelpScreen {
+    align: center middle;
+    background: rgba(0, 0, 0, 0.60);
+}
+
+#dialog {
+    padding: 0 1;
+    width: 40;
+    height: 11;
+    border: thick rgb(138, 68, 100) 80%;
+    background: rgb(138, 68, 100);
+}
