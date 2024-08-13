@@ -98,3 +98,36 @@ check_pidevice_generation() {
             ;;
     esac
 }
+
+read_config() {
+    if [ -f /etc/rpi-sb-provisioner/config ]; then
+        . /etc/rpi-sb-provisioner/config
+    else
+        echo "Failed to load config. Please use configuration tool." >&2
+        exit 1
+    fi
+}
+
+get_cryptroot() {
+    if [ -f /etc/rpi-sb-provisioner/cryptroot_initramfs ]; then
+        echo "/etc/rpi-sb-provisioner/cryptroot_initramfs"
+    else
+        echo "/var/lib/rpi-sb-provisioner/cryptroot_initramfs"
+    fi
+}
+
+get_fastboot_gadget() {
+    if [ -f /etc/rpi-sb-provisioner/fastboot-gadget.img ]; then
+        echo "/etc/rpi-sb-provisioner/fastboot-gadget.img"
+    else
+        echo "/var/lib/rpi-sb-provisioner/fastboot-gadget.img"
+    fi
+}
+
+get_fastboot_config_file() {
+    if [ -f /etc/rpi-sb-provisioner/boot_ramdisk_config.txt ]; then
+        echo "/etc/rpi-sb-provisioner/boot_ramdisk_config.txt"
+    else
+        echo "/var/lib/rpi-sb-provisioner/boot_ramdisk_config.txt"
+    fi
+}

@@ -2,8 +2,9 @@
 
 set -e
 
-. /etc/rpi-sb-provisioner/config
 . /usr/local/bin/terminal-functions.sh
+
+read_config
 
 TARGET_DEVICE_SERIAL="$(udevadm info --name="$1" --query=property --property=ID_SERIAL_SHORT --value)"
 echo "Starting triage for $1, serial: $TARGET_DEVICE_SERIAL"
@@ -17,7 +18,7 @@ if [ ! -d "${DEVICE_SERIAL_STORE}" ]; then
 fi
 
 if [ -z "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" ]; then
-    RPI_DEVICE_BOOTLOADER_CONFIG_FILE=/etc/default/rpi-sb-provisioner/bootloader.default
+    RPI_DEVICE_BOOTLOADER_CONFIG_FILE=/var/lib/rpi-sb-provisioner/bootloader.default
 fi
 
 if [ -z "${CUSTOMER_KEY_FILE_PEM}" ]; then
