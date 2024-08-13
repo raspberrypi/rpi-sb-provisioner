@@ -2,3 +2,5 @@
 
 # macOS Finder intermediates
 *.DS_Store
+
+*/__pycache__
