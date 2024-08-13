@@ -2,8 +2,9 @@
 
 set -x
 
-. /etc/rpi-sb-provisioner/config
 . /usr/local/bin/terminal-functions.sh
+
+read_config
 
 TARGET_DEVICE_SERIAL="$1"
 
