@@ -21,8 +21,8 @@ if [ -z "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" ]; then
     RPI_DEVICE_BOOTLOADER_CONFIG_FILE=/var/lib/rpi-sb-provisioner/bootloader.default
 fi
 
-if [ -z "${CUSTOMER_KEY_FILE_PEM}" ]; then
-    echo "You must provide a customer key file in the environment via CUSTOMER_KEY_FILE_PEM"
+if [ -z "${CUSTOMER_KEY_FILE_PEM}" ] || [ -z "${CUSTOMER_KEY_PKCS11_NAME}" ]; then
+    echo "You must provide a key in the environment via CUSTOMER_KEY_FILE_PEM, or a key name via CUSTOMER_KEY_PKCS11_NAME"
     exit 1
 fi
 

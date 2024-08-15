@@ -131,3 +131,20 @@ get_fastboot_config_file() {
         echo "/var/lib/rpi-sb-provisioner/boot_ramdisk_config.txt"
     fi
 }
+
+get_signing_directives() {
+    if [ -n "${CUSTOMER_KEY_PKCS11_NAME}" ]; then
+        echo "${CUSTOMER_KEY_PKCS11_NAME} -engine pkcs11 -keyform engine"
+    else
+        if [ -n "${CUSTOMER_KEY_FILE_PEM}" ]; then
+            if [ -f "${CUSTOMER_KEY_FILE_PEM}" ]; then
+                echo "RSA private key \"${CUSTOMER_KEY_FILE_PEM}\" not a file. Aborting." >&2
+                exit 1
+            fi
+            echo "${CUSTOMER_KEY_FILE_PEM} -keyform PEM"
+        else
+            echo "Neither PKCS11 key name, or PEM key file specified. Aborting." >&2
+            exit 1
+        fi
+    fi
+}
