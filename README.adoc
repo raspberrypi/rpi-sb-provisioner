@@ -94,11 +94,26 @@ Once you have followed all those steps, `rpi-sb-provisioner` should be correctly
 Configure `rpi-sb-provisioner` by using the following fields in `/etc/rpi-sb-provisioner/config`
 
 === CUSTOMER_KEY_FILE_PEM
-*Mandatory*
+*Optional, mandatory if CUSTOMER_KEY_PKCS11_NAME is not set*
 
 The fully qualified path to your signing key, encoded in PEM format. This file is expected to contain an RSA 2048-bit Private Key.
 
 WARNING: This file should be considered key material, and should be protected while at rest and in use according to your threat model.
+
+=== CUSTOMER_KEY_PKCS11_NAME
+*Optional, mandatory if CUSTOMER_KEY_FILE_PEM is not set*
+
+The keypair alias for a PKCS11 keypair, typically stored on a Hardware Security Module (HSM) and provided through a helper tool. This is expected to act in place of the RSA 2048-bit Private key specified with CUSTOMER_KEY_FILE_PEM, and will be used as the signing device for all future pre-boot authentication images.
+
+The value should take the format:
+
+----
+"pkcs11:object=<keypair-alias>;type=private"
+----
+
+WARNING: You must use double quotes to enclose the value.
+
+WARNING: The PKCS11 provider, and it's associated HSM, should be considered key material and should be protected while at rest and in use according to your threat model.
 
 === GOLD_MASTER_OS_FILE
 *Mandatory*

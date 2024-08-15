@@ -31,9 +31,8 @@ writeSig() {
    # Include the update-timestamp
    echo "ts: $(date -u +%s)" >> "${OUTPUT}"
 
-   if [ -n "${CUSTOMER_KEY_FILE_PEM}" ]; then
-      [ -f "${CUSTOMER_KEY_FILE_PEM}" ] || die "RSA private key \"${CUSTOMER_KEY_FILE_PEM}\" not found"
-      "${OPENSSL}" dgst -sign "${CUSTOMER_KEY_FILE_PEM}" -keyform PEM -sha256 -out "${SIG_TMP}" "${IMAGE}"
+   if [ -n "$(get_signing_directives)" ]; then
+      "${OPENSSL}" dgst -sign "$(get_signing_directives)" -sha256 -out "${SIG_TMP}" "${IMAGE}"
       echo "rsa2048: $(xxd -c 4096 -p < "${SIG_TMP}")" >> "${OUTPUT}"
    fi
    rm "${SIG_TMP}"
