@@ -212,7 +212,8 @@ cp "$(get_fastboot_config_file)" "${RPI_SB_WORKDIR}"/config.txt
 #boot.sig generation
 sha256sum "${RPI_SB_WORKDIR}"/boot.img | awk '{print $1}' > "${RPI_SB_WORKDIR}"/boot.sig
 echo -n "rsa2048: " >> "${RPI_SB_WORKDIR}"/boot.sig
-${OPENSSL} dgst -sign "${CUSTOMER_KEY_FILE_PEM}" -keyform PEM -sha256 "${RPI_SB_WORKDIR}"/boot.img | xxd -c 4096 -p >> "${RPI_SB_WORKDIR}"/boot.sig
+# Prefer PKCS11 over PEM keyfiles, if both are specified.
+${OPENSSL} dgst -sign "$(get_signing_directives)" -sha256 "${RPI_SB_WORKDIR}"/boot.img | xxd -c 4096 -p >> "${RPI_SB_WORKDIR}"/boot.sig
 
 announce_stop "Finding/generating fastboot image"
 
@@ -378,7 +379,7 @@ if [[ -z $(check_file_is_expected "${RPI_SB_WORKDIR}"/bootfs-temporary.img "img"
     # N.B. rpi-eeprom-digest could be used here but it includes a timestamp that is not required for this use-case
     sha256sum "${TMP_DIR}"/boot.img | awk '{print $1}' > "${TMP_DIR}"/boot.sig
     echo -n "rsa2048: " >> "${TMP_DIR}"/boot.sig
-    ${OPENSSL} dgst -sign "${CUSTOMER_KEY_FILE_PEM}" -keyform PEM -sha256 "${TMP_DIR}"/boot.img | xxd -c 4096 -p >> "${TMP_DIR}"/boot.sig
+    ${OPENSSL} dgst -sign "$(get_signing_directives)" -sha256 "${TMP_DIR}"/boot.img | xxd -c 4096 -p >> "${TMP_DIR}"/boot.sig
     announce_stop "boot.img signing"
 
     announce_start "Boot Image partition extraction"
