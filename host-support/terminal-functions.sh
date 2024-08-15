@@ -137,7 +137,7 @@ get_signing_directives() {
         echo "${CUSTOMER_KEY_PKCS11_NAME} -engine pkcs11 -keyform engine"
     else
         if [ -n "${CUSTOMER_KEY_FILE_PEM}" ]; then
-            if [ -f "${CUSTOMER_KEY_FILE_PEM}" ]; then
+            if [ ! -f "${CUSTOMER_KEY_FILE_PEM}" ]; then
                 echo "RSA private key \"${CUSTOMER_KEY_FILE_PEM}\" not a file. Aborting." >&2
                 exit 1
             fi
