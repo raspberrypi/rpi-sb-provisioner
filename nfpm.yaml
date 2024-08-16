@@ -143,9 +143,14 @@ depends:
   - dctrl-tools
   - diffutils
   - findutils
+<<<<<<< HEAD
   - libengine-pkcs11-openssl
   - libp11-kit-dev
   - gnutls-bin
+=======
+  - python3-textual
+  - jq
+>>>>>>> 7727953 (rpi-sb-provisioner now supports metadata)
 
 # Recommended packages. (overridable)
 # This will expand any env var you set in the field, e.g. ${RECOMMENDS_BLA}
@@ -215,6 +220,9 @@ contents:
 
   - src: host-support/fastboot-gadget.img
     dst: /var/lib/rpi-sb-provisioner/fastboot-gadget.img
+  
+  - src: host-support/recovery.bin
+    dst: /var/lib/rpi-sb-provisioner/recovery.bin
 
   - src: host-support/make-boot-image
     dst: /usr/local/bin/make-boot-image

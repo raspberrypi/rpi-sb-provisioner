@@ -75,7 +75,10 @@ def list_failed_devices():
 
 def list_device_files(device_name):
     if path.exists("/var/log/rpi-sb-provisioner/" + device_name):
-        return listdir("/var/log/rpi-sb-provisioner/" + device_name)
+        ret = listdir("/var/log/rpi-sb-provisioner/" + device_name)
+        if "metadata" in ret:
+            ret.remove("metadata")
+        return ret
     else:
         return []
 
