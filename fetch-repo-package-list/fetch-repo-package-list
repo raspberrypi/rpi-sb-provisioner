@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 
 set -e
 
@@ -10,7 +10,6 @@ ARCH="${ARCH:-arm64}"
 # Should be set by systemd
 SERVICE_NAME="fetch-repo-package-list@https:--archive.raspberrypi.org-debian.service"
 CACHE_DIRECTORY="${CACHE_DIRECTORY:=/var/cache/${SERVICE_NAME}}"
-RUNTUME_DIRECTORY="${RUNTIME_DIRECTORY:=/run/${SERVICE_NAME}}"
 
 PGZ="Packages.gz"
 PACKAGES_GZ_FILE="${CACHE_DIRECTORY}/${PGZ}"
@@ -19,21 +18,21 @@ PACKAGES_GZ_URL="${REPOSITORY}/dists/${RELEASE}/main/binary-${ARCH}/${PGZ}"
 
 >&2 echo "Downloading latest package information for ${RELEASE}:${ARCH} from ${REPOSITORY}"
 curl \
-	--etag-compare ${PACKAGES_GZ_ETAG_FILE} \
-	--etag-save ${PACKAGES_GZ_ETAG_FILE} \
-	${PACKAGES_GZ_URL} \
-	-o ${PACKAGES_GZ_FILE} \
+	--etag-compare "${PACKAGES_GZ_ETAG_FILE}" \
+	--etag-save "${PACKAGES_GZ_ETAG_FILE}" \
+	"${PACKAGES_GZ_URL}" \
+	-o "${PACKAGES_GZ_FILE}" \
 	2> /dev/null
 
-PACKAGES_GZ_ETAG="$(< ${PACKAGES_GZ_ETAG_FILE})"
+PACKAGES_GZ_ETAG="$(cat "${PACKAGES_GZ_ETAG_FILE}")"
 PACKAGES_GZ_ETAG="${PACKAGES_GZ_ETAG%\"}"
 PACKAGES_GZ_ETAG="${PACKAGES_GZ_ETAG#\"}"
 
 # Extract the downloaded file, use the etag as a suffix to create a unique file
 PACKAGES_FILE="${CACHE_DIRECTORY}/Packages_${PACKAGES_GZ_ETAG}"
-if [ ! -f ${PACKAGES_FILE} ]
+if [ ! -f "${PACKAGES_FILE}" ]
 then
-	gunzip --to-stdout ${PACKAGES_GZ_FILE} > ${PACKAGES_FILE}
+	gunzip --to-stdout "${PACKAGES_GZ_FILE}" > "${PACKAGES_FILE}"
 fi
 
 >&2 echo "Copying Packages to runtime directory"
