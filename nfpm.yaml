@@ -144,6 +144,9 @@ depends:
   - diffutils
   - findutils
   - python3-textual
+  - libengine-pkcs11-openssl
+  - libp11-kit-dev
+  - gnutls-bin
 
 # Recommended packages. (overridable)
 # This will expand any env var you set in the field, e.g. ${RECOMMENDS_BLA}
