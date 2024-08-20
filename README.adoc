@@ -59,10 +59,12 @@ $ sudo reboot now
 Next, you will have to configure `rpi-sb-provisioner` by using the TUI. In a terminal, run: 
 
 ----
-$ configure.sh
+$ config.sh
 ----
 
 WARNING: This will not work if you have not reboot after installing the package! 
+
+WARNING: `rpi-sb-provisioner' must be installed with `--install-suggests' for `config.sh' to work. This will require installation of `python3-textual' and `python3-rich' from Debian's Trixie release.
 
 Running this command will open up a full screen text UI. The TUI supports mouse input or keyboard navigation! 
 Each of the boxes contains a name, text entry and help button. The steps for editing each parameter are as follows:
@@ -214,6 +216,8 @@ No further intervention is required in the success case.
 WARNING: `rpi-sb-provisioner` will not, by default, block JTAG access. If you wish to make use of this facility, you _must_ specify this in the Raspberry Pi Bootloader configuration pointed to by `RPI_DEVICE_BOOTLOADER_CONFIG_FILE`
 
 === Monitoring via the monitoring application
+
+WARNING: `rpi-sb-provisioner' must be installed with `--install-suggests' for `monitor.sh' to work. This will require installation of `python3-textual' and `python3-rich' from Debian's Trixie release.
 
 `rpi-sb-provisioner` also contains a monitoring application. This can be used to observe the progress of a device as it is being provisioned. It also allows for easy introspection of the log files and lists all completed and failed devices.
 The monitoring application supports both mouse or keyboard input. Navigation between boxes can be acheived by using the `tab` key or by clicking on the desired area.
