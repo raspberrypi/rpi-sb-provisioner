@@ -32,7 +32,8 @@ writeSig() {
    echo "ts: $(date -u +%s)" >> "${OUTPUT}"
 
    if [ -n "$(get_signing_directives)" ]; then
-      "${OPENSSL}" dgst -sign "$(get_signing_directives)" -sha256 -out "${SIG_TMP}" "${IMAGE}"
+      # shellcheck disable=SC2046
+      "${OPENSSL}" dgst -sign $(get_signing_directives) -sha256 -out "${SIG_TMP}" "${IMAGE}"
       echo "rsa2048: $(xxd -c 4096 -p < "${SIG_TMP}")" >> "${OUTPUT}"
    fi
    rm "${SIG_TMP}"
