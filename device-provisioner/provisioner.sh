@@ -371,7 +371,7 @@ if [[ -z $(check_file_is_expected "${RPI_SB_WORKDIR}"/bootfs-temporary.img "img"
     announce_stop "config.txt modification"
 
     announce_start "boot.img creation"
-    cp /usr/share/rpi-sb-provisioner/boot_ramdisk_config.txt "${TMP_DIR}"/config.txt
+    cp "$(get_fastboot_config_file)" "${TMP_DIR}"/config.txt
 
     make-boot-image -b "pi${RPI_DEVICE_FAMILY}" -d "${TMP_DIR}"/rpi-boot-img-mount -o "${TMP_DIR}"/boot.img
     announce_stop "boot.img creation"
