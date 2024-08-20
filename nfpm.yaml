@@ -143,7 +143,6 @@ depends:
   - dctrl-tools
   - diffutils
   - findutils
-  - python3-textual
   - libengine-pkcs11-openssl
   - libp11-kit-dev
   - gnutls-bin
@@ -158,8 +157,21 @@ depends:
 # Suggested packages. (overridable)
 # This will expand any env var you set in the field, e.g. ${SUGGESTS_BLA}
 # the env var approach can be used to account for differences in platforms
-# suggests:
-#   - bzr
+#
+# textual is a hard requirement for config.sh / monitor.sh but the version
+# packaged for Bookworm (0.1.13) does not implement features we depend upon.
+# At a minimum, we require 'The CSS Release' (0.2.0). As a more recent textual
+# package is available for Trixie (0.52.1), the dependencies have been listed
+# as 'suggests'.
+#
+# Debian's python3-textual (0.52.1-1) declares a dependency on python3-rich (>= 10.7.0),
+# but this is incorrect as (>= 13.3.3) is required due to use of Style.clear_meta_and_links.
+# clear_meta_and_links has been an upstream python3-textual requirement as of
+# (0.17.0). As such declare the dependencies below such that they can be
+# fulfilled by Debian's python3-textual, python3-rich Trixie packages.
+suggests:
+  - python3-textual (>= 0.17.0)
+  - python3-rich (>= 13.3.3)
 
 # Packages it conflicts with. (overridable)
 # This will expand any env var you set in the field, e.g. ${CONFLICTS_BLA}
