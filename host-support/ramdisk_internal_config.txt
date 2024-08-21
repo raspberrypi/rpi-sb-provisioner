@@ -1,0 +1,13 @@
+[all]
+kernel=zImage
+arm_64bit=1
+initramfs rootfs.cpio.zst
+enable_uart=1
+uart_2ndstage=1
+disable_overscan=1
+cmdline=cmdline.txt
+
+[cm4]
+dtoverlay=dwc2,dr_mode=host
+
+[none]

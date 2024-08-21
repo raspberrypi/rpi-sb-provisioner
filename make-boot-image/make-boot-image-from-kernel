@@ -1,0 +1,230 @@
+#!/bin/sh
+
+set -e
+
+# deps:
+#   - dpkg (dpkg-deb)
+#   - openssl
+#   - zstd
+#   - cpio
+#   - findutils (xargs)
+
+. /usr/local/bin/terminal-functions.sh
+
+read_config
+
+TMPDIR="${TMPDIR:=/tmp}"
+
+if [ -z "${1}" ]; then
+	>&2 echo "No linux image specified"
+	exit 1
+fi
+
+if [ -z "${RPI_DEVICE_FAMILY}" ]; then
+	>&2 echo "'RPI_DEVICE_FAMILY' not specified"
+	exit 1
+fi
+
+if [ -z "${BOOT_IMAGE_VENDOR}" ]; then
+	>&2 echo "'BOOT_IMAGE_VENDOR' not specified"
+	exit 1
+fi
+
+if [ -z "${BOOT_IMAGE_MAINTAINER}" ]; then
+	>&2 echo "'BOOT_IMAGE_MAINTAINER' not specified"
+	exit 1
+fi
+
+if [ -z "${OPENSSL}" ] || [ ! -f "${OPENSSL}" ]; then
+	>&2 echo "'OPENSSL' not set or binary does not exist"
+	exit 1
+fi
+
+LINUX_IMAGE="${1}"
+
+# Should be set by systemd
+SERVICE_NAME="make-boot-image@$(systemd-escape "$LINUX_IMAGE").service"
+CACHE_DIRECTORY="${CACHE_DIRECTORY:=/var/cache/${SERVICE_NAME}}"
+
+# TODO: Might be interesting to start rpi-package-download with --no-block to
+# allow multiple simultaneous downloads.
+download_package() {
+	systemctl start \
+		--wait \
+		rpi-package-download@"$(systemd-escape "${1}")".service
+}
+
+KERNEL_2711="linux-image-${LINUX_IMAGE}"
+>&2 echo "Downloading ${KERNEL_2711}"
+download_package "$KERNEL_2711"
+
+PACKAGE_NAME="boot-image-${BOOT_IMAGE_VENDOR}-${LINUX_IMAGE}"
+
+# Temp directory cleanup
+TEMP_DIRS_LIST=$(mktemp make_boot_image_temp_dirs_list.XXX)
+:> "${TEMP_DIRS_LIST}"
+remove_temp_dirs() {
+	>&2 echo "Removing temporary directories"
+	xargs --null rm -rf < "${TEMP_DIRS_LIST}"
+	rm -f "${TEMP_DIRS_LIST}"
+}
+trap remove_temp_dirs EXIT
+
+>&2 printf "Creating filesystem hierarchy for deb package: "
+DEB_HIER="$(mktemp --directory --tmpdir debhier.XXX)"
+printf "%s\0" "${DEB_HIER}" >> "${TEMP_DIRS_LIST}"
+>&2 echo "${DEB_HIER}"
+
+>&2 printf "Create rootfs working directory: "
+WORK_DIR="$(mktemp --directory --tmpdir boot-image-rootfs.XXX)"
+printf "%s\0" "${WORK_DIR}" >> "${TEMP_DIRS_LIST}"
+>&2 echo "${WORK_DIR}"
+
+latest_pkg_dir() {
+	echo /var/cache/rpi-package-download@"$(systemd-escape "${1}")".service/latest
+}
+
+>&2 echo "Extracting package contents"
+dpkg-deb --raw-extract "$(latest_pkg_dir "$KERNEL_2711")/package.deb" "${WORK_DIR}"
+
+get_dctrl_field() {
+	grep-dctrl \
+		--field=Package \
+		--exact-match "${2}" \
+		--no-field-names \
+		--show-field="${3}" \
+		"${1}"
+}
+
+# Determine package version for later reuse
+KERNEL_2711_VERSION="$(get_dctrl_field "${WORK_DIR}/DEBIAN/control" "${KERNEL_2711}" Version)"
+>&2 echo "Extracted ${KERNEL_2711}, version ${KERNEL_2711_VERSION}"
+
+# rootfs kernel modules
+>&2 echo "Copy kernel modules into deb package"
+mkdir -p "${DEB_HIER}/lib/modules"
+rsync -crt "${WORK_DIR}/lib/modules/"* "${DEB_HIER}/lib/modules"
+
+>&2 printf "Create ramdisk working directory: "
+BFS_DIR="$(mktemp --directory --tmpdir boot-image-bootfs.XXX)"
+printf "%s\0" "${BFS_DIR}" >> "${TEMP_DIRS_LIST}"
+>&2 echo "${BFS_DIR}"
+
+# Kernel Images
+>&2 echo "Copy kernel to ramdisk"
+cp "${WORK_DIR}/boot/vmlinuz-${LINUX_IMAGE}" "${BFS_DIR}/zImage"
+
+# Overlays
+>&2 echo "Copy overlays to ramdisk"
+OVERLAY_PATH="${WORK_DIR}/usr/lib/${KERNEL_2711}/overlays"
+rsync -crt "${OVERLAY_PATH}"/*.dtb* "${OVERLAY_PATH}/README" "${BFS_DIR}/overlays"
+
+# DTBs
+>&2 echo "Copy DTBs to ramdisk"
+DTB_PATH="${WORK_DIR}/usr/lib/${KERNEL_2711}/broadcom"
+rsync -crt "${DTB_PATH}"/bcm27*.dtb "${BFS_DIR}"
+
+# Insert an initramfs
+>&2 echo "Add cryptoot initramfs to ramdisk (with necessary kernel modules)"
+INITRAMFS_EXTRACT="$(mktemp --directory --tmpdir initramfs-extract.XXX)"
+printf "%s\0" "${INITRAMFS_EXTRACT}" >> "${TEMP_DIRS_LIST}"
+zstd -q -d "$(get_cryptroot)" -o "${INITRAMFS_EXTRACT}/initramfs.cpio"
+mkdir -p "${INITRAMFS_EXTRACT}/initramfs"
+cd "${INITRAMFS_EXTRACT}/initramfs"
+RETURN_DIR="${OLDPWD}"
+cpio --quiet -id < ../initramfs.cpio > /dev/null
+rm ../initramfs.cpio
+cd "${WORK_DIR}"
+find lib/modules \
+	\( \
+		-name 'dm-mod.*' \
+		-o \
+		-name 'dm-crypt.*' \
+		-o \
+		-name 'af_alg.*' \
+		-o \
+		-name 'algif_skcipher.*' \
+		-o \
+		-name 'libaes.*' \
+		-o \
+		-name 'aes_generic.*' \
+		-o \
+		-name 'aes-arm64.*' \
+	\) \
+	-exec cp -r --parents "{}" "${INITRAMFS_EXTRACT}/initramfs/usr/" \;
+cd -
+find . -print0 | cpio --quiet --null -ov --format=newc > ../initramfs.cpio 2> /dev/null
+cd "${RETURN_DIR}"
+unset RETURN_DIR
+zstd -q -6 "${INITRAMFS_EXTRACT}/initramfs.cpio" -o "${BFS_DIR}/rootfs.cpio.zst"
+
+# raspi-firmware
+>&2 echo "Downloading raspi-firmware"
+download_package raspi-firmware
+
+>&2 printf "Create temp directory to extract firmware: "
+FW_EXTRACT_DIR="$(mktemp --directory --tmpdir boot-image-firmware.XXX)"
+printf "%s\0" "${FW_EXTRACT_DIR}" >> "${TEMP_DIRS_LIST}"
+>&2 echo "${FW_EXTRACT_DIR}"
+
+>&2 echo "Extracting firmware package contents"
+dpkg-deb --raw-extract "$(latest_pkg_dir raspi-firmware)/package.deb" "${FW_EXTRACT_DIR}"
+
+>&2 echo "Add firmware to ramdisk"
+rsync -v -crt "${FW_EXTRACT_DIR}/usr/lib/raspi-firmware/" "${BFS_DIR}"
+
+# cmdline.txt
+>&2 echo "Add cmdline.txt to ramdisk"
+cp "$(get_ramdisk_cmdline_file)" "${BFS_DIR}/cmdline.txt"
+
+# Inner config.txt
+>&2 echo "Add config.txt to ramdisk"
+cp "$(get_internal_config_file)" "${BFS_DIR}/config.txt"
+
+# Invoke make-boot-image
+>&2 echo "Finalise ramdisk in deb package (boot.img)"
+mkdir -p "${DEB_HIER}/boot/firmware"
+make-boot-image \
+	-b "pi${RPI_DEVICE_FAMILY}" \
+	-d "${BFS_DIR}" \
+	-o "${DEB_HIER}/boot/firmware/boot.img" > /dev/null
+
+# Outer config.txt
+>&2 echo "Add config.txt to deb package (ensure boot.img is used)"
+cp "$(get_fastboot_config_file)" "${DEB_HIER}/boot/firmware/config.txt"
+
+# boot.sig generation
+>&2 echo "Signing ramdisk image"
+sha256sum "${DEB_HIER}/boot/firmware/boot.img" | awk '{print $1}' > "${DEB_HIER}/boot/firmware/boot.sig"
+printf "rsa2048: " >> "${DEB_HIER}/boot/firmware/boot.sig"
+# shellcheck disable=SC2046
+${OPENSSL} dgst \
+	-sign $(get_signing_directives) \
+	-keyform PEM \
+	-sha256 \
+	"${DEB_HIER}/boot/firmware/boot.img" \
+	| xxd -c 4096 -p >> "${DEB_HIER}/boot/firmware/boot.sig"
+
+# Insert control file
+mkdir "${DEB_HIER}/DEBIAN"
+echo \
+"Package: ${PACKAGE_NAME}
+Source: linux
+Version: ${KERNEL_2711_VERSION}
+Architecture: arm64
+Maintainer: ${BOOT_IMAGE_MAINTAINER}
+Section: kernel
+Priority: optional
+Homepage: https://github.com/raspberrypi/linux/
+Provides: ${KERNEL_2711}
+Conflicts: ${KERNEL_2711}
+Replaces: ${KERNEL_2711}
+Description: Repackaged ${KERNEL_2711} for signed/cryptroot boot" \
+> "${DEB_HIER}/DEBIAN/control"
+
+# Insert preinst script to remove /boot/firmware/config.txt (otherwise dpkg
+# attempt to create a ".dpkg-tmp" hardlink.
+cp "$(get_bootimg_preinst_file)" "${DEB_HIER}/DEBIAN/preinst"
+
+# Create Debian package
+dpkg-deb --build "${DEB_HIER}" "${CACHE_DIRECTORY}"

@@ -1,0 +1,1 @@
+rootwait console=tty0 console=serial0,115200 root=/dev/ram0

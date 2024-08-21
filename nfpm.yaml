@@ -146,6 +146,8 @@ depends:
   - libengine-pkcs11-openssl
   - libp11-kit-dev
   - gnutls-bin
+  - dpkg
+  - zstd
 
 # Recommended packages. (overridable)
 # This will expand any env var you set in the field, e.g. ${RECOMMENDS_BLA}
@@ -216,8 +218,17 @@ contents:
   - src: host-support/fastboot-gadget.img
     dst: /var/lib/rpi-sb-provisioner/fastboot-gadget.img
 
+  - src: host-support/ramdisk_internal_config.txt
+    dst: /var/lib/rpi-sb-provisioner/ramdisk_internal_config.txt
+
+  - src: host-support/ramdisk_cmdline.txt
+    dst: /var/lib/rpi-sb-provisioner/ramdisk_cmdline.txt
+
   - src: host-support/make-boot-image
     dst: /usr/local/bin/make-boot-image
+
+  - src: host-support/bootimg_preinst
+    dst: /var/lib/rpi-sb-provisioner/bootimg_preinst
 
   - src: key-writer/rpi-sb-keywriter.service
     dst: /usr/local/lib/systemd/system/rpi-sb-keywriter@.service
@@ -239,6 +250,12 @@ contents:
 
   - src: rpi-package-download/rpi-package-download
     dst: /usr/local/bin/rpi-package-download
+
+  - src: make-boot-image/make-boot-image.service
+    dst: /usr/local/lib/systemd/system/make-boot-image@.service
+
+  - src: make-boot-image/make-boot-image-from-kernel
+    dst: /usr/local/bin/make-boot-image-from-kernel
 
   - src: monitor/monitor.sh
     dst: /usr/local/bin/monitor.sh

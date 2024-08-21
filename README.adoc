@@ -182,6 +182,20 @@ Set to `1` to allow the service to run without actually writing keys or OS image
 
 WARNING: Setting `DEMO_MODE_ONLY` will cause your seen-devices storage location to change to a subdirectory of the one specified by `RPI_DEVICE_SERIAL_STORE`, `demo/`
 
+=== BOOT_IMAGE_VENDOR
+*Mandatory* for make-boot-image
+
+Lower-case single-word representation of your organisation name. Used by
+make-boot-image service. e.g. `acme` would be appropriate for "Acme
+Corporation".
+
+=== BOOT_IMAGE_MAINTAINER
+*Mandatory* for make-boot-image
+
+A display name and email address in RFC 5322 mailbox format of the individual /
+team responsible for creating your boot-image packages. e.g.
+`Packaging Team <packaging-team@example.com>'
+
 == Using rpi-sb-provisioner
 `rpi-sb-provisioner` is composed of three `systemd` services that are triggered by the connection of a device in RPIBoot mode to a USB port. With `rpi-sb-provisioner` configured to your requirements, all that is therefore required is to connect your target Raspberry Pi device in RPIBoot mode.
 
