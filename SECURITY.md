@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-Only listed versions recieve active support, and $HEAD may be changed at any time prior to a release.
+Only listed versions receive active support, and $HEAD may be changed at any time prior to a release.
 
 | Version | Supported          |
 | ------- | ------------------ |
