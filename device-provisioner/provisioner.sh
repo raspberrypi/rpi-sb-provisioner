@@ -90,7 +90,7 @@ unmount_image() {
 
 cleanup() {
     mkdir -p /var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/
-    echo "1" > /var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/finished
+    echo "PROVISIONER-EXITED" >> /var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/progress
     unmount_image "${COPY_OS_COMBINED_FILE}"
     if [ -d "${TMP_DIR}" ]; then
         rm -rf "${TMP_DIR}"
@@ -472,6 +472,6 @@ fastboot oem led PWR 0
 announce_stop "Set LED status"
 
 mkdir -p /var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/
-echo "1" > /var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/success
+echo "PROVISIONER-FINISHED" >> /var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/progress
 
 echo "Provisioning completed. Remove the device from this machine."

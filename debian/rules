@@ -1,0 +1,9 @@
+#!/usr/bin/make -f
+
+export DH_VERBOSE = 1
+export DH_VIRTUALENV_INSTALL_ROOT=/usr/share/
+
+%:
+	dh $@ --with python-virtualenv --with systemd
+
+override_dh_usrlocal:

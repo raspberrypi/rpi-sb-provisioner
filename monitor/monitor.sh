@@ -1,4 +1,4 @@
 #!/bin/sh
 
 cd /usr/share/rpi-sb-provisioner/monitor/
-python3 monitor.py
+/usr/share/rpi-sb-provisioner/bin/python3 monitor.py
