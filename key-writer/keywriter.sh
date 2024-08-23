@@ -15,6 +15,8 @@ die() {
 
 TMP_DIR=""
 cleanup() {
+    mkdir -p /var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/
+    echo "KEYWRITER-EXITED" >> /var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/progress
    if [ -d "${TMP_DIR}" ]; then
       rm -rf "${TMP_DIR}"
    fi
@@ -269,3 +271,6 @@ esac
 
 echo "Board is: ${BOARD_STR}, with revision number ${REVISION}. Has Processor ${PROCESSOR_STR} with Memory ${MEMORY_STR}. Was manufactured by ${MANUFACTURER_STR}"
 echo "Keywriting completed. Rebooting for next phase."
+
+mkdir -p /var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/
+echo "KEYWRITER-FINISHED" >> /var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/progress

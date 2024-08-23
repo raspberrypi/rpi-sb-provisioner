@@ -52,10 +52,14 @@ def list_completed_devices():
     all_devices = list_seen_devices()
     completed_devices = []
     for device in all_devices:
-        if path.exists("/var/log/rpi-sb-provisioner/" + device + "/success"):
-            f = open("/var/log/rpi-sb-provisioner/" + device + "/success", "r")
+        provisioner_success = -1
+        if path.exists("/var/log/rpi-sb-provisioner/" + device + "/progress"):
+            f = open("/var/log/rpi-sb-provisioner/" + device + "/progress", "r")
             status = f.read()
-            if "1" in status:
+            if "PROVISIONER-EXITED" in status:
+                if "PROVISIONER-FINISHED" in status: provisioner_success = 1
+                else: provisioner_success = 0
+            if provisioner_success == 1:
                 completed_devices.append(device)
             f.close()
     return completed_devices
@@ -64,13 +68,20 @@ def list_failed_devices():
     all_devices = list_seen_devices()
     failed_devices = []
     for device in all_devices:
-        if path.exists("/var/log/rpi-sb-provisioner/" + device + "/finished"):
-            if not(path.exists("/var/log/rpi-sb-provisioner/" + device + "/success")):
-                f = open("/var/log/rpi-sb-provisioner/" + device + "/finished", "r")
-                status = f.read()
-                if "1" in status:
-                    failed_devices.append(device)
-                f.close()
+        provisioner_success = -1
+        keywriter_success = -1
+        if path.exists("/var/log/rpi-sb-provisioner/" + device + "/progress"):
+            f = open("/var/log/rpi-sb-provisioner/" + device + "/progress", "r")
+            status = f.read()
+            if "PROVISIONER-EXITED" in status:
+                if "PROVISIONER-FINISHED" in status: provisioner_success = 1
+                else: provisioner_success = 0
+            if "KEYWRITER-EXITED" in status:
+                if "KEYWRITER-FINISHED" in status: keywriter_success = 1
+                else: keywriter_success = 0
+            if provisioner_success == 0 or keywriter_success == 0:
+                failed_devices.append(device)
+            f.close()
     return failed_devices
 
 def list_device_files(device_name):
