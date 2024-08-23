@@ -1,0 +1,6 @@
+rpi-sb-provisioner.*.debhelper
+rpi-sb-provisioner.substvars
+rpi-sb-provisioner/
+rpi-sb-provisioner-*/
+files
+debhelper-build-stamp
