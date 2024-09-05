@@ -215,7 +215,7 @@ fi
 mkdir -p "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/"
 [ -z "${DEMO_MODE_ONLY}" ] && rpiboot -d "${FLASHING_DIR}" -i "${TARGET_DEVICE_SERIAL}" -j "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/"
 
-touch "${DEVICE_SERIAL_STORE}/${TARGET_DEVICE_SERIAL}"
+touch "${RPI_DEVICE_SERIAL_STORE}/${TARGET_DEVICE_SERIAL}"
 
 USER_BOARDREV="0x$(cat /var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/${TARGET_DEVICE_SERIAL}.json | jq -r '.USER_BOARDREV')"
 MAC_ADDRESS=$(cat /var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/${TARGET_DEVICE_SERIAL}.json | jq -r '.MAC_ADDR')
@@ -272,5 +272,5 @@ esac
 echo "Board is: ${BOARD_STR}, with revision number ${REVISION}. Has Processor ${PROCESSOR_STR} with Memory ${MEMORY_STR}. Was manufactured by ${MANUFACTURER_STR}"
 echo "Keywriting completed. Rebooting for next phase."
 
-mkdir -p /var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/
-echo "KEYWRITER-FINISHED" >> /var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/progress
+mkdir -p /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/
+echo "KEYWRITER-FINISHED" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress

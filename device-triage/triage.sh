@@ -9,12 +9,12 @@ read_config
 TARGET_DEVICE_SERIAL="$(udevadm info --name="$1" --query=property --property=ID_SERIAL_SHORT --value)"
 echo "Starting triage for $1, serial: $TARGET_DEVICE_SERIAL"
 
-if [ -z "${DEVICE_SERIAL_STORE}" ]; then
-    DEVICE_SERIAL_STORE=/usr/local/etc/rpi-sb-provisioner/seen
+if [ -z "${RPI_DEVICE_SERIAL_STORE}" ]; then
+    RPI_DEVICE_SERIAL_STORE=/usr/local/etc/rpi-sb-provisioner/seen
 fi
 
-if [ ! -d "${DEVICE_SERIAL_STORE}" ]; then
-    mkdir -p "${DEVICE_SERIAL_STORE}"
+if [ ! -d "${RPI_DEVICE_SERIAL_STORE}" ]; then
+    mkdir -p "${RPI_DEVICE_SERIAL_STORE}"
 fi
 
 if [ -z "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" ]; then
@@ -31,9 +31,9 @@ if [ -z "${TARGET_DEVICE_SERIAL}" ]; then
     exit 1
 fi
 
-if [ -e "${DEVICE_SERIAL_STORE}/${TARGET_DEVICE_SERIAL}" ]; then
+if [ -e "${RPI_DEVICE_SERIAL_STORE}/${TARGET_DEVICE_SERIAL}" ]; then
     echo "Device already provisioned with the key, moving to write the image"
-    echo "If this is in error, delete ${DEVICE_SERIAL_STORE}/${TARGET_DEVICE_SERIAL}"
+    echo "If this is in error, delete ${RPI_DEVICE_SERIAL_STORE}/${TARGET_DEVICE_SERIAL}"
 
     # Start the boot provisioner service
     mkdir -p /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/
