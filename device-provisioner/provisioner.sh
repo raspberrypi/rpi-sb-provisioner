@@ -164,7 +164,7 @@ check_command_exists grep
 check_command_exists sfdisk
 
 get_variable() {
-    fastboot getvar "$1" 2>&1 | grep -oP "${1}"': \K.*'
+    [ -z "${DEMO_MODE_ONLY}" ] && fastboot getvar "$1" 2>&1 | grep -oP "${1}"': \K.*'
 }
 
 RPI_DEVICE_FAMILY=$(check_pidevice_generation "${RPI_DEVICE_FAMILY}")
@@ -219,7 +219,7 @@ ${OPENSSL} dgst -sign $(get_signing_directives) -sha256 "${RPI_SB_WORKDIR}"/boot
 announce_stop "Finding/generating fastboot image"
 
 announce_start "Starting fastboot"
-rpiboot -v -d "${RPI_SB_WORKDIR}" -i "${TARGET_DEVICE_SERIAL}"
+[ -z "${DEMO_MODE_ONLY}" ] && rpiboot -v -d "${RPI_SB_WORKDIR}" -i "${TARGET_DEVICE_SERIAL}"
 announce_stop "Starting fastboot"
 
 announce_start "Selecting and interrogating device"
@@ -468,7 +468,7 @@ fi
 announce_stop "Cleaning up"
 
 announce_start "Set LED status"
-fastboot oem led PWR 0
+[ -z "${DEMO_MODE_ONLY}" ] && fastboot oem led PWR 0
 announce_stop "Set LED status"
 
 mkdir -p /var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/
