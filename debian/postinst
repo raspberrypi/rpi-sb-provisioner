@@ -1,6 +1,6 @@
 #!/bin/bash
 
-if [ ! $(getent group rpi-sb-provisioner) ]; then
+if [ ! "$(getent group rpi-sb-provisioner)" ]; then
   groupadd rpi-sb-provisioner
 else
     echo "Group rpi-sb-provisioner already exists"
