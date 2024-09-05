@@ -6,6 +6,6 @@ RPI_DEVICE_FAMILY=
 RPI_DEVICE_BOOTLOADER_CONFIG_FILE=/var/lib/rpi-sb-provisioner/bootloader.config
 RPI_DEVICE_LOCK_JTAG=
 RPI_DEVICE_EEPROM_WP_SET=
-DEVICE_SERIAL_STORE=/usr/local/etc/rpi-sb-provisioner/seen
+RPI_DEVICE_SERIAL_STORE=/usr/local/etc/rpi-sb-provisioner/seen
 DEMO_MODE_ONLY=
 RPI_SB_WORKDIR=
