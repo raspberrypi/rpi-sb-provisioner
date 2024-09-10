@@ -22,6 +22,7 @@ host-support/fastboot-gadget.img /var/lib/rpi-sb-provisioner
 host-support/make-boot-image /usr/local/bin
 host-support/rpi-sb-provisioner /etc/default/
 host-support/bootloader.config /var/lib/rpi-sb-provisioner/
+host-support/recovery.bin /var/lib/rpi-sb-provisioner
 
 device-provisioner/provisioner.sh /usr/local/bin
 device-provisioner/rpi-sb-provisioner@.service /usr/local/lib/systemd/system
