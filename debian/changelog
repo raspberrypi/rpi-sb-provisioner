@@ -1,5 +1,7 @@
-rpi-sb-provisioner (1.0.3) unstable; urgency=medium
+rpi-sb-provisioner (1.1.0) unstable; urgency=medium
 
+  * Add 2712 support
+  * Add metadata gathering support for 2711, 2712
   * Demo mode: Expand coverage to all Fastboot commands
   * Copyright: Correct license
   * Config: Prefix DEVICE_SERIAL_STORE with RPI to match docs
