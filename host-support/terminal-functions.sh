@@ -92,6 +92,9 @@ check_pidevice_generation() {
         4)
             echo "$1"
             ;;
+        5)
+            echo "$1"
+            ;;
         ?)
             echo "Unexpected Raspberry Pi Generation. Wanted 4, got $1" >&2
             exit 1
