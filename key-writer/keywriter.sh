@@ -97,17 +97,17 @@ update_eeprom() {
                 # 2711 does _not_ require a signed bootcode binary
                 cp "${src_image}" "${dst_image}.intermediate"
                 ;;
-            # 5)
-            #     customer_signed_bootcode_binary_workdir=$(mktemp -d)
-            #     cd "${customer_signed_bootcode_binary_workdir}" || return
-            #     rpi-eeprom-config -x "${src_image}"
-            #     rpi-sign-bootcode --debug -c 2712 -i bootcode.bin -o bootcode.bin.signed -k "${pem_file}" -v 0 -n 16
-            #     rpi-eeprom-config \
-            #         --out "${dst_image}.intermediate" --bootcode "${customer_signed_bootcode_binary_workdir}/bootcode.bin.signed" \
-            #         "${src_image}" || die "Failed to update signed bootcode in the EEPROM image"
-            #     cd - || return
-            #     rm -rf "${customer_signed_bootcode_binary_workdir}"
-            #     ;;
+            5)
+                customer_signed_bootcode_binary_workdir=$(mktemp -d)
+                cd "${customer_signed_bootcode_binary_workdir}" || return
+                rpi-eeprom-config -x "${src_image}"
+                rpi-sign-bootcode --debug -c 2712 -i bootcode.bin -o bootcode.bin.signed -k "${pem_file}" -v 0 -n 16
+                rpi-eeprom-config \
+                    --out "${dst_image}.intermediate" --bootcode "${customer_signed_bootcode_binary_workdir}/bootcode.bin.signed" \
+                    "${src_image}" || die "Failed to update signed bootcode in the EEPROM image"
+                cd - || return
+                rm -rf "${customer_signed_bootcode_binary_workdir}"
+                ;;
         esac
     fi
 
@@ -161,15 +161,15 @@ BOOTCODE_BINARY_IMAGE=
 BOOTCODE_FLASHING_NAME=
 case ${RPI_DEVICE_FAMILY} in
     4)
-        SOURCE_EEPROM_IMAGE="/lib/firmware/raspberrypi/bootloader-2711/latest/pieeprom-2024-05-17.bin"
-        BOOTCODE_BINARY_IMAGE="/var/lib/rpi-sb-provisioner/recovery.bin"
+        SOURCE_EEPROM_IMAGE="/lib/firmware/raspberrypi/bootloader-2711/latest/pieeprom-2024-07-30.bin"
+        BOOTCODE_BINARY_IMAGE="/lib/firmware/raspberrypi/bootloader-2711/latest/recovery.bin"
         BOOTCODE_FLASHING_NAME="${FLASHING_DIR}/bootcode4.bin"
         ;;
-    # 5)
-    #     SOURCE_EEPROM_IMAGE="/lib/firmware/raspberrypi/bootloader-2712/latest/pieeprom-2024-05-17.bin"
-    #     BOOTCODE_BINARY_IMAGE="/lib/firmware/raspberrypi/bootloader-2712/latest/recovery.bin"
-    #     BOOTCODE_FLASHING_NAME="${FLASHING_DIR}/bootcode5.bin"
-    #     ;;
+    5)
+        SOURCE_EEPROM_IMAGE="/lib/firmware/raspberrypi/bootloader-2712/latest/pieeprom-2024-07-30.bin"
+        BOOTCODE_BINARY_IMAGE="/lib/firmware/raspberrypi/bootloader-2712/latest/recovery.bin"
+        BOOTCODE_FLASHING_NAME="${FLASHING_DIR}/bootcode5.bin"
+        ;;
     *)
         die "Unable to identify Raspberry Pi HW Family. Aborting key writing."
 esac
