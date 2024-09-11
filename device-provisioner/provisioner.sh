@@ -188,7 +188,7 @@ fi
 
 announce_start "Finding/generating fastboot image"
 
-case ${RPI_DEVICE_FAMILY} in
+case "${RPI_DEVICE_FAMILY}" in
     4)
         # Raspberry Pi 4-class devices do not use signed bootcode files, so just copy the file into the relevant place.
         cp /usr/share/rpiboot/mass-storage-gadget64/bootfiles.bin "${RPI_SB_WORKDIR}/bootfiles.bin"
@@ -308,11 +308,13 @@ if [[ -z $(check_file_is_expected "${RPI_SB_WORKDIR}"/bootfs-temporary.img "img"
     announce_start "Initramfs modification"
 
     augment_initramfs() {
+        # shellcheck disable=SC2155
         local initramfs_compressed_file=$(check_file_is_expected "$1" "")
         # shellcheck disable=SC2086
         mkdir -p "${TMP_DIR}"/initramfs ${DEBUG}
         # shellcheck disable=SC2086
         zstd --rm -f -d "${initramfs_compressed_file}" -o "${TMP_DIR}"/initramfs.cpio ${DEBUG}
+        # shellcheck disable=SC2155
         local ROOTFS_MOUNT=$(realpath "${TMP_DIR}"/rpi-rootfs-img-mount)
         pushd "${TMP_DIR}"/initramfs 
         # shellcheck disable=SC2086
@@ -371,9 +373,9 @@ if [[ -z $(check_file_is_expected "${RPI_SB_WORKDIR}"/bootfs-temporary.img "img"
         4)
             echo 'initramfs initramfs8' >> "${TMP_DIR}"/rpi-boot-img-mount/config.txt
             ;;
-        # 5)
-        #     echo 'initramfs initramfs_2712' >> "${TMP_DIR}"/rpi-boot-img-mount/config.txt
-        #     ;;
+        5)
+            echo 'initramfs initramfs_2712' >> "${TMP_DIR}"/rpi-boot-img-mount/config.txt
+            ;;
     esac
     
     announce_stop "config.txt modification"
