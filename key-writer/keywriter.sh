@@ -219,59 +219,61 @@ mkdir -p "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/"
 
 touch "${RPI_DEVICE_SERIAL_STORE}/${TARGET_DEVICE_SERIAL}"
 
-USER_BOARDREV="0x$(cat /var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/${TARGET_DEVICE_SERIAL}.json | jq -r '.USER_BOARDREV')"
-MAC_ADDRESS=$(cat /var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/${TARGET_DEVICE_SERIAL}.json | jq -r '.MAC_ADDR')
+if [ -z "${DEMO_MODE_ONLY}" ]; then
+    USER_BOARDREV="0x$(jq -r '.USER_BOARDREV' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)"
+    MAC_ADDRESS=$(jq -r '.MAC_ADDR' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
 
-TYPE=$(printf "0x%X\n" $(((USER_BOARDREV & 0xFF0) >> 4)))
-PROCESSOR=$(printf "0x%X\n" $(((USER_BOARDREV & 0xF000) >> 12)))
-MEMORY=$(printf "0x%X\n" $(((USER_BOARDREV & 0x700000) >> 20)))
-MANUFACTURER=$(printf "0x%X\n" $(((USER_BOARDREV & 0xF0000) >> 16)))
-REVISION=$(((USER_BOARDREV & 0xF)))
+    TYPE=$(printf "0x%X\n" $(((USER_BOARDREV & 0xFF0) >> 4)))
+    PROCESSOR=$(printf "0x%X\n" $(((USER_BOARDREV & 0xF000) >> 12)))
+    MEMORY=$(printf "0x%X\n" $(((USER_BOARDREV & 0x700000) >> 20)))
+    MANUFACTURER=$(printf "0x%X\n" $(((USER_BOARDREV & 0xF0000) >> 16)))
+    REVISION=$((USER_BOARDREV & 0xF))
 
-case ${TYPE} in
-    "0x11") BOARD_STR="CM4" ;;
-    "0x12") BOARD_STR="Zero 2 W" ;;
-    "0x13") BOARD_STR="400" ;;
-    "0x14") BOARD_STR="CM4" ;;
-    "0x15") BOARD_STR="CM4S" ;;
-    "0x17") BOARD_STR="5" ;;
-    *)
-        BOARD_STR="Unsupported Board"
-esac
+    case ${TYPE} in
+        "0x11") BOARD_STR="CM4" ;;
+        "0x12") BOARD_STR="Zero 2 W" ;;
+        "0x13") BOARD_STR="400" ;;
+        "0x14") BOARD_STR="CM4" ;;
+        "0x15") BOARD_STR="CM4S" ;;
+        "0x17") BOARD_STR="5" ;;
+        *)
+            BOARD_STR="Unsupported Board"
+    esac
 
-case ${PROCESSOR} in
-    "0x0") PROCESSOR_STR="BCM2835" ;;
-    "0x1") PROCESSOR_STR="BCM2836" ;;
-    "0x2") PROCESSOR_STR="BCM2837" ;;
-    "0x3") PROCESSOR_STR="BCM2711" ;;
-    "0x4") PROCESSOR_STR="BCM2712" ;;
-    *)
-        PROCESSOR_STR="Unknown"
-esac
+    case ${PROCESSOR} in
+        "0x0") PROCESSOR_STR="BCM2835" ;;
+        "0x1") PROCESSOR_STR="BCM2836" ;;
+        "0x2") PROCESSOR_STR="BCM2837" ;;
+        "0x3") PROCESSOR_STR="BCM2711" ;;
+        "0x4") PROCESSOR_STR="BCM2712" ;;
+        *)
+            PROCESSOR_STR="Unknown"
+    esac
 
-case ${MEMORY} in
-    "0x0") MEMORY_STR="256MB" ;;
-    "0x1") MEMORY_STR="512MB" ;;
-    "0x2") MEMORY_STR="1GB" ;;
-    "0x3") MEMORY_STR="2GB" ;;
-    "0x4") MEMORY_STR="4GB" ;;
-    "0x5") MEMORY_STR="8GB" ;;
-    *)
-        MEMORY_STR="Unknown"
-esac
+    case ${MEMORY} in
+        "0x0") MEMORY_STR="256MB" ;;
+        "0x1") MEMORY_STR="512MB" ;;
+        "0x2") MEMORY_STR="1GB" ;;
+        "0x3") MEMORY_STR="2GB" ;;
+        "0x4") MEMORY_STR="4GB" ;;
+        "0x5") MEMORY_STR="8GB" ;;
+        *)
+            MEMORY_STR="Unknown"
+    esac
 
-case ${MANUFACTURER} in
-    "0x0") MANUFACTURER_STR="Sony UK" ;;
-    "0x1") MANUFACTURER_STR="Egoman" ;;
-    "0x2") MANUFACTURER_STR="Embest" ;;
-    "0x3") MANUFACTURER_STR="Sony Japan" ;;
-    "0x4") MANUFACTURER_STR="Embest" ;;
-    "0x5") MANUFACTURER_STR="Stadium" ;;
-    *)
-        MANUFACTURER_STR="Unknown"
-esac
+    case ${MANUFACTURER} in
+        "0x0") MANUFACTURER_STR="Sony UK" ;;
+        "0x1") MANUFACTURER_STR="Egoman" ;;
+        "0x2") MANUFACTURER_STR="Embest" ;;
+        "0x3") MANUFACTURER_STR="Sony Japan" ;;
+        "0x4") MANUFACTURER_STR="Embest" ;;
+        "0x5") MANUFACTURER_STR="Stadium" ;;
+        *)
+            MANUFACTURER_STR="Unknown"
+    esac
 
-echo "Board is: ${BOARD_STR}, with revision number ${REVISION}. Has Processor ${PROCESSOR_STR} with Memory ${MEMORY_STR}. Was manufactured by ${MANUFACTURER_STR}"
+    echo "Board is: ${BOARD_STR}, with revision number ${REVISION}. Has Processor ${PROCESSOR_STR} with Memory ${MEMORY_STR}. Was manufactured by ${MANUFACTURER_STR}"
+fi
 echo "Keywriting completed. Rebooting for next phase."
 
 mkdir -p /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/
