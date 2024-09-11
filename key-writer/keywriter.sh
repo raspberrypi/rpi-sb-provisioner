@@ -9,14 +9,15 @@ read_config
 TARGET_DEVICE_SERIAL="$1"
 
 die() {
+   # shellcheck disable=SC2086
    echo "$@" ${DEBUG}
    exit 1
 }
 
 TMP_DIR=""
 cleanup() {
-    mkdir -p /var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/
-    echo "KEYWRITER-EXITED" >> /var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/progress
+    mkdir -p /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/
+    echo "KEYWRITER-EXITED" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
    if [ -d "${TMP_DIR}" ]; then
       rm -rf "${TMP_DIR}"
    fi
@@ -81,9 +82,10 @@ update_eeprom() {
         #update_version=$(strings "${src_image}" | grep BUILD_TIMESTAMP | sed 's/.*=//g')
 
         TMP_CONFIG_SIG="$(mktemp)"
-        echo "Signing bootloader config" ${DEBUG}
+        echo "Signing bootloader config"
         writeSig "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" "${TMP_CONFIG_SIG}"
 
+        # shellcheck disable=SC2086
         cat "${TMP_CONFIG_SIG}" ${DEBUG}
 
         # rpi-eeprom-config extracts the public key args from the specified
