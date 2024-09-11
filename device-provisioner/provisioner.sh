@@ -89,8 +89,8 @@ unmount_image() {
 }
 
 cleanup() {
-    mkdir -p /var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/
-    echo "PROVISIONER-EXITED" >> /var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/progress
+    mkdir -p /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/
+    echo "PROVISIONER-EXITED" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
     unmount_image "${COPY_OS_COMBINED_FILE}"
     if [ -d "${TMP_DIR}" ]; then
         rm -rf "${TMP_DIR}"
@@ -279,7 +279,9 @@ if [[ -z $(check_file_is_expected "${RPI_SB_WORKDIR}"/bootfs-temporary.img "img"
     BOOT_DEV="${LOOP_DEV}"p1
     ROOT_DEV="${LOOP_DEV}"p2
 
+    # shellcheck disable=SC2086
     mkdir -p "${TMP_DIR}"/rpi-boot-img-mount ${DEBUG}
+    # shellcheck disable=SC2086
     mkdir -p "${TMP_DIR}"/rpi-rootfs-img-mount ${DEBUG}
 
     # OS Images are, by convention, packed as a MBR whole-disk file,
@@ -289,7 +291,9 @@ if [[ -z $(check_file_is_expected "${RPI_SB_WORKDIR}"/bootfs-temporary.img "img"
     # Note that this mechanism is _assuming_ Linux. We may revise that in the future, but
     # to do so would require a concrete support commitment from the vendor - and Raspberry Pi only
     # support Linux.
+    # shellcheck disable=SC2086
     mount -t vfat "${BOOT_DEV}" "${TMP_DIR}"/rpi-boot-img-mount ${DEBUG}
+    # shellcheck disable=SC2086
     mount -t ext4 "${ROOT_DEV}" "${TMP_DIR}"/rpi-rootfs-img-mount ${DEBUG}
 
     announce_stop "OS Image Mounting"
@@ -305,11 +309,15 @@ if [[ -z $(check_file_is_expected "${RPI_SB_WORKDIR}"/bootfs-temporary.img "img"
 
     augment_initramfs() {
         local initramfs_compressed_file=$(check_file_is_expected "$1" "")
+        # shellcheck disable=SC2086
         mkdir -p "${TMP_DIR}"/initramfs ${DEBUG}
+        # shellcheck disable=SC2086
         zstd --rm -f -d "${initramfs_compressed_file}" -o "${TMP_DIR}"/initramfs.cpio ${DEBUG}
         local ROOTFS_MOUNT=$(realpath "${TMP_DIR}"/rpi-rootfs-img-mount)
         pushd "${TMP_DIR}"/initramfs 
+        # shellcheck disable=SC2086
         cpio -id < ../initramfs.cpio ${DEBUG}
+        # shellcheck disable=SC2086
         rm ../initramfs.cpio ${DEBUG}
 
         # Insert required kernel modules
@@ -456,11 +464,14 @@ announce_stop "Writing OS images"
 announce_start "Cleaning up"
 [ -d "${TMP_DIR}/rpi-boot-img-mount" ] && umount "${TMP_DIR}"/rpi-boot-img-mount
 [ -d "${TMP_DIR}/rpi-rootfs-img-mount" ] && umount "${TMP_DIR}"/rpi-rootfs-img-mount
+# shellcheck disable=SC2086
 unmount_image "${COPY_OS_COMBINED_FILE}" ${DEBUG}
 # We also delete the temporary directory - preserving the cached generated asset
+# shellcheck disable=SC2086
 rm -rf "${TMP_DIR}" ${DEBUG}
 if [ -n "${DELETE_PRIVATE_TMPDIR}" ]; then
     announce_start "Deleting customised intermediates"
+    # shellcheck disable=SC2086
     rm -rf "${DELETE_PRIVATE_TMPDIR}" ${DEBUG}
     DELETE_PRIVATE_TMPDIR=
     announce_stop "Deleting customised intermediates"
@@ -471,7 +482,7 @@ announce_start "Set LED status"
 [ -z "${DEMO_MODE_ONLY}" ] && fastboot oem led PWR 0
 announce_stop "Set LED status"
 
-mkdir -p /var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/
-echo "PROVISIONER-FINISHED" >> /var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/progress
+mkdir -p /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/
+echo "PROVISIONER-FINISHED" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
 
 echo "Provisioning completed. Remove the device from this machine."
