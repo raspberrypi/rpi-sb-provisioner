@@ -105,7 +105,7 @@ update_eeprom() {
                 rpi-eeprom-config \
                     --out "${dst_image}.intermediate" --bootcode "${customer_signed_bootcode_binary_workdir}/bootcode.bin.signed" \
                     "${src_image}" || die "Failed to update signed bootcode in the EEPROM image"
-                cd - || return
+                cd - > /dev/null || return
                 rm -rf "${customer_signed_bootcode_binary_workdir}"
                 ;;
         esac
