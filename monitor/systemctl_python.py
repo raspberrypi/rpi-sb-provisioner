@@ -1,3 +1,4 @@
+import os
 import subprocess
 from os import listdir, path
 
@@ -85,18 +86,23 @@ def list_failed_devices():
     return failed_devices
 
 def list_device_files(device_name):
-    if path.exists("/var/log/rpi-sb-provisioner/" + device_name):
-        ret = listdir("/var/log/rpi-sb-provisioner/" + device_name)
+    device_files_dir = os.path.join("/var/log/rpi-sb-provisioner", device_name)
+    try:
+        ret = os.listdir(device_files_dir)
         if "metadata" in ret:
             ret.remove("metadata")
-        return ret
-    else:
+    except FileNotFoundError:
         return []
+    else:
+        return ret
+
 
 def read_device_file(device_name, filename):
-    contents = "Unable to read/open file!"
-    if path.exists("/var/log/rpi-sb-provisioner/" + device_name + "/" + filename):
-        f = open("/var/log/rpi-sb-provisioner/" + device_name + "/" + filename, "r")
-        contents = f.read()
-        f.close()
-    return contents
+    device_file_path = os.path.join("/var/log/rpi-sb-provisioner", device_name, filename)
+    try:
+        with open(device_file_path, "r") as f:
+            contents = f.read()
+    except FileNotFoundError:
+        return "Unable to read/open file!"
+    else:
+        return contents
