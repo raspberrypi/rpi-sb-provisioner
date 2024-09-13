@@ -2,11 +2,9 @@ from textual.app import App, ComposeResult
 from textual.containers import ScrollableContainer, Container
 from textual.widgets import Header, Footer, DataTable, Static, Button
 from textual.reactive import reactive
-from textual.message import Message
 from textual.screen import Screen
 from textual.widget import Widget
 from textual import on
-from textual import events
 import systemctl_python
 
 

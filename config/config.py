@@ -1,14 +1,14 @@
+import os
+
 from textual.app import App, ComposeResult
-from textual.containers import ScrollableContainer, Container
-from textual.widgets import Header, Footer, DataTable, Static, Button, Input
-from textual.reactive import reactive
-from textual.message import Message
-from textual.screen import Screen, ModalScreen
+from textual.containers import Container
+from textual.widgets import Header, Footer, Static, Button, Input
+from textual.screen import Screen
 from textual.widget import Widget
-from textual.validation import ValidationResult
 from textual import on
-from textual import events
-import validator, os
+
+import validator
+
 
 class ParamWidget(Widget):
     def __init__(self, paramname, paramvalue, currentval):
