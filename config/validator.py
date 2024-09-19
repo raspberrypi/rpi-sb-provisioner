@@ -14,7 +14,15 @@ def validate_CUSTOMER_KEY_FILE_PEM(text) -> tuple[bool, str]:
         return (False, "openssl error: " + output.stdout.decode() + output.stderr.decode())
     # "openssl rsa -in " + text + "  -check -noout"
     return (True, "")
-    
+
+def validate_CUSTOMER_KEY_PKCS11_NAME(text) -> tuple[bool, str]:
+    output = subprocess.run(["openssl", "rsa", text, "-engine", "pkcs11", "-keyform", "engine", "-check", "-noout"], capture_output=True)
+    if "RSA key ok" in output.stdout.decode():
+        pass
+    else:
+        return (False, "openssl error: " + output.stdout.decode() + output.stderr.decode())
+    # "openssl rsa -in " + text + "  -check -noout"
+    return (True, "")
 
 def validate_GOLD_MASTER_OS_FILE(text) -> tuple[bool, str]:
     if path.exists(text):
