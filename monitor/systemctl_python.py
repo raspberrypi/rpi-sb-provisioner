@@ -1,6 +1,6 @@
 import os
 import subprocess
-from os import listdir, path
+from os import listdir, path, stat
 
 def list_rpi_sb_units(service_name):
     output = subprocess.run(["systemctl", "list-units", service_name, "-l", "--all", "--no-pager"], capture_output=True)
@@ -81,7 +81,8 @@ def list_failed_devices():
                 if "KEYWRITER-FINISHED" in status: keywriter_success = 1
                 else: keywriter_success = 0
             if provisioner_success == 0 or keywriter_success == 0:
-                failed_devices.append(device)
+                modified_time = stat("/var/log/rpi-sb-provisioner/" + device + "/progress").mtime()
+                failed_devices.append((device, modified_time))
             f.close()
     return failed_devices
 
