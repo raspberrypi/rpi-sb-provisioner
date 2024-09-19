@@ -6,10 +6,10 @@ rpi-sb-provisioner (1.1.0) unstable; urgency=medium
   * Copyright: Correct license
   * Config: Prefix DEVICE_SERIAL_STORE with RPI to match docs
 
- -- Tom Dewey <tom.dewey@raspberrypi.com> Thu, 05 Sep 2024 18:57:00 +0000
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Wed, 05 Sep 2024 18:57:00 +0000
 
 rpi-sb-provisioner (1.0.2) UNRELEASED; urgency=low
 
   * rpi-sb-provisioner: Changed Debian Packaging
 
- -- Ben Benson <ben.benson@raspberrypi.com> Fri, 23 Aug 2024 11:24:00 +0000
+ -- Ben Benson <ben.benson@raspberrypi.com>  Fri, 23 Aug 2024 11:24:00 +0000
