@@ -1,33 +1,32 @@
-config/config.sh /usr/local/bin/
-config/config.py /usr/share/rpi-sb-provisioner/config
-config/validator.py /usr/share/rpi-sb-provisioner/config
-config/config_app.css /usr/share/rpi-sb-provisioner/config
-config/config_app.helper /usr/share/rpi-sb-provisioner/config
+config/config.sh                                /usr/local/bin
+monitor/monitor.sh                              /usr/local/bin
+key-writer/keywriter.sh                         /usr/local/bin
+host-support/terminal-functions.sh              /usr/local/bin
+host-support/make-boot-image                    /usr/local/bin
+device-provisioner/provisioner.sh               /usr/local/bin
+fetch-repo-package-list/fetch-repo-package-list /usr/local/bin
+rpi-package-download/rpi-package-download       /usr/local/bin
+device-triage/triage.sh                         /usr/local/bin
 
-monitor/monitor.sh /usr/local/bin
-monitor/monitor.py /usr/share/rpi-sb-provisioner/monitor
-monitor/systemctl_python.py /usr/share/rpi-sb-provisioner/monitor/
-monitor/monitor.css /usr/share/rpi-sb-provisioner/monitor/
+config/config.py                    /usr/share/rpi-sb-provisioner/config
+config/validator.py                 /usr/share/rpi-sb-provisioner/config
+config/config_app.css               /usr/share/rpi-sb-provisioner/config
+config/config_app.helper            /usr/share/rpi-sb-provisioner/config
 
-rpi-package-download/rpi-package-download /usr/local/bin/
-rpi-package-download/rpi-package-download@.service /usr/local/lib/systemd/system/
+monitor/monitor.py                  /usr/share/rpi-sb-provisioner/monitor
+monitor/systemctl_python.py         /usr/share/rpi-sb-provisioner/monitor
+monitor/monitor.css                 /usr/share/rpi-sb-provisioner/monitor
 
-key-writer/keywriter.sh /usr/local/bin
-key-writer/rpi-sb-keywriter@.service /usr/local/lib/systemd/system/
+rpi-package-download/rpi-package-download@.service          /usr/local/lib/systemd/system
+key-writer/rpi-sb-keywriter@.service                        /usr/local/lib/systemd/system
+device-provisioner/rpi-sb-provisioner@.service              /usr/local/lib/systemd/system
+fetch-repo-package-list/fetch-repo-package-list@.timer      /usr/local/lib/systemd/system
+fetch-repo-package-list/fetch-repo-package-list@.service    /usr/local/lib/systemd/system
+device-triage/rpi-sb-triage@.service                        /usr/local/lib/systemd/system
 
-host-support/terminal-functions.sh /usr/local/bin
-host-support/cryptroot_initramfs /var/lib/rpi-sb-provisioner
-host-support/boot_ramdisk_config.txt /var/lib/rpi-sb-provisioner
-host-support/fastboot-gadget.img /var/lib/rpi-sb-provisioner
-host-support/make-boot-image /usr/local/bin
-host-support/rpi-sb-provisioner /etc/default/
-host-support/bootloader.config /var/lib/rpi-sb-provisioner/
+host-support/cryptroot_initramfs        /var/lib/rpi-sb-provisioner
+host-support/boot_ramdisk_config.txt    /var/lib/rpi-sb-provisioner
+host-support/fastboot-gadget.img        /var/lib/rpi-sb-provisioner
+host-support/bootloader.config          /var/lib/rpi-sb-provisioner
 
-device-provisioner/provisioner.sh /usr/local/bin
-device-provisioner/rpi-sb-provisioner@.service /usr/local/lib/systemd/system
-device-triage/triage.sh /usr/local/bin
-device-triage/rpi-sb-triage@.service /usr/local/lib/systemd/system
-
-fetch-repo-package-list/fetch-repo-package-list /usr/local/bin/
-fetch-repo-package-list/fetch-repo-package-list@.timer /usr/local/lib/systemd/system/
-fetch-repo-package-list/fetch-repo-package-list@.service /usr/local/lib/systemd/system/
+host-support/rpi-sb-provisioner         /etc/default
