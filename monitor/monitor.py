@@ -71,7 +71,8 @@ class Failed_devices_list(Static):
         """Called when the devices variable changes"""
         table = self.query_one(DataTable)
         table_devices = []# [("TEST",), ("TEST",)]
-        for device in self.devices:
+        """ Sort the devices by modified time of the progress file. """
+        for (device, _) in sorted(self.devices, key=lambda device: device[1], reverse=True):
             table_devices.append((device, ))
         table.clear()
         table.add_rows(table_devices)
