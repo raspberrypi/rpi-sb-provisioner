@@ -1,4 +1,4 @@
-tar-ignore
+tar-ignore = .gitignore
 tar-ignore = .coverage
 tar-ignore = .tox
 tar-ignore = .venv
