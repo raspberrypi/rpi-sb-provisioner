@@ -6,20 +6,6 @@ else
   echo "Group rpi-sb-provisioner already exists"
 fi
 
-if id -nGz "pi" | grep -qzxF "rpi-sb-provisioner"
-then
-  echo User \`pi\' already belongs to group \`rpi-sb-provisioner\'
-else
-  usermod --append --groups rpi-sb-provisioner pi
-fi
-
-if id -nGz "root" | grep -qzxF "rpi-sb-provisioner"
-then
-  echo User \`root\' already belongs to group \`rpi-sb-provisioner\'
-else
-  usermod --append --groups rpi-sb-provisioner root
-fi
-
 if [ -d "/etc/rpi-sb-provisioner/" ]; then
   echo "/etc/rpi-sb-provisioner/ already exists"
 else 
