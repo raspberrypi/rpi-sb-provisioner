@@ -113,6 +113,7 @@ update_eeprom() {
 
     rm -f "${dst_image}"
     set -x
+    # shellcheck disable=SC2086
     rpi-eeprom-config \
         --config "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" \
         --out "${dst_image}" ${sign_args} \
