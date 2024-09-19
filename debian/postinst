@@ -34,3 +34,5 @@ fi
 
 chown :rpi-sb-provisioner /etc/rpi-sb-provisioner/config
 chmod g+w /etc/rpi-sb-provisioner/config
+
+#DEBHELPER#
