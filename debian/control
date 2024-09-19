@@ -1,6 +1,6 @@
 Source: rpi-sb-provisioner
 Section: admin
-Priority: extra
+Priority: optional
 Maintainer: Tom Dewey <tom.dewey@raspberrypi.com>
 Build-Depends: debhelper (>= 11), python3, dh-virtualenv (>= 0.8)
 Standards-Version: 1.0.2
