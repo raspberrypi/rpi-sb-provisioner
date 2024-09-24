@@ -1,3 +1,14 @@
+rpi-sb-provisioner (1.1.1) unstable; urgency=medium
+
+  * config: Added RPI_DEVICE_FETCH_METADATA, to control device metadata
+    gathering
+  * packaging: Numerous lintian fixes
+  * packaging: Remove automatic user group additions
+  * monitor: Sort failed devices by most recent
+  * monitor, config: Require sudo
+
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Tue, 24 Sep 2024 18:57:00 +0000
+
 rpi-sb-provisioner (1.1.0) unstable; urgency=medium
 
   * Add 2712 support
