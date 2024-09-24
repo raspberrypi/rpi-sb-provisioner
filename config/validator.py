@@ -58,6 +58,9 @@ def validate_RPI_DEVICE_LOCK_JTAG(text) -> tuple[bool, str]:
 def validate_RPI_DEVICE_EEPROM_WP_SET(text) -> tuple[bool, str]:
     return (True, "")
 
+def validate_RPI_DEVICE_FETCH_METADATA(text) -> tuple[bool, str]:
+    return (True, "")
+
 def validate_RPI_DEVICE_SERIAL_STORE(text) -> tuple[bool, str]:
     if text[0] == "/":
         pass
