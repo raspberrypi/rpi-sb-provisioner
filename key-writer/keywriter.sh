@@ -204,7 +204,10 @@ cp "${BOOTCODE_BINARY_IMAGE}" "${BOOTCODE_FLASHING_NAME}"
 echo "program_pubkey=1" > "${FLASHING_DIR}/config.txt"
 # This directive tells the bootloader to reboot once it's written the OTP
 echo "recovery_reboot=1" >> "${FLASHING_DIR}/config.txt"
+
+if [ -n "${RPI_DEVICE_FETCH_METADATA}" ]; then
 echo "recovery_metadata=1" >> "${FLASHING_DIR}/config.txt"
+fi
 
 if [ -n "${RPI_DEVICE_JTAG_LOCK}" ]; then
 echo "program_jtag_lock=1" >> "${FLASHING_DIR}/config.txt"

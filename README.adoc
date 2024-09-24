@@ -159,6 +159,15 @@ Raspberry Pi devices that use an EEPROM as part of their boot flow can configure
 
 Set to any value to enable EEPROM write protection.
 
+=== RPI_DEVICE_FETCH_METADATA
+*Optional*
+
+Collect manufacturing data from each device that is provisioned. This will include the board type, board revision number, the processor name, the memory configuration, and the factory where the board was made.
+
+The metadata is inserted into the `keywriter` log for the device, and also as a serial-number named JSON file under the `metadata` subdirectory of the device provisioning logs.
+
+Set to any value to enable metadata collection.
+
 === RPI_DEVICE_SERIAL_STORE
 *Optional, with a default*
 
