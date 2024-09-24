@@ -103,6 +103,7 @@ def read_device_file(device_name, filename):
     try:
         with open(device_file_path, "r") as f:
             contents = f.read()
+            f.close()
     except FileNotFoundError:
         return "Unable to read/open file!"
     else:
