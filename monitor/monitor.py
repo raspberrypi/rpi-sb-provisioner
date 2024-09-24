@@ -34,7 +34,7 @@ ROWS = [
 
 class CompletedDevicesList(Widget):
     dev_type_g = ""
-    devices=reactive([])
+    devices=reactive(tuple[str, int])
     def compose(self) -> ComposeResult:
          yield DataTable()
     def __init__(self, dev_type):
@@ -46,7 +46,7 @@ class CompletedDevicesList(Widget):
         """Called when the devices variable changes"""
         table = self.query_one(DataTable)
         table_devices = []
-        for device in self.devices:
+        for (device, _) in sorted(self.devices, key=lambda device: device[1], reverse=True):
             table_devices.append((device, ))
         table.clear()
         table.add_rows(table_devices)
@@ -59,7 +59,7 @@ class CompletedDevicesList(Widget):
 
 class Failed_devices_list(Static):
     dev_type_g = ""
-    devices=reactive([])
+    devices=reactive(tuple[str, int])
     def compose(self) -> ComposeResult:
          yield DataTable()
     def __init__(self, dev_type):

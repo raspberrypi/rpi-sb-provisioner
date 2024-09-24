@@ -61,7 +61,8 @@ def list_completed_devices():
                 if "PROVISIONER-FINISHED" in status: provisioner_success = 1
                 else: provisioner_success = 0
             if provisioner_success == 1:
-                completed_devices.append(device)
+                modified_time = stat("/var/log/rpi-sb-provisioner/" + device + "/progress").st_mtime_ns()
+                completed_devices.append((device, modified_time))
             f.close()
     return completed_devices
 
@@ -81,7 +82,7 @@ def list_failed_devices():
                 if "KEYWRITER-FINISHED" in status: keywriter_success = 1
                 else: keywriter_success = 0
             if provisioner_success == 0 or keywriter_success == 0:
-                modified_time = stat("/var/log/rpi-sb-provisioner/" + device + "/progress").mtime()
+                modified_time = stat("/var/log/rpi-sb-provisioner/" + device + "/progress").st_mtime_ns()
                 failed_devices.append((device, modified_time))
             f.close()
     return failed_devices
@@ -96,7 +97,6 @@ def list_device_files(device_name):
         return []
     else:
         return ret
-
 
 def read_device_file(device_name, filename):
     device_file_path = os.path.join("/var/log/rpi-sb-provisioner", device_name, filename)
