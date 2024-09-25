@@ -2,20 +2,14 @@
 
 if [ ! "$(getent group rpi-sb-provisioner)" ]; then
   groupadd rpi-sb-provisioner
-else
-  echo "Group rpi-sb-provisioner already exists"
 fi
 
-if [ -d "/etc/rpi-sb-provisioner/" ]; then
-  echo "/etc/rpi-sb-provisioner/ already exists"
-else 
+if [ ! -d "/etc/rpi-sb-provisioner/" ]; then
   mkdir -p /etc/rpi-sb-provisioner/
 fi
 
 if ! [ -f /etc/rpi-sb-provisioner/config ]; then
   touch /etc/rpi-sb-provisioner/config
-else
-  echo "Config file already exists"
 fi
 
 chown :rpi-sb-provisioner /etc/rpi-sb-provisioner/config
