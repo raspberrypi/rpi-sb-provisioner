@@ -101,7 +101,7 @@ def list_device_files(device_name):
 def read_device_file(device_name, filename):
     device_file_path = os.path.join("/var/log/rpi-sb-provisioner", device_name, filename)
     try:
-        with (device_file_path, "r") as f:
+        with open(device_file_path, "r") as f:
             contents = f.read()
             f.close()
     except FileNotFoundError:
