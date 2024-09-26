@@ -9,5 +9,3 @@ Type=oneshot
 ExecStart=/usr/local/bin/triage.sh /%I
 # '/' is needed - otherwise triage does not use correct address of device
 EnvironmentFile=/etc/rpi-sb-provisioner/config
-# StandardOutput will fail if the file does not exist (consider tmpfiles.d or udev creation approach?)
-#StandardOutput=append:/var/log/rpi-sb-provisioner/%I/triage.log

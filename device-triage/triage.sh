@@ -7,9 +7,9 @@ set -e
 read_config
 
 TARGET_DEVICE_SERIAL="$(udevadm info --name="$1" --query=property --property=ID_SERIAL_SHORT --value)"
-echo "Starting triage for $1, serial: $TARGET_DEVICE_SERIAL"
 mkdir -p /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/
-
+touch /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
+echo "Starting triage for $1, serial: $TARGET_DEVICE_SERIAL" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
 
 if [ -z "${RPI_DEVICE_SERIAL_STORE}" ]; then
     RPI_DEVICE_SERIAL_STORE=/usr/local/etc/rpi-sb-provisioner/seen
@@ -24,49 +24,42 @@ if [ -z "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" ]; then
 fi
 
 if [ -z "${CUSTOMER_KEY_FILE_PEM}" ] && [ -z "${CUSTOMER_KEY_PKCS11_NAME}" ]; then
-    echo "You must provide a key in the environment via CUSTOMER_KEY_FILE_PEM, or a key name via CUSTOMER_KEY_PKCS11_NAME"
+    echo "You must provide a key in the environment via CUSTOMER_KEY_FILE_PEM, or a key name via CUSTOMER_KEY_PKCS11_NAME" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
     exit 1
 fi
 
 if [ -z "${TARGET_DEVICE_SERIAL}" ]; then
-    echo "You must provide a device serial as the argument to this program"
+    echo "You must provide a device serial as the argument to this program" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
     exit 1
 fi
 
 
 if [ -e "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/progress" ]; then
     last_status=$(tail -n 1 "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/progress")
-    echo "Observed provisioning state for ${TARGET_DEVICE_SERIAL}: ${last_status}"
+    echo "Observed provisioning state for ${TARGET_DEVICE_SERIAL}: ${last_status}"  >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
 
     case "${last_status}" in
         "${KEYWRITER_STARTED}")
-            echo "Taking no action - keywriter is already active"
+            echo "Taking no action - keywriter is already active" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
             exit 0
             ;;
-        "${KEYWRITER-FINISHED}")
-            echo "Device already provisioned with the key, moving to write the image"
-            echo "If this is in error, consult the README"
+        "${KEYWRITER_FINISHED}")
+            echo "Device already provisioned with the key, moving to write the image" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
+            echo "If this is in error, consult the README" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
 
             # Start the boot provisioner service
             touch "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/provisioner.log"
             systemctl start rpi-sb-provisioner@"${TARGET_DEVICE_SERIAL}"
             exit 0
             ;;
-        "${KEYWRITER-EXITED}")
-            echo "Keywriter failed, inspect the logs and raise a bug report"
-            exit 1
-            ;;
         *)
-            echo "Unexpected state, please raise a bug report"
+            echo "Device is completely new to us, starting keywriter" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
+            echo "Using keyfile at ${CUSTOMER_KEY_FILE_PEM}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
+
+            # Start the keywriter service
+            touch "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/keywriter.log"
+            systemctl start rpi-sb-keywriter@"${TARGET_DEVICE_SERIAL}"
+            exit 0
             ;;
     esac
-
-else
-    echo "Device is completely new to us, starting keywriter"
-    echo "Using keyfile at ${CUSTOMER_KEY_FILE_PEM}"
-
-    # Start the keywriter service
-    touch "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/keywriter.log"
-    systemctl start rpi-sb-keywriter@"${TARGET_DEVICE_SERIAL}"
-    exit 0
 fi
