@@ -8,6 +8,8 @@ read_config
 
 TARGET_DEVICE_SERIAL="$(udevadm info --name="$1" --query=property --property=ID_SERIAL_SHORT --value)"
 echo "Starting triage for $1, serial: $TARGET_DEVICE_SERIAL"
+mkdir -p /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/
+
 
 if [ -z "${RPI_DEVICE_SERIAL_STORE}" ]; then
     RPI_DEVICE_SERIAL_STORE=/usr/local/etc/rpi-sb-provisioner/seen
@@ -31,22 +33,39 @@ if [ -z "${TARGET_DEVICE_SERIAL}" ]; then
     exit 1
 fi
 
-if [ -e "${RPI_DEVICE_SERIAL_STORE}/${TARGET_DEVICE_SERIAL}" ]; then
-    echo "Device already provisioned with the key, moving to write the image"
-    echo "If this is in error, delete ${RPI_DEVICE_SERIAL_STORE}/${TARGET_DEVICE_SERIAL}"
 
-    # Start the boot provisioner service
-    mkdir -p /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/
-    touch "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/provisioner.log"
-    systemctl start rpi-sb-provisioner@"${TARGET_DEVICE_SERIAL}"
+if [ -e "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/progress" ]; then
+    last_status=$(tail -n 1 "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/progress")
+    echo "Observed provisioning state for ${TARGET_DEVICE_SERIAL}: ${last_status}"
 
-    exit 0
+    case "${last_status}" in
+        "${KEYWRITER_STARTED}")
+            echo "Taking no action - keywriter is already active"
+            exit 0
+            ;;
+        "${KEYWRITER-FINISHED}")
+            echo "Device already provisioned with the key, moving to write the image"
+            echo "If this is in error, consult the README"
+
+            # Start the boot provisioner service
+            touch "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/provisioner.log"
+            systemctl start rpi-sb-provisioner@"${TARGET_DEVICE_SERIAL}"
+            exit 0
+            ;;
+        "${KEYWRITER-EXITED}")
+            echo "Keywriter failed, inspect the logs and raise a bug report"
+            exit 1
+            ;;
+        *)
+            echo "Unexpected state, please raise a bug report"
+            ;;
+    esac
+
 else
-    echo "Device is new to us, programing customer signature"
+    echo "Device is completely new to us, starting keywriter"
     echo "Using keyfile at ${CUSTOMER_KEY_FILE_PEM}"
 
     # Start the keywriter service
-    mkdir -p /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/
     touch "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/keywriter.log"
     systemctl start rpi-sb-keywriter@"${TARGET_DEVICE_SERIAL}"
     exit 0
