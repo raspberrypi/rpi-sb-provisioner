@@ -1,5 +1,0 @@
-ACTION=="add", SUBSYSTEM=="usb", \
-  ATTRS{idVendor}=="0a5c", ATTR{idProduct}=="27[16][1234]", \
-  TAG+="systemd", \
-  PROGRAM="/usr/bin/systemd-escape -p --template=rpi-sb-triage@.service $env{DEVNAME}", \
-  ENV{SYSTEMD_WANTS}+="%c"
