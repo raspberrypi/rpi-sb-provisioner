@@ -14,7 +14,7 @@ TARGET_DEVICE_SERIAL="$1"
 
 . /usr/local/bin/terminal-functions.sh
 
-echo "${PROVISONER_STARTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+echo "${PROVISIONER_STARTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
 
 read_config
 
@@ -92,7 +92,7 @@ unmount_image() {
 
 cleanup() {
     mkdir -p /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/
-    echo "${PROVISONER_EXITED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+    echo "${PROVISIONER_EXITED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
     unmount_image "${COPY_OS_COMBINED_FILE}"
     if [ -d "${TMP_DIR}" ]; then
         rm -rf "${TMP_DIR}"
