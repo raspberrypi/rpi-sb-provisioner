@@ -14,6 +14,8 @@ TARGET_DEVICE_SERIAL="$1"
 
 . /usr/local/bin/terminal-functions.sh
 
+echo "${PROVISONER_STARTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+
 read_config
 
 check_pidevice_storage_type() {
@@ -90,7 +92,7 @@ unmount_image() {
 
 cleanup() {
     mkdir -p /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/
-    echo "PROVISIONER-EXITED" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+    echo "${PROVISONER_EXITED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
     unmount_image "${COPY_OS_COMBINED_FILE}"
     if [ -d "${TMP_DIR}" ]; then
         rm -rf "${TMP_DIR}"
@@ -485,6 +487,6 @@ announce_start "Set LED status"
 announce_stop "Set LED status"
 
 mkdir -p /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/
-echo "PROVISIONER-FINISHED" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+echo "${PROVISIONER_FINISHED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
 
 echo "Provisioning completed. Remove the device from this machine."
