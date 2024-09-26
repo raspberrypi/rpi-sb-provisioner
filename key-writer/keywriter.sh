@@ -167,7 +167,7 @@ case ${RPI_DEVICE_FAMILY} in
         BOOTCODE_FLASHING_NAME="${FLASHING_DIR}/bootcode4.bin"
         ;;
     5)
-        SOURCE_EEPROM_IMAGE="/lib/firmware/raspberrypi/bootloader-2712/latest/pieeprom-2024-09-10.bin"
+        SOURCE_EEPROM_IMAGE="/lib/firmware/raspberrypi/bootloader-2712/latest/pieeprom-2024-09-23.bin"
         BOOTCODE_BINARY_IMAGE="/lib/firmware/raspberrypi/bootloader-2712/latest/recovery.bin"
         BOOTCODE_FLASHING_NAME="${FLASHING_DIR}/bootcode5.bin"
         ;;
