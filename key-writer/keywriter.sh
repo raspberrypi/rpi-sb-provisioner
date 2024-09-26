@@ -4,11 +4,11 @@ set -x
 
 . /usr/local/bin/terminal-functions.sh
 
-echo "${KEYWRITER-STARTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+TARGET_DEVICE_SERIAL="$1"
+
+echo "${KEYWRITER_STARTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
 
 read_config
-
-TARGET_DEVICE_SERIAL="$1"
 
 die() {
    # shellcheck disable=SC2086
@@ -19,7 +19,7 @@ die() {
 TMP_DIR=""
 cleanup() {
     mkdir -p /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/
-    echo "${KEYWRITER-EXITED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+    echo "${KEYWRITER_EXITED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
    if [ -d "${TMP_DIR}" ]; then
       rm -rf "${TMP_DIR}"
    fi
@@ -283,4 +283,4 @@ fi
 echo "Keywriting completed. Rebooting for next phase."
 
 mkdir -p /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/
-echo "${KEYWRITER-FINISHED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+echo "${KEYWRITER_FINISHED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
