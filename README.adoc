@@ -258,19 +258,14 @@ $ systemctl list-units rpi-sb-*
 
 === Observing logs
 
-Logs are stored on a per-device, per-stage basis, where logs for a given device are stored at `/var/log/rpi-sb-provisioner/<phase>/<serial>.log`. The logs for the *triage* stage, which is the state machine controlling rpi-sb-provisioner, are accessible via the systemd journal:
+Logs are stored on a per-device, per-stage basis, where logs for a given device are stored at `/var/log/rpi-sb-provisioner/<serial>/<phase>.log`.
 
-To observe the triage of an individual device, use `systemctl`
-
-----
-$ sudo systemctl status rpi-sb-triage@<serial>.service
-----
-
-For the *keywriter* and *provisioner* stages, logs are named per their stage in the log directory. For example, to observe the progress of an individual device through a stage, you could use `tail`:
+For example, to observe the progress of an individual device through a stage, you could use `tail`:
 
 ----
-$ tail -f -n 100 /var/log/rpi-sb-provisioner/keywriter/<serial>.log
-$ tail -f -n 100 /var/log/rpi-sb-provisioner/provisioner/<serial>.log
+$ tail -f -n 100 /var/log/rpi-sb-provisioner/<serial>/keywriter.log
+$ tail -f -n 100 /var/log/rpi-sb-provisioner/<serial>/provisioner.log
+$ tail -f -n 100 /var/log/rpi-sb-provisioner/<serial>/triage.log
 ----
 
 === Identifying secured devices
