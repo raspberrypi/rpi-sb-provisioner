@@ -42,7 +42,7 @@ if [ -e "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/progress" ]; then
             echo "Taking no action - stage is already active" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
             exit 0
             ;;
-        "${KEYWRITER_FINISHED}")
+        "${KEYWRITER_FINISHED}" | "${TRIAGE_PROVISIONER_HANDOFF}")
             echo "Device already provisioned with the key, moving to write the image" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
             echo "If this is in error, consult the README" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
 
