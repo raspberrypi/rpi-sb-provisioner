@@ -2,6 +2,12 @@
 
 set -e
 
+TRIAGE_STARTED="TRIAGE-STARTED"
+TRIAGE_KEYWRITER_HANDOFF="TRIAGE-HANDOFF-KEYWRITER"
+TRIAGE_PROVISIONER_HANDOFF="TRIAGE-HANDOFF-PROVISIONER"
+TRIAGE_BUSY="TRIAGE-BUSY"
+TRIAGE_ABORT="TRIAGE-ABORT"
+
 . /usr/local/bin/terminal-functions.sh
 
 read_config
@@ -10,6 +16,7 @@ TARGET_DEVICE_SERIAL="$(udevadm info --name="$1" --query=property --property=ID_
 mkdir -p /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/
 touch /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
 echo "Starting triage for $1, serial: $TARGET_DEVICE_SERIAL" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
+echo "${TRIAGE_STARTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
 
 if [ -z "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" ]; then
     RPI_DEVICE_BOOTLOADER_CONFIG_FILE=/var/lib/rpi-sb-provisioner/bootloader.default
@@ -25,13 +32,13 @@ if [ -z "${TARGET_DEVICE_SERIAL}" ]; then
     exit 1
 fi
 
-
 if [ -e "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/progress" ]; then
     last_status=$(tail -n 1 "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/progress")
     echo "Observed provisioning state for ${TARGET_DEVICE_SERIAL}: ${last_status}"  >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
 
     case "${last_status}" in
         "${KEYWRITER_STARTED}" | "${PROVISIONER_STARTED}")
+            echo "${TRIAGE_BUSY}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
             echo "Taking no action - stage is already active" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
             exit 0
             ;;
@@ -40,11 +47,13 @@ if [ -e "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/progress" ]; then
             echo "If this is in error, consult the README" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
 
             # Start the boot provisioner service
+            echo "${TRIAGE_PROVISIONER_HANDOFF}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
             touch "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/provisioner.log"
             systemctl start rpi-sb-provisioner@"${TARGET_DEVICE_SERIAL}"
             exit 0
             ;;
         "${KEYWRITER_ABORTED}")
+            echo "${TRIAGE_ABORT}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
             echo "Keywriter failed for this device, refusing to provision" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
             exit 1
             ;;
@@ -53,6 +62,7 @@ if [ -e "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/progress" ]; then
             echo "Using keyfile at ${CUSTOMER_KEY_FILE_PEM}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
 
             # Start the keywriter service
+            echo "${TRIAGE_KEYWRITER_HANDOFF}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
             touch "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/keywriter.log"
             systemctl start rpi-sb-keywriter@"${TARGET_DEVICE_SERIAL}"
             exit 0
@@ -63,6 +73,7 @@ else
     echo "Using keyfile at ${CUSTOMER_KEY_FILE_PEM}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
 
     # Start the keywriter service
+    echo "${TRIAGE_KEYWRITER_HANDOFF}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
     touch "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/keywriter.log"
     systemctl start rpi-sb-keywriter@"${TARGET_DEVICE_SERIAL}"
     exit 0
