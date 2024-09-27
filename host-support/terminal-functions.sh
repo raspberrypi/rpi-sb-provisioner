@@ -3,17 +3,12 @@
 OPENSSL=${OPENSSL:-openssl}
 
 export KEYWRITER_FINISHED="KEYWRITER-FINISHED"
-export KEYWRITER_EXITED="KEYWRITER-EXITED"
+export KEYWRITER_ABORTED="KEYWRITER-ABORTED"
 export KEYWRITER_STARTED="KEYWRITER-STARTED"
 export PROVISIONER_FINISHED="PROVISIONER-FINISHED"
-export PROVISIONER_EXITED="PROVISIONER-EXITED"
+export PROVISIONER_ABORTED="PROVISIONER-ABORTED"
 export PROVISIONER_STARTED="PROVISIONER-STARTED"
 
-CUSTOMER_PUBLIC_KEY_FILE=
-derivePublicKey() {
-    CUSTOMER_PUBLIC_KEY_FILE="$(mktemp)"
-    "${OPENSSL}" rsa -in "${CUSTOMER_KEY_FILE_PEM}" -pubout > "${CUSTOMER_PUBLIC_KEY_FILE}"
-}
 
 ring_bell() {
     tput bel
@@ -35,110 +30,12 @@ announce_stop() {
     echo "================================================================================"
 }
 
-# check_file_is_expected ${path_to_file} ${expected_file_extension}
-# Checks if a file exists, is not a directory, is not zero and has the right extension.
-# If any of those checks fail, exit the script entirely and print a debug message
-# If all checks succeed, supply the filepath via stdout
-check_file_is_expected() {
-    filepath="$1"
-    ext="$2"
-
-    if [ ! -e "${filepath}" ]; then
-        echo "Specified file does not exist: ${filepath}" >&2
-        return 1
-    fi
-
-    if [ -d "${filepath}" ]; then
-        echo "Expected a file, got a directory for ${filepath}" >&2
-        return 1
-    fi
-
-    if [ -z "${filepath}" ]; then
-        echo "Provided file is empty: ${filepath}" >&2
-        return 1
-    fi
-
-    ## RHS of == is a shell pattern, believe this is a bashism
-    if [ -z "${ext}" ] || [[ ${filepath} == *.${ext} ]]; then
-        echo "${filepath}"
-        return 0
-    else
-        echo "Provided file is of the wrong extension, wanted ${ext}, provided ${filepath}" >&2
-        return 1
-    fi
-}
-
-check_file_is_expected_fatal() {
-    if ! check_file_is_expected "$1" "$2"; then
-        exit 1
-    fi
-}
-
-check_command_exists() {
-    command_to_test=$1
-    if ! command -v "${command_to_test}" 1> /dev/null; then
-        echo "${command_to_test} could not be found" >&2
-        exit 1
-    else
-        echo "$command_to_test"
-    fi
-}
-
-check_python_module_exists() {
-    module_name=$1
-    if ! python -c "import ${module_name}" 1> /dev/null; then
-        echo "Failed to load Python module '${module_name}'" >&2
-        exit 1
-    else
-        echo "${module_name}"
-    fi
-}
-
-check_pidevice_generation() {
-    case "$1" in
-        4)
-            echo "$1"
-            ;;
-        5)
-            echo "$1"
-            ;;
-        ?)
-            echo "Unexpected Raspberry Pi Generation. Wanted 4, got $1" >&2
-            exit 1
-            ;;
-    esac
-}
-
 read_config() {
     if [ -f /etc/rpi-sb-provisioner/config ]; then
         . /etc/rpi-sb-provisioner/config
     else
         echo "Failed to load config. Please use configuration tool." >&2
-        exit 1
-    fi
-}
-
-get_cryptroot() {
-    if [ -f /etc/rpi-sb-provisioner/cryptroot_initramfs ]; then
-        echo "/etc/rpi-sb-provisioner/cryptroot_initramfs"
-    else
-        echo "/var/lib/rpi-sb-provisioner/cryptroot_initramfs"
-    fi
-}
-
-get_fastboot_gadget() {
-    if [ -f /etc/rpi-sb-provisioner/fastboot-gadget.img ]; then
-        echo "/etc/rpi-sb-provisioner/fastboot-gadget.img"
-    else
-        echo "/var/lib/rpi-sb-provisioner/fastboot-gadget.img"
-    fi
-}
-
-get_fastboot_config_file() {
-    if [ -f /etc/rpi-sb-provisioner/boot_ramdisk_config.txt ]; then
-        echo "/etc/rpi-sb-provisioner/boot_ramdisk_config.txt"
-    else
-        echo "/var/lib/rpi-sb-provisioner/boot_ramdisk_config.txt"
+        return 1
     fi
 }
 

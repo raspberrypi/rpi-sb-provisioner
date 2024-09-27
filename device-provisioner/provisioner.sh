@@ -3,7 +3,6 @@
 set -e
 set -x
 
-OPTSTRING=":i:k:p:s:d"
 CUSTOMER_KEY_FILE_PEM=""
 RPI_DEVICE_FAMILY=
 RPI_DEVICE_STORAGE_TYPE=
@@ -18,6 +17,84 @@ echo "${PROVISIONER_STARTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SE
 
 read_config
 
+die() {
+    echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+    # shellcheck disable=SC2086
+    echo "$@" ${DEBUG}
+    exit 1
+}
+
+get_cryptroot() {
+    if [ -f /etc/rpi-sb-provisioner/cryptroot_initramfs ]; then
+        echo "/etc/rpi-sb-provisioner/cryptroot_initramfs"
+    else
+        echo "/var/lib/rpi-sb-provisioner/cryptroot_initramfs"
+    fi
+}
+
+get_fastboot_gadget() {
+    if [ -f /etc/rpi-sb-provisioner/fastboot-gadget.img ]; then
+        echo "/etc/rpi-sb-provisioner/fastboot-gadget.img"
+    else
+        echo "/var/lib/rpi-sb-provisioner/fastboot-gadget.img"
+    fi
+}
+
+get_fastboot_config_file() {
+    if [ -f /etc/rpi-sb-provisioner/boot_ramdisk_config.txt ]; then
+        echo "/etc/rpi-sb-provisioner/boot_ramdisk_config.txt"
+    else
+        echo "/var/lib/rpi-sb-provisioner/boot_ramdisk_config.txt"
+    fi
+}
+
+# check_file_is_expected ${path_to_file} ${expected_file_extension}
+# Checks if a file exists, is not a directory, is not zero and has the right extension.
+# If any of those checks fail, exit the script entirely and print a debug message
+# If all checks succeed, supply the filepath via stdout
+check_file_is_expected() {
+    filepath="$1"
+    ext="$2"
+
+    if [ ! -e "${filepath}" ]; then
+        die "Specified file does not exist: ${filepath}"
+    fi
+
+    if [ -d "${filepath}" ]; then
+        die "Expected a file, got a directory for ${filepath}"
+    fi
+
+    if [ -z "${filepath}" ]; then
+        die "Provided file is empty: ${filepath}"
+    fi
+
+    ## RHS of == is a shell pattern, believe this is a bashism
+    if [ -z "${ext}" ] || [[ ${filepath} == *.${ext} ]]; then
+        echo "${filepath}"
+        return 0
+    else
+        die "Provided file is of the wrong extension, wanted ${ext}, provided ${filepath}"
+    fi
+}
+
+check_command_exists() {
+    command_to_test=$1
+    if ! command -v "${command_to_test}" 1> /dev/null; then
+        die "${command_to_test} could not be found"
+    else
+        echo "$command_to_test"
+    fi
+}
+
+check_python_module_exists() {
+    module_name=$1
+    if ! python -c "import ${module_name}" 1> /dev/null; then
+        die "Failed to load Python module '${module_name}'"
+    else
+        echo "${module_name}"
+    fi
+}
+
 check_pidevice_storage_type() {
     case "${1}" in
         "sd")
@@ -30,8 +107,7 @@ check_pidevice_storage_type() {
             echo "mmcblk0"
             ;;
         ?)
-            echo "Unexpected storage device type. Wanted sd, nvme or emmc, got $1" >&2
-            exit 1
+            die "Unexpected storage device type. Wanted sd, nvme or emmc, got $1"
             ;;
     esac
 }
@@ -92,7 +168,6 @@ unmount_image() {
 
 cleanup() {
     mkdir -p /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/
-    echo "${PROVISIONER_EXITED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
     unmount_image "${COPY_OS_COMBINED_FILE}"
     if [ -d "${TMP_DIR}" ]; then
         rm -rf "${TMP_DIR}"
@@ -104,36 +179,6 @@ cleanup() {
 }
 
 trap cleanup EXIT
-
-while getopts ${OPTSTRING} opt; do
-    case ${opt} in
-        i)
-            # Image path. Must be local, and a combined image.
-            GOLD_MASTER_OS_FILE=$(check_file_is_expected_fatal "${OPTARG}" "img")
-            ;;
-        k)
-            # Key file. Expected a PEM.
-            CUSTOMER_KEY_FILE_PEM=$(check_file_is_expected_fatal "${OPTARG}" "pem")
-            ;;
-        p)
-            RPI_DEVICE_FAMILY=$(check_pidevice_generation "${OPTARG}")
-            ;;
-        s)
-            check_pidevice_storage_type "${OPTARG}"
-            ;;
-        v)
-            DEBUG="2>&1 | tee debug.log"
-            ;;
-        :)
-            echo "Option -${OPTARG} requires an argument"
-            exit 1
-            ;;
-        ?)
-            echo "Unexpected option -${OPTARG}"
-            exit 1
-            ;;
-    esac
-done
 
 # These tools are used to modify the supplied images, and deal with mounting and unmounting the images.
 check_command_exists losetup
@@ -169,8 +214,6 @@ get_variable() {
     [ -z "${DEMO_MODE_ONLY}" ] && fastboot getvar "$1" 2>&1 | grep -oP "${1}"': \K.*'
 }
 
-RPI_DEVICE_FAMILY=$(check_pidevice_generation "${RPI_DEVICE_FAMILY}")
-
 TMP_DIR=$(mktemp -d)
 RPI_DEVICE_STORAGE_TYPE="$(check_pidevice_storage_type "${RPI_DEVICE_STORAGE_TYPE}")"
 DELETE_PRIVATE_TMPDIR=
@@ -205,6 +248,8 @@ case "${RPI_DEVICE_FAMILY}" in
         popd
         rm -rf "${FASTBOOT_SIGN_DIR}"
         ;;
+    *)
+        die "Could not identify RPI_DEVICE_FAMILY. Got ${RPI_DEVICE_FAMILY}, wanted 4 or 5."
 esac
 
 cp "$(get_fastboot_gadget)" "${RPI_SB_WORKDIR}"/boot.img
@@ -243,16 +288,14 @@ announce_start "Storage device check"
 #done
 
 #if ! ${STORAGE_FOUND}; then
-#    echo "Selected storage type is not available, wanted one of [${TARGET_STORAGE_LIST_RESULT}], got ${RPI_DEVICE_STORAGE_TYPE}"
-#    exit 1
+#    die "Selected storage type is not available, wanted one of [${TARGET_STORAGE_LIST_RESULT}], got ${RPI_DEVICE_STORAGE_TYPE}"
 #fi
 
 announce_stop "Storage device check"
 
 #announce_start "Raspberry Pi Generation check"
 #if ${RPI_DEVICE_FAMILY} != ${TARGET_PI_GENERATION}; then
-#    echo "Raspberry Pi Generation mismatch. Expected a Raspberry Pi ${TARGET_PI_GENERATION} class device, you supplied ${RPI_DEVICE_FAMILY}"
-#    exit 1
+#    die "Raspberry Pi Generation mismatch. Expected a Raspberry Pi ${TARGET_PI_GENERATION} class device, you supplied ${RPI_DEVICE_FAMILY}"
 #fi
 #announce_stop "Raspberry Pi Generation check"
 
