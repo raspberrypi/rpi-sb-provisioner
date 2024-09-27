@@ -168,11 +168,6 @@ The metadata is inserted into the `keywriter` log for the device, and also as a 
 
 Set to any value to enable metadata collection.
 
-=== RPI_DEVICE_SERIAL_STORE
-*Optional, with a default*
-
-Specify a location for the seen-devices storage directory. This directory will contain a zero-length file named with the serial number of each device seen, with the created files being used inside the state machine of `rpi-sb-provisioner`
-
 === RPI_SB_WORKDIR
 *Optional*
 
@@ -189,8 +184,6 @@ RPI_SB_WORKDIR=/srv/rpi-sb-provisioner/
 
 Set to `1` to allow the service to run without actually writing keys or OS images. You may, for example, use `DEMO_MODE_ONLY` in combination with `RPI_SB_WORKDIR` to inspect the modifications `rpi-sb-provisioner` would make to your OS ahead of deployment.
 
-WARNING: Setting `DEMO_MODE_ONLY` will cause your seen-devices storage location to change to a subdirectory of the one specified by `RPI_DEVICE_SERIAL_STORE`, `demo/`
-
 == Using rpi-sb-provisioner
 `rpi-sb-provisioner` is composed of three `systemd` services that are triggered by the connection of a device in RPIBoot mode to a USB port. With `rpi-sb-provisioner` configured to your requirements, all that is therefore required is to connect your target Raspberry Pi device in RPIBoot mode.
 
@@ -203,12 +196,11 @@ image::docs/images/rpi-cm4io-detail.png[]
 After connecting your device in RPIBoot mode, `rpi-sb-provisioner` will perform the following steps:
 
 * A new device connection is recognised over USB, and enters the *triage* phase:
-** If your device does not have a file matching it's serial number in the directory pointed to by `RPI_DEVICE_SERIAL_STORE`, move to the *keywriter* phase
-** If the device does have a file matching it's serial number in the directory pointed to by `RPI_DEVICE_SERIAL_STORE`, move to the *provisioner* phase.
+** If your device has not been recorded as having been through the *keywriter* phase, move to the *keywriter* phase
+** If the device has been recorded as having been through the *keywriter* phase, move to the *provisioner* phase.
 * In the *keywriter* phase:
 ** Your device will boot a specialised Raspberry Pi firmware, designed to write a hash of your public signing key (generated from the file pointed to by `CUSTOMER_KEY_FILE_PEM`) into device One Time Programmable (OTP) memory
 ** Your device will be updated to Raspberry Pi EEPROM software released on 2024-05-17
-** A file is created in the directory pointed to by `RPI_DEVICE_SERIAL_STORE`, named with the serial number of your device
 ** Your device will perform a silent reboot, moving back to the *triage* phase
 * In the *provisioner* phase:
 ** `rpi-sb-provisioner` will boot your device with a specialised Linux distribution designed to:
@@ -272,13 +264,11 @@ $ tail -f -n 100 /var/log/rpi-sb-provisioner/<serial>/triage.log
 
 A 'secured device' is one where your customer signing key has been written - regardless of the state of your OS or other software. Such devices can only load Linux images signed by your customer signing key.
 
-Obtain this by enumerating the files from the *Device Serial Store* directory:
+Obtain this by inspecting the rpi-sb-provisioner logs:
 
 ----
-ls <RPI_DEVICE_SERIAL_STORE>
+grep -R /var/log/rpi-sb-provisioner/ --include="progress" -e "PROVISIONER-FINISHED" | tail -n 1 | cut -d '/' -f 5
 ----
-
-WARNING: If you have set `DEMO_MODE_ONLY`, your demo mode seen files will be located at `<RPI_DEVICE_SERIAL_STORE>/demo`
 
 === Inspecting the image to be flashed
 
@@ -300,8 +290,8 @@ The first stage of debugging unexpected results is to delete the contents of the
 $ sudo rm ${RPI_SB_WORKDIR}/*
 ----
 
-The second stage is to delete the corresponding `seen` file, matching the serial number of the device you are debugging, in the directory pointed to by `RPI_DEVICE_SERIAL_STORE`
+The second stage is to remove the progress file matching the serial number of the device you are debugging:
 
 ----
-$ sudo rm ${RPI_DEVICE_SERIAL_STORE}/<serial>
+$ sudo rm /var/log/rpi-sb-provisioner/<serial>/progress
 ----
