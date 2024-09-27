@@ -11,19 +11,19 @@ echo "${KEYWRITER_STARTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERI
 read_config
 
 die() {
-   # shellcheck disable=SC2086
-   echo "$@" ${DEBUG}
-   exit 1
+    echo "${KEYWRITER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+    # shellcheck disable=SC2086
+    echo "$@" ${DEBUG}
+    exit 1
 }
 
 TMP_DIR=""
 cleanup() {
     mkdir -p /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/
-    echo "${KEYWRITER_EXITED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
-   if [ -d "${TMP_DIR}" ]; then
-      rm -rf "${TMP_DIR}"
-   fi
-   rm "${CUSTOMER_PUBLIC_KEY_FILE}"
+    if [ -d "${TMP_DIR}" ]; then
+        rm -rf "${TMP_DIR}"
+    fi
+    rm "${CUSTOMER_PUBLIC_KEY_FILE}"
 }
 trap cleanup EXIT
 
@@ -129,28 +129,6 @@ source-image: ${src_image}
 config: ${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}
 EOF
 }
-
-OPTSTRING="c:vh:"
-while getopts ${OPTSTRING} opt; do
-    case ${opt} in
-        c)
-            # Override config path
-            . "$(check_file_is_expected_fatal "${OPTARG}" "")"
-            ;;
-        v)
-            DEBUG="2>&1 | tee /var/log/rpi-sb-provisioner/${OPTARG}.log"
-            ;;
-        h)
-            RPI_DEVICE_FAMILY=$(check_pidevice_generation "${OPTARG}")
-            ;;
-        :)
-            die "Option -${OPTARG} requires an argument"
-            ;;
-        ?)
-            die "Unexpected option -${OPTARG}"
-            ;;
-    esac
-done
 
 FLASHING_DIR=$(mktemp -d)
 derivePublicKey
