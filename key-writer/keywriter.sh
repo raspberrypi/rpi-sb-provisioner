@@ -17,6 +17,12 @@ die() {
     exit 1
 }
 
+CUSTOMER_PUBLIC_KEY_FILE=
+derivePublicKey() {
+    CUSTOMER_PUBLIC_KEY_FILE="$(mktemp)"
+    "${OPENSSL}" rsa -in "${CUSTOMER_KEY_FILE_PEM}" -pubout > "${CUSTOMER_PUBLIC_KEY_FILE}"
+}
+
 TMP_DIR=""
 cleanup() {
     mkdir -p /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/

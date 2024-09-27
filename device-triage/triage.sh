@@ -6,12 +6,6 @@ set -e
 
 read_config
 
-CUSTOMER_PUBLIC_KEY_FILE=
-derivePublicKey() {
-    CUSTOMER_PUBLIC_KEY_FILE="$(mktemp)"
-    "${OPENSSL}" rsa -in "${CUSTOMER_KEY_FILE_PEM}" -pubout > "${CUSTOMER_PUBLIC_KEY_FILE}"
-}
-
 TARGET_DEVICE_SERIAL="$(udevadm info --name="$1" --query=property --property=ID_SERIAL_SHORT --value)"
 mkdir -p /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/
 touch /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
