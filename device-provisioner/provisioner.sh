@@ -300,8 +300,8 @@ announce_stop "Storage device check"
 #announce_stop "Raspberry Pi Generation check"
 
 # Fast path: If we've already generated the assets, just move to flashing.
-if [[ -z $(check_file_is_expected "${RPI_SB_WORKDIR}"/bootfs-temporary.img "img") ||
-      -z $(check_file_is_expected "${RPI_SB_WORKDIR}"/rootfs-temporary.simg "simg") ]]; then
+if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.img" ] ||
+   [ ! -e "${RPI_SB_WORKDIR}/rootfs-temporary.simg" ]; then
 
     announce_start "OS Image Mounting"
     COPY_OS_COMBINED_FILE=$(mktemp "working-os-image.XXX" --tmpdir="/srv/")

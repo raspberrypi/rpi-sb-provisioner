@@ -31,8 +31,8 @@ if [ -e "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/progress" ]; then
     echo "Observed provisioning state for ${TARGET_DEVICE_SERIAL}: ${last_status}"  >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
 
     case "${last_status}" in
-        "${KEYWRITER_STARTED}")
-            echo "Taking no action - keywriter is already active" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
+        "${KEYWRITER_STARTED}" | "${PROVISIONER_STARTED}")
+            echo "Taking no action - stage is already active" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
             exit 0
             ;;
         "${KEYWRITER_FINISHED}")
@@ -45,11 +45,11 @@ if [ -e "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/progress" ]; then
             exit 0
             ;;
         "${KEYWRITER_ABORTED}")
-            echo "Keywriter failed for this device, refusing to provision"
+            echo "Keywriter failed for this device, refusing to provision" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
             exit 1
             ;;
         *)
-            echo "Device is completely new to us, starting keywriter" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
+            echo "Device is in an unknown state, starting keywriter" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
             echo "Using keyfile at ${CUSTOMER_KEY_FILE_PEM}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
 
             # Start the keywriter service
@@ -58,4 +58,12 @@ if [ -e "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/progress" ]; then
             exit 0
             ;;
     esac
+else
+    echo "Device is completely new to us, starting keywriter" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
+    echo "Using keyfile at ${CUSTOMER_KEY_FILE_PEM}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
+
+    # Start the keywriter service
+    touch "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/keywriter.log"
+    systemctl start rpi-sb-keywriter@"${TARGET_DEVICE_SERIAL}"
+    exit 0
 fi
