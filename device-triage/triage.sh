@@ -11,14 +11,6 @@ mkdir -p /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/
 touch /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
 echo "Starting triage for $1, serial: $TARGET_DEVICE_SERIAL" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
 
-if [ -z "${RPI_DEVICE_SERIAL_STORE}" ]; then
-    RPI_DEVICE_SERIAL_STORE=/usr/local/etc/rpi-sb-provisioner/seen
-fi
-
-if [ ! -d "${RPI_DEVICE_SERIAL_STORE}" ]; then
-    mkdir -p "${RPI_DEVICE_SERIAL_STORE}"
-fi
-
 if [ -z "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" ]; then
     RPI_DEVICE_BOOTLOADER_CONFIG_FILE=/var/lib/rpi-sb-provisioner/bootloader.default
 fi
