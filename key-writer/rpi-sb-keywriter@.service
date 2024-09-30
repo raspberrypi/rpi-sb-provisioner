@@ -1,8 +1,0 @@
-[Unit]
-Description=Provision signing keys to a Raspberry Pi Device
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/keywriter.sh %I
-EnvironmentFile=/etc/rpi-sb-provisioner/config
-StandardOutput=file:/var/log/rpi-sb-provisioner/%I/keywriter.log
