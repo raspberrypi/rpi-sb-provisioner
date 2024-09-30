@@ -1,19 +1,14 @@
-#!/usr/bin/env bash
+#!/bin/sh
 
 set -e
 set -x
 
-CUSTOMER_KEY_FILE_PEM=""
-RPI_DEVICE_FAMILY=
-RPI_DEVICE_STORAGE_TYPE=
-GOLD_MASTER_OS_FILE=""
-COPY_OS_COMBINED_FILE=""
-DEBUG=
-TARGET_DEVICE_SERIAL="$1"
-
 . /usr/local/bin/terminal-functions.sh
 
-echo "${PROVISIONER_STARTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+TARGET_DEVICE_SERIAL="$1"
+DEBUG=
+
+echo "${KEYWRITER_STARTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
 
 read_config
 
@@ -23,6 +18,278 @@ die() {
     echo "$@" ${DEBUG}
     exit 1
 }
+
+keywriter_log() {
+    echo "$1" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/keywriter.log
+}
+
+provisioner_log() {
+    echo "$1" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/provisioner.log
+}
+
+CUSTOMER_PUBLIC_KEY_FILE=
+derivePublicKey() {
+    CUSTOMER_PUBLIC_KEY_FILE="$(mktemp)"
+    "${OPENSSL}" rsa -in "${CUSTOMER_KEY_FILE_PEM}" -pubout > "${CUSTOMER_PUBLIC_KEY_FILE}"
+}
+
+TMP_DIR=""
+cleanup() {
+    mkdir -p /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/
+    if [ -d "${TMP_DIR}" ]; then
+        rm -rf "${TMP_DIR}"
+    fi
+    rm "${CUSTOMER_PUBLIC_KEY_FILE}"
+
+    unmount_image "${COPY_OS_COMBINED_FILE}"
+    if [ -d "${TMP_DIR}" ]; then
+        rm -rf "${TMP_DIR}"
+    fi
+
+    if [ -f "${COPY_OS_COMBINED_FILE}" ]; then
+        rm -rf "${COPY_OS_COMBINED_FILE}"
+    fi
+}
+trap cleanup EXIT
+
+writeSig() {
+   SIG_TMP="$(mktemp)"
+   IMAGE="$1"
+   OUTPUT="$2"
+   sha256sum "${IMAGE}" | awk '{print $1}' > "${OUTPUT}"
+
+   # Include the update-timestamp
+   echo "ts: $(date -u +%s)" >> "${OUTPUT}"
+
+   if [ -n "$(get_signing_directives)" ]; then
+      # shellcheck disable=SC2046
+      "${OPENSSL}" dgst -sign $(get_signing_directives) -sha256 -out "${SIG_TMP}" "${IMAGE}"
+      echo "rsa2048: $(xxd -c 4096 -p < "${SIG_TMP}")" >> "${OUTPUT}"
+   fi
+   rm "${SIG_TMP}"
+}
+
+enforceSecureBootloaderConfig() {
+    if ! grep -Fxq "SIGNED_BOOT=1" "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"; then
+        echo "SIGNED_BOOT=1" >> "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
+        sed -i -e "s/SIGNED_BOOT=0//g" "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
+    fi
+
+    # These directives are for the bootloader to load the ramdisk
+    # Don't use the traditional boot flow, and instead look for boot.img/boot.sig
+    echo "boot_ramdisk=1" >> "${FLASHING_DIR}/config.txt"
+    # Log to the UART, so you can inspect the process
+    echo "uart_2ndstage=1" >> "${FLASHING_DIR}/config.txt"
+    #echo "eeprom_write_protect=1" >> "${FLASHING_DIR}/config.txt"
+}
+
+identifyBootloaderConfig() {
+    # Possible to pass in RPI_DEVICE_BOOTLOADER_CONFIG_FILE... we should make sure the right thing happens with this.
+    if [ ! -f "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" ]; then
+        RPI_DEVICE_BOOTLOADER_CONFIG_FILE="$(mktemp)"
+    fi
+}
+
+# This function is adapted from the functions in the usbboot repo.
+update_eeprom() {
+    src_image="$1"
+    dst_image="$2"
+    pem_file="$3" 
+    public_pem_file="$4"
+    sign_args=""
+
+    if [ -n "${pem_file}" ]; then
+        if ! grep -q "SIGNED_BOOT=1" "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"; then
+            # If the OTP bit to require secure boot are set then then
+            # SIGNED_BOOT=1 is implicitly set in the EEPROM config.
+            # For debug in signed-boot mode it's normally useful to set this
+            keywriter_log "Warning: SIGNED_BOOT=1 not found in \"${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}\""
+        fi
+
+        #update_version=$(strings "${src_image}" | grep BUILD_TIMESTAMP | sed 's/.*=//g')
+
+        TMP_CONFIG_SIG="$(mktemp)"
+        keywriter_log "Signing bootloader config"
+        writeSig "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" "${TMP_CONFIG_SIG}"
+
+        # shellcheck disable=SC2086
+        cat "${TMP_CONFIG_SIG}" ${DEBUG}
+
+        # rpi-eeprom-config extracts the public key args from the specified
+        # PEM file.
+        sign_args="-d ${TMP_CONFIG_SIG} -p ${public_pem_file}"
+
+        case ${RPI_DEVICE_FAMILY} in
+            4)
+                # 2711 does _not_ require a signed bootcode binary
+                cp "${src_image}" "${dst_image}.intermediate"
+                ;;
+            5)
+                customer_signed_bootcode_binary_workdir=$(mktemp -d)
+                cd "${customer_signed_bootcode_binary_workdir}" || return
+                rpi-eeprom-config -x "${src_image}"
+                rpi-sign-bootcode --debug -c 2712 -i bootcode.bin -o bootcode.bin.signed -k "${pem_file}" -v 0 -n 16
+                rpi-eeprom-config \
+                    --out "${dst_image}.intermediate" --bootcode "${customer_signed_bootcode_binary_workdir}/bootcode.bin.signed" \
+                    "${src_image}" || die "Failed to update signed bootcode in the EEPROM image"
+                cd - > /dev/null || return
+                rm -rf "${customer_signed_bootcode_binary_workdir}"
+                ;;
+        esac
+    fi
+
+    rm -f "${dst_image}"
+    set -x
+    # shellcheck disable=SC2086
+    rpi-eeprom-config \
+        --config "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" \
+        --out "${dst_image}" ${sign_args} \
+        "${dst_image}.intermediate" || die "Failed to update EEPROM image"
+    rm -f "${dst_image}.intermediate"
+    set +x
+
+cat <<EOF
+new-image: ${dst_image}
+source-image: ${src_image}
+config: ${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}
+EOF
+}
+
+FLASHING_DIR=$(mktemp -d)
+derivePublicKey
+identifyBootloaderConfig
+enforceSecureBootloaderConfig
+
+SOURCE_EEPROM_IMAGE=
+DESTINATION_EEPROM_IMAGE=
+DESTINATION_EEPROM_SIGNATURE=
+BOOTCODE_BINARY_IMAGE=
+BOOTCODE_FLASHING_NAME=
+case ${RPI_DEVICE_FAMILY} in
+    4)
+        SOURCE_EEPROM_IMAGE="/lib/firmware/raspberrypi/bootloader-2711/latest/pieeprom-2024-09-05.bin"
+        BOOTCODE_BINARY_IMAGE="/lib/firmware/raspberrypi/bootloader-2711/latest/recovery.bin"
+        BOOTCODE_FLASHING_NAME="${FLASHING_DIR}/bootcode4.bin"
+        ;;
+    5)
+        SOURCE_EEPROM_IMAGE="/lib/firmware/raspberrypi/bootloader-2712/latest/pieeprom-2024-09-23.bin"
+        BOOTCODE_BINARY_IMAGE="/lib/firmware/raspberrypi/bootloader-2712/latest/recovery.bin"
+        BOOTCODE_FLASHING_NAME="${FLASHING_DIR}/bootcode5.bin"
+        ;;
+    *)
+        keywriter_log "Unable to identify Raspberry Pi HW Family. Aborting."
+        exit 1
+esac
+
+DESTINATION_EEPROM_IMAGE="${FLASHING_DIR}/pieeprom.bin"
+DESTINATION_EEPROM_SIGNATURE="${FLASHING_DIR}/pieeprom.sig"
+
+if [ ! -e "${DESTINATION_EEPROM_SIGNATURE}" ]; then
+    if [ ! -e "${SOURCE_EEPROM_IMAGE}" ]; then
+        keywriter_log "No Raspberry Pi EEPROM file to use as key vector"
+        exit 1
+    else
+        update_eeprom "${SOURCE_EEPROM_IMAGE}" "${DESTINATION_EEPROM_IMAGE}" "${CUSTOMER_KEY_FILE_PEM}" "${CUSTOMER_PUBLIC_KEY_FILE}"
+        writeSig "${DESTINATION_EEPROM_IMAGE}" "${DESTINATION_EEPROM_SIGNATURE}"
+    fi
+fi
+
+### NOTE: Use this in only case of a partial signing situation, where you have provisioned the key, but need to re-write the eeprom.
+# case ${RPI_DEVICE_FAMILY} in
+#     4)
+#         cp "${BOOTCODE_BINARY_IMAGE}" "${BOOTCODE_FLASHING_NAME}"
+#         ;;
+#     5)
+#         rpi-sign-bootcode --debug -c 2712 -i "${BOOTCODE_BINARY_IMAGE}" -o "${BOOTCODE_FLASHING_NAME}" -k "${CUSTOMER_KEY_FILE_PEM}" -v 0 -n 16
+#         ;;
+# esac
+### In the completely-unprovisioned state, where you have not yet written a customer OTP key, simply make the copy of the unsigned bootcode
+cp "${BOOTCODE_BINARY_IMAGE}" "${BOOTCODE_FLASHING_NAME}"
+####
+
+# This directive informs the bootloader to write the public key into OTP
+echo "program_pubkey=1" > "${FLASHING_DIR}/config.txt"
+# This directive tells the bootloader to reboot once it's written the OTP
+echo "recovery_reboot=1" >> "${FLASHING_DIR}/config.txt"
+
+if [ -n "${RPI_DEVICE_FETCH_METADATA}" ]; then
+echo "recovery_metadata=1" >> "${FLASHING_DIR}/config.txt"
+fi
+
+if [ -n "${RPI_DEVICE_JTAG_LOCK}" ]; then
+echo "program_jtag_lock=1" >> "${FLASHING_DIR}/config.txt"
+fi
+
+if [ -n "${RPI_DEVICE_EEPROM_WP_SET}" ]; then
+echo "eeprom_write_protect=1" >> "${FLASHING_DIR}/config.txt"
+fi
+
+# With the EEPROMs configured and signed, RPIBoot them.
+mkdir -p "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/"
+[ -z "${DEMO_MODE_ONLY}" ] && rpiboot -d "${FLASHING_DIR}" -i "${TARGET_DEVICE_SERIAL}" -j "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/"
+
+if [ -z "${DEMO_MODE_ONLY}" ] && [ -n "${RPI_DEVICE_FETCH_METADATA}" ]; then
+    USER_BOARDREV="0x$(jq -r '.USER_BOARDREV' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)"
+    MAC_ADDRESS=$(jq -r '.MAC_ADDR' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
+
+    TYPE=$(printf "0x%X\n" $(((USER_BOARDREV & 0xFF0) >> 4)))
+    PROCESSOR=$(printf "0x%X\n" $(((USER_BOARDREV & 0xF000) >> 12)))
+    MEMORY=$(printf "0x%X\n" $(((USER_BOARDREV & 0x700000) >> 20)))
+    MANUFACTURER=$(printf "0x%X\n" $(((USER_BOARDREV & 0xF0000) >> 16)))
+    REVISION=$((USER_BOARDREV & 0xF))
+
+    case ${TYPE} in
+        "0x11") BOARD_STR="CM4" ;;
+        "0x12") BOARD_STR="Zero 2 W" ;;
+        "0x13") BOARD_STR="400" ;;
+        "0x14") BOARD_STR="CM4" ;;
+        "0x15") BOARD_STR="CM4S" ;;
+        "0x17") BOARD_STR="5" ;;
+        *)
+            BOARD_STR="Unsupported Board"
+    esac
+
+    case ${PROCESSOR} in
+        "0x0") PROCESSOR_STR="BCM2835" ;;
+        "0x1") PROCESSOR_STR="BCM2836" ;;
+        "0x2") PROCESSOR_STR="BCM2837" ;;
+        "0x3") PROCESSOR_STR="BCM2711" ;;
+        "0x4") PROCESSOR_STR="BCM2712" ;;
+        *)
+            PROCESSOR_STR="Unknown"
+    esac
+
+    case ${MEMORY} in
+        "0x0") MEMORY_STR="256MB" ;;
+        "0x1") MEMORY_STR="512MB" ;;
+        "0x2") MEMORY_STR="1GB" ;;
+        "0x3") MEMORY_STR="2GB" ;;
+        "0x4") MEMORY_STR="4GB" ;;
+        "0x5") MEMORY_STR="8GB" ;;
+        *)
+            MEMORY_STR="Unknown"
+    esac
+
+    case ${MANUFACTURER} in
+        "0x0") MANUFACTURER_STR="Sony UK" ;;
+        "0x1") MANUFACTURER_STR="Egoman" ;;
+        "0x2") MANUFACTURER_STR="Embest" ;;
+        "0x3") MANUFACTURER_STR="Sony Japan" ;;
+        "0x4") MANUFACTURER_STR="Embest" ;;
+        "0x5") MANUFACTURER_STR="Stadium" ;;
+        *)
+            MANUFACTURER_STR="Unknown"
+    esac
+
+    keywriter_log "Board is: ${BOARD_STR}, with revision number ${REVISION}. Has Processor ${PROCESSOR_STR} with Memory ${MEMORY_STR}. Was manufactured by ${MANUFACTURER_STR}"
+fi
+keywriter_log "Keywriting completed. Rebooting for next phase."
+
+echo "${KEYWRITER_FINISHED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+
+### Start the provisioner phase
+
+echo "${PROVISIONER_STARTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
 
 get_cryptroot() {
     if [ -f /etc/rpi-sb-provisioner/cryptroot_initramfs ]; then
@@ -68,8 +335,7 @@ check_file_is_expected() {
         die "Provided file is empty: ${filepath}"
     fi
 
-    ## RHS of == is a shell pattern, believe this is a bashism
-    if [ -z "${ext}" ] || [[ ${filepath} == *.${ext} ]]; then
+    if [ -z "${ext}" ] || echo "${filepath}" | grep -q "${ext}"; then
         echo "${filepath}"
         return 0
     else
@@ -80,7 +346,8 @@ check_file_is_expected() {
 check_command_exists() {
     command_to_test=$1
     if ! command -v "${command_to_test}" 1> /dev/null; then
-        die "${command_to_test} could not be found"
+        provisioner_log "${command_to_test} could not be found"
+        exit 1
     else
         echo "$command_to_test"
     fi
@@ -89,7 +356,8 @@ check_command_exists() {
 check_python_module_exists() {
     module_name=$1
     if ! python -c "import ${module_name}" 1> /dev/null; then
-        die "Failed to load Python module '${module_name}'"
+        provisioner_log "Failed to load Python module '${module_name}'"
+        exit 1
     else
         echo "${module_name}"
     fi
@@ -114,17 +382,13 @@ check_pidevice_storage_type() {
 
 # Lifted from pi-gen/scripts/common, unsure under what circumstances this would be necessary
 ensure_next_loopdev() {
-    local loopdev
     loopdev="$(losetup -f)"
     loopmaj="$(echo "$loopdev" | sed -E 's/.*[0-9]*?([0-9]+)$/\1/')"
-    [[ -b "$loopdev" ]] || mknod "$loopdev" b 7 "$loopmaj"
+    [ -b "$loopdev" ] || mknod "$loopdev" b 7 "$loopmaj"
 }
 
 # Lifted from pi-gen/scripts/common, unsure under what circumstances this would be necessary
 ensure_loopdev_partitions() {
-    local line
-    local partition
-    local majmin
     lsblk -r -n -o "NAME,MAJ:MIN" "$1" | grep -v "^${1#/dev/}" | while read -r line; do
         partition="${line%% *}"
         majmin="${line#* }"
@@ -143,9 +407,8 @@ unmount() {
     fi
 
     while mount | grep -q "$DIR"; do
-        local LOCS
-        LOCS=$(mount | grep "$DIR" | cut -f 3 -d ' ' | sort -r)
-        for loc in $LOCS; do
+        locs=$(mount | grep "$DIR" | cut -f 3 -d ' ' | sort -r)
+        for loc in $locs; do
             umount "$loc"
         done
     done
@@ -165,20 +428,6 @@ unmount_image() {
         losetup -d "$LOOP_DEVICE"
     fi
 }
-
-cleanup() {
-    mkdir -p /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/
-    unmount_image "${COPY_OS_COMBINED_FILE}"
-    if [ -d "${TMP_DIR}" ]; then
-        rm -rf "${TMP_DIR}"
-    fi
-
-    if [ -f "${COPY_OS_COMBINED_FILE}" ]; then
-        rm -rf "${COPY_OS_COMBINED_FILE}"
-    fi
-}
-
-trap cleanup EXIT
 
 # These tools are used to modify the supplied images, and deal with mounting and unmounting the images.
 check_command_exists losetup
@@ -240,12 +489,12 @@ case "${RPI_DEVICE_FAMILY}" in
         ;;
     5)
         FASTBOOT_SIGN_DIR=$(mktemp -d)
-        pushd "${FASTBOOT_SIGN_DIR}"
+        cd "${FASTBOOT_SIGN_DIR}"
         tar -vxf /usr/share/rpiboot/mass-storage-gadget64/bootfiles.bin
         rpi-sign-bootcode --debug -c 2712 -i 2712/bootcode5.bin -o 2712/bootcode5.bin.signed -k "${CUSTOMER_KEY_FILE_PEM}" -v 0 -n 16
         mv -f "2712/bootcode5.bin.signed" "2712/bootcode5.bin"
         tar -vcf "${RPI_SB_WORKDIR}/bootfiles.bin" -- *
-        popd
+        cd -
         rm -rf "${FASTBOOT_SIGN_DIR}"
         ;;
     *)
@@ -258,7 +507,7 @@ cp "$(get_fastboot_config_file)" "${RPI_SB_WORKDIR}"/config.txt
 
 #boot.sig generation
 sha256sum "${RPI_SB_WORKDIR}"/boot.img | awk '{print $1}' > "${RPI_SB_WORKDIR}"/boot.sig
-echo -n "rsa2048: " >> "${RPI_SB_WORKDIR}"/boot.sig
+printf "rsa2048: " >> "${RPI_SB_WORKDIR}"/boot.sig
 # Prefer PKCS11 over PEM keyfiles, if both are specified.
 # shellcheck disable=SC2046
 ${OPENSSL} dgst -sign $(get_signing_directives) -sha256 "${RPI_SB_WORKDIR}"/boot.img | xxd -c 4096 -p >> "${RPI_SB_WORKDIR}"/boot.sig
@@ -311,10 +560,10 @@ if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.img" ] ||
     until ensure_next_loopdev && LOOP_DEV="$(losetup --show --find --partscan "${COPY_OS_COMBINED_FILE}")"; do
         if [ $cnt -lt 5 ]; then
             cnt=$((cnt + 1))
-            echo "Error in losetup.  Retrying..."
+            provisioner_log "Error in losetup.  Retrying..."
             sleep 5
         else
-            echo "ERROR: losetup failed; exiting"
+            provisioner_log "ERROR: losetup failed; exiting"
             sleep 5
         fi
     done
@@ -354,22 +603,22 @@ if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.img" ] ||
 
     augment_initramfs() {
         # shellcheck disable=SC2155
-        local initramfs_compressed_file=$(check_file_is_expected "$1" "")
+        initramfs_compressed_file=$(check_file_is_expected "$1" "")
         # shellcheck disable=SC2086
         mkdir -p "${TMP_DIR}"/initramfs ${DEBUG}
         # shellcheck disable=SC2086
         zstd --rm -f -d "${initramfs_compressed_file}" -o "${TMP_DIR}"/initramfs.cpio ${DEBUG}
         # shellcheck disable=SC2155
-        local ROOTFS_MOUNT=$(realpath "${TMP_DIR}"/rpi-rootfs-img-mount)
-        pushd "${TMP_DIR}"/initramfs 
+        rootfs_mount=$(realpath "${TMP_DIR}"/rpi-rootfs-img-mount)
+        cd "${TMP_DIR}"/initramfs 
         # shellcheck disable=SC2086
         cpio -id < ../initramfs.cpio ${DEBUG}
         # shellcheck disable=SC2086
         rm ../initramfs.cpio ${DEBUG}
 
         # Insert required kernel modules
-        local INITRAMFS_DIR=$PWD/ # trailing '/' is meaningful
-        pushd "${ROOTFS_MOUNT}"
+        initramfs_dir="$PWD"/ # trailing '/' is meaningful
+        cd "${rootfs_mount}"
         find usr/lib/modules \
             \( \
                 -name 'dm-mod.*' \
@@ -386,20 +635,21 @@ if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.img" ] ||
                 -o \
                 -name 'aes-arm64.*' \
             \) \
-            -exec cp -r --parents "{}" "${INITRAMFS_DIR}" \;
-        popd
+            -exec cp -r --parents "{}" "${initramfs_dir}" \;
+        cd -
 
         find . -print0 | cpio --null -ov --format=newc > ../initramfs.cpio
-        popd
+        cd "${TMP_DIR}"
         rm -rf "${TMP_DIR}"/initramfs
         zstd --no-progress --rm -f -6 "${TMP_DIR}"/initramfs.cpio -o "${initramfs_compressed_file}"
     }
 
+    # Use subshells to avoid polluting our CWD.
     if check_file_is_expected "${TMP_DIR}"/rpi-boot-img-mount/initramfs_2712 ""; then
-        augment_initramfs "${TMP_DIR}"/rpi-boot-img-mount/initramfs_2712
+        ( augment_initramfs "${TMP_DIR}"/rpi-boot-img-mount/initramfs_2712 )
     fi
     if check_file_is_expected "${TMP_DIR}"/rpi-boot-img-mount/initramfs8 ""; then
-        augment_initramfs "${TMP_DIR}"/rpi-boot-img-mount/initramfs8
+        ( augment_initramfs "${TMP_DIR}"/rpi-boot-img-mount/initramfs8) 
     fi
     announce_stop "Initramfs modification"
 
@@ -407,7 +657,7 @@ if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.img" ] ||
     sed --in-place 's%\b\(root=\)\S*%\1/dev/ram0%' "${TMP_DIR}"/rpi-boot-img-mount/cmdline.txt
     sed --in-place 's%\binit=\S*%%' "${TMP_DIR}"/rpi-boot-img-mount/cmdline.txt
     sed --in-place 's%\brootfstype=\S*%%' "${TMP_DIR}"/rpi-boot-img-mount/cmdline.txt
-    # Consider deleting quiet
+    # TODO: Consider deleting quiet
     sed --in-place 's%\bquiet\b%%' "${TMP_DIR}"/rpi-boot-img-mount/cmdline.txt
     announce_stop "cmdline.txt modification"
 
@@ -434,7 +684,7 @@ if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.img" ] ||
     announce_start "boot.img signing"
     # N.B. rpi-eeprom-digest could be used here but it includes a timestamp that is not required for this use-case
     sha256sum "${TMP_DIR}"/boot.img | awk '{print $1}' > "${TMP_DIR}"/boot.sig
-    echo -n "rsa2048: " >> "${TMP_DIR}"/boot.sig
+    printf 'rsa2048: ' >> "${TMP_DIR}"/boot.sig
     # shellcheck disable=SC2046
     ${OPENSSL} dgst -sign $(get_signing_directives) -sha256 "${TMP_DIR}"/boot.img | xxd -c 4096 -p >> "${TMP_DIR}"/boot.sig
     announce_stop "boot.img signing"
@@ -532,4 +782,4 @@ announce_stop "Set LED status"
 mkdir -p /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/
 echo "${PROVISIONER_FINISHED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
 
-echo "Provisioning completed. Remove the device from this machine."
+provisioner_log "Provisioning completed. Remove the device from this machine."

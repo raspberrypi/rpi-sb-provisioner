@@ -14,8 +14,6 @@ def list_rpi_sb_units(service_name):
             name=line[line.find("rpi-sb-"):line.find(".service")]
             if "triage" in name:
                 triage.append(name.replace("rpi-sb-triage@", ""))
-            if "keywriter" in name:
-                keywriter.append(name.replace("rpi-sb-keywriter@", ""))
             if "provisioner" in name:
                 provisioner.append(name.replace("rpi-sb-provisioner@", ""))
     return [triage, keywriter, provisioner]
@@ -78,9 +76,6 @@ def list_failed_devices():
             if "PROVISIONER-EXITED" in status:
                 if "PROVISIONER-FINISHED" in status: provisioner_success = 1
                 else: provisioner_success = 0
-            if "KEYWRITER-EXITED" in status:
-                if "KEYWRITER-FINISHED" in status: keywriter_success = 1
-                else: keywriter_success = 0
             if provisioner_success == 0 or keywriter_success == 0:
                 modified_time = stat("/var/log/rpi-sb-provisioner/" + device + "/progress").st_mtime_ns
                 failed_devices.append((device, modified_time))

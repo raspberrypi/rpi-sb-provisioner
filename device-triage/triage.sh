@@ -3,10 +3,7 @@
 set -e
 
 TRIAGE_STARTED="TRIAGE-STARTED"
-TRIAGE_KEYWRITER_HANDOFF="TRIAGE-HANDOFF-KEYWRITER"
-TRIAGE_PROVISIONER_HANDOFF="TRIAGE-HANDOFF-PROVISIONER"
-TRIAGE_BUSY="TRIAGE-BUSY"
-TRIAGE_ABORT="TRIAGE-ABORT"
+TRIAGE_HANDOFF="TRIAGE-HANDOFF"
 
 . /usr/local/bin/terminal-functions.sh
 
@@ -33,48 +30,23 @@ if [ -z "${TARGET_DEVICE_SERIAL}" ]; then
 fi
 
 if [ -e "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/progress" ]; then
+    # Status messages are more for human consumption than anything else.
     last_status=$(tail -n 1 "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/progress")
-    echo "Observed provisioning state for ${TARGET_DEVICE_SERIAL}: ${last_status}"  >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
-
-    case "${last_status}" in
-        "${KEYWRITER_STARTED}" | "${PROVISIONER_STARTED}")
-            echo "${TRIAGE_BUSY}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
-            echo "Taking no action - stage is already active" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
-            exit 0
-            ;;
-        "${KEYWRITER_FINISHED}" | "${TRIAGE_PROVISIONER_HANDOFF}")
-            echo "Device already provisioned with the key, moving to write the image" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
-            echo "If this is in error, consult the README" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
-
-            # Start the boot provisioner service
-            echo "${TRIAGE_PROVISIONER_HANDOFF}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
-            touch "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/provisioner.log"
-            systemctl start rpi-sb-provisioner@"${TARGET_DEVICE_SERIAL}"
-            exit 0
-            ;;
-        "${KEYWRITER_ABORTED}")
-            echo "${TRIAGE_ABORT}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
-            echo "Keywriter failed for this device, refusing to provision" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
-            exit 1
-            ;;
-        *)
-            echo "Device is in an unknown state, starting keywriter" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
-            echo "Using keyfile at ${CUSTOMER_KEY_FILE_PEM}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
-
-            # Start the keywriter service
-            echo "${TRIAGE_KEYWRITER_HANDOFF}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
-            touch "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/keywriter.log"
-            systemctl start rpi-sb-keywriter@"${TARGET_DEVICE_SERIAL}"
-            exit 0
-            ;;
-    esac
+    {
+        echo "Observed provisioning state for ${TARGET_DEVICE_SERIAL}: ${last_status}"
+        echo "Not starting additional services, device already undergoing provisioning"
+    } >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
 else
-    echo "Device is completely new to us, starting keywriter" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
-    echo "Using keyfile at ${CUSTOMER_KEY_FILE_PEM}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
+    { 
+        echo "Device is completely new to us, starting keywriter"
+        echo "Using keyfile at ${CUSTOMER_KEY_FILE_PEM}"
+        echo "Using OS image at ${GOLD_MASTER_OS_FILE}"
+    } >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
 
     # Start the keywriter service
-    echo "${TRIAGE_KEYWRITER_HANDOFF}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+    echo "${TRIAGE_HANDOFF}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
     touch "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/keywriter.log"
-    systemctl start rpi-sb-keywriter@"${TARGET_DEVICE_SERIAL}"
+    touch "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/provisioner.log"
+    systemctl start rpi-sb-provisioner@"${TARGET_DEVICE_SERIAL}"
     exit 0
 fi

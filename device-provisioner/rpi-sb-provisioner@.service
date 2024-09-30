@@ -1,8 +1,0 @@
-[Unit]
-Description=Transform and flash a supplied operating system to a Secure Boot Raspberry Pi Device
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/provisioner.sh %I
-EnvironmentFile=/etc/rpi-sb-provisioner/config
-StandardOutput=file:/var/log/rpi-sb-provisioner/%I/provisioner.log

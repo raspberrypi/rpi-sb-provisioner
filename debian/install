@@ -1,9 +1,8 @@
 config/config.sh                                /usr/local/bin
 monitor/monitor.sh                              /usr/local/bin
-key-writer/keywriter.sh                         /usr/local/bin
 host-support/terminal-functions.sh              /usr/local/bin
 host-support/make-boot-image                    /usr/local/bin
-device-provisioner/provisioner.sh               /usr/local/bin
+service/rpi-sb-provisioner.sh                   /usr/local/bin
 fetch-repo-package-list/fetch-repo-package-list /usr/local/bin
 rpi-package-download/rpi-package-download       /usr/local/bin
 device-triage/triage.sh                         /usr/local/bin
@@ -17,12 +16,12 @@ monitor/monitor.py                  /usr/share/rpi-sb-provisioner/monitor
 monitor/systemctl_python.py         /usr/share/rpi-sb-provisioner/monitor
 monitor/monitor.css                 /usr/share/rpi-sb-provisioner/monitor
 
-rpi-package-download/rpi-package-download@.service          /usr/local/lib/systemd/system
-key-writer/rpi-sb-keywriter@.service                        /usr/local/lib/systemd/system
-device-provisioner/rpi-sb-provisioner@.service              /usr/local/lib/systemd/system
+service/rpi-sb-provisioner@.service                         /usr/local/lib/systemd/system
+device-triage/rpi-sb-triage@.service                        /usr/local/lib/systemd/system
+
 fetch-repo-package-list/fetch-repo-package-list@.timer      /usr/local/lib/systemd/system
 fetch-repo-package-list/fetch-repo-package-list@.service    /usr/local/lib/systemd/system
-device-triage/rpi-sb-triage@.service                        /usr/local/lib/systemd/system
+rpi-package-download/rpi-package-download@.service          /usr/local/lib/systemd/system
 
 host-support/cryptroot_initramfs        /var/lib/rpi-sb-provisioner
 host-support/boot_ramdisk_config.txt    /var/lib/rpi-sb-provisioner

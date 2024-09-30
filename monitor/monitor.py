@@ -87,10 +87,6 @@ class Triage_Box(Static):
     def compose(self) -> ComposeResult:
         yield ScrollableContainer(Static("Triaging \n----------------"), Devices_list(dev_type="triage"))
 
-class Keywrite_Box(Static):
-    def compose(self) -> ComposeResult:
-        yield ScrollableContainer(Static("Keywriting \n----------------"), Devices_list(dev_type="keywriter"))
-
 class Provision_Box(Static):
     def compose(self) -> ComposeResult:
         yield ScrollableContainer(Static("Provisioning \n----------------"), Devices_list(dev_type="provision"))
@@ -107,8 +103,7 @@ class Failed_Box(Static):
 class Processing(Static):
     def compose(self) -> ComposeResult:
         yield Triage_Box("1", classes="box2")
-        yield Keywrite_Box("2", classes="box2")
-        yield Provision_Box("3", classes="box2")
+        yield Provision_Box("2", classes="box2")
 
 class Ended(Static):
     def compose(self) -> ComposeResult:
