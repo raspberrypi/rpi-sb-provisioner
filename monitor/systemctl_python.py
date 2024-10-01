@@ -1,6 +1,6 @@
 import os
 import subprocess
-from os import listdir, path, stat
+
 
 def list_rpi_sb_units(service_name):
     output = subprocess.run(["systemctl", "list-units", service_name, "-l", "--all", "--no-pager"], capture_output=True)
@@ -18,6 +18,7 @@ def list_rpi_sb_units(service_name):
                 provisioner.append(name.replace("rpi-sb-provisioner@", ""))
     return [triage, keywriter, provisioner]
 
+
 def list_working_units(service_name):
     output = subprocess.run(["systemctl", "list-units", service_name, "-l", "--all", "--no-pager"], capture_output=True)
     units=[]
@@ -28,6 +29,7 @@ def list_working_units(service_name):
                 name=line[line.find("rpi-sb-"):line.find(".service")]
                 units.append(name)
     return units
+
 
 def list_failed_units(service_name):
     output = subprocess.run(["systemctl", "list-units", service_name, "-l", "--all", "--no-pager"], capture_output=True)
@@ -40,12 +42,15 @@ def list_failed_units(service_name):
                 units.append(name)
     return units
 
+
 def list_seen_devices():
-    if path.exists("/var/log/rpi-sb-provisioner/"):
-        devices = listdir("/var/log/rpi-sb-provisioner")
-        return devices
-    else:
+    try:
+        devices = os.listdir("/var/log/rpi-sb-provisioner")
+    except FileNotFoundError:
         return []
+    else:
+        return devices
+
 
 def list_completed_devices():
     all_devices = list_seen_devices()
@@ -63,6 +68,7 @@ def list_completed_devices():
                 completed_devices.append((device, modified_time))
             f.close()
     return completed_devices
+
 
 def list_failed_devices():
     all_devices = list_seen_devices()
@@ -82,6 +88,7 @@ def list_failed_devices():
             f.close()
     return failed_devices
 
+
 def list_device_files(device_name):
     device_files_dir = os.path.join("/var/log/rpi-sb-provisioner", device_name)
     try:
@@ -92,6 +99,7 @@ def list_device_files(device_name):
         return []
     else:
         return ret
+
 
 def read_device_file(device_name, filename):
     device_file_path = os.path.join("/var/log/rpi-sb-provisioner", device_name, filename)
