@@ -1,5 +1,3 @@
-import os
-
 from textual.app import App, ComposeResult
 from textual.containers import Container
 from textual.widgets import Header, Footer, Static, Button, Input
@@ -92,11 +90,10 @@ class OpeningScreen(Screen):
                         id="dialog2")
 
 
-
 class App(App):
     CSS_PATH = "config_app.css"
     BINDINGS = [("q", "quit", "Quit")]
-    SCREENS = {"MainScreen": MainScreen()}    
+    SCREENS = {"MainScreen": MainScreen()}
 
     def on_mount(self) -> None:
         self.title = "rpi-sb-provisioner config editor"
@@ -116,11 +113,10 @@ class App(App):
         if "close_help_screen" in event.button.id: 
             self.pop_screen()
         if "write_button" in event.button.id:
-            f = open("/etc/rpi-sb-provisioner/config", "w+")
-            for param in params_to_save:
-                if param != "":
-                    f.write(param + "=" + params_to_save[param] + "\n")
-            f.close()
+            with open("/etc/rpi-sb-provisioner/config", "w+") as f:
+                for param in params_to_save:
+                    if param != "":
+                        f.write(param + "=" + params_to_save[param] + "\n")
             quit()
 
     @on(Input.Submitted)
@@ -129,13 +125,13 @@ class App(App):
             paramname = event.input.id.replace("param_entry_", "")
             validate = getattr(validator, "validate_" + paramname)
             success, errmsg = validate(event.input.value)
-            if not(success):
+            if not success:
                 inputbox = self.query_one("#param_entry_" + paramname)
                 inputbox.classes = "paramentry"
                 nametext = self.query_one("#nameentry_" + paramname)
                 nametext.update("╳ - " + paramname)
                 self.push_screen(ValidatedScreen(paramname, errmsg, defaultparams[paramname], "idk", required[paramname], helper[paramname]))
-            if success:
+            else:
                 inputbox = self.query_one("#param_entry_" + paramname)
                 inputbox.classes = "success_entry"
                 params_to_save[paramname] = event.input.value
@@ -143,15 +139,12 @@ class App(App):
                 nametext.update("✓ - " + paramname)
 
 
-
-
-
 ### initially need to open the default config files
 defaultparams = {}
 initialparams = {}
 params_to_save = {}
-f = open("/etc/default/rpi-sb-provisioner", "r")
-contents_by_line = f.read().split("\n")
+with open("/etc/default/rpi-sb-provisioner", "r") as f:
+    contents_by_line = f.read().split("\n")
 for line in contents_by_line:
     if len(line.split("=")) > 1:
         defaultparams.update([(line.split("=")[0], line.split("=")[1])])
@@ -162,9 +155,12 @@ for line in contents_by_line:
         params_to_save.update([(line.split("=")[0], "")])
         initialparams.update([(line.split("=")[0], "")])
 
-if os.path.exists("/etc/rpi-sb-provisioner/config"):
-    f = open("/etc/rpi-sb-provisioner/config", "r")
-    contents_by_line = f.read().split("\n")
+try:
+    with open("/etc/rpi-sb-provisioner/config", "r") as f:
+        contents_by_line = f.read().split("\n")
+except FileNotFoundError:
+    pass
+else:
     for line in contents_by_line:
         if len(line.split("=")) > 1:
             initialparams.update([(line.split("=")[0], line.split("=")[1])])
@@ -174,34 +170,36 @@ if os.path.exists("/etc/rpi-sb-provisioner/config"):
     try:
         initialparams.pop("")
         defaultparams.pop("")
-    except:
+    except KeyError:
         pass
 
 ### Find the differences!
 different_from_defaults = []
 for param in defaultparams:
-    if defaultparams[param] != "":
-        if param in initialparams:
-            if initialparams[param] != defaultparams[param]:
-                different_from_defaults.append(param)
-        else:
+    if defaultparams[param] == "":
+        continue
+    if param in initialparams:
+        if initialparams[param] != defaultparams[param]:
             different_from_defaults.append(param)
+    else:
+        different_from_defaults.append(param)
 
 ### Load helper descriptor!
 helper = {}
 required = {}
 mandatory_not_set = []
-f = open("config_app.helper")
-contents_by_param = f.read().split("\n")
+with open("config_app.helper") as f:
+    contents_by_param = f.read().split("\n")
 for line in contents_by_param:
-    if len(line.split("|")) > 1:
-        helper.update([(line.split("|")[0], line.split("|")[2])])
-        required.update([(line.split("|")[0], line.split("|")[1])])
-        if "Mandatory" in required[line.split("|")[0]]:
-            if params_to_save[line.split("|")[0]] == "":
-                mandatory_not_set.append(line.split("|")[0])
-    else:
+    if len(line.split("|")) <= 1:
         print("Error - unable to correctly parse helper line: " + line)
+        continue
+    helper.update([(line.split("|")[0], line.split("|")[2])])
+    required.update([(line.split("|")[0], line.split("|")[1])])
+    if "Mandatory" in required[line.split("|")[0]]:
+        if params_to_save[line.split("|")[0]] == "":
+            mandatory_not_set.append(line.split("|")[0])
+
 
 if __name__ == "__main__":
     app = App()
