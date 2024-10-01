@@ -3,10 +3,65 @@
 set -e
 set -x
 
-. /usr/local/bin/terminal-functions.sh
-
 TARGET_DEVICE_SERIAL="$1"
 DEBUG=
+
+OPENSSL=${OPENSSL:-openssl}
+
+export KEYWRITER_FINISHED="KEYWRITER-FINISHED"
+export KEYWRITER_ABORTED="KEYWRITER-ABORTED"
+export KEYWRITER_STARTED="KEYWRITER-STARTED"
+export PROVISIONER_FINISHED="PROVISIONER-FINISHED"
+export PROVISIONER_ABORTED="PROVISIONER-ABORTED"
+export PROVISIONER_STARTED="PROVISIONER-STARTED"
+
+
+ring_bell() {
+    tput bel
+}
+
+announce_start() {
+    provisioner_log "================================================================================"
+
+    provisioner_log "Starting $1"
+
+    provisioner_log "================================================================================"
+}
+
+announce_stop() {
+    provisioner_log "================================================================================"
+
+    provisioner_log "Stopping $1"
+
+    provisioner_log "================================================================================"
+}
+
+read_config() {
+    if [ -f /etc/rpi-sb-provisioner/config ]; then
+        . /etc/rpi-sb-provisioner/config
+    else
+        echo "Failed to load config. Please use configuration tool." >&2
+        return 1
+    fi
+}
+
+get_signing_directives() {
+    if [ -n "${CUSTOMER_KEY_PKCS11_NAME}" ]; then
+        echo "${CUSTOMER_KEY_PKCS11_NAME} -engine pkcs11 -keyform engine"
+    else
+        if [ -n "${CUSTOMER_KEY_FILE_PEM}" ]; then
+            if [ -f "${CUSTOMER_KEY_FILE_PEM}" ]; then
+                echo "${CUSTOMER_KEY_FILE_PEM} -keyform PEM"
+            else
+                echo "RSA private key \"${CUSTOMER_KEY_FILE_PEM}\" not a file. Aborting." >&2
+                exit 1
+            fi
+        else
+            echo "Neither PKCS11 key name, or PEM key file specified. Aborting." >&2
+            exit 1
+        fi
+    fi
+}
 
 echo "${KEYWRITER_STARTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
 
@@ -15,16 +70,16 @@ read_config
 die() {
     echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
     # shellcheck disable=SC2086
-    echo "$@" ${DEBUG}
+    printf '%s' "$@" ${DEBUG}
     exit 1
 }
 
 keywriter_log() {
-    echo "$1" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/keywriter.log
+    printf '%s' "$@" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/keywriter.log
 }
 
 provisioner_log() {
-    echo "$1" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/provisioner.log
+    printf '%s' "$@" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/provisioner.log
 }
 
 CUSTOMER_PUBLIC_KEY_FILE=
@@ -507,7 +562,7 @@ cp "$(get_fastboot_config_file)" "${RPI_SB_WORKDIR}"/config.txt
 
 #boot.sig generation
 sha256sum "${RPI_SB_WORKDIR}"/boot.img | awk '{print $1}' > "${RPI_SB_WORKDIR}"/boot.sig
-printf "rsa2048: " >> "${RPI_SB_WORKDIR}"/boot.sig
+printf 'rsa2048: ' >> "${RPI_SB_WORKDIR}"/boot.sig
 # Prefer PKCS11 over PEM keyfiles, if both are specified.
 # shellcheck disable=SC2046
 ${OPENSSL} dgst -sign $(get_signing_directives) -sha256 "${RPI_SB_WORKDIR}"/boot.img | xxd -c 4096 -p >> "${RPI_SB_WORKDIR}"/boot.sig
