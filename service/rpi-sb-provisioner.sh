@@ -713,7 +713,7 @@ if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.img" ] ||
         ( augment_initramfs "${TMP_DIR}"/rpi-boot-img-mount/initramfs_2712 )
     fi
     if check_file_is_expected "${TMP_DIR}"/rpi-boot-img-mount/initramfs8 ""; then
-        ( augment_initramfs "${TMP_DIR}"/rpi-boot-img-mount/initramfs8) 
+        ( augment_initramfs "${TMP_DIR}"/rpi-boot-img-mount/initramfs8 )
     fi
     announce_stop "Initramfs modification"
 
