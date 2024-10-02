@@ -29,6 +29,8 @@ For more information on creating an OS based on Raspberry Pi OS in `pi-gen`, con
 ** A USB-A to microUSB-B cable
 ** A Raspberry Pi Compute Module 4 IO Board
 ** A single Jumper Wire
+* For provisioning Raspberry Pi 5:
+** A USB-A to USB-C cable
 
 === Hardware configuration
 
@@ -130,9 +132,10 @@ Specify the kind of storage your target will use. Supported values are `sd`, `em
 === RPI_DEVICE_FAMILY
 *Mandatory*
 
-Specify the family of Raspberry Pi device you are provisioning. Supported values are `4`. For example,
+Specify the family of Raspberry Pi device you are provisioning. Supported values are `4, 5`. For example,
 
 A Raspberry Pi Compute Module 4 would be family `4`
+A Raspberry Pi 5 would be family `5`
 
 === RPI_DEVICE_BOOTLOADER_CONFIG_FILE
 *Mandatory, with a default*
@@ -164,7 +167,7 @@ Set to any value to enable EEPROM write protection.
 
 Collect manufacturing data from each device that is provisioned. This will include the board type, board revision number, the processor name, the memory configuration, and the factory where the board was made.
 
-The metadata is inserted into the `keywriter` log for the device, and also as a serial-number named JSON file under the `metadata` subdirectory of the device provisioning logs.
+The metadata is inserted into the log for the device, and also as a serial-number named JSON file under the `metadata` subdirectory of the device provisioning logs.
 
 Set to any value to enable metadata collection.
 
@@ -196,13 +199,12 @@ image::docs/images/rpi-cm4io-detail.png[]
 After connecting your device in RPIBoot mode, `rpi-sb-provisioner` will perform the following steps:
 
 * A new device connection is recognised over USB, and enters the *triage* phase:
-** If your device has not been recorded as having been through the *keywriter* phase, move to the *keywriter* phase
-** If the device has been recorded as having been through the *keywriter* phase, move to the *provisioner* phase.
-* In the *keywriter* phase:
+** If your device has not been recorded as having been provisioned, start the *provisioner*
+** If the device has been recorded as having been provisioned, cease further actions
+* In the *provisioner* phase:
 ** Your device will boot a specialised Raspberry Pi firmware, designed to write a hash of your public signing key (generated from the file pointed to by `CUSTOMER_KEY_FILE_PEM`) into device One Time Programmable (OTP) memory
 ** Your device will be updated to Raspberry Pi EEPROM software released on 2024-05-17
-** Your device will perform a silent reboot, moving back to the *triage* phase
-* In the *provisioner* phase:
+** Your device will perform a silent reboot
 ** `rpi-sb-provisioner` will boot your device with a specialised Linux distribution designed to:
 *** create a device unique key
 *** partition and format your device's storage
@@ -229,7 +231,7 @@ To run, type into a terminal window:
 $ monitor.sh
 ----
 
-The TUI will intialise with 2 rows, the top one showing the progress of a device throughout the process, with each of the columns being for devices in the following stages: triaging, keywriting and provisoning.
+The TUI will intialise with 2 rows, the top one showing the progress of a device throughout the process, with each of the columns being for devices in the following stages: triaging and provisoning.
 When a device is connected, you will be able to watch it progress through each of the sections.
 The second row of the TUI also has two boxes at the bottom, the left being successfully completed provisions and the right for failed provisions.
 Clicking on the device name will open up a second window, with buttons to view the log files for each step of the provisioning service.
@@ -245,17 +247,16 @@ As `rpi-sb-provisioner` is implemented using `systemd` services, you can use the
 To see active provisioning operations, and the serial numbers of the devices involved, type into a Terminal window:
 
 ----
-$ systemctl list-units rpi-sb-*
+$ systemctl list-units rpi-sb-provisioner*
 ----
 
 === Observing logs
 
-Logs are stored on a per-device, per-stage basis, where logs for a given device are stored at `/var/log/rpi-sb-provisioner/<serial>/<phase>.log`.
+Logs are stored on a per-device, per-phase basis, where logs for a given device are stored at `/var/log/rpi-sb-provisioner/<serial>/<phase>.log`.
 
-For example, to observe the progress of an individual device through a stage, you could use `tail`:
+For example, to observe the progress of an individual device through a phase, you could use `tail`:
 
 ----
-$ tail -f -n 100 /var/log/rpi-sb-provisioner/<serial>/keywriter.log
 $ tail -f -n 100 /var/log/rpi-sb-provisioner/<serial>/provisioner.log
 $ tail -f -n 100 /var/log/rpi-sb-provisioner/<serial>/triage.log
 ----
