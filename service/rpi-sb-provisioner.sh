@@ -70,16 +70,16 @@ read_config
 die() {
     echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
     # shellcheck disable=SC2086
-    printf '%s' "$@" ${DEBUG}
+    echo "$@" ${DEBUG}
     exit 1
 }
 
 keywriter_log() {
-    printf '%s' "$@" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/keywriter.log
+    echo "$@" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/keywriter.log
 }
 
 provisioner_log() {
-    printf '%s' "$@" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/provisioner.log
+    echo "$@" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/provisioner.log
 }
 
 CUSTOMER_PUBLIC_KEY_FILE=
