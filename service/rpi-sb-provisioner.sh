@@ -104,6 +104,13 @@ cleanup() {
     if [ -f "${COPY_OS_COMBINED_FILE}" ]; then
         rm -rf "${COPY_OS_COMBINED_FILE}"
     fi
+    if [ -n "${DELETE_PRIVATE_TMPDIR}" ]; then
+        announce_start "Deleting customised intermediates"
+        # shellcheck disable=SC2086
+        rm -rf "${DELETE_PRIVATE_TMPDIR}" ${DEBUG}
+        DELETE_PRIVATE_TMPDIR=
+        announce_stop "Deleting customised intermediates"
+    fi
 }
 trap cleanup EXIT
 
@@ -282,6 +289,8 @@ fi
 # With the EEPROMs configured and signed, RPIBoot them.
 mkdir -p "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/"
 [ -z "${DEMO_MODE_ONLY}" ] && rpiboot -d "${FLASHING_DIR}" -i "${TARGET_DEVICE_SERIAL}" -j "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/"
+
+rm -rf "${FLASHING_DIR}"
 
 if [ -z "${DEMO_MODE_ONLY}" ] && [ -n "${RPI_DEVICE_FETCH_METADATA}" ]; then
     USER_BOARDREV="0x$(jq -r '.USER_BOARDREV' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)"
@@ -821,13 +830,6 @@ unmount_image "${COPY_OS_COMBINED_FILE}" ${DEBUG}
 # We also delete the temporary directory - preserving the cached generated asset
 # shellcheck disable=SC2086
 rm -rf "${TMP_DIR}" ${DEBUG}
-if [ -n "${DELETE_PRIVATE_TMPDIR}" ]; then
-    announce_start "Deleting customised intermediates"
-    # shellcheck disable=SC2086
-    rm -rf "${DELETE_PRIVATE_TMPDIR}" ${DEBUG}
-    DELETE_PRIVATE_TMPDIR=
-    announce_stop "Deleting customised intermediates"
-fi
 announce_stop "Cleaning up"
 
 announce_start "Set LED status"
