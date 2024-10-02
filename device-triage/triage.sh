@@ -13,7 +13,6 @@ TARGET_DEVICE_SERIAL="$(udevadm info --name="$1" --query=property --property=ID_
 mkdir -p /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/
 touch /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
 echo "Starting triage for $1, serial: $TARGET_DEVICE_SERIAL" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
-echo "${TRIAGE_STARTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
 
 if [ -z "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" ]; then
     RPI_DEVICE_BOOTLOADER_CONFIG_FILE=/var/lib/rpi-sb-provisioner/bootloader.default
@@ -36,6 +35,7 @@ if [ -e "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/progress" ]; then
         echo "Observed provisioning state for ${TARGET_DEVICE_SERIAL}: ${last_status}"
         echo "Not starting additional services, device already undergoing provisioning"
     } >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/triage.log
+    echo "${TRIAGE_STARTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
 else
     { 
         echo "Device is completely new to us, starting keywriter"
