@@ -5,7 +5,14 @@ set -e
 TRIAGE_STARTED="TRIAGE-STARTED"
 TRIAGE_HANDOFF="TRIAGE-HANDOFF"
 
-. /usr/local/bin/terminal-functions.sh
+read_config() {
+    if [ -f /etc/rpi-sb-provisioner/config ]; then
+        . /etc/rpi-sb-provisioner/config
+    else
+        echo "Failed to load config. Please use configuration tool." >&2
+        return 1
+    fi
+}
 
 read_config
 
