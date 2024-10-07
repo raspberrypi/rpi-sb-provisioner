@@ -26,7 +26,10 @@ def list_working_units(service_name):
         if "rpi-sb-" in line:
             if not("failed" in line):
                 name=line[line.find("rpi-sb-"):line.find(".service")]
-                units.append(name)
+                if "triage" in name:
+                    units.append(name.replace("rpi-sb-triage@", ""))
+                if "provisioner" in name:
+                    units.append(name.replace("rpi-sb-provisioner@", ""))
     return units
 
 def list_failed_units(service_name):
