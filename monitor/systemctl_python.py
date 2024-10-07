@@ -19,7 +19,7 @@ def list_rpi_sb_units(service_name):
     return [triage, keywriter, provisioner]
 
 def list_working_units(service_name):
-    output = subprocess.run(["systemctl", "list-units", service_name, "-l", "--all", "--no-pager"], capture_output=True)
+    output = subprocess.run(["systemctl", "list-units", service_name, "-l", "--all", "--no-pager", "--plain"], capture_output=True)
     units=[]
     lines = output.stdout.decode().split("\n")
     for line in lines:
@@ -33,22 +33,29 @@ def list_working_units(service_name):
     return units
 
 def list_failed_units(service_name):
-    output = subprocess.run(["systemctl", "list-units", service_name, "-l", "--all", "--no-pager"], capture_output=True)
+    output = subprocess.run(["systemctl", "list-units", service_name, "-l", "--all", "--no-pager", "--plain"], capture_output=True)
     units=[]
     lines = output.stdout.decode().split("\n")
     for line in lines:
         if "rpi-sb-" in line:
             if "failed" in line:
                 name=line[line.find("rpi-sb-"):line.find(".service")]
-                units.append(name)
+                if "triage" in name:
+                    units.append(name.replace("rpi-sb-triage@", ""))
+                if "provisioner" in name:
+                    units.append(name.replace("rpi-sb-provisioner@", ""))
     return units
 
 def list_seen_devices():
-    if path.exists("/var/log/rpi-sb-provisioner/"):
-        devices = listdir("/var/log/rpi-sb-provisioner")
-        return devices
-    else:
-        return []
+    output = subprocess.run(["systemctl", "list-units", "rpi-sb-*", "-l", "--all", "--no-pager", "--plain"], capture_output=True)
+    units=[]
+    lines = output.stdout.decode().split("\n")
+    for line in lines:
+        if "rpi-sb-provisioner" in line:
+            name=line[line.find("rpi-sb-"):line.find(".service")]
+            units.append(name.replace("rpi-sb-provisioner@", ""))
+        
+    return units
 
 def list_completed_devices():
     all_devices = list_seen_devices()
@@ -70,7 +77,7 @@ def list_failed_devices():
         if path.exists("/var/log/rpi-sb-provisioner/" + device + "/progress"):
             f = open("/var/log/rpi-sb-provisioner/" + device + "/progress", "r")
             status = f.read()
-            if "PROVISIONER-ABORTED" in status:
+            if "PROVISIONER-ABORTED" in status or "KEYWRITER-ABORTED" in status:
                 modified_time = stat("/var/log/rpi-sb-provisioner/" + device + "/progress").st_mtime_ns
                 failed_devices.append((device, modified_time))
             f.close()
