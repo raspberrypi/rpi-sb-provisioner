@@ -804,6 +804,17 @@ fi # Slow path
 announce_start "Erase / Partition Device Storage"
 
 # Arbitrary sleeps to handle lack of correct synchronisation in fastbootd.
+[ -z "${DEMO_MODE_ONLY}" ] && timeout 30 fastboot getvar version
+FASTBOOT_EXIT_STATUS=$?
+if [ $FASTBOOT_EXIT_STATUS -eq 124 ]
+then
+provisioner_log "Loading Fastboot failed, timed out."
+echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+return 124
+else
+provisioner_log "Fastboot loaded."
+fi
+
 [ -z "${DEMO_MODE_ONLY}" ] && fastboot erase "${RPI_DEVICE_STORAGE_TYPE}"
 sleep 2
 [ -z "${DEMO_MODE_ONLY}" ] && fastboot oem partinit "${RPI_DEVICE_STORAGE_TYPE}" DOS "${DISK_IDENTIFIER}"
