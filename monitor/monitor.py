@@ -7,30 +7,34 @@ from textual.widget import Widget
 from textual import on
 import systemctl_python
 
+ROWS = [
+    ("Serial Number",),
+]
 
-class Devices_list(Static):
+class DevicesList(Widget):
     dev_type_g = ""
     devices=reactive([])
-
+    def compose(self) -> ComposeResult:
+         yield DataTable()
     def __init__(self, dev_type):
         self.dev_type = dev_type
         super().__init__()
     def update_devices(self) -> None:
         self.devices = systemctl_python.list_working_units("rpi-sb-" + self.dev_type + "*")
-    def watch_devices(self, devices) -> None:
+    def watch_devices(self, devices: list[str]) -> None:
         """Called when the devices variable changes"""
-        text = ""
-        for i in range(len(devices)):
-            text += devices[i] + "\n"
-        self.styles.height = len(devices)
-        self.update(text)
+        table = self.query_one(DataTable)
+        table_devices = []
+        for device in sorted(self.devices):
+            table_devices.append((device,))
+        table.clear()
+        table.add_rows(table_devices)
 
     def on_mount(self) -> None:
+        table = self.query_one(DataTable)
+        table.add_columns(*ROWS[0])
+        table.add_rows(ROWS[1:])
         self.set_interval(1/20, self.update_devices)
-
-ROWS = [
-    ("Serial Number",),
-]
 
 class CompletedDevicesList(Widget):
     dev_type_g = ""
@@ -85,12 +89,11 @@ class Failed_devices_list(Static):
 
 class Triage_Box(Static):
     def compose(self) -> ComposeResult:
-        yield ScrollableContainer(Static("Triaging \n----------------"), Devices_list(dev_type="triage"))
+        yield ScrollableContainer(Static("Triaging \n----------------"), DevicesList(dev_type="triage"))
 
 class Provision_Box(Static):
     def compose(self) -> ComposeResult:
-        yield ScrollableContainer(Static("Provisioning \n----------------"), Devices_list(dev_type="provision"))
-
+        yield ScrollableContainer(Static("Provisioning \n----------------"), DevicesList(dev_type="provision"))
 
 class Completed_Box(Static):
     def compose(self) -> ComposeResult:
