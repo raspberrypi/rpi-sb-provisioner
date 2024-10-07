@@ -89,30 +89,6 @@ derivePublicKey() {
 }
 
 TMP_DIR=""
-cleanup() {
-    mkdir -p /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/
-    if [ -d "${TMP_DIR}" ]; then
-        rm -rf "${TMP_DIR}"
-    fi
-    rm "${CUSTOMER_PUBLIC_KEY_FILE}"
-
-    unmount_image "${COPY_OS_COMBINED_FILE}"
-    if [ -d "${TMP_DIR}" ]; then
-        rm -rf "${TMP_DIR}"
-    fi
-
-    if [ -f "${COPY_OS_COMBINED_FILE}" ]; then
-        rm -rf "${COPY_OS_COMBINED_FILE}"
-    fi
-    if [ -n "${DELETE_PRIVATE_TMPDIR}" ]; then
-        announce_start "Deleting customised intermediates"
-        # shellcheck disable=SC2086
-        rm -rf "${DELETE_PRIVATE_TMPDIR}" ${DEBUG}
-        DELETE_PRIVATE_TMPDIR=
-        announce_stop "Deleting customised intermediates"
-    fi
-}
-trap cleanup EXIT
 
 writeSig() {
    SIG_TMP="$(mktemp)"
@@ -216,6 +192,168 @@ source-image: ${src_image}
 config: ${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}
 EOF
 }
+
+get_cryptroot() {
+    if [ -f /etc/rpi-sb-provisioner/cryptroot_initramfs ]; then
+        echo "/etc/rpi-sb-provisioner/cryptroot_initramfs"
+    else
+        echo "/var/lib/rpi-sb-provisioner/cryptroot_initramfs"
+    fi
+}
+
+get_fastboot_gadget() {
+    if [ -f /etc/rpi-sb-provisioner/fastboot-gadget.img ]; then
+        echo "/etc/rpi-sb-provisioner/fastboot-gadget.img"
+    else
+        echo "/var/lib/rpi-sb-provisioner/fastboot-gadget.img"
+    fi
+}
+
+get_fastboot_config_file() {
+    if [ -f /etc/rpi-sb-provisioner/boot_ramdisk_config.txt ]; then
+        echo "/etc/rpi-sb-provisioner/boot_ramdisk_config.txt"
+    else
+        echo "/var/lib/rpi-sb-provisioner/boot_ramdisk_config.txt"
+    fi
+}
+
+# check_file_is_expected ${path_to_file} ${expected_file_extension}
+# Checks if a file exists, is not a directory, is not zero and has the right extension.
+# If any of those checks fail, exit the script entirely and print a debug message
+# If all checks succeed, supply the filepath via stdout
+check_file_is_expected() {
+    filepath="$1"
+    ext="$2"
+
+    if [ ! -e "${filepath}" ]; then
+        die "Specified file does not exist: ${filepath}"
+    fi
+
+    if [ -d "${filepath}" ]; then
+        die "Expected a file, got a directory for ${filepath}"
+    fi
+
+    if [ -z "${filepath}" ]; then
+        die "Provided file is empty: ${filepath}"
+    fi
+
+    if [ -z "${ext}" ] || echo "${filepath}" | grep -q "${ext}"; then
+        echo "${filepath}"
+        return 0
+    else
+        die "Provided file is of the wrong extension, wanted ${ext}, provided ${filepath}"
+    fi
+}
+
+check_command_exists() {
+    command_to_test=$1
+    if ! command -v "${command_to_test}" 1> /dev/null; then
+        provisioner_log "${command_to_test} could not be found"
+        exit 1
+    else
+        echo "$command_to_test"
+    fi
+}
+
+check_python_module_exists() {
+    module_name=$1
+    if ! python -c "import ${module_name}" 1> /dev/null; then
+        provisioner_log "Failed to load Python module '${module_name}'"
+        exit 1
+    else
+        echo "${module_name}"
+    fi
+}
+
+check_pidevice_storage_type() {
+    case "${1}" in
+        "sd")
+            echo "mmcblk0"
+            ;;
+        "nvme")
+            echo "nvme0n1"
+            ;;
+        "emmc")
+            echo "mmcblk0"
+            ;;
+        ?)
+            die "Unexpected storage device type. Wanted sd, nvme or emmc, got $1"
+            ;;
+    esac
+}
+
+# Lifted from pi-gen/scripts/common, unsure under what circumstances this would be necessary
+ensure_next_loopdev() {
+    loopdev="$(losetup -f)"
+    loopmaj="$(echo "$loopdev" | sed -E 's/.*[0-9]*?([0-9]+)$/\1/')"
+    [ -b "$loopdev" ] || mknod "$loopdev" b 7 "$loopmaj"
+}
+
+# Lifted from pi-gen/scripts/common, unsure under what circumstances this would be necessary
+ensure_loopdev_partitions() {
+    lsblk -r -n -o "NAME,MAJ:MIN" "$1" | grep -v "^${1#/dev/}" | while read -r line; do
+        partition="${line%% *}"
+        majmin="${line#* }"
+        if [ ! -b "/dev/$partition" ]; then
+            mknod "/dev/$partition" b "${majmin%:*}" "${majmin#*:}"
+        fi
+    done
+}
+
+# Lifted from pi-gen/scripts/common
+unmount() {
+    if [ -z "$1" ]; then
+        DIR=$PWD
+    else
+        DIR=$1
+    fi
+
+    while mount | grep -q "$DIR"; do
+        locs=$(mount | grep "$DIR" | cut -f 3 -d ' ' | sort -r)
+        for loc in $locs; do
+            umount "$loc"
+        done
+    done
+}
+
+# Lifted from pi-gen/scripts/common
+unmount_image() {
+    sync
+    sleep 1
+    LOOP_DEVICE=$(losetup --list | grep "$1" | cut -f1 -d' ')
+    if [ -n "$LOOP_DEVICE" ]; then
+        for part in "$LOOP_DEVICE"p*; do
+            if DIR=$(findmnt -n -o target -S "$part"); then
+                unmount "$DIR"
+            fi
+        done
+        losetup -d "$LOOP_DEVICE"
+    fi
+}
+
+cleanup() {
+    if [ -d "${TMP_DIR}" ]; then
+        rm -rf "${TMP_DIR}"
+    fi
+    rm "${CUSTOMER_PUBLIC_KEY_FILE}"
+
+    unmount_image "${COPY_OS_COMBINED_FILE}"
+    if [ -d "${TMP_DIR}" ]; then
+        rm -rf "${TMP_DIR}"
+    fi
+
+    if [ -f "${COPY_OS_COMBINED_FILE}" ]; then
+        rm -rf "${COPY_OS_COMBINED_FILE}"
+    fi
+    if [ -n "${DELETE_PRIVATE_TMPDIR}" ]; then
+        announce_start "Deleting customised intermediates"
+        # shellcheck disable=SC2086
+        rm -rf "${DELETE_PRIVATE_TMPDIR}" ${DEBUG}
+        DELETE_PRIVATE_TMPDIR=
+        announce_stop "Deleting customised intermediates"
+    fi
+}
+trap cleanup EXIT
 
 FLASHING_DIR=$(mktemp -d)
 derivePublicKey
@@ -367,144 +505,6 @@ echo "${KEYWRITER_FINISHED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SER
 
 echo "${PROVISIONER_STARTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
 
-get_cryptroot() {
-    if [ -f /etc/rpi-sb-provisioner/cryptroot_initramfs ]; then
-        echo "/etc/rpi-sb-provisioner/cryptroot_initramfs"
-    else
-        echo "/var/lib/rpi-sb-provisioner/cryptroot_initramfs"
-    fi
-}
-
-get_fastboot_gadget() {
-    if [ -f /etc/rpi-sb-provisioner/fastboot-gadget.img ]; then
-        echo "/etc/rpi-sb-provisioner/fastboot-gadget.img"
-    else
-        echo "/var/lib/rpi-sb-provisioner/fastboot-gadget.img"
-    fi
-}
-
-get_fastboot_config_file() {
-    if [ -f /etc/rpi-sb-provisioner/boot_ramdisk_config.txt ]; then
-        echo "/etc/rpi-sb-provisioner/boot_ramdisk_config.txt"
-    else
-        echo "/var/lib/rpi-sb-provisioner/boot_ramdisk_config.txt"
-    fi
-}
-
-# check_file_is_expected ${path_to_file} ${expected_file_extension}
-# Checks if a file exists, is not a directory, is not zero and has the right extension.
-# If any of those checks fail, exit the script entirely and print a debug message
-# If all checks succeed, supply the filepath via stdout
-check_file_is_expected() {
-    filepath="$1"
-    ext="$2"
-
-    if [ ! -e "${filepath}" ]; then
-        die "Specified file does not exist: ${filepath}"
-    fi
-
-    if [ -d "${filepath}" ]; then
-        die "Expected a file, got a directory for ${filepath}"
-    fi
-
-    if [ -z "${filepath}" ]; then
-        die "Provided file is empty: ${filepath}"
-    fi
-
-    if [ -z "${ext}" ] || echo "${filepath}" | grep -q "${ext}"; then
-        echo "${filepath}"
-        return 0
-    else
-        die "Provided file is of the wrong extension, wanted ${ext}, provided ${filepath}"
-    fi
-}
-
-check_command_exists() {
-    command_to_test=$1
-    if ! command -v "${command_to_test}" 1> /dev/null; then
-        provisioner_log "${command_to_test} could not be found"
-        exit 1
-    else
-        echo "$command_to_test"
-    fi
-}
-
-check_python_module_exists() {
-    module_name=$1
-    if ! python -c "import ${module_name}" 1> /dev/null; then
-        provisioner_log "Failed to load Python module '${module_name}'"
-        exit 1
-    else
-        echo "${module_name}"
-    fi
-}
-
-check_pidevice_storage_type() {
-    case "${1}" in
-        "sd")
-            echo "mmcblk0"
-            ;;
-        "nvme")
-            echo "nvme0n1"
-            ;;
-        "emmc")
-            echo "mmcblk0"
-            ;;
-        ?)
-            die "Unexpected storage device type. Wanted sd, nvme or emmc, got $1"
-            ;;
-    esac
-}
-
-# Lifted from pi-gen/scripts/common, unsure under what circumstances this would be necessary
-ensure_next_loopdev() {
-    loopdev="$(losetup -f)"
-    loopmaj="$(echo "$loopdev" | sed -E 's/.*[0-9]*?([0-9]+)$/\1/')"
-    [ -b "$loopdev" ] || mknod "$loopdev" b 7 "$loopmaj"
-}
-
-# Lifted from pi-gen/scripts/common, unsure under what circumstances this would be necessary
-ensure_loopdev_partitions() {
-    lsblk -r -n -o "NAME,MAJ:MIN" "$1" | grep -v "^${1#/dev/}" | while read -r line; do
-        partition="${line%% *}"
-        majmin="${line#* }"
-        if [ ! -b "/dev/$partition" ]; then
-            mknod "/dev/$partition" b "${majmin%:*}" "${majmin#*:}"
-        fi
-    done
-}
-
-# Lifted from pi-gen/scripts/common
-unmount() {
-    if [ -z "$1" ]; then
-        DIR=$PWD
-    else
-        DIR=$1
-    fi
-
-    while mount | grep -q "$DIR"; do
-        locs=$(mount | grep "$DIR" | cut -f 3 -d ' ' | sort -r)
-        for loc in $locs; do
-            umount "$loc"
-        done
-    done
-}
-
-# Lifted from pi-gen/scripts/common
-unmount_image() {
-    sync
-    sleep 1
-    LOOP_DEVICE=$(losetup --list | grep "$1" | cut -f1 -d' ')
-    if [ -n "$LOOP_DEVICE" ]; then
-        for part in "$LOOP_DEVICE"p*; do
-            if DIR=$(findmnt -n -o target -S "$part"); then
-                unmount "$DIR"
-            fi
-        done
-        losetup -d "$LOOP_DEVICE"
-    fi
-}
-
 # These tools are used to modify the supplied images, and deal with mounting and unmounting the images.
 check_command_exists losetup
 check_command_exists mknod
@@ -641,7 +641,9 @@ if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.img" ] ||
 
     announce_start "OS Image Mounting"
     COPY_OS_COMBINED_FILE=$(mktemp "working-os-image.XXX" --tmpdir="/srv/")
+    announce_start "OS Image Copying (potentially slow)"
     cp "${GOLD_MASTER_OS_FILE}" "${COPY_OS_COMBINED_FILE}"
+    announce_stop "OS Image Copying (potentially slow)"
     # Mount the 'complete' image as a series of partitions 
     cnt=0
     until ensure_next_loopdev && LOOP_DEV="$(losetup --show --find --partscan "${COPY_OS_COMBINED_FILE}")"; do
