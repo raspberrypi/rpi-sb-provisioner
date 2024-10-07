@@ -51,14 +51,10 @@ def list_completed_devices():
     all_devices = list_seen_devices()
     completed_devices = []
     for device in all_devices:
-        provisioner_success = -1
         if path.exists("/var/log/rpi-sb-provisioner/" + device + "/progress"):
             f = open("/var/log/rpi-sb-provisioner/" + device + "/progress", "r")
             status = f.read()
-            if "PROVISIONER-EXITED" in status:
-                if "PROVISIONER-FINISHED" in status: provisioner_success = 1
-                else: provisioner_success = 0
-            if provisioner_success == 1:
+            if "PROVISIONER-FINISHED" in status:
                 modified_time = stat("/var/log/rpi-sb-provisioner/" + device + "/progress").st_mtime_ns
                 completed_devices.append((device, modified_time))
             f.close()
@@ -68,15 +64,10 @@ def list_failed_devices():
     all_devices = list_seen_devices()
     failed_devices = []
     for device in all_devices:
-        provisioner_success = -1
-        keywriter_success = -1
         if path.exists("/var/log/rpi-sb-provisioner/" + device + "/progress"):
             f = open("/var/log/rpi-sb-provisioner/" + device + "/progress", "r")
             status = f.read()
-            if "PROVISIONER-EXITED" in status:
-                if "PROVISIONER-FINISHED" in status: provisioner_success = 1
-                else: provisioner_success = 0
-            if provisioner_success == 0 or keywriter_success == 0:
+            if "PROVISIONER-ABORTED" in status:
                 modified_time = stat("/var/log/rpi-sb-provisioner/" + device + "/progress").st_mtime_ns
                 failed_devices.append((device, modified_time))
             f.close()
