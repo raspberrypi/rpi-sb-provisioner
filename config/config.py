@@ -1,5 +1,3 @@
-import os
-
 from textual.app import App, ComposeResult
 from textual.containers import Container
 from textual.widgets import Header, Footer, Static, Button, Input
@@ -16,10 +14,12 @@ class ParamWidget(Widget):
         self.paramvalue = paramvalue
         self.currentval = currentval
         super().__init__()
+
     def compose(self) -> ComposeResult:
         yield Static(self.paramname, classes="paramname", id="nameentry_" + self.paramname)
         yield Input(placeholder=self.paramvalue, classes="paramentry", value=self.currentval, id="param_entry_"+self.paramname)   #, validate_on="blur", validators=[validate(self.paramname)])
         yield Button("Help!", classes="paramhelp", id=self.paramname + "_helpbutton")
+
 
 class MainScreen(Screen):
     def compose(self) -> ComposeResult:
@@ -28,6 +28,7 @@ class MainScreen(Screen):
             for param in defaultparams:
                 yield ParamWidget(paramname=param, paramvalue=defaultparams[param], currentval=initialparams[param])
             yield Container(Button("Write verified params to config file", id="write_button", classes="write_button"), classes="bottom_bar")
+
 
 class HelpScreen(Screen):
     def __init__(self, paramname, defaultvalue, currentvalue, optional, helptext):
@@ -39,6 +40,7 @@ class HelpScreen(Screen):
         if self.defaultvalue == "":
             self.defaultvalue = "None"
         super().__init__()
+
     def compose(self) -> ComposeResult:
         yield Container(Static(self.paramname + "\n"), Static(self.optional + "\n"), Static(self.helptext + "\n"), Static("Default Value: " + self.defaultvalue + "\n"), Button("OK", id="close_help_screen"), id="dialog")
 
@@ -54,6 +56,7 @@ class ValidatedScreen(Screen):
         if self.defaultvalue == "":
             self.defaultvalue = "None"
         super().__init__()
+
     def compose(self) -> ComposeResult:
         yield Container(Static("ERROR VALIDATING: " + self.paramname + " - NOT WRITING!" + "\n"),
                         Static("Error is : " + self.errmsg + "\n"),
@@ -75,6 +78,7 @@ class OpeningScreen(Screen):
             for param in mandatory_not_set:
                 self.mandatory_not_set += param + " "
         super().__init__()
+
     def compose(self) -> ComposeResult:
         if self.differed_params == "":
             warning_text_1 = ""
@@ -92,11 +96,10 @@ class OpeningScreen(Screen):
                         id="dialog2")
 
 
-
 class App(App):
     CSS_PATH = "config_app.css"
     BINDINGS = [("q", "quit", "Quit")]
-    SCREENS = {"MainScreen": MainScreen()}    
+    SCREENS = {"MainScreen": MainScreen()}
 
     def on_mount(self) -> None:
         self.title = "rpi-sb-provisioner config editor"
@@ -116,11 +119,10 @@ class App(App):
         if "close_help_screen" in event.button.id: 
             self.pop_screen()
         if "write_button" in event.button.id:
-            f = open("/etc/rpi-sb-provisioner/config", "w+")
-            for param in params_to_save:
-                if param != "":
-                    f.write(param + "=" + params_to_save[param] + "\n")
-            f.close()
+            with open("/etc/rpi-sb-provisioner/config", "w+") as f:
+                for param in params_to_save:
+                    if param != "":
+                        f.write(param + "=" + params_to_save[param] + "\n")
             quit()
 
     @on(Input.Submitted)
@@ -129,13 +131,13 @@ class App(App):
             paramname = event.input.id.replace("param_entry_", "")
             validate = getattr(validator, "validate_" + paramname)
             success, errmsg = validate(event.input.value)
-            if not(success):
+            if not success:
                 inputbox = self.query_one("#param_entry_" + paramname)
                 inputbox.classes = "paramentry"
                 nametext = self.query_one("#nameentry_" + paramname)
                 nametext.update("╳ - " + paramname)
                 self.push_screen(ValidatedScreen(paramname, errmsg, defaultparams[paramname], "idk", required[paramname], helper[paramname]))
-            if success:
+            else:
                 inputbox = self.query_one("#param_entry_" + paramname)
                 inputbox.classes = "success_entry"
                 params_to_save[paramname] = event.input.value
@@ -150,8 +152,9 @@ class App(App):
 defaultparams = {}
 initialparams = {}
 params_to_save = {}
-f = open("/etc/default/rpi-sb-provisioner", "r")
-contents_by_line = f.read().split("\n")
+with open("/etc/default/rpi-sb-provisioner", "r") as f:
+    contents_by_line = f.read().split("\n")
+
 for line in contents_by_line:
     if len(line.split("=")) > 1:
         defaultparams.update([(line.split("=")[0], line.split("=")[1])])
@@ -162,9 +165,12 @@ for line in contents_by_line:
         params_to_save.update([(line.split("=")[0], "")])
         initialparams.update([(line.split("=")[0], "")])
 
-if os.path.exists("/etc/rpi-sb-provisioner/config"):
-    f = open("/etc/rpi-sb-provisioner/config", "r")
-    contents_by_line = f.read().split("\n")
+try:
+    with open("/etc/rpi-sb-provisioner/config", "r") as f:
+        contents_by_line = f.read().split("\n")
+except FileNotFoundError:
+    pass
+else:
     for line in contents_by_line:
         if len(line.split("=")) > 1:
             initialparams.update([(line.split("=")[0], line.split("=")[1])])
@@ -174,8 +180,9 @@ if os.path.exists("/etc/rpi-sb-provisioner/config"):
     try:
         initialparams.pop("")
         defaultparams.pop("")
-    except:
+    except KeyError:
         pass
+
 
 ### Find the differences!
 different_from_defaults = []
@@ -191,8 +198,8 @@ for param in defaultparams:
 helper = {}
 required = {}
 mandatory_not_set = []
-f = open("config_app.helper")
-contents_by_param = f.read().split("\n")
+with open("config_app.helper") as f:
+    contents_by_param = f.read().split("\n")
 for line in contents_by_param:
     if len(line.split("|")) > 1:
         helper.update([(line.split("|")[0], line.split("|")[2])])
