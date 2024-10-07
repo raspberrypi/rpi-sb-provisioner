@@ -289,6 +289,7 @@ fi
 # With the EEPROMs configured and signed, RPIBoot them.
 mkdir -p "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/"
 keywriter_log "Writing key and EEPROM configuration to the device"
+set +e
 [ -z "${DEMO_MODE_ONLY}" ] && timeout 120 rpiboot -d "${FLASHING_DIR}" -i "${TARGET_DEVICE_SERIAL}" -j "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/"
 KEYWRITER_EXIT_STATUS=$?
 if [ $KEYWRITER_EXIT_STATUS -eq 124 ]
@@ -299,6 +300,7 @@ return 124
 else
 keywriter_log "Writing completed."
 fi
+set -e
 
 rm -rf "${FLASHING_DIR}"
 
@@ -589,6 +591,7 @@ ${OPENSSL} dgst -sign $(get_signing_directives) -sha256 "${RPI_SB_WORKDIR}"/boot
 announce_stop "Finding/generating fastboot image"
 
 announce_start "Starting fastboot"
+set +e
 [ -z "${DEMO_MODE_ONLY}" ] && timeout 120 rpiboot -v -d "${RPI_SB_WORKDIR}" -i "${TARGET_DEVICE_SERIAL}"
 FLASHING_GADGET_EXIT_STATUS=$?
 if [ $FLASHING_GADGET_EXIT_STATUS -eq 124 ]
@@ -599,6 +602,7 @@ return 124
 else
 provisioner_log "Fastboot loaded."
 fi
+set -e
 announce_stop "Starting fastboot"
 
 announce_start "Selecting and interrogating device"
@@ -804,6 +808,7 @@ fi # Slow path
 announce_start "Erase / Partition Device Storage"
 
 # Arbitrary sleeps to handle lack of correct synchronisation in fastbootd.
+set +e
 [ -z "${DEMO_MODE_ONLY}" ] && timeout 30 fastboot getvar version
 FASTBOOT_EXIT_STATUS=$?
 if [ $FASTBOOT_EXIT_STATUS -eq 124 ]
@@ -814,6 +819,7 @@ return 124
 else
 provisioner_log "Fastboot loaded."
 fi
+set -e
 
 [ -z "${DEMO_MODE_ONLY}" ] && fastboot erase "${RPI_DEVICE_STORAGE_TYPE}"
 sleep 2
