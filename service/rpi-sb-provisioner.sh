@@ -603,14 +603,14 @@ announce_stop "Starting fastboot"
 
 announce_start "Selecting and interrogating device"
 
-announce_start "Getting target information"
+#announce_start "Getting target information"
 #TARGET_STORAGE_LIST_RESULT="$(get_variable storage-types-list)"
 #TARGET_PI_GENERATION="$(get_variable hw-generation)"
 #TARGET_DUID="$(get_variable device-uuid)"
 #TARGET_SERIAL="$(get_variable serialno)"
-announce_stop "Getting target information"
+#announce_stop "Getting target information"
 
-announce_start "Storage device check"
+#announce_start "Storage device check"
 #STORAGE_FOUND=0
 #for device in ${TARGET_STORAGE_LIST_RESULT}
 #do
@@ -623,7 +623,7 @@ announce_start "Storage device check"
 #    die "Selected storage type is not available, wanted one of [${TARGET_STORAGE_LIST_RESULT}], got ${RPI_DEVICE_STORAGE_TYPE}"
 #fi
 
-announce_stop "Storage device check"
+#announce_stop "Storage device check"
 
 #announce_start "Raspberry Pi Generation check"
 #if ${RPI_DEVICE_FAMILY} != ${TARGET_PI_GENERATION}; then
