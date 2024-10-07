@@ -589,7 +589,16 @@ ${OPENSSL} dgst -sign $(get_signing_directives) -sha256 "${RPI_SB_WORKDIR}"/boot
 announce_stop "Finding/generating fastboot image"
 
 announce_start "Starting fastboot"
-[ -z "${DEMO_MODE_ONLY}" ] && rpiboot -v -d "${RPI_SB_WORKDIR}" -i "${TARGET_DEVICE_SERIAL}"
+[ -z "${DEMO_MODE_ONLY}" ] && timeout 120 rpiboot -v -d "${RPI_SB_WORKDIR}" -i "${TARGET_DEVICE_SERIAL}"
+FLASHING_GADGET_EXIT_STATUS=$?
+if [ $FLASHING_GADGET_EXIT_STATUS -eq 124 ]
+then
+provisioner_log "Loading Fastboot failed, timed out."
+echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+return 124
+else
+provisioner_log "Fastboot loaded."
+fi
 announce_stop "Starting fastboot"
 
 announce_start "Selecting and interrogating device"
