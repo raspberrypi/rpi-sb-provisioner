@@ -288,7 +288,17 @@ fi
 
 # With the EEPROMs configured and signed, RPIBoot them.
 mkdir -p "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/"
-[ -z "${DEMO_MODE_ONLY}" ] && rpiboot -d "${FLASHING_DIR}" -i "${TARGET_DEVICE_SERIAL}" -j "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/"
+keywriter_log "Writing key and EEPROM configuration to the device"
+[ -z "${DEMO_MODE_ONLY}" ] && timeout 120 rpiboot -d "${FLASHING_DIR}" -i "${TARGET_DEVICE_SERIAL}" -j "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/"
+KEYWRITER_EXIT_STATUS=$?
+if [ $KEYWRITER_EXIT_STATUS -eq 124 ]
+then
+keywriter_log "Writing failed, timed out."
+echo "${KEYWRITER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+return 124
+else
+keywriter_log "Writing completed."
+fi
 
 rm -rf "${FLASHING_DIR}"
 
