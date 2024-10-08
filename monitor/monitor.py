@@ -37,12 +37,10 @@ class DevicesList(Widget):
         self.set_interval(1/20, self.update_devices)
 
 class CompletedDevicesList(Widget):
-    dev_type_g = ""
     devices=reactive(tuple[str, int])
     def compose(self) -> ComposeResult:
          yield DataTable()
-    def __init__(self, dev_type):
-        self.dev_type = dev_type
+    def __init__(self):
         super().__init__()
     def update_devices(self) -> None:
         self.devices = systemctl_python.list_completed_devices()
@@ -61,13 +59,11 @@ class CompletedDevicesList(Widget):
         table.add_rows(ROWS[1:])
         self.set_interval(1/20, self.update_devices)
 
-class Failed_devices_list(Static):
-    dev_type_g = ""
+class FailedDevicesList(Static):
     devices=reactive(tuple[str, int])
     def compose(self) -> ComposeResult:
          yield DataTable()
-    def __init__(self, dev_type):
-        self.dev_type = dev_type
+    def __init__(self):
         super().__init__()
     def update_devices(self) -> None:
         self.devices = systemctl_python.list_failed_devices()
@@ -97,11 +93,11 @@ class Provision_Box(Static):
 
 class Completed_Box(Static):
     def compose(self) -> ComposeResult:
-        yield ScrollableContainer(Static("Completed \n----------------"), CompletedDevicesList(dev_type="provision"))
+        yield ScrollableContainer(Static("Completed \n----------------"), CompletedDevicesList())
 
 class Failed_Box(Static):
     def compose(self) -> ComposeResult:
-        yield ScrollableContainer(Static("Failed \n----------------"), Failed_devices_list(dev_type="provision"))
+        yield ScrollableContainer(Static("Failed \n----------------"), FailedDevicesList())
 
 class Processing(Static):
     def compose(self) -> ComposeResult:
