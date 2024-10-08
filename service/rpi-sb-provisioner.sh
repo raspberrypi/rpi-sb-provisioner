@@ -184,6 +184,7 @@ update_eeprom() {
         --out "${dst_image}" ${sign_args} \
         "${dst_image}.intermediate" || die "Failed to update EEPROM image"
     rm -f "${dst_image}.intermediate"
+    rm -f "${TMP_CONFIG_SIG}"
     set +x
 
 cat <<EOF
