@@ -6,7 +6,9 @@ Only listed versions receive active support, and $HEAD may be changed at any tim
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 1.1.0   | :white_check_mark: |
+| 1.2.0   | :white_check_mark: |
+| 1.1.1   |  |
+| 1.1.0   |  |
 | 1.0.2   |  |
 | 1.0.1   |  |
 
