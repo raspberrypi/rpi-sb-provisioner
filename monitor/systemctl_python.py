@@ -76,9 +76,11 @@ def list_seen_devices():
         
     return units
 
-
+# Completed devices don't show up as systemd units, so we _must_ fall back to the log files
 def list_completed_devices():
-    all_devices = list_seen_devices()
+    all_devices = []
+    if os.path.exists("/var/log/rpi-sb-provisioner/"):
+        all_devices = os.listdir("/var/log/rpi-sb-provisioner")
     completed_devices = []
     for device in all_devices:
         if os.path.exists("/var/log/rpi-sb-provisioner/" + device + "/progress"):
