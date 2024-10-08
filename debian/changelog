@@ -1,3 +1,13 @@
+rpi-sb-provisioner (1.2.0) unstable; urgency=medium
+
+  * monitor: Rework finding completed & failed devices
+  * monitor: Make in-progress devices selectable
+  * monitor: Prune extraneous text from device names
+  * provisioner: Add timeouts to commands that may hang in failure cases
+  * packaging: Add missing python3-venv build dep
+
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Tue, 08 Oct 2024 18:57:00 +0000
+
 rpi-sb-provisioner (1.1.1) unstable; urgency=medium
 
   * config: Added RPI_DEVICE_FETCH_METADATA, to control device metadata
