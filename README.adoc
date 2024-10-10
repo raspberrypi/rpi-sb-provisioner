@@ -296,3 +296,17 @@ The second stage is to remove the progress file matching the serial number of th
 ----
 $ sudo rm /var/log/rpi-sb-provisioner/<serial>/progress
 ----
+
+=== Temporarily disabling rpi-sb-provisioner
+
+You can disable rpi-sb-provisioner for using `rpiboot` in other scripts or tools by disabling the `udev` rule that activates `rpi-sb-provisioner`:
+
+----
+$ sudo ln -s /dev/null /etc/udev/rules.d/60-rpi-sb-provisioner.rules
+----
+
+To re-enable the trigger, remove the override file:
+
+----
+sudo ln -s /dev/null /etc/udev/rules.d/60-rpi-sb-provisioner.rules
+----
