@@ -534,7 +534,6 @@ check_command_exists fastboot
 check_command_exists blockdev
 
 check_command_exists grep
-check_command_exists sfdisk
 
 get_variable() {
     [ -z "${DEMO_MODE_ONLY}" ] && fastboot getvar "$1" 2>&1 | grep -oP "${1}"': \K.*'
@@ -659,7 +658,6 @@ if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.img" ] ||
     done
 
     ensure_loopdev_partitions "$LOOP_DEV"
-    DISK_IDENTIFIER="$(sfdisk --disk-id "${LOOP_DEV}")"
     BOOT_DEV="${LOOP_DEV}"p1
     ROOT_DEV="${LOOP_DEV}"p2
 
