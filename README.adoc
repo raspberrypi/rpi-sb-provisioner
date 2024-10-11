@@ -308,5 +308,5 @@ $ sudo ln -s /dev/null /etc/udev/rules.d/60-rpi-sb-provisioner.rules
 To re-enable the trigger, remove the override file:
 
 ----
-sudo ln -s /dev/null /etc/udev/rules.d/60-rpi-sb-provisioner.rules
+$ sudo rm /etc/udev/rules.d/60-rpi-sb-provisioner.rules
 ----
