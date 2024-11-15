@@ -162,6 +162,13 @@ Raspberry Pi devices that use an EEPROM as part of their boot flow can configure
 
 Set to any value to enable EEPROM write protection.
 
+=== RPI_DEVICE_METADATA_CSV
+*Optional*
+
+Store manufacturing data in a comma separated values (CSV) file. This will include the board serial, board revision, the boot ROM version, the MAC address of the ethernet port, any set hash of the customer signing key, the JTAG lock state, the board attributes and the advanced boot flags.
+
+Set to a writeable file path to enable data storage.
+
 === RPI_DEVICE_FETCH_METADATA
 *Optional*
 
