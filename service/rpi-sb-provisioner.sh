@@ -446,6 +446,11 @@ rm -rf "${FLASHING_DIR}"
 if [ -z "${DEMO_MODE_ONLY}" ] && [ -n "${RPI_DEVICE_FETCH_METADATA}" ]; then
     USER_BOARDREV="0x$(jq -r '.USER_BOARDREV' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)"
     MAC_ADDRESS=$(jq -r '.MAC_ADDR' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
+    CUSTOMER_KEY_HASH=$(jq -r '.CUSTOMER_KEY_HASH' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
+    JTAG_LOCKED=$(jq -r '.JTAG_LOCKED' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
+    ADVANCED_BOOT=$(jq -r '.ADVANCED_BOOT' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
+    BOOT_ROM=$(jq -r '.BOOT_ROM' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
+    BOARD_ATTR=$(jq -r '.BOARD_ATTR' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
 
     TYPE=$(printf "0x%X\n" $(((USER_BOARDREV & 0xFF0) >> 4)))
     PROCESSOR=$(printf "0x%X\n" $(((USER_BOARDREV & 0xF000) >> 12)))
@@ -454,7 +459,14 @@ if [ -z "${DEMO_MODE_ONLY}" ] && [ -n "${RPI_DEVICE_FETCH_METADATA}" ]; then
     REVISION=$((USER_BOARDREV & 0xF))
 
     case ${TYPE} in
-        "0x11") BOARD_STR="CM4" ;;
+        "0x06") BOARD_STR="CM1" ;;
+        "0x08") BOARD_STR="3B" ;;
+        "0x09") BOARD_STR="Zero" ;;
+        "0x0A") BOARD_STR="CM3" ;;
+        "0x0D") BOARD_STR="3B+" ;;
+        "0x0E") BOARD_STR="3A+" ;;
+        "0x10") BOARD_STR="CM3+" ;;
+        "0x11") BOARD_STR="4B" ;;
         "0x12") BOARD_STR="Zero 2 W" ;;
         "0x13") BOARD_STR="400" ;;
         "0x14") BOARD_STR="CM4" ;;
@@ -497,6 +509,13 @@ if [ -z "${DEMO_MODE_ONLY}" ] && [ -n "${RPI_DEVICE_FETCH_METADATA}" ]; then
     esac
 
     keywriter_log "Board is: ${BOARD_STR}, with revision number ${REVISION}. Has Processor ${PROCESSOR_STR} with Memory ${MEMORY_STR}. Was manufactured by ${MANUFACTURER_STR}"
+
+    if [ -n "${RPI_DEVICE_METADATA_CSV}" ]; then
+        if [ ! -e "${RPI_DEVICE_METADATA_CSV}" ]; then
+            echo "serial,keyhash,mac,jtag_locked,advanced_boot,boot_rom,board_attr,boardname,boardrev,processor,memory,manufacturer" > "${RPI_DEVICE_METADATA_CSV}"
+        fi
+        echo "${TARGET_DEVICE_SERIAL},${CUSTOMER_KEY_HASH},${MAC_ADDRESS},${JTAG_LOCKED},${ADVANCED_BOOT},${BOOT_ROM},${BOARD_ATTR},${BOARD_STR},${REVISION},${PROCESSOR_STR},${MEMORY_STR},${MANUFACTURER_STR}" >> "${RPI_DEVICE_METADATA_CSV}"
+    fi
 fi
 keywriter_log "Keywriting completed. Rebooting for next phase."
 
