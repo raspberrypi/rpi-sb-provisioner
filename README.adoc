@@ -178,6 +178,15 @@ The metadata is inserted into the log for the device, and also as a serial-numbe
 
 Set to any value to enable metadata collection.
 
+=== RPI_DEVICE_RETRIEVE_KEYPAIR
+*Optional*
+
+Specify a directory to copy the device unique keypair to. The keys will be named <serial>.der and <serial>.pub
+
+Set to the path of a directory to use, leave blank to disable.
+
+NOTE: These keys are sensitive key material, and you must ensure they are handled appropriately.
+
 === RPI_SB_WORKDIR
 *Optional*
 
