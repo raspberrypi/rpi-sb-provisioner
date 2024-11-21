@@ -64,9 +64,6 @@ def validate_RPI_DEVICE_LOCK_JTAG(text) -> tuple[bool, str]:
 def validate_RPI_DEVICE_EEPROM_WP_SET(text) -> tuple[bool, str]:
     return (True, "")
 
-def validate_RPI_DEVICE_METADATA_CSV(text) -> tuple[bool, str]:
-    return (True, "")
-
 def validate_RPI_DEVICE_RETRIEVE_PRIVATE_KEY(text) -> tuple[bool, str]:
     return (True, "")
 
@@ -79,4 +76,9 @@ def validate_DEMO_MODE_ONLY(text) -> tuple[bool, str]:
 def validate_RPI_SB_WORKDIR(text) -> tuple[bool, str]:
     if text and text[0] != "/":
         return (False, "Please specify absolute path, beginning with /")
+    return (True, "")
+
+def validate_RPI_SB_PROVISONER_MANUFACTURING_DB(text) -> tuple[bool, str]:
+    if not os.path.exists(text):
+            return (False, "Failed to check file. You must create the file ahead of use, using 'touch " + text + "'")
     return (True, "")
