@@ -56,7 +56,6 @@ def validate_RPI_DEVICE_BOOTLOADER_CONFIG_FILE(text) -> tuple[bool, str]:
 
     return (True, "")
 
-
 def validate_RPI_DEVICE_LOCK_JTAG(text) -> tuple[bool, str]:
     return (True, "")
 
@@ -64,7 +63,7 @@ def validate_RPI_DEVICE_LOCK_JTAG(text) -> tuple[bool, str]:
 def validate_RPI_DEVICE_EEPROM_WP_SET(text) -> tuple[bool, str]:
     return (True, "")
 
-def validate_RPI_DEVICE_RETRIEVE_PRIVATE_KEY(text) -> tuple[bool, str]:
+def validate_RPI_DEVICE_RETRIEVE_KEYPAIR(text) -> tuple[bool, str]:
     return (True, "")
 
 def validate_RPI_DEVICE_FETCH_METADATA(text) -> tuple[bool, str]:
