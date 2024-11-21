@@ -167,7 +167,15 @@ Set to any value to enable EEPROM write protection.
 
 Store manufacturing data in a sqlite3 database. This will include the board serial, board revision, the boot ROM version, the MAC address of the ethernet port, any set hash of the customer signing key, the JTAG lock state, the board attributes and the advanced boot flags.
 
-Set to a writeable file path to enable data storage.
+You must not specify the path of a database stored on a network drive or similar storage, as this mechanism is only safe to use on a single provisioning system. For merging the output with multiple provisioning systems, consider "Processing the manufacturing database" later in this document.
+
+Create this file before execution, for example using `touch`:
+
+----
+$ touch ${RPI_SB_PROVISONER_MANUFACTURING_DB}
+----
+
+Set to the path of a file to contain a SQLite database stored on local storage.
 
 === RPI_DEVICE_FETCH_METADATA
 *Optional*
