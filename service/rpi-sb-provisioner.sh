@@ -510,11 +510,53 @@ if [ -z "${DEMO_MODE_ONLY}" ] && [ -n "${RPI_DEVICE_FETCH_METADATA}" ]; then
 
     keywriter_log "Board is: ${BOARD_STR}, with revision number ${REVISION}. Has Processor ${PROCESSOR_STR} with Memory ${MEMORY_STR}. Was manufactured by ${MANUFACTURER_STR}"
 
-    if [ -n "${RPI_DEVICE_METADATA_CSV}" ]; then
-        if [ ! -e "${RPI_DEVICE_METADATA_CSV}" ]; then
-            echo "serial,keyhash,mac,jtag_locked,advanced_boot,boot_rom,board_attr,boardname,boardrev,processor,memory,manufacturer" > "${RPI_DEVICE_METADATA_CSV}"
-        fi
-        echo "${TARGET_DEVICE_SERIAL},${CUSTOMER_KEY_HASH},${MAC_ADDRESS},${JTAG_LOCKED},${ADVANCED_BOOT},${BOOT_ROM},${BOARD_ATTR},${BOARD_STR},${REVISION},${PROCESSOR_STR},${MEMORY_STR},${MANUFACTURER_STR}" >> "${RPI_DEVICE_METADATA_CSV}"
+    if [ -f "${RPI_SB_PROVISONER_MANUFACTURING_DB}" ]; then
+        check_command_exists sqlite3
+        sqlite3 "${RPI_SB_PROVISONER_MANUFACTURING_DB}"         \
+            -cmd "PRAGMA journal_mode=WAL;"                     \
+            "CREATE TABLE IF NOT EXISTS rpi_sb_provisioner(     \
+                id              integer primary key,   \
+                boardname       varchar(255)        not null,   \
+                serial          char(8)             not null,   \
+                keyhash         char(64)            not null,   \
+                mac             char(17)            not null,   \
+                jtag_locked     int2                not null,   \
+                advanced_boot   char(8)             not null,   \
+                boot_rom        char(8)             not null,   \
+                board_attr      char(8)             not null,   \
+                board_revision  varchar(255)        not null,   \
+                processor       varchar(255)        not null,   \
+                memory          varchar(255)        not null,   \
+                manufacturer    varchar(255)        not null    \
+                );"
+        sqlite3 "${RPI_SB_PROVISONER_MANUFACTURING_DB}" \
+            "INSERT INTO rpi_sb_provisioner(\
+                boardname,                  \
+                serial,                     \
+                keyhash,                    \
+                mac,                        \
+                jtag_locked,                \
+                advanced_boot,              \
+                boot_rom,                   \
+                board_attr,                 \
+                board_revision,             \
+                processor,                  \
+                memory,                     \
+                manufacturer                \
+            ) VALUES (                      \
+                '${BOARD_STR}',               \
+                '${TARGET_DEVICE_SERIAL}',    \
+                '${CUSTOMER_KEY_HASH}',       \
+                '${MAC_ADDRESS}',             \
+                '${JTAG_LOCKED}',             \
+                '${ADVANCED_BOOT}',           \
+                '${BOOT_ROM}',                \
+                '${BOARD_ATTR}',              \
+                '${REVISION}',                \
+                '${PROCESSOR_STR}',           \
+                '${MEMORY_STR}',              \
+                '${MANUFACTURER_STR}',        \
+            );"
     fi
 fi
 keywriter_log "Keywriting completed. Rebooting for next phase."

@@ -162,10 +162,10 @@ Raspberry Pi devices that use an EEPROM as part of their boot flow can configure
 
 Set to any value to enable EEPROM write protection.
 
-=== RPI_DEVICE_METADATA_CSV
+=== RPI_SB_PROVISONER_MANUFACTURING_DB
 *Optional*
 
-Store manufacturing data in a comma separated values (CSV) file. This will include the board serial, board revision, the boot ROM version, the MAC address of the ethernet port, any set hash of the customer signing key, the JTAG lock state, the board attributes and the advanced boot flags.
+Store manufacturing data in a sqlite3 database. This will include the board serial, board revision, the boot ROM version, the MAC address of the ethernet port, any set hash of the customer signing key, the JTAG lock state, the board attributes and the advanced boot flags.
 
 Set to a writeable file path to enable data storage.
 
@@ -275,6 +275,17 @@ For example, to observe the progress of an individual device through a phase, yo
 ----
 $ tail -f -n 100 /var/log/rpi-sb-provisioner/<serial>/provisioner.log
 $ tail -f -n 100 /var/log/rpi-sb-provisioner/<serial>/triage.log
+----
+
+=== Processing the manufacturing database
+
+If you have enabled the manufacturing database (using RPI_SB_PROVISIONER_MANUFACTURING_DB), you can create a comma-separated value (CSV) file from the manufacturing database for use with other software.
+
+To do so, you must use the *sqlite3* program:
+
+----
+$ sqlite3 ${RPI_SB_PROVISIONER_MANUFACTURING_DB} -cmd ".headers on" -cmd ".mode csv" -cmd ".output mfg_db.csv" "SELECT * FROM rpi_sb_provisioner;"
+$ stat mfg_db.csv
 ----
 
 === Identifying secured devices
