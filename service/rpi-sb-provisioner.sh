@@ -555,7 +555,7 @@ if [ -z "${DEMO_MODE_ONLY}" ] && [ -n "${RPI_DEVICE_FETCH_METADATA}" ]; then
                 '${REVISION}',                \
                 '${PROCESSOR_STR}',           \
                 '${MEMORY_STR}',              \
-                '${MANUFACTURER_STR}',        \
+                '${MANUFACTURER_STR}'        \
             );"
     fi
 fi
