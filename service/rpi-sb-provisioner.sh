@@ -597,7 +597,7 @@ check_command_exists blockdev
 check_command_exists grep
 
 get_variable() {
-    [ -z "${DEMO_MODE_ONLY}" ] && fastboot getvar "$1" 2>&1 | grep -oP "${1}"': \K.*'
+    [ -z "${DEMO_MODE_ONLY}" ] && fastboot getvar "$1" 2>&1 | grep -oP "${1}"': \K[^\r\n]*'
 }
 
 TMP_DIR=$(mktemp -d)
