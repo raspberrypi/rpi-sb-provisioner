@@ -932,7 +932,11 @@ announce_stop "Writing OS images"
 
 if [ -z "${DEMO_MODE_ONLY}" ] && [ -d "${RPI_DEVICE_RETRIEVE_KEYPAIR}" ]; then
     announce_start "Capturing device keypair to ${RPI_DEVICE_RETRIEVE_KEYPAIR}"
-    get_variable private-key > "${RPI_DEVICE_RETRIEVE_KEYPAIR}/${TARGET_DEVICE_SERIAL}.der"
+    N_ALREADY_PROVISIONED=0
+    get_variable private-key > "${RPI_DEVICE_RETRIEVE_KEYPAIR}/${TARGET_DEVICE_SERIAL}.der" || N_ALREADY_PROVISIONED=$?
+    if [ 0 -ne "$N_ALREADY_PROVISIONED" ]; then
+        keywriter_log "Warning: Unable to retrieve device private key; already provisioned"
+    fi
     get_variable public-key > "${RPI_DEVICE_RETRIEVE_KEYPAIR}/${TARGET_DEVICE_SERIAL}.pub"
     announce_stop "Capturing device keypair to ${RPI_DEVICE_RETRIEVE_KEYPAIR}"
 fi
