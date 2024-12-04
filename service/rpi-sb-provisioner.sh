@@ -765,8 +765,13 @@ if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.img" ] ||
         # shellcheck disable=SC2086
         rm ../initramfs.cpio ${DEBUG}
 
-        # Insert required kernel modules
         initramfs_dir="$PWD"/ # trailing '/' is meaningful
+
+        # Remove any pre-existing kernel modules in initramfs
+        rm -rf "${initramfs_dir}usr/lib/modules"
+        mkdir -p "${initramfs_dir}usr/lib/modules"
+
+        # Insert required kernel modules
         cd "${rootfs_mount}"
         find usr/lib/modules \
             \( \
@@ -786,6 +791,11 @@ if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.img" ] ||
             \) \
             -exec cp -r --parents "{}" "${initramfs_dir}" \;
         cd -
+
+        # Generate depmod information
+        for kernel in $(find "${initramfs_dir}usr/lib/modules" -mindepth 1 -maxdepth 1 -type d -printf '%f\n'); do
+            depmod --basedir "${initramfs_dir}" "${kernel}"
+        done
 
         find . -print0 | cpio --null -ov --format=newc > ../initramfs.cpio
         cd "${TMP_DIR}"
