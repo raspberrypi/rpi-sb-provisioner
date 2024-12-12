@@ -45,6 +45,8 @@ read_config() {
     fi
 }
 
+: "${RPI_DEVICE_STORAGE_CIPHER:=aes-xts-plain64}"
+
 get_signing_directives() {
     if [ -n "${CUSTOMER_KEY_PKCS11_NAME}" ]; then
         echo "${CUSTOMER_KEY_PKCS11_NAME} -engine pkcs11 -keyform engine"
@@ -788,6 +790,18 @@ if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.img" ] ||
                 -name 'aes_generic.*' \
                 -o \
                 -name 'aes-arm64.*' \
+                -o \
+                -name 'libpoly1305.*' \
+                -o \
+                -name 'nhpoly1305.*' \
+                -o \
+                -name 'adiantum.*' \
+                -o \
+                -name 'libchacha.*' \
+                -o \
+                -name 'chacha-neon.*' \
+                -o \
+                -name 'chacha_generic.*' \
             \) \
             -exec cp -r --parents "{}" "${initramfs_dir}" \;
         cd -
@@ -901,7 +915,7 @@ sleep 2
 sleep 2
 [ -z "${DEMO_MODE_ONLY}" ] && fastboot oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 83 # Grow to fill storage
 sleep 2
-[ -z "${DEMO_MODE_ONLY}" ] && fastboot oem cryptinit "${RPI_DEVICE_STORAGE_TYPE}"p2 root
+[ -z "${DEMO_MODE_ONLY}" ] && fastboot oem cryptinit "${RPI_DEVICE_STORAGE_TYPE}"p2 root "${RPI_DEVICE_STORAGE_CIPHER}"
 sleep 2
 [ -z "${DEMO_MODE_ONLY}" ] && fastboot oem cryptopen "${RPI_DEVICE_STORAGE_TYPE}"p2 cryptroot
 sleep 2
