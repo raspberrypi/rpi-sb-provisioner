@@ -127,6 +127,11 @@ This should be your 'gold master' OS image. No customisation should be present i
 
 Specify the kind of storage your target will use. Supported values are `sd`, `emmc`, `nvme`.
 
+=== RPI_DEVICE_STORAGE_CIPHER
+*Optional*
+
+Specify the full-disk-encryption cipher. Supported values are `aes-xts-plain64`, `xchacha12,aes-adiantum-plain64`. If `RPI_DEVICE_STORAGE_CIPHER` is not specified, it defaults to `aes-xts-plain64`. `aes-xts-plain64` is recommended for Raspberry Pi 5 family devices (including Compute Module 5); all other Raspberry Pi devices are recommended to use `xchacha12,aes-adiantum-plain64` for performance reasons.
+
 === RPI_DEVICE_FAMILY
 *Mandatory*
 
