@@ -138,6 +138,8 @@ update_eeprom() {
     public_pem_file="$4"
     sign_args=""
 
+    keywriter_log "update_eeprom() src_image: \"${src_image}\""
+
     if [ -n "${pem_file}" ]; then
         if ! grep -q "SIGNED_BOOT=1" "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"; then
             # If the OTP bit to require secure boot are set then then
@@ -358,6 +360,22 @@ cleanup() {
 }
 trap cleanup EXIT
 
+FIRMWARE_ROOT="/lib/firmware/raspberrypi/bootloader"
+FIRMWARE_RELEASE_STATUS="default"
+
+# Taken from rpi-eeprom-update
+BOOTLOADER_UPDATE_IMAGE=""
+BOOTLOADER_UPDATE_VERSION=0
+getBootloaderUpdateVersion() {
+   BOOTLOADER_UPDATE_VERSION=0
+   match=".*/pieeprom-[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].bin"
+   latest="$(find "${FIRMWARE_IMAGE_DIR}/" -maxdepth 1 -type f -follow -size "${EEPROM_SIZE}c" -regex "${match}" | sort -r | head -n1)"
+   if [ -f "${latest}" ]; then
+      BOOTLOADER_UPDATE_VERSION=$(strings "${latest}" | grep BUILD_TIMESTAMP | sed 's/.*=//g')
+      BOOTLOADER_UPDATE_IMAGE="${latest}"
+   fi
+}
+
 FLASHING_DIR=$(mktemp -d)
 derivePublicKey
 identifyBootloaderConfig
@@ -370,13 +388,21 @@ BOOTCODE_BINARY_IMAGE=
 BOOTCODE_FLASHING_NAME=
 case ${RPI_DEVICE_FAMILY} in
     4)
-        SOURCE_EEPROM_IMAGE="/lib/firmware/raspberrypi/bootloader-2711/latest/pieeprom-2024-09-05.bin"
-        BOOTCODE_BINARY_IMAGE="/lib/firmware/raspberrypi/bootloader-2711/latest/recovery.bin"
+        BCM_CHIP=2711
+        EEPROM_SIZE=524288
+        FIRMWARE_IMAGE_DIR="${FIRMWARE_ROOT}-${BCM_CHIP}/${FIRMWARE_RELEASE_STATUS}"
+        getBootloaderUpdateVersion
+        SOURCE_EEPROM_IMAGE="${BOOTLOADER_UPDATE_IMAGE}"
+        BOOTCODE_BINARY_IMAGE="${FIRMWARE_IMAGE_DIR}/recovery.bin"
         BOOTCODE_FLASHING_NAME="${FLASHING_DIR}/bootcode4.bin"
         ;;
     5)
-        SOURCE_EEPROM_IMAGE="/lib/firmware/raspberrypi/bootloader-2712/latest/pieeprom-2024-09-23.bin"
-        BOOTCODE_BINARY_IMAGE="/lib/firmware/raspberrypi/bootloader-2712/latest/recovery.bin"
+        BCM_CHIP=2712
+        EEPROM_SIZE=2097152
+        FIRMWARE_IMAGE_DIR="${FIRMWARE_ROOT}-${BCM_CHIP}/${FIRMWARE_RELEASE_STATUS}"
+        getBootloaderUpdateVersion
+        SOURCE_EEPROM_IMAGE="${BOOTLOADER_UPDATE_IMAGE}"
+        BOOTCODE_BINARY_IMAGE="${FIRMWARE_IMAGE_DIR}/recovery.bin"
         BOOTCODE_FLASHING_NAME="${FLASHING_DIR}/bootcode5.bin"
         ;;
     *)
