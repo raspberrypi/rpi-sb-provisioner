@@ -43,6 +43,13 @@ def validate_RPI_DEVICE_STORAGE_TYPE(text) -> tuple[bool, str]:
         return (False, "type `" + text + "` was not any of sd, nvme or emmc")
 
 
+def validate_RPI_DEVICE_STORAGE_CIPHER(text) -> tuple[bool, str]:
+    if text in "aes-xts-plain64 xchacha12,aes-adiantum-plain64":
+        return (True, "")
+    else:
+        return (False, "cipher `" + text + "` was not any of aes-xts-plain64, xchacha12,aes-adiantum-plain64")
+
+
 def validate_RPI_DEVICE_FAMILY(text) -> tuple[bool, str]:
     if text in "45":
         return (True, "")

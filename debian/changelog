@@ -1,3 +1,12 @@
+rpi-sb-provisioner (1.3.1) unstable; urgency=medium
+
+  * provisioner: Generate depmod information for pre-boot
+      authentication environment
+  * provisioner: Introduce LUKSv2 cipher selection mechanism
+  * provisioner: Device-unique key retreival fixes
+
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Fri, 13 Dec 2024 11:15:00 +0000
+
 rpi-sb-provisioner (1.3.0) unstable; urgency=medium
 
   * provisioner: Add optional manufacturing database
