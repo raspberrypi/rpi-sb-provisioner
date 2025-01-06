@@ -224,7 +224,7 @@ Set to `1` to allow the service to run without actually writing keys or OS image
 == Using rpi-sb-provisioner
 `rpi-sb-provisioner` is composed of three `systemd` services that are triggered by the connection of a device in RPIBOOT mode to a USB port. With `rpi-sb-provisioner` configured to your requirements, all that is therefore required is to connect your target Raspberry Pi device in RPIBOOT mode.
 
-For any Raspberry Pi Compute Module on the matching Raspberry Pi Compute Module IO Board, you can do this by using the single jumper wire to connect the `disable eMMC Boot` pins on the 12-pin header at the top of the board.
+For any Raspberry Pi Compute Module on the matching Raspberry Pi Compute Module IO Board, you can do this by using the single Jumper Wire to connect the `disable eMMC Boot` pins on the 12-pin header at the top of the board.
 
 [pdfwidth=90%]
 .Force your Compute Module into RPIBOOT mode by connecting the 'disable eMMC Boot' pins
