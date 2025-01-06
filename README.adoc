@@ -44,6 +44,8 @@ Connect your Raspberry Pi 5 to your Raspberry Pi Compute Module 4 or 5 IO Board 
 .A correctly connected provisioning set-up
 image::docs/images/rpi-connection-cm4io.png[]
 
+WARNING: You *must not* have additional peripherals connected via USB to the Compute Module IO board, as the provisioning Raspberry Pi will only supply up to 900mA of power to the provisoned Compute Module.
+
 === Software configuration
 
 `rpi-sb-provisioner` is provided from the Raspberry Pi OS APT repositories, and can be installed in the usual manner.
@@ -220,15 +222,15 @@ RPI_SB_WORKDIR=/srv/rpi-sb-provisioner/
 Set to `1` to allow the service to run without actually writing keys or OS images. You may, for example, use `DEMO_MODE_ONLY` in combination with `RPI_SB_WORKDIR` to inspect the modifications `rpi-sb-provisioner` would make to your OS ahead of deployment.
 
 == Using rpi-sb-provisioner
-`rpi-sb-provisioner` is composed of three `systemd` services that are triggered by the connection of a device in RPIBoot mode to a USB port. With `rpi-sb-provisioner` configured to your requirements, all that is therefore required is to connect your target Raspberry Pi device in RPIBoot mode.
+`rpi-sb-provisioner` is composed of three `systemd` services that are triggered by the connection of a device in RPIBOOT mode to a USB port. With `rpi-sb-provisioner` configured to your requirements, all that is therefore required is to connect your target Raspberry Pi device in RPIBOOT mode.
 
-For any Raspberry Pi Compute Module on the matching Raspberry Pi Compute Module IO Board, you can do this by using the single jumper wire to connect the `disable eMMC Boot` pins on the 12-pin header at the top of the board
+For any Raspberry Pi Compute Module on the matching Raspberry Pi Compute Module IO Board, you can do this by using the single jumper wire to connect the `disable eMMC Boot` pins on the 12-pin header at the top of the board.
 
 [pdfwidth=90%]
-.Force your Compute Module into RPIBoot mode by connecting the 'disable eMMC Boot' pins
+.Force your Compute Module into RPIBOOT mode by connecting the 'disable eMMC Boot' pins
 image::docs/images/rpi-cm4io-detail.png[]
 
-After connecting your device in RPIBoot mode, `rpi-sb-provisioner` will perform the following steps:
+After connecting your device in RPIBOOT mode, `rpi-sb-provisioner` will perform the following steps:
 
 * A new device connection is recognised over USB, and enters the *triage* phase:
 ** If your device has not been recorded as having been provisioned, start the *provisioner*
