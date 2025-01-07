@@ -141,11 +141,12 @@ Specify the full-disk-encryption cipher. Supported values are `aes-xts-plain64`,
 === RPI_DEVICE_FAMILY
 *Mandatory*
 
-Specify the family of Raspberry Pi device you are provisioning. Supported values are `4, 5`. For example,
+Specify the family of Raspberry Pi device you are provisioning. Supported values are `4, 5, 2W`. For example,
 
 A Raspberry Pi Compute Module 4 would be family `4`
 A Raspberry Pi 5 would be family `5`
 A Raspberry Pi Compute Module 5 would be family `5`
+A Raspberry Pi Zero 2 W would be family `2W`
 
 === RPI_DEVICE_BOOTLOADER_CONFIG_FILE
 *Mandatory, with a default*

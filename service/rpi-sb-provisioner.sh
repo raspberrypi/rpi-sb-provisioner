@@ -670,6 +670,10 @@ fi
 announce_start "Finding/generating fastboot image"
 
 case "${RPI_DEVICE_FAMILY}" in
+    2W)
+        # Raspberry Pi Zero 2W-class devices do not use signed bootcode files, so just copy the file into the relevant place.
+        cp /usr/share/rpiboot/mass-storage-gadget64/bootfiles.bin "${RPI_SB_WORKDIR}/bootfiles.bin"
+        ;;
     4)
         # Raspberry Pi 4-class devices do not use signed bootcode files, so just copy the file into the relevant place.
         cp /usr/share/rpiboot/mass-storage-gadget64/bootfiles.bin "${RPI_SB_WORKDIR}/bootfiles.bin"
@@ -878,6 +882,9 @@ if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.img" ] ||
     sed --in-place 's%^\(auto_initramfs=\S*\)%#\1%' "${TMP_DIR}"/rpi-boot-img-mount/config.txt
 
     case "${RPI_DEVICE_FAMILY}" in
+        2W)
+            echo 'initramfs initramfs8' >> "${TMP_DIR}"/rpi-boot-img-mount/config.txt
+            ;;
         4)
             echo 'initramfs initramfs8' >> "${TMP_DIR}"/rpi-boot-img-mount/config.txt
             ;;
@@ -888,47 +895,55 @@ if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.img" ] ||
     
     announce_stop "config.txt modification"
 
-    announce_start "boot.img creation"
+    # Move the fastboot rpiboot configuration file into the flashing directory
     cp "$(get_fastboot_config_file)" "${TMP_DIR}"/config.txt
 
-    rpi-make-boot-image -b "pi${RPI_DEVICE_FAMILY}" -d "${TMP_DIR}"/rpi-boot-img-mount -o "${TMP_DIR}"/boot.img
-    announce_stop "boot.img creation"
+    if [ "${RPI_DEVICE_FAMILY}" != "2W" ]; then
+        announce_start "boot.img creation"
+        rpi-make-boot-image -b "pi${RPI_DEVICE_FAMILY}" -d "${TMP_DIR}"/rpi-boot-img-mount -o "${TMP_DIR}"/boot.img
+        announce_stop "boot.img creation"
 
-    announce_start "boot.img signing"
-    # N.B. rpi-eeprom-digest could be used here but it includes a timestamp that is not required for this use-case
-    sha256sum "${TMP_DIR}"/boot.img | awk '{print $1}' > "${TMP_DIR}"/boot.sig
-    printf 'rsa2048: ' >> "${TMP_DIR}"/boot.sig
-    # shellcheck disable=SC2046
-    ${OPENSSL} dgst -sign $(get_signing_directives) -sha256 "${TMP_DIR}"/boot.img | xxd -c 4096 -p >> "${TMP_DIR}"/boot.sig
-    announce_stop "boot.img signing"
+        announce_start "boot.img signing"
+        # N.B. rpi-eeprom-digest could be used here but it includes a timestamp that is not required for this use-case
+        sha256sum "${TMP_DIR}"/boot.img | awk '{print $1}' > "${TMP_DIR}"/boot.sig
+        printf 'rsa2048: ' >> "${TMP_DIR}"/boot.sig
+        # shellcheck disable=SC2046
+        ${OPENSSL} dgst -sign $(get_signing_directives) -sha256 "${TMP_DIR}"/boot.img | xxd -c 4096 -p >> "${TMP_DIR}"/boot.sig
+        announce_stop "boot.img signing"
 
-    announce_start "Boot Image partition extraction"
+        announce_start "Boot Image partition extraction"
 
-    REQUIRED_BOOTIMG_SIZE="$(stat -c%s "${TMP_DIR}"/boot.img)"
-    REQUIRED_BOOTSIG_SIZE="$(stat -c%s "${TMP_DIR}"/boot.sig)"
-    REQUIRED_CONFIGTXT_SIZE="$(stat -c%s "${TMP_DIR}"/config.txt)"
-    SECTOR_SIZE=512
-    TOTAL_SIZE=$((REQUIRED_BOOTIMG_SIZE + REQUIRED_BOOTSIG_SIZE + REQUIRED_CONFIGTXT_SIZE))
-    TOTAL_SIZE=$((TOTAL_SIZE + 64))
-    TOTAL_SIZE=$(((TOTAL_SIZE + 1023) / 1024))
-    SECTORS=$((TOTAL_SIZE / SECTOR_SIZE))
-    SECTORS=$((SECTORS / 2))
-    # HACK: pi-gen is producing 512mib boot images, but we should _really_ calculate this from the base image.
-    dd if=/dev/zero of="${TMP_DIR}"/bootfs-temporary.img bs=1M count=512
-    mkfs.fat -n "BOOT" "${TMP_DIR}"/bootfs-temporary.img
+        REQUIRED_BOOTIMG_SIZE="$(stat -c%s "${TMP_DIR}"/boot.img)"
+        REQUIRED_BOOTSIG_SIZE="$(stat -c%s "${TMP_DIR}"/boot.sig)"
+        REQUIRED_CONFIGTXT_SIZE="$(stat -c%s "${TMP_DIR}"/config.txt)"
+        SECTOR_SIZE=512
+        TOTAL_SIZE=$((REQUIRED_BOOTIMG_SIZE + REQUIRED_BOOTSIG_SIZE + REQUIRED_CONFIGTXT_SIZE))
+        TOTAL_SIZE=$((TOTAL_SIZE + 64))
+        TOTAL_SIZE=$(((TOTAL_SIZE + 1023) / 1024))
+        SECTORS=$((TOTAL_SIZE / SECTOR_SIZE))
+        SECTORS=$((SECTORS / 2))
+        # HACK: pi-gen is producing 512mib boot images, but we should _really_ calculate this from the base image.
+        dd if=/dev/zero of="${TMP_DIR}"/bootfs-temporary.img bs=1M count=512
+        mkfs.fat -n "BOOT" "${TMP_DIR}"/bootfs-temporary.img
 
-    META_BOOTIMG_MOUNT_PATH=$(mktemp -d)
-    mount -o loop "${TMP_DIR}"/bootfs-temporary.img "${META_BOOTIMG_MOUNT_PATH}"
-    cp "${TMP_DIR}"/boot.img "${META_BOOTIMG_MOUNT_PATH}"/boot.img
-    cp "${TMP_DIR}"/boot.sig "${META_BOOTIMG_MOUNT_PATH}"/boot.sig
-    cp "${TMP_DIR}"/config.txt "${META_BOOTIMG_MOUNT_PATH}"/config.txt
+        META_BOOTIMG_MOUNT_PATH=$(mktemp -d)
+        mount -o loop "${TMP_DIR}"/bootfs-temporary.img "${META_BOOTIMG_MOUNT_PATH}"
+        cp "${TMP_DIR}"/boot.img "${META_BOOTIMG_MOUNT_PATH}"/boot.img
+        cp "${TMP_DIR}"/boot.sig "${META_BOOTIMG_MOUNT_PATH}"/boot.sig
+        cp "${TMP_DIR}"/config.txt "${META_BOOTIMG_MOUNT_PATH}"/config.txt
 
-    sync; sync; sync;
+        sync; sync; sync;
 
-    umount "${META_BOOTIMG_MOUNT_PATH}"
-    rm -rf "${META_BOOTIMG_MOUNT_PATH}"
-    mv "${TMP_DIR}"/bootfs-temporary.img "${RPI_SB_WORKDIR}"/bootfs-temporary.img
-    announce_stop "Boot Image partition extraction"
+        umount "${META_BOOTIMG_MOUNT_PATH}"
+        rm -rf "${META_BOOTIMG_MOUNT_PATH}"
+        mv "${TMP_DIR}"/bootfs-temporary.img "${RPI_SB_WORKDIR}"/bootfs-temporary.img
+        announce_stop "Boot Image partition extraction"
+    else # Legacy boot flow - not using signed boot
+        announce_start "Copying boot image to working directory"
+        dd if="${BOOT_DEV}" of="${RPI_SB_WORKDIR}"/bootfs-temporary.img
+        sync; sync; sync;
+        announce_stop "Copying boot image to working directory"
+    fi
 fi # Slow path
 
 announce_start "Erase / Partition Device Storage"
