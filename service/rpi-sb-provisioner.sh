@@ -488,7 +488,40 @@ fi
 # With the EEPROMs configured and signed, RPIBoot them.
 mkdir -p "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/"
 keywriter_log "Writing key and EEPROM configuration to the device"
-[ ! -f "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/special-skip-keywriter" ] && timeout_fatal rpiboot -d "${FLASHING_DIR}" -i "${TARGET_DEVICE_SERIAL}" -j "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/"
+set +e
+[ -z "${DEMO_MODE_ONLY}" ] && timeout 120 rpiboot -d "${FLASHING_DIR}" -i "${TARGET_DEVICE_SERIAL}" -j "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/"
+set -e
+KEYWRITER_EXIT_STATUS=$?
+if [ ${KEYWRITER_EXIT_STATUS} -eq 124 ]; then
+    keywriter_log "Writing failed, timed out."
+    case "${RPI_DEVICE_FAMILY}" in
+        5)
+            # Raspberry Pi 5-family hardware may already have a key provisioned - so retry with a signed bootcode.
+            rpi-sign-bootcode --debug -c 2712 -i "${BOOTCODE_BINARY_IMAGE}" -o "${BOOTCODE_FLASHING_NAME}" -k "${CUSTOMER_KEY_FILE_PEM}" -v 0 -n 16
+            [ -z "${DEMO_MODE_ONLY}" ] && timeout 120 rpiboot -d "${FLASHING_DIR}" -i "${TARGET_DEVICE_SERIAL}" -j "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/"
+            KEYWRITER_RETRY_EXIT_STATUS=$?
+            if [ ${KEYWRITER_RETRY_EXIT_STATUS} -eq 124 ]; then
+                # If the retry with a signed recovery image fails, this is likely a hard failure.
+                echo "${KEYWRITER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+                return 124
+            elif [ ${KEYWRITER_EXIT_STATUS} -ne 0 ]; then
+                keywriter_log "Failed to load keywriter: ${KEYWRITER_EXIT_STATUS}"
+                echo "${KEYWRITER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+                return ${KEYWRITER_EXIT_STATUS}
+            fi
+        ;;
+        *)
+            # If we're not Raspberry Pi 5-family, then this is the end of the line, no retry will help.
+            echo "${KEYWRITER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+            return 124
+        ;;
+    esac
+elif [ ${KEYWRITER_EXIT_STATUS} -ne 0 ]; then
+    keywriter_log "Failed to load keywriter: ${KEYWRITER_EXIT_STATUS}"
+    echo "${KEYWRITER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+    return ${KEYWRITER_EXIT_STATUS}
+fi
+keywriter_log "Keywriting completed."
 
 rm -rf "${FLASHING_DIR}"
 
@@ -878,9 +911,6 @@ if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.img" ] ||
     sed --in-place 's%^\(auto_initramfs=\S*\)%#\1%' "${TMP_DIR}"/rpi-boot-img-mount/config.txt
 
     case "${RPI_DEVICE_FAMILY}" in
-        2W)
-            echo 'initramfs initramfs8' >> "${TMP_DIR}"/rpi-boot-img-mount/config.txt
-            ;;
         4)
             echo 'initramfs initramfs8' >> "${TMP_DIR}"/rpi-boot-img-mount/config.txt
             ;;
@@ -891,81 +921,70 @@ if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.img" ] ||
     
     announce_stop "config.txt modification"
 
-    # Move the fastboot rpiboot configuration file into the flashing directory
+    announce_start "boot.img creation"
     cp "$(get_fastboot_config_file)" "${TMP_DIR}"/config.txt
 
-    if [ "${RPI_DEVICE_FAMILY}" != "2W" ]; then
-        announce_start "boot.img creation"
-        rpi-make-boot-image -b "pi${RPI_DEVICE_FAMILY}" -d "${TMP_DIR}"/rpi-boot-img-mount -o "${TMP_DIR}"/boot.img
-        announce_stop "boot.img creation"
+    rpi-make-boot-image -b "pi${RPI_DEVICE_FAMILY}" -d "${TMP_DIR}"/rpi-boot-img-mount -o "${TMP_DIR}"/boot.img
+    announce_stop "boot.img creation"
 
-        announce_start "boot.img signing"
-        # N.B. rpi-eeprom-digest could be used here but it includes a timestamp that is not required for this use-case
-        sha256sum "${TMP_DIR}"/boot.img | awk '{print $1}' > "${TMP_DIR}"/boot.sig
-        printf 'rsa2048: ' >> "${TMP_DIR}"/boot.sig
-        # shellcheck disable=SC2046
-        ${OPENSSL} dgst -sign $(get_signing_directives) -sha256 "${TMP_DIR}"/boot.img | xxd -c 4096 -p >> "${TMP_DIR}"/boot.sig
-        announce_stop "boot.img signing"
+    announce_start "boot.img signing"
+    # N.B. rpi-eeprom-digest could be used here but it includes a timestamp that is not required for this use-case
+    sha256sum "${TMP_DIR}"/boot.img | awk '{print $1}' > "${TMP_DIR}"/boot.sig
+    printf 'rsa2048: ' >> "${TMP_DIR}"/boot.sig
+    # shellcheck disable=SC2046
+    ${OPENSSL} dgst -sign $(get_signing_directives) -sha256 "${TMP_DIR}"/boot.img | xxd -c 4096 -p >> "${TMP_DIR}"/boot.sig
+    announce_stop "boot.img signing"
 
-        announce_start "Boot Image partition extraction"
+    announce_start "Boot Image partition extraction"
 
-        REQUIRED_BOOTIMG_SIZE="$(stat -c%s "${TMP_DIR}"/boot.img)"
-        REQUIRED_BOOTSIG_SIZE="$(stat -c%s "${TMP_DIR}"/boot.sig)"
-        REQUIRED_CONFIGTXT_SIZE="$(stat -c%s "${TMP_DIR}"/config.txt)"
-        SECTOR_SIZE=512
-        TOTAL_SIZE=$((REQUIRED_BOOTIMG_SIZE + REQUIRED_BOOTSIG_SIZE + REQUIRED_CONFIGTXT_SIZE))
-        TOTAL_SIZE=$((TOTAL_SIZE + 64))
-        TOTAL_SIZE=$(((TOTAL_SIZE + 1023) / 1024))
-        SECTORS=$((TOTAL_SIZE / SECTOR_SIZE))
-        SECTORS=$((SECTORS / 2))
-        # HACK: pi-gen is producing 512mib boot images, but we should _really_ calculate this from the base image.
-        dd if=/dev/zero of="${TMP_DIR}"/bootfs-temporary.img bs=1M count=512
-        mkfs.fat -n "BOOT" "${TMP_DIR}"/bootfs-temporary.img
+    REQUIRED_BOOTIMG_SIZE="$(stat -c%s "${TMP_DIR}"/boot.img)"
+    REQUIRED_BOOTSIG_SIZE="$(stat -c%s "${TMP_DIR}"/boot.sig)"
+    REQUIRED_CONFIGTXT_SIZE="$(stat -c%s "${TMP_DIR}"/config.txt)"
+    SECTOR_SIZE=512
+    TOTAL_SIZE=$((REQUIRED_BOOTIMG_SIZE + REQUIRED_BOOTSIG_SIZE + REQUIRED_CONFIGTXT_SIZE))
+    TOTAL_SIZE=$((TOTAL_SIZE + 64))
+    TOTAL_SIZE=$(((TOTAL_SIZE + 1023) / 1024))
+    SECTORS=$((TOTAL_SIZE / SECTOR_SIZE))
+    SECTORS=$((SECTORS / 2))
+    # HACK: pi-gen is producing 512mib boot images, but we should _really_ calculate this from the base image.
+    dd if=/dev/zero of="${TMP_DIR}"/bootfs-temporary.img bs=1M count=512
+    mkfs.fat -n "BOOT" "${TMP_DIR}"/bootfs-temporary.img
 
-        META_BOOTIMG_MOUNT_PATH=$(mktemp -d)
-        mount -o loop "${TMP_DIR}"/bootfs-temporary.img "${META_BOOTIMG_MOUNT_PATH}"
-        cp "${TMP_DIR}"/boot.img "${META_BOOTIMG_MOUNT_PATH}"/boot.img
-        cp "${TMP_DIR}"/boot.sig "${META_BOOTIMG_MOUNT_PATH}"/boot.sig
-        cp "${TMP_DIR}"/config.txt "${META_BOOTIMG_MOUNT_PATH}"/config.txt
+    META_BOOTIMG_MOUNT_PATH=$(mktemp -d)
+    mount -o loop "${TMP_DIR}"/bootfs-temporary.img "${META_BOOTIMG_MOUNT_PATH}"
+    cp "${TMP_DIR}"/boot.img "${META_BOOTIMG_MOUNT_PATH}"/boot.img
+    cp "${TMP_DIR}"/boot.sig "${META_BOOTIMG_MOUNT_PATH}"/boot.sig
+    cp "${TMP_DIR}"/config.txt "${META_BOOTIMG_MOUNT_PATH}"/config.txt
 
-        sync; sync; sync;
+    sync; sync; sync;
 
-        umount "${META_BOOTIMG_MOUNT_PATH}"
-        rm -rf "${META_BOOTIMG_MOUNT_PATH}"
-        mv "${TMP_DIR}"/bootfs-temporary.img "${RPI_SB_WORKDIR}"/bootfs-temporary.img
-        announce_stop "Boot Image partition extraction"
-    else # Legacy boot flow - not using signed boot
-        announce_start "Copying boot image to working directory"
-        dd if="${BOOT_DEV}" of="${RPI_SB_WORKDIR}"/bootfs-temporary.img
-        sync; sync; sync;
-        announce_stop "Copying boot image to working directory"
-    fi
+    umount "${META_BOOTIMG_MOUNT_PATH}"
+    rm -rf "${META_BOOTIMG_MOUNT_PATH}"
+    mv "${TMP_DIR}"/bootfs-temporary.img "${RPI_SB_WORKDIR}"/bootfs-temporary.img
+    announce_stop "Boot Image partition extraction"
 fi # Slow path
 
 announce_start "Erase / Partition Device Storage"
 
-# 64-bit extended serial numbers make this a required stage - up to this point, we only know
-# the older form 32-bit serial number, which will not match the identity known by fastbootd.
-FASTBOOT_DEVICE_SPECIFIER="$(fastboot devices | grep "${TARGET_DEVICE_SERIAL}" | cut -f1)"
-
-timeout_fatal fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar version
-
-KEYPAIR_DIR=/var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/keypair
-if [ -d "${RPI_DEVICE_RETRIEVE_KEYPAIR}" ]; then
-    KEYPAIR_DIR="${RPI_DEVICE_RETRIEVE_KEYPAIR}"
-fi
-mkdir -p "${KEYPAIR_DIR}"
-announce_start "Capturing device keypair to ${KEYPAIR_DIR}"
-N_ALREADY_PROVISIONED=0
-get_variable private-key > "${KEYPAIR_DIR}/${TARGET_DEVICE_SERIAL}.der" || N_ALREADY_PROVISIONED=$?
-if [ 0 -ne "$N_ALREADY_PROVISIONED" ]; then
-    keywriter_log "Warning: Unable to retrieve device private key; already provisioned"
-fi
-get_variable public-key > "${KEYPAIR_DIR}/${TARGET_DEVICE_SERIAL}.pub"
-announce_stop "Capturing device keypair to ${KEYPAIR_DIR}"
-
 # Arbitrary sleeps to handle lack of correct synchronisation in fastbootd.
-fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" erase "${RPI_DEVICE_STORAGE_TYPE}"
+set +e
+[ -z "${DEMO_MODE_ONLY}" ] && timeout 30 fastboot getvar version
+set -e
+FASTBOOT_EXIT_STATUS=$?
+if [ $FASTBOOT_EXIT_STATUS -eq 124 ]; then
+    provisioner_log "Loading Fastboot failed, timed out."
+    echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+    return 124
+elif [ $FASTBOOT_EXIT_STATUS -ne 0 ]; then
+    provisioner_log "Failed to load fastboot: ${FASTBOOT_EXIT_STATUS}"
+    echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+    return ${FASTBOOT_EXIT_STATUS}
+else
+    provisioner_log "Fastboot loaded."
+fi
+
+
+[ -z "${DEMO_MODE_ONLY}" ] && fastboot erase "${RPI_DEVICE_STORAGE_TYPE}"
 sleep 2
 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem partinit "${RPI_DEVICE_STORAGE_TYPE}" DOS
 sleep 2
