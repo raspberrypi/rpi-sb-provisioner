@@ -1,0 +1,7 @@
+[Unit]
+Description=Provision a Raspberry Pi Device an OS that you supply inside of a LUKSv2 container tied to the device.
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/rpi-fde-provisioner.sh %I
+EnvironmentFile=/etc/rpi-fde-provisioner/config

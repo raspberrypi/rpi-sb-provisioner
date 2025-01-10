@@ -648,10 +648,6 @@ fi
 announce_start "Finding/generating fastboot image"
 
 case "${RPI_DEVICE_FAMILY}" in
-    2W)
-        # Raspberry Pi Zero 2W-class devices do not use signed bootcode files, so just copy the file into the relevant place.
-        cp /usr/share/rpiboot/mass-storage-gadget64/bootfiles.bin "${RPI_SB_WORKDIR}/bootfiles.bin"
-        ;;
     4)
         # Raspberry Pi 4-class devices do not use signed bootcode files, so just copy the file into the relevant place.
         cp /usr/share/rpiboot/mass-storage-gadget64/bootfiles.bin "${RPI_SB_WORKDIR}/bootfiles.bin"

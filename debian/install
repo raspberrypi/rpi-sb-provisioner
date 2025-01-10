@@ -2,9 +2,11 @@ config/config.sh                                /usr/local/bin
 monitor/monitor.sh                              /usr/local/bin
 host-support/make-boot-image                    /usr/local/bin
 service/rpi-sb-provisioner.sh                   /usr/local/bin
+service/rpi-fde-provisioner.sh                  /usr/local/bin
 fetch-repo-package-list/fetch-repo-package-list /usr/local/bin
 rpi-package-download/rpi-package-download       /usr/local/bin
-device-triage/triage.sh                         /usr/local/bin
+device-triage/rpi-sb-triage.sh                  /usr/local/bin
+device-triage/rpi-fde-triage.sh                 /usr/local/bin
 
 config/config.py                    /usr/share/rpi-sb-provisioner/config
 config/validator.py                 /usr/share/rpi-sb-provisioner/config
@@ -17,6 +19,7 @@ monitor/monitor.css                 /usr/share/rpi-sb-provisioner/monitor
 
 service/rpi-sb-provisioner@.service                         /usr/local/lib/systemd/system
 device-triage/rpi-sb-triage@.service                        /usr/local/lib/systemd/system
+device-triage/rpi-fde-triage@.service                       /usr/local/lib/systemd/system
 
 fetch-repo-package-list/fetch-repo-package-list@.timer      /usr/local/lib/systemd/system
 fetch-repo-package-list/fetch-repo-package-list@.service    /usr/local/lib/systemd/system
