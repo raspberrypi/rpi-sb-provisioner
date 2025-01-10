@@ -5,18 +5,13 @@ set -x
 
 DEBUG=
 
-OPENSSL=${OPENSSL:-openssl}
-
-export KEYWRITER_FINISHED="KEYWRITER-FINISHED"
-export KEYWRITER_ABORTED="KEYWRITER-ABORTED"
-export KEYWRITER_STARTED="KEYWRITER-STARTED"
 export PROVISIONER_FINISHED="PROVISIONER-FINISHED"
 export PROVISIONER_ABORTED="PROVISIONER-ABORTED"
 export PROVISIONER_STARTED="PROVISIONER-STARTED"
 
 read_config() {
-    if [ -f /etc/rpi-sb-provisioner/config ]; then
-        . /etc/rpi-sb-provisioner/config
+    if [ -f /etc/rpi-naked-provisioner/config ]; then
+        . /etc/rpi-naked-provisioner/config
     else
         printf "%s\n" "Failed to load config. Please use configuration tool." >&2
         return 1
@@ -26,6 +21,7 @@ read_config() {
 read_config
 
 TARGET_DEVICE_SERIAL="$(udevadm info --name="$1" --query=property --property=ID_SERIAL_SHORT --value)"
+mkdir -p /var/log/rpi-naked-provisioner/"${TARGET_DEVICE_SERIAL}"/
 
 ring_bell() {
     tput bel
@@ -47,44 +43,33 @@ announce_stop() {
     provisioner_log "================================================================================"
 }
 
-: "${RPI_DEVICE_STORAGE_CIPHER:=xchacha12,aes-adiantum-plain64}"
-
 die() {
-    [ -n "${TARGET_DEVICE_SERIAL}" ] && echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-fde-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+    [ -n "${TARGET_DEVICE_SERIAL}" ] && echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-naked-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
     # shellcheck disable=SC2086
     echo "$@" ${DEBUG}
     exit 1
 }
 
 provisioner_log() {
-    [ -n "${TARGET_DEVICE_SERIAL}" ] && echo "$@" >> /var/log/rpi-fde-provisioner/"${TARGET_DEVICE_SERIAL}"/provisioner.log
+    [ -n "${TARGET_DEVICE_SERIAL}" ] && echo "$@" >> /var/log/rpi-naked-provisioner/"${TARGET_DEVICE_SERIAL}"/provisioner.log
     printf "%s\n" "$@"
 }
 
 TMP_DIR=""
 
-
-get_cryptroot() {
-    if [ -f /etc/rpi-sb-provisioner/cryptroot_initramfs ]; then
-        echo "/etc/rpi-sb-provisioner/cryptroot_initramfs"
-    else
-        echo "/var/lib/rpi-sb-provisioner/cryptroot_initramfs"
-    fi
-}
-
 get_fastboot_gadget() {
-    if [ -f /etc/rpi-sb-provisioner/fastboot-gadget.img ]; then
-        echo "/etc/rpi-sb-provisioner/fastboot-gadget.img"
+    if [ -f /etc/rpi-naked-provisioner/fastboot-gadget.img ]; then
+        echo "/etc/rpi-naked-provisioner/fastboot-gadget.img"
     else
-        echo "/var/lib/rpi-sb-provisioner/fastboot-gadget.img"
+        echo "/var/lib/rpi-naked-provisioner/fastboot-gadget.img"
     fi
 }
 
 get_fastboot_config_file() {
-    if [ -f /etc/rpi-sb-provisioner/boot_ramdisk_config.txt ]; then
-        echo "/etc/rpi-sb-provisioner/boot_ramdisk_config.txt"
+    if [ -f /etc/rpi-naked-provisioner/boot_ramdisk_config.txt ]; then
+        echo "/etc/rpi-naked-provisioner/boot_ramdisk_config.txt"
     else
-        echo "/var/lib/rpi-sb-provisioner/boot_ramdisk_config.txt"
+        echo "/var/lib/rpi-naked-provisioner/boot_ramdisk_config.txt"
     fi
 }
 
@@ -200,14 +185,10 @@ unmount_image() {
 }
 
 cleanup() {
-    unmount_image "${COPY_OS_COMBINED_FILE}"
     if [ -d "${TMP_DIR}" ]; then
         rm -rf "${TMP_DIR}"
     fi
 
-    if [ -f "${COPY_OS_COMBINED_FILE}" ]; then
-        rm -rf "${COPY_OS_COMBINED_FILE}"
-    fi
     if [ -n "${DELETE_PRIVATE_TMPDIR}" ]; then
         announce_start "Deleting customised intermediates"
         # shellcheck disable=SC2086
@@ -220,7 +201,7 @@ trap cleanup EXIT
 
 # Start the provisioner phase
 
-[ -n "${TARGET_DEVICE_SERIAL}" ] && echo "${PROVISIONER_STARTED}" >> /var/log/rpi-fde-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+[ -n "${TARGET_DEVICE_SERIAL}" ] && echo "${PROVISIONER_STARTED}" >> /var/log/rpi-naked-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
 
 # These tools are used to modify the supplied images, and deal with mounting and unmounting the images.
 check_command_exists losetup
@@ -228,18 +209,6 @@ check_command_exists mknod
 check_command_exists lsblk
 check_command_exists cut
 check_command_exists findmnt
-
-# python is used by the Raspberry Pi usbboot scripts, and used as part of transforming the supplied key.
-check_command_exists python
-# pycryptodome is a python module used by the Raspberry Pi usbboot scripts
-check_python_module_exists Cryptodome
-
-# These tools are used for modifying and packaging the initramfs
-check_command_exists zstd
-check_command_exists cpio
-check_command_exists sed
-check_command_exists cp
-check_command_exists mount
 
 # Fastboot is used as a transfer mechanism to get images and metadata to and from the Raspberry Pi device
 check_command_exists fastboot
@@ -257,11 +226,11 @@ RPI_DEVICE_STORAGE_TYPE="$(check_pidevice_storage_type "${RPI_DEVICE_STORAGE_TYP
 DELETE_PRIVATE_TMPDIR=
 announce_start "Finding the cache directory"
 if [ -z "${RPI_SB_WORKDIR}" ]; then
-    RPI_SB_WORKDIR=$(mktemp -d "rpi-fde-provisioner.XXX" --tmpdir="/srv/")
+    RPI_SB_WORKDIR=$(mktemp -d "rpi-naked-provisioner.XXX" --tmpdir="/srv/")
     announce_stop "Finding the cache directory: Created a new one as unspecified"
     DELETE_PRIVATE_TMPDIR="true"
 elif [ ! -d "${RPI_SB_WORKDIR}" ]; then
-    RPI_SB_WORKDIR=$(mktemp -d "rpi-fde-provisioner.XXX" --tmpdir="/srv/")
+    RPI_SB_WORKDIR=$(mktemp -d "rpi-naked-provisioner.XXX" --tmpdir="/srv/")
     announce_stop "Finding the cache directory: Created a new one in /srv, as supplied path isn't a directory"
     DELETE_PRIVATE_TMPDIR="true"
 else
@@ -269,21 +238,154 @@ else
     announce_stop "Finding the cache directory: Using specified name"
 fi
 
-# Prior to this point, we cannot know the device serial. From here, provisioner_log can do the Right Thing.
-mkdir -p /var/log/rpi-fde-provisioner/"${TARGET_DEVICE_SERIAL}"/
+announce_start "Staging fastboot image"
+
+cp /usr/share/rpiboot/mass-storage-gadget64/bootfiles.bin "${RPI_SB_WORKDIR}/bootfiles.bin"
+cp "$(get_fastboot_gadget)" "${RPI_SB_WORKDIR}"/boot.img
+cp "$(get_fastboot_config_file)" "${RPI_SB_WORKDIR}"/config.txt
+announce_stop "Staging fastboot image"
+
+announce_start "Starting fastboot"
+set +e
+[ -z "${DEMO_MODE_ONLY}" ] && timeout 120 rpiboot -v -d "${RPI_SB_WORKDIR}" -i "${TARGET_DEVICE_SERIAL}" -j "/var/log/rpi-naked-provisioner/${TARGET_DEVICE_SERIAL}/metadata/"
+set -e
+FLASHING_GADGET_EXIT_STATUS=$?
+if [ $FLASHING_GADGET_EXIT_STATUS -eq 124 ]; then
+    provisioner_log "Loading Fastboot failed, timed out."
+    echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-naked-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+    return 124
+elif [ $FLASHING_GADGET_EXIT_STATUS -ne 0 ]; then
+    provisioner_log "Fastboot failed to load: ${FLASHING_GADGET_EXIT_STATUS}"
+else
+    provisioner_log "Fastboot loaded."
+fi
+announce_stop "Starting fastboot"
+
+if [ -z "${DEMO_MODE_ONLY}" ] && [ -n "${RPI_DEVICE_FETCH_METADATA}" ]; then
+    USER_BOARDREV="0x$(jq -r '.USER_BOARDREV' < /var/log/rpi-naked-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)"
+    MAC_ADDRESS=$(jq -r '.MAC_ADDR' < /var/log/rpi-naked-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
+    CUSTOMER_KEY_HASH=$(jq -r '.CUSTOMER_KEY_HASH' < /var/log/rpi-naked-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
+    JTAG_LOCKED=$(jq -r '.JTAG_LOCKED' < /var/log/rpi-naked-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
+    ADVANCED_BOOT=$(jq -r '.ADVANCED_BOOT' < /var/log/rpi-naked-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
+    BOOT_ROM=$(jq -r '.BOOT_ROM' < /var/log/rpi-naked-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
+    BOARD_ATTR=$(jq -r '.BOARD_ATTR' < /var/log/rpi-naked-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
+
+    TYPE=$(printf "0x%X\n" $(((USER_BOARDREV & 0xFF0) >> 4)))
+    PROCESSOR=$(printf "0x%X\n" $(((USER_BOARDREV & 0xF000) >> 12)))
+    MEMORY=$(printf "0x%X\n" $(((USER_BOARDREV & 0x700000) >> 20)))
+    MANUFACTURER=$(printf "0x%X\n" $(((USER_BOARDREV & 0xF0000) >> 16)))
+    REVISION=$((USER_BOARDREV & 0xF))
+
+    case ${TYPE} in
+        "0x06") BOARD_STR="CM1" ;;
+        "0x08") BOARD_STR="3B" ;;
+        "0x09") BOARD_STR="Zero" ;;
+        "0x0A") BOARD_STR="CM3" ;;
+        "0x0D") BOARD_STR="3B+" ;;
+        "0x0E") BOARD_STR="3A+" ;;
+        "0x10") BOARD_STR="CM3+" ;;
+        "0x11") BOARD_STR="4B" ;;
+        "0x12") BOARD_STR="Zero 2 W" ;;
+        "0x13") BOARD_STR="400" ;;
+        "0x14") BOARD_STR="CM4" ;;
+        "0x15") BOARD_STR="CM4S" ;;
+        "0x17") BOARD_STR="5" ;;
+        *)
+            BOARD_STR="Unsupported Board"
+    esac
+
+    case ${PROCESSOR} in
+        "0x0") PROCESSOR_STR="BCM2835" ;;
+        "0x1") PROCESSOR_STR="BCM2836" ;;
+        "0x2") PROCESSOR_STR="BCM2837" ;;
+        "0x3") PROCESSOR_STR="BCM2711" ;;
+        "0x4") PROCESSOR_STR="BCM2712" ;;
+        *)
+            PROCESSOR_STR="Unknown"
+    esac
+
+    case ${MEMORY} in
+        "0x0") MEMORY_STR="256MB" ;;
+        "0x1") MEMORY_STR="512MB" ;;
+        "0x2") MEMORY_STR="1GB" ;;
+        "0x3") MEMORY_STR="2GB" ;;
+        "0x4") MEMORY_STR="4GB" ;;
+        "0x5") MEMORY_STR="8GB" ;;
+        *)
+            MEMORY_STR="Unknown"
+    esac
+
+    case ${MANUFACTURER} in
+        "0x0") MANUFACTURER_STR="Sony UK" ;;
+        "0x1") MANUFACTURER_STR="Egoman" ;;
+        "0x2") MANUFACTURER_STR="Embest" ;;
+        "0x3") MANUFACTURER_STR="Sony Japan" ;;
+        "0x4") MANUFACTURER_STR="Embest" ;;
+        "0x5") MANUFACTURER_STR="Stadium" ;;
+        *)
+            MANUFACTURER_STR="Unknown"
+    esac
+
+    keywriter_log "Board is: ${BOARD_STR}, with revision number ${REVISION}. Has Processor ${PROCESSOR_STR} with Memory ${MEMORY_STR}. Was manufactured by ${MANUFACTURER_STR}"
+
+    if [ -f "${RPI_SB_PROVISONER_MANUFACTURING_DB}" ]; then
+        check_command_exists sqlite3
+        sqlite3 "${RPI_SB_PROVISONER_MANUFACTURING_DB}"         \
+            -cmd "PRAGMA journal_mode=WAL;"                     \
+            "CREATE TABLE IF NOT EXISTS rpi_sb_provisioner(     \
+                id              integer primary key,   \
+                boardname       varchar(255)        not null,   \
+                serial          char(8)             not null,   \
+                keyhash         char(64)            not null,   \
+                mac             char(17)            not null,   \
+                jtag_locked     int2                not null,   \
+                advanced_boot   char(8)             not null,   \
+                boot_rom        char(8)             not null,   \
+                board_attr      char(8)             not null,   \
+                board_revision  varchar(255)        not null,   \
+                processor       varchar(255)        not null,   \
+                memory          varchar(255)        not null,   \
+                manufacturer    varchar(255)        not null    \
+                );"
+        sqlite3 "${RPI_SB_PROVISONER_MANUFACTURING_DB}" \
+            "INSERT INTO rpi_sb_provisioner(\
+                boardname,                  \
+                serial,                     \
+                keyhash,                    \
+                mac,                        \
+                jtag_locked,                \
+                advanced_boot,              \
+                boot_rom,                   \
+                board_attr,                 \
+                board_revision,             \
+                processor,                  \
+                memory,                     \
+                manufacturer                \
+            ) VALUES (                      \
+                '${BOARD_STR}',               \
+                '${TARGET_DEVICE_SERIAL}',    \
+                '${CUSTOMER_KEY_HASH}',       \
+                '${MAC_ADDRESS}',             \
+                '${JTAG_LOCKED}',             \
+                '${ADVANCED_BOOT}',           \
+                '${BOOT_ROM}',                \
+                '${BOARD_ATTR}',              \
+                '${REVISION}',                \
+                '${PROCESSOR_STR}',           \
+                '${MEMORY_STR}',              \
+                '${MANUFACTURER_STR}'        \
+            );"
+    fi
+fi
 
 # Fast path: If we've already generated the assets, just move to flashing.
-if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.img" ] ||
-   [ ! -e "${RPI_SB_WORKDIR}/rootfs-temporary.simg" ]; then
+if [ ! -e "${RPI_SB_WORKDIR}"/bootfs-temporary.img ] ||
+   [ ! -e "${TMP_DIR}"/rpi-rootfs-img-mount ]; then
 
     announce_start "OS Image Mounting"
-    COPY_OS_COMBINED_FILE=$(mktemp "working-os-image.XXX" --tmpdir="/srv/")
-    announce_start "OS Image Copying (potentially slow)"
-    cp "${GOLD_MASTER_OS_FILE}" "${COPY_OS_COMBINED_FILE}"
-    announce_stop "OS Image Copying (potentially slow)"
     # Mount the 'complete' image as a series of partitions 
     cnt=0
-    until ensure_next_loopdev && LOOP_DEV="$(losetup --show --find --partscan "${COPY_OS_COMBINED_FILE}")"; do
+    until ensure_next_loopdev && LOOP_DEV="$(losetup --show --find --partscan "${GOLD_MASTER_OS_FILE}")"; do
         if [ $cnt -lt 5 ]; then
             cnt=$((cnt + 1))
             provisioner_log "Error in losetup.  Retrying..."
@@ -299,7 +401,7 @@ if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.img" ] ||
     ROOT_DEV="${LOOP_DEV}"p2
 
     # shellcheck disable=SC2086
-    mkdir -p "${TMP_DIR}"/rpi-boot-img-mount ${DEBUG}
+    # mkdir -p "${TMP_DIR}"/rpi-boot-img-mount ${DEBUG}
     # shellcheck disable=SC2086
     mkdir -p "${TMP_DIR}"/rpi-rootfs-img-mount ${DEBUG}
 
@@ -311,133 +413,28 @@ if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.img" ] ||
     # to do so would require a concrete support commitment from the vendor - and Raspberry Pi only
     # support Linux.
     # shellcheck disable=SC2086
-    mount -t vfat "${BOOT_DEV}" "${TMP_DIR}"/rpi-boot-img-mount ${DEBUG}
+    # mount -t vfat "${BOOT_DEV}" "${TMP_DIR}"/rpi-boot-img-mount ${DEBUG}
     # shellcheck disable=SC2086
     mount -t ext4 "${ROOT_DEV}" "${TMP_DIR}"/rpi-rootfs-img-mount ${DEBUG}
 
-    announce_stop "OS Image Mounting"
-
-    # We supply a pre-baked Raspberry Pi Pre-boot-authentication initramfs, which we insert here.
-    # This image is maintained by Raspberry Pi, with sources available on our GitHub pages.
-    announce_start "Insert pre-boot authentication initramfs"
-    cp "$(get_cryptroot)" "${TMP_DIR}"/rpi-boot-img-mount/initramfs8
-    announce_stop "Insert pre-boot authentication initramfs"
-
-    announce_start "Initramfs modification"
-
-    augment_initramfs() {
-        # shellcheck disable=SC2155
-        initramfs_compressed_file=$(check_file_is_expected "$1" "")
-        # shellcheck disable=SC2086
-        mkdir -p "${TMP_DIR}"/initramfs ${DEBUG}
-        # shellcheck disable=SC2086
-        zstd --rm -f -d "${initramfs_compressed_file}" -o "${TMP_DIR}"/initramfs.cpio ${DEBUG}
-        # shellcheck disable=SC2155
-        rootfs_mount=$(realpath "${TMP_DIR}"/rpi-rootfs-img-mount)
-        cd "${TMP_DIR}"/initramfs 
-        # shellcheck disable=SC2086
-        cpio -id < ../initramfs.cpio ${DEBUG}
-        # shellcheck disable=SC2086
-        rm ../initramfs.cpio ${DEBUG}
-
-        initramfs_dir="$PWD"/ # trailing '/' is meaningful
-
-        # Remove any pre-existing kernel modules in initramfs
-        rm -rf "${initramfs_dir}usr/lib/modules"
-        mkdir -p "${initramfs_dir}usr/lib/modules"
-
-        # Insert required kernel modules
-        cd "${rootfs_mount}"
-        find usr/lib/modules \
-            \( \
-                -name 'dm-mod.*' \
-                -o \
-                -name 'dm-crypt.*' \
-                -o \
-                -name 'af_alg.*' \
-                -o \
-                -name 'algif_skcipher.*' \
-                -o \
-                -name 'libaes.*' \
-                -o \
-                -name 'aes_generic.*' \
-                -o \
-                -name 'aes-arm64.*' \
-                -o \
-                -name 'libpoly1305.*' \
-                -o \
-                -name 'nhpoly1305.*' \
-                -o \
-                -name 'adiantum.*' \
-                -o \
-                -name 'libchacha.*' \
-                -o \
-                -name 'chacha-neon.*' \
-                -o \
-                -name 'chacha_generic.*' \
-            \) \
-            -exec cp -r --parents "{}" "${initramfs_dir}" \;
-        cd -
-
-        # Generate depmod information
-        for kernel in $(find "${initramfs_dir}usr/lib/modules" -mindepth 1 -maxdepth 1 -type d -printf '%f\n'); do
-            depmod --basedir "${initramfs_dir}" "${kernel}"
-        done
-
-        find . -print0 | cpio --null -ov --format=newc > ../initramfs.cpio
-        cd "${TMP_DIR}"
-        rm -rf "${TMP_DIR}"/initramfs
-        zstd --no-progress --rm -f -6 "${TMP_DIR}"/initramfs.cpio -o "${initramfs_compressed_file}"
-    }
-
-    # Use subshells to avoid polluting our CWD.
-    if check_file_is_expected "${TMP_DIR}"/rpi-boot-img-mount/initramfs_2712 ""; then
-        ( augment_initramfs "${TMP_DIR}"/rpi-boot-img-mount/initramfs_2712 )
-    fi
-    if check_file_is_expected "${TMP_DIR}"/rpi-boot-img-mount/initramfs8 ""; then
-        ( augment_initramfs "${TMP_DIR}"/rpi-boot-img-mount/initramfs8 )
-    fi
-    announce_stop "Initramfs modification"
-
-    announce_start "cmdline.txt modification"
-    sed --in-place 's%\b\(root=\)\S*%\1/dev/ram0%' "${TMP_DIR}"/rpi-boot-img-mount/cmdline.txt
-    sed --in-place 's%\binit=\S*%%' "${TMP_DIR}"/rpi-boot-img-mount/cmdline.txt
-    sed --in-place 's%\brootfstype=\S*%%' "${TMP_DIR}"/rpi-boot-img-mount/cmdline.txt
-    # TODO: Consider deleting quiet
-    sed --in-place 's%\bquiet\b%%' "${TMP_DIR}"/rpi-boot-img-mount/cmdline.txt
-    announce_stop "cmdline.txt modification"
-
-    announce_start "config.txt modification"
-    sed --in-place 's%^\(auto_initramfs=\S*\)%#\1%' "${TMP_DIR}"/rpi-boot-img-mount/config.txt
-
-    echo 'initramfs initramfs8' >> "${TMP_DIR}"/rpi-boot-img-mount/config.txt
-    
-    announce_stop "config.txt modification"
-
-    # Move the fastboot rpiboot configuration file into the flashing directory
-    cp "$(get_fastboot_config_file)" "${TMP_DIR}"/config.txt
-
-    announce_start "Copying boot image to working directory"
+    # Immediately copy the boot files to the boot partition
     dd if="${BOOT_DEV}" of="${RPI_SB_WORKDIR}"/bootfs-temporary.img
-    sync; sync; sync;
-    announce_stop "Copying boot image to working directory"
-fi # Slow path
+    announce_stop "OS Image Mounting"
+fi
 
 announce_start "Erase / Partition Device Storage"
 
 # Arbitrary sleeps to handle lack of correct synchronisation in fastbootd.
 set +e
-[ -z "${DEMO_MODE_ONLY}" ] && timeout 30 fastboot getvar version
+[ -z "${DEMO_MODE_ONLY}" ] && timeout 30 fastboot wait-for-device getvar version
 set -e
 FASTBOOT_EXIT_STATUS=$?
 if [ $FASTBOOT_EXIT_STATUS -eq 124 ]; then
     provisioner_log "Loading Fastboot failed, timed out."
-    [ -n "${TARGET_DEVICE_SERIAL}" ] && echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-fde-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+    [ -n "${TARGET_DEVICE_SERIAL}" ] && echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-naked-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
     return 124
 elif [ $FASTBOOT_EXIT_STATUS -ne 0 ]; then
     provisioner_log "Fastboot failed to load: ${FASTBOOT_EXIT_STATUS}"
-    [ -n "${TARGET_DEVICE_SERIAL}" ] && echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-fde-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
-    return ${FASTBOOT_EXIT_STATUS}
 else
     provisioner_log "Fastboot loaded."
 fi
@@ -446,13 +443,9 @@ fi
 sleep 2
 [ -z "${DEMO_MODE_ONLY}" ] && fastboot oem partinit "${RPI_DEVICE_STORAGE_TYPE}" DOS
 sleep 2
-[ -z "${DEMO_MODE_ONLY}" ] && fastboot oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 0c "$(stat -c%s "${RPI_SB_WORKDIR}"/bootfs-temporary.img)"
+[ -z "${DEMO_MODE_ONLY}" ] && fastboot oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 0c "$(stat -c%s "${BOOT_DEV}")"
 sleep 2
-[ -z "${DEMO_MODE_ONLY}" ] && fastboot oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 83 # Grow to fill storage
-sleep 2
-[ -z "${DEMO_MODE_ONLY}" ] && fastboot oem cryptinit "${RPI_DEVICE_STORAGE_TYPE}"p2 root "${RPI_DEVICE_STORAGE_CIPHER}"
-sleep 2
-[ -z "${DEMO_MODE_ONLY}" ] && fastboot oem cryptopen "${RPI_DEVICE_STORAGE_TYPE}"p2 cryptroot
+[ -z "${DEMO_MODE_ONLY}" ] && fastboot oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 11 # Grow to fill storage
 sleep 2
 announce_stop "Erase / Partition Device Storage"
 
@@ -464,12 +457,13 @@ announce_start "Resizing OS images"
 # https://dl.google.com/android/repository/platform-tools-latest-linux.zip
 # https://dl.google.com/android/repository/platform-tools-latest-darwin.zip
 # https://dl.google.com/android/repository/platform-tools-latest-windows.zip
-TARGET_STORAGE_ROOT_EXTENT="$(get_variable partition-size:mapper/cryptroot)"
+TARGET_STORAGE_ROOT_EXTENT="$(get_variable partition-size:"${RPI_DEVICE_STORAGE_TYPE}"p2)"
 if [ -f "${RPI_SB_WORKDIR}/rootfs-temporary.simg" ] && [ "$((TARGET_STORAGE_ROOT_EXTENT))" -eq "$(stat -c%s "${RPI_SB_WORKDIR}"/rootfs-temporary.simg)" ]; then
     announce_stop "Resizing OS images: Not required, already the correct size"
 else
     mke2fs -t ext4 -b 4096 -d "${TMP_DIR}"/rpi-rootfs-img-mount "${RPI_SB_WORKDIR}"/rootfs-temporary.img $((TARGET_STORAGE_ROOT_EXTENT / 4096))
     img2simg "${RPI_SB_WORKDIR}"/rootfs-temporary.img "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
+    rm -f "${RPI_SB_WORKDIR}"/rootfs-temporary.img
     #TODO: Re-enable android_sparse
     #mke2fs -t ext4 -b 4096 -d ${TMP_DIR}/rpi-rootfs-img-mount -E android_sparse ${RPI_SB_WORKDIR}/rootfs-temporary.simg $((TARGET_STORAGE_ROOT_EXTENT / 4096))
     announce_stop "Resizing OS images: Resized to $((TARGET_STORAGE_ROOT_EXTENT))"
@@ -477,25 +471,12 @@ fi
 
 announce_start "Writing OS images"
 [ -z "${DEMO_MODE_ONLY}" ] && fastboot flash "${RPI_DEVICE_STORAGE_TYPE}"p1 "${RPI_SB_WORKDIR}"/bootfs-temporary.img
-[ -z "${DEMO_MODE_ONLY}" ] && fastboot flash mapper/cryptroot "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
+[ -z "${DEMO_MODE_ONLY}" ] && fastboot flash "${RPI_DEVICE_STORAGE_TYPE}"p2 "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
 announce_stop "Writing OS images"
 
-if [ -z "${DEMO_MODE_ONLY}" ] && [ -d "${RPI_DEVICE_RETRIEVE_KEYPAIR}" ]; then
-    announce_start "Capturing device keypair to ${RPI_DEVICE_RETRIEVE_KEYPAIR}"
-    N_ALREADY_PROVISIONED=0
-    get_variable private-key > "${RPI_DEVICE_RETRIEVE_KEYPAIR}/${TARGET_DEVICE_SERIAL}.der" || N_ALREADY_PROVISIONED=$?
-    if [ 0 -ne "$N_ALREADY_PROVISIONED" ]; then
-        keywriter_log "Warning: Unable to retrieve device private key; already provisioned"
-    fi
-    get_variable public-key > "${RPI_DEVICE_RETRIEVE_KEYPAIR}/${TARGET_DEVICE_SERIAL}.pub"
-    announce_stop "Capturing device keypair to ${RPI_DEVICE_RETRIEVE_KEYPAIR}"
-fi
-
 announce_start "Cleaning up"
-[ -d "${TMP_DIR}/rpi-boot-img-mount" ] && umount "${TMP_DIR}"/rpi-boot-img-mount
 [ -d "${TMP_DIR}/rpi-rootfs-img-mount" ] && umount "${TMP_DIR}"/rpi-rootfs-img-mount
 # shellcheck disable=SC2086
-unmount_image "${COPY_OS_COMBINED_FILE}" ${DEBUG}
 # We also delete the temporary directory - preserving the cached generated asset
 # shellcheck disable=SC2086
 rm -rf "${TMP_DIR}" ${DEBUG}
@@ -505,6 +486,6 @@ announce_start "Set LED status"
 [ -z "${DEMO_MODE_ONLY}" ] && fastboot oem led PWR 0
 announce_stop "Set LED status"
 
-echo "${PROVISIONER_FINISHED}" >> /var/log/rpi-fde-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+echo "${PROVISIONER_FINISHED}" >> /var/log/rpi-naked-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
 
 provisioner_log "Provisioning completed. Remove the device from this machine."

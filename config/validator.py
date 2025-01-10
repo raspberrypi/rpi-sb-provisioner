@@ -2,6 +2,11 @@
 import os
 import subprocess
 
+def validate_PROVISIONING_STYLE(text) -> tuple[bool, str]:
+    if text in ["secure-boot", "fde-only", "naked"]:
+        return (True, "")
+    else:
+        return (False, "Unexpected provisioning style: `" + text + "` is not one of secure-boot, fde-only, naked")
 
 def validate_CUSTOMER_KEY_FILE_PEM(text) -> tuple[bool, str]:
     if not os.path.exists(text):
