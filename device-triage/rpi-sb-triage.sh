@@ -20,7 +20,7 @@ read_config
 
 LOG_DIR=
 case "${PROVISIONING_STYLE}" in
-    secure-boot)
+    "secure-boot")
         LOG_DIR=/var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/
 
         if [ -z "${CUSTOMER_KEY_FILE_PEM}" ] && [ -z "${CUSTOMER_KEY_PKCS11_NAME}" ]; then
@@ -28,10 +28,10 @@ case "${PROVISIONING_STYLE}" in
             exit 1
         fi
         ;;
-    fde-only)
+    "fde-only")
         LOG_DIR=/var/log/rpi-fde-provisioner/"${TARGET_DEVICE_SERIAL}"/
         ;;
-    naked)
+    "naked")
         LOG_DIR=/var/log/rpi-naked-provisioner/"${TARGET_DEVICE_SERIAL}"/
         ;;
     *)
