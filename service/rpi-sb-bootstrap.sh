@@ -321,7 +321,7 @@ esac
 
 
 # Determine if we're enforcing secure boot, and if so, prepare the environment & eeprom accordingly.
-if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
+if [ "$ALLOW_SIGNED_BOOT" -eq 1 ] && [ "${PROVISIONING_STYLE}" = "secure-boot" ]; then
     announce_start "Setting up the environment for a signed-boot capable device"
     if [ -z "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" ]; then
         RPI_DEVICE_BOOTLOADER_CONFIG_FILE=/var/lib/rpi-sb-provisioner/bootloader.default
@@ -432,6 +432,8 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
         bootstrap_log "No key specified, skipping eeprom update"
     fi
     bootstrap_log "Keywriting completed. Rebooting for next phase."
+    # Clear signing intermediates
+    rm -rf "${RPI_SB_WORKDIR:?}/*"
 
     case "${TARGET_DEVICE_FAMILY}" in
         2712)
@@ -453,9 +455,6 @@ else
     # No signed boot means we never have to sign the fastboot gadget, so go go go!
     cp /usr/share/rpiboot/mass-storage-gadget64/bootfiles.bin "${RPI_SB_WORKDIR}/bootfiles.bin"
 fi
-
-# Clear signing intermediates
-rm -rf "${RPI_SB_WORKDIR:?}/*"
 
 announce_start "Staging fastboot image"
 cp "$(get_fastboot_gadget)" "${RPI_SB_WORKDIR}"/boot.img
