@@ -25,8 +25,6 @@ read_config() {
 
 read_config
 
-TARGET_DEVICE_SERIAL="$(udevadm info --name="$1" --query=property --property=ID_SERIAL_SHORT --value)"
-
 ring_bell() {
     tput bel
 }
@@ -220,8 +218,6 @@ trap cleanup EXIT
 
 # Start the provisioner phase
 
-[ -n "${TARGET_DEVICE_SERIAL}" ] && echo "${PROVISIONER_STARTED}" >> /var/log/rpi-fde-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
-
 # These tools are used to modify the supplied images, and deal with mounting and unmounting the images.
 check_command_exists losetup
 check_command_exists mknod
@@ -251,6 +247,9 @@ check_command_exists grep
 get_variable() {
     [ -z "${DEMO_MODE_ONLY}" ] && fastboot getvar "$1" 2>&1 | grep -oP "${1}"': \K[^\r\n]*'
 }
+
+TARGET_DEVICE_SERIAL="$(get-variable serialno)"
+echo "${PROVISIONER_STARTED}" >> /var/log/rpi-fde-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
 
 TMP_DIR=$(mktemp -d)
 RPI_DEVICE_STORAGE_TYPE="$(check_pidevice_storage_type "${RPI_DEVICE_STORAGE_TYPE}")"
@@ -432,12 +431,11 @@ set -e
 FASTBOOT_EXIT_STATUS=$?
 if [ $FASTBOOT_EXIT_STATUS -eq 124 ]; then
     provisioner_log "Loading Fastboot failed, timed out."
-    [ -n "${TARGET_DEVICE_SERIAL}" ] && echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-fde-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+    echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-fde-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
     return 124
 elif [ $FASTBOOT_EXIT_STATUS -ne 0 ]; then
-    provisioner_log "Fastboot failed to load: ${FASTBOOT_EXIT_STATUS}"
-    [ -n "${TARGET_DEVICE_SERIAL}" ] && echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-fde-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
-    return ${FASTBOOT_EXIT_STATUS}
+    echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-fde-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+    die "Fastboot failed to load: ${FASTBOOT_EXIT_STATUS}"
 else
     provisioner_log "Fastboot loaded."
 fi
@@ -465,11 +463,12 @@ announce_start "Resizing OS images"
 # https://dl.google.com/android/repository/platform-tools-latest-darwin.zip
 # https://dl.google.com/android/repository/platform-tools-latest-windows.zip
 TARGET_STORAGE_ROOT_EXTENT="$(get_variable partition-size:mapper/cryptroot)"
-if [ -f "${RPI_SB_WORKDIR}/rootfs-temporary.simg" ] && [ "$((TARGET_STORAGE_ROOT_EXTENT))" -eq "$(stat -c%s "${RPI_SB_WORKDIR}"/rootfs-temporary.simg)" ]; then
+if [ -f "${RPI_SB_WORKDIR}/rootfs-temporary.simg" ] && [ "$((TARGET_STORAGE_ROOT_EXTENT))" -eq "$(stat -c%b*%B "${RPI_SB_WORKDIR}"/rootfs-temporary.simg)" ]; then
     announce_stop "Resizing OS images: Not required, already the correct size"
 else
     mke2fs -t ext4 -b 4096 -d "${TMP_DIR}"/rpi-rootfs-img-mount "${RPI_SB_WORKDIR}"/rootfs-temporary.img $((TARGET_STORAGE_ROOT_EXTENT / 4096))
     img2simg "${RPI_SB_WORKDIR}"/rootfs-temporary.img "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
+    rm -f "${RPI_SB_WORKDIR}"/rootfs-temporary.img
     #TODO: Re-enable android_sparse
     #mke2fs -t ext4 -b 4096 -d ${TMP_DIR}/rpi-rootfs-img-mount -E android_sparse ${RPI_SB_WORKDIR}/rootfs-temporary.simg $((TARGET_STORAGE_ROOT_EXTENT / 4096))
     announce_stop "Resizing OS images: Resized to $((TARGET_STORAGE_ROOT_EXTENT))"

@@ -3,10 +3,11 @@ monitor/monitor.sh                              /usr/local/bin
 host-support/make-boot-image                    /usr/local/bin
 service/rpi-sb-provisioner.sh                   /usr/local/bin
 service/rpi-fde-provisioner.sh                  /usr/local/bin
+service/rpi-naked-provisioner.sh                /usr/local/bin
+service/rpi-sb-bootstrap.sh                     /usr/local/bin
+service/rpi-sb-triage.sh                        /usr/local/bin
 fetch-repo-package-list/fetch-repo-package-list /usr/local/bin
 rpi-package-download/rpi-package-download       /usr/local/bin
-device-triage/rpi-sb-triage.sh                  /usr/local/bin
-device-triage/rpi-fde-triage.sh                 /usr/local/bin
 
 config/config.py                    /usr/share/rpi-sb-provisioner/config
 config/validator.py                 /usr/share/rpi-sb-provisioner/config
@@ -18,8 +19,10 @@ monitor/systemctl_python.py         /usr/share/rpi-sb-provisioner/monitor
 monitor/monitor.css                 /usr/share/rpi-sb-provisioner/monitor
 
 service/rpi-sb-provisioner@.service                         /usr/local/lib/systemd/system
-device-triage/rpi-sb-triage@.service                        /usr/local/lib/systemd/system
-device-triage/rpi-fde-triage@.service                       /usr/local/lib/systemd/system
+service/rpi-fde-provisioner@.service                        /usr/local/lib/systemd/system
+service/rpi-naked-provisioner@.service                      /usr/local/lib/systemd/system
+service/rpi-sb-bootstrap@.service                           /usr/local/lib/systemd/system
+service/rpi-sb-triage@.service                              /usr/local/lib/systemd/system
 
 fetch-repo-package-list/fetch-repo-package-list@.timer      /usr/local/lib/systemd/system
 fetch-repo-package-list/fetch-repo-package-list@.service    /usr/local/lib/systemd/system

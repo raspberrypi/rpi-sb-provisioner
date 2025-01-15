@@ -1,7 +1,0 @@
-[Unit]
-Description=Bootstrap a legacy Raspberry Pi device in to Fastboot, for full-disk encryption setup
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/rpi-fde-bootstrap.sh %I
-EnvironmentFile=/etc/rpi-sb-provisioner/config

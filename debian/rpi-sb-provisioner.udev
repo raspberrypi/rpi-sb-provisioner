@@ -1,17 +1,11 @@
 ACTION=="add", SUBSYSTEM=="usb", \
-  ATTRS{idVendor}=="0a5c", ATTR{idProduct}=="2711|2712", \
+  ATTRS{idVendor}=="0a5c", ATTR{idProduct}=="2764|2710|2711|2712", \
   TAG+="systemd", \
-  PROGRAM="/usr/bin/systemd-escape -p --template=rpi-sb-triage@.service $env{DEVNAME}", \
-  ENV{SYSTEMD_WANTS}+="%c"
-
-ACTION=="add", SUBSYSTEM=="usb", \
-  ATTRS{idVendor}=="0a5c", ATTR{idProduct}=="2764|2710", \
-  TAG+="systemd", \
-  PROGRAM="/usr/bin/systemd-escape -p --template=rpi-fde-triage@.service $env{DEVNAME}", \
+  PROGRAM="/usr/bin/systemd-escape -p --template=rpi-sb-bootstrap@.service $env{DEVNAME}", \
   ENV{SYSTEMD_WANTS}+="%c"
 
 ACTION=="add", SUBSYSTEM=="usb", \
   ATTRS{idVendor}=="18d1", ATTR{idProduct}=="4e40", \
   TAG+="systemd", \
-  PROGRAM="/usr/bin/systemd-escape -p --template=rpi-fde-provisioner@.service $env{DEVNAME}", \
+  PROGRAM="/usr/bin/systemd-escape -p --template=rpi-sb-triage@.service $env{DEVNAME}", \
   ENV{SYSTEMD_WANTS}+="%c"
