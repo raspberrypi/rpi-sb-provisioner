@@ -395,7 +395,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ] && [ "${PROVISIONING_STYLE}" = "secure-boot" ]
 
         bootstrap_log "Writing key and EEPROM configuration to the device"
         set +e
-        [ -z "${DEMO_MODE_ONLY}" ] && timeout 120 rpiboot -d "${RPI_SB_WORKDIR}" -i "${TARGET_DEVICE_SERIAL}" -j "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/"
+        [ -z "${DEMO_MODE_ONLY}" ] && timeout 10s rpiboot -d "${RPI_SB_WORKDIR}" -i "${TARGET_DEVICE_SERIAL}" -j "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/"
         set -e
         KEYWRITER_EXIT_STATUS=$?
         if [ ${KEYWRITER_EXIT_STATUS} -eq 124 ]; then
@@ -404,16 +404,16 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ] && [ "${PROVISIONING_STYLE}" = "secure-boot" ]
                 2712)
                     # Raspberry Pi 5-family hardware may already have a key provisioned - so retry with a signed bootcode.
                     rpi-sign-bootcode --debug -c 2712 -i "${BOOTCODE_BINARY_IMAGE}" -o "${BOOTCODE_FLASHING_NAME}" -k "${CUSTOMER_KEY_FILE_PEM}" -v 0 -n 16
-                    [ -z "${DEMO_MODE_ONLY}" ] && timeout 120 rpiboot -d "${RPI_SB_WORKDIR}" -i "${TARGET_DEVICE_SERIAL}" -j "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/"
+                    [ -z "${DEMO_MODE_ONLY}" ] && timeout 10s rpiboot -d "${RPI_SB_WORKDIR}" -i "${TARGET_DEVICE_SERIAL}" -j "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/"
                     KEYWRITER_RETRY_EXIT_STATUS=$?
                     if [ ${KEYWRITER_RETRY_EXIT_STATUS} -eq 124 ]; then
                         # If the retry with a signed recovery image fails, this is likely a hard failure.
                         echo "${BOOTSTRAP_ABORTED}" >> "${EARLY_LOG_DIRECTORY}"/bootstrap.log
                         return 124
-                    elif [ ${KEYWRITER_EXIT_STATUS} -ne 0 ]; then
-                        bootstrap_log "Failed to load keywriter: ${KEYWRITER_EXIT_STATUS}"
+                    elif [ ${KEYWRITER_RETRY_EXIT_STATUS} -ne 0 ]; then
+                        bootstrap_log "Failed to load keywriter: ${KEYWRITER_RETRY_EXIT_STATUS}"
                         echo "${BOOTSTRAP_ABORTED}" >> "${EARLY_LOG_DIRECTORY}"/bootstrap.log
-                        return ${KEYWRITER_EXIT_STATUS}
+                        return ${KEYWRITER_RETRY_EXIT_STATUS}
                     fi
                 ;;
                 *)
