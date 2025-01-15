@@ -3,7 +3,6 @@
 set -e
 set -x
 
-TARGET_DEVICE_SERIAL="$1"
 DEBUG=
 
 OPENSSL=${OPENSSL:-openssl}
@@ -80,10 +79,6 @@ simg_expanded_size() {
     echo "$(($(simg_dump "$1" | sed -E 's/.*?Total of ([0-9]+) ([0-9]+)-byte .*/\1 * \2/')))"
 }
 
-keywriter_log() {
-    echo "$@" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/keywriter.log
-}
-
 provisioner_log() {
     echo "$@" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/provisioner.log
 }
@@ -123,12 +118,6 @@ timeout_fatal() {
     set -e
 }
 
-CUSTOMER_PUBLIC_KEY_FILE=
-derivePublicKey() {
-    CUSTOMER_PUBLIC_KEY_FILE="$(mktemp)"
-    "${OPENSSL}" rsa -in "${CUSTOMER_KEY_FILE_PEM}" -pubout > "${CUSTOMER_PUBLIC_KEY_FILE}"
-}
-
 TMP_DIR=""
 
 writeSig() {
@@ -146,95 +135,6 @@ writeSig() {
       echo "rsa2048: $(xxd -c 4096 -p < "${SIG_TMP}")" >> "${OUTPUT}"
    fi
    rm "${SIG_TMP}"
-}
-
-enforceSecureBootloaderConfig() {
-    if ! grep -Fxq "SIGNED_BOOT=1" "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"; then
-        echo "SIGNED_BOOT=1" >> "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
-        sed -i -e "s/SIGNED_BOOT=0//g" "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
-    fi
-
-    # These directives are for the bootloader to load the ramdisk
-    # Don't use the traditional boot flow, and instead look for boot.img/boot.sig
-    echo "boot_ramdisk=1" >> "${FLASHING_DIR}/config.txt"
-    # Log to the UART, so you can inspect the process
-    echo "uart_2ndstage=1" >> "${FLASHING_DIR}/config.txt"
-    #echo "eeprom_write_protect=1" >> "${FLASHING_DIR}/config.txt"
-}
-
-identifyBootloaderConfig() {
-    # Possible to pass in RPI_DEVICE_BOOTLOADER_CONFIG_FILE... we should make sure the right thing happens with this.
-    if [ ! -f "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" ]; then
-        RPI_DEVICE_BOOTLOADER_CONFIG_FILE="$(mktemp)"
-    fi
-}
-
-# This function is adapted from the functions in the usbboot repo.
-update_eeprom() {
-    src_image="$1"
-    dst_image="$2"
-    pem_file="$3" 
-    public_pem_file="$4"
-    sign_args=""
-
-    keywriter_log "update_eeprom() src_image: \"${src_image}\""
-
-    if [ -n "${pem_file}" ]; then
-        if ! grep -q "SIGNED_BOOT=1" "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"; then
-            # If the OTP bit to require secure boot are set then then
-            # SIGNED_BOOT=1 is implicitly set in the EEPROM config.
-            # For debug in signed-boot mode it's normally useful to set this
-            keywriter_log "Warning: SIGNED_BOOT=1 not found in \"${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}\""
-        fi
-
-        #update_version=$(strings "${src_image}" | grep BUILD_TIMESTAMP | sed 's/.*=//g')
-
-        TMP_CONFIG_SIG="$(mktemp)"
-        keywriter_log "Signing bootloader config"
-        writeSig "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" "${TMP_CONFIG_SIG}"
-
-        # shellcheck disable=SC2086
-        cat "${TMP_CONFIG_SIG}" ${DEBUG}
-
-        # rpi-eeprom-config extracts the public key args from the specified
-        # PEM file.
-        sign_args="-d ${TMP_CONFIG_SIG} -p ${public_pem_file}"
-
-        case ${RPI_DEVICE_FAMILY} in
-            4)
-                # 2711 does _not_ require a signed bootcode binary
-                cp "${src_image}" "${dst_image}.intermediate"
-                ;;
-            5)
-                customer_signed_bootcode_binary_workdir=$(mktemp -d)
-                cd "${customer_signed_bootcode_binary_workdir}" || return
-                rpi-eeprom-config -x "${src_image}"
-                rpi-sign-bootcode --debug -c 2712 -i bootcode.bin -o bootcode.bin.signed -k "${pem_file}" -v 0 -n 16
-                rpi-eeprom-config \
-                    --out "${dst_image}.intermediate" --bootcode "${customer_signed_bootcode_binary_workdir}/bootcode.bin.signed" \
-                    "${src_image}" || die "Failed to update signed bootcode in the EEPROM image"
-                cd - > /dev/null || return
-                rm -rf "${customer_signed_bootcode_binary_workdir}"
-                ;;
-        esac
-    fi
-
-    rm -f "${dst_image}"
-    set -x
-    # shellcheck disable=SC2086
-    rpi-eeprom-config \
-        --config "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" \
-        --out "${dst_image}" ${sign_args} \
-        "${dst_image}.intermediate" || die "Failed to update EEPROM image"
-    rm -f "${dst_image}.intermediate"
-    rm -f "${TMP_CONFIG_SIG}"
-    set +x
-
-cat <<EOF
-new-image: ${dst_image}
-source-image: ${src_image}
-config: ${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}
-EOF
 }
 
 get_cryptroot() {
@@ -314,11 +214,11 @@ check_pidevice_storage_type() {
         "sd")
             echo "mmcblk0"
             ;;
-        "nvme")
-            echo "nvme0n1"
-            ;;
         "emmc")
             echo "mmcblk0"
+            ;;
+        "nvme")
+            echo "nvme0n1"
             ;;
         ?)
             die "Unexpected storage device type. Wanted sd, nvme or emmc, got $1"
@@ -464,6 +364,15 @@ if [ ! -e "${DESTINATION_EEPROM_SIGNATURE}" ]; then
     fi
 fi
 
+### NOTE: Use this in only case of a partial signing situation, where you have provisioned the key, but need to re-write the eeprom.
+# case ${RPI_DEVICE_FAMILY} in
+#     4)
+#         cp "${BOOTCODE_BINARY_IMAGE}" "${BOOTCODE_FLASHING_NAME}"
+#         ;;
+#     5)
+#         rpi-sign-bootcode --debug -c 2712 -i "${BOOTCODE_BINARY_IMAGE}" -o "${BOOTCODE_FLASHING_NAME}" -k "${CUSTOMER_KEY_FILE_PEM}" -v 0 -n 16
+#         ;;
+# esac
 ### In the completely-unprovisioned state, where you have not yet written a customer OTP key, simply make the copy of the unsigned bootcode
 cp "${BOOTCODE_BINARY_IMAGE}" "${BOOTCODE_FLASHING_NAME}"
 ####
@@ -525,7 +434,7 @@ keywriter_log "Keywriting completed."
 
 rm -rf "${FLASHING_DIR}"
 
-if [ -n "${RPI_DEVICE_FETCH_METADATA}" ] && [ ! -f "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/special-skip-keywriter" ]; then
+if [ -z "${DEMO_MODE_ONLY}" ] && [ -n "${RPI_DEVICE_FETCH_METADATA}" ]; then
     USER_BOARDREV="0x$(jq -r '.USER_BOARDREV' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)"
     MAC_ADDRESS=$(jq -r '.MAC_ADDR' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
     CUSTOMER_KEY_HASH=$(jq -r '.CUSTOMER_KEY_HASH' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
@@ -683,6 +592,8 @@ get_variable() {
     fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar "$1" 2>&1 | grep -oP "${1}"': \K[^\r\n]*'
 }
 
+TARGET_DEVICE_SERIAL="$(get_variable serialno)"
+
 TMP_DIR=$(mktemp -d)
 RPI_DEVICE_STORAGE_TYPE="$(check_pidevice_storage_type "${RPI_DEVICE_STORAGE_TYPE}")"
 DELETE_PRIVATE_TMPDIR=
@@ -735,7 +646,18 @@ ${OPENSSL} dgst -sign $(get_signing_directives) -sha256 "${RPI_SB_WORKDIR}"/boot
 announce_stop "Finding/generating fastboot image"
 
 announce_start "Starting fastboot"
-timeout_fatal rpiboot -v -d "${RPI_SB_WORKDIR}" -i "${TARGET_DEVICE_SERIAL}"
+set +e
+[ -z "${DEMO_MODE_ONLY}" ] && timeout 120 rpiboot -v -d "${RPI_SB_WORKDIR}" -i "${TARGET_DEVICE_SERIAL}"
+FLASHING_GADGET_EXIT_STATUS=$?
+if [ $FLASHING_GADGET_EXIT_STATUS -eq 124 ]
+then
+provisioner_log "Loading Fastboot failed, timed out."
+echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+return 124
+else
+provisioner_log "Fastboot loaded."
+fi
+set -e
 announce_stop "Starting fastboot"
 
 announce_start "Selecting and interrogating device"
@@ -769,7 +691,7 @@ announce_start "Selecting and interrogating device"
 #announce_stop "Raspberry Pi Generation check"
 
 # Fast path: If we've already generated the assets, just move to flashing.
-if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.img" ] ||
+if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.simg" ] ||
    [ ! -e "${RPI_SB_WORKDIR}/rootfs-temporary.simg" ]; then
 
     announce_start "OS Image Mounting"
@@ -960,7 +882,7 @@ if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.img" ] ||
 
     umount "${META_BOOTIMG_MOUNT_PATH}"
     rm -rf "${META_BOOTIMG_MOUNT_PATH}"
-    mv "${TMP_DIR}"/bootfs-temporary.img "${RPI_SB_WORKDIR}"/bootfs-temporary.img
+    img2simg "${TMP_DIR}"/bootfs-temporary.img "${RPI_SB_WORKDIR}"/bootfs-temporary.simg
     announce_stop "Boot Image partition extraction"
 fi # Slow path
 
@@ -976,9 +898,8 @@ if [ $FASTBOOT_EXIT_STATUS -eq 124 ]; then
     echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
     return 124
 elif [ $FASTBOOT_EXIT_STATUS -ne 0 ]; then
-    provisioner_log "Failed to load fastboot: ${FASTBOOT_EXIT_STATUS}"
     echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
-    return ${FASTBOOT_EXIT_STATUS}
+    die "Failed to load fastboot: ${FASTBOOT_EXIT_STATUS}"
 else
     provisioner_log "Fastboot loaded."
 fi
@@ -1036,7 +957,7 @@ if [ ${USE_IPV6} -eq 0 ]; then
 elif [ ${USE_IPV4} -eq 0 ]; then
     FASTBOOT_DEVICE_SPECIFIER="tcp:${IPV4_ADDRESS}"
 fi
-fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}"p1 "${RPI_SB_WORKDIR}"/bootfs-temporary.img
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}"p1 "${RPI_SB_WORKDIR}"/bootfs-temporary.simg
 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash mapper/cryptroot "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
 announce_stop "Writing OS images"
 
@@ -1061,7 +982,6 @@ announce_start "Set LED status"
 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem led PWR 0
 announce_stop "Set LED status"
 
-mkdir -p /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/
 echo "${PROVISIONER_FINISHED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
 
 provisioner_log "Provisioning completed. Remove the device from this machine."

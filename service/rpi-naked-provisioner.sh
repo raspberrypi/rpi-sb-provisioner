@@ -10,18 +10,16 @@ export PROVISIONER_ABORTED="PROVISIONER-ABORTED"
 export PROVISIONER_STARTED="PROVISIONER-STARTED"
 
 read_config() {
-    if [ -f /etc/rpi-naked-provisioner/config ]; then
-        . /etc/rpi-naked-provisioner/config
+    if [ -f /etc/rpi-sb-provisioner/config ]; then
+        . /etc/rpi-sb-provisioner/config
     else
-        printf "%s\n" "Failed to load config. Please use configuration tool." >&2
-        return 1
+        die "Failed to load config. Please use configuration tool."
     fi
 }
 
 read_config
 
 TARGET_DEVICE_SERIAL="$(udevadm info --name="$1" --query=property --property=ID_SERIAL_SHORT --value)"
-mkdir -p /var/log/rpi-naked-provisioner/"${TARGET_DEVICE_SERIAL}"/
 
 ring_bell() {
     tput bel
@@ -44,32 +42,32 @@ announce_stop() {
 }
 
 die() {
-    [ -n "${TARGET_DEVICE_SERIAL}" ] && echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-naked-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+    echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
     # shellcheck disable=SC2086
     echo "$@" ${DEBUG}
     exit 1
 }
 
 provisioner_log() {
-    [ -n "${TARGET_DEVICE_SERIAL}" ] && echo "$@" >> /var/log/rpi-naked-provisioner/"${TARGET_DEVICE_SERIAL}"/provisioner.log
+    echo "$@" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/provisioner.log
     printf "%s\n" "$@"
 }
 
 TMP_DIR=""
 
 get_fastboot_gadget() {
-    if [ -f /etc/rpi-naked-provisioner/fastboot-gadget.img ]; then
-        echo "/etc/rpi-naked-provisioner/fastboot-gadget.img"
+    if [ -f /etc/rpi-sb-provisioner/fastboot-gadget.img ]; then
+        echo "/etc/rpi-sb-provisioner/fastboot-gadget.img"
     else
-        echo "/var/lib/rpi-naked-provisioner/fastboot-gadget.img"
+        echo "/var/lib/rpi-sb-provisioner/fastboot-gadget.img"
     fi
 }
 
 get_fastboot_config_file() {
-    if [ -f /etc/rpi-naked-provisioner/boot_ramdisk_config.txt ]; then
-        echo "/etc/rpi-naked-provisioner/boot_ramdisk_config.txt"
+    if [ -f /etc/rpi-sb-provisioner/boot_ramdisk_config.txt ]; then
+        echo "/etc/rpi-sb-provisioner/boot_ramdisk_config.txt"
     else
-        echo "/var/lib/rpi-naked-provisioner/boot_ramdisk_config.txt"
+        echo "/var/lib/rpi-sb-provisioner/boot_ramdisk_config.txt"
     fi
 }
 
@@ -104,8 +102,7 @@ check_file_is_expected() {
 check_command_exists() {
     command_to_test=$1
     if ! command -v "${command_to_test}" 1> /dev/null; then
-        provisioner_log "${command_to_test} could not be found"
-        exit 1
+        die "${command_to_test} could not be found"
     else
         echo "$command_to_test"
     fi
@@ -114,8 +111,7 @@ check_command_exists() {
 check_python_module_exists() {
     module_name=$1
     if ! python -c "import ${module_name}" 1> /dev/null; then
-        provisioner_log "Failed to load Python module '${module_name}'"
-        exit 1
+        die "Failed to load Python module '${module_name}'"
     else
         echo "${module_name}"
     fi
@@ -128,6 +124,9 @@ check_pidevice_storage_type() {
             ;;
         "emmc")
             echo "mmcblk0"
+            ;;
+        "nvme")
+            echo "nvme0n1"
             ;;
         ?)
             die "Unexpected storage device type. Wanted sd, nvme or emmc, got $1"
@@ -201,7 +200,7 @@ trap cleanup EXIT
 
 # Start the provisioner phase
 
-[ -n "${TARGET_DEVICE_SERIAL}" ] && echo "${PROVISIONER_STARTED}" >> /var/log/rpi-naked-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+[ -n "${TARGET_DEVICE_SERIAL}" ] && echo "${PROVISIONER_STARTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
 
 # These tools are used to modify the supplied images, and deal with mounting and unmounting the images.
 check_command_exists losetup
@@ -226,156 +225,16 @@ RPI_DEVICE_STORAGE_TYPE="$(check_pidevice_storage_type "${RPI_DEVICE_STORAGE_TYP
 DELETE_PRIVATE_TMPDIR=
 announce_start "Finding the cache directory"
 if [ -z "${RPI_SB_WORKDIR}" ]; then
-    RPI_SB_WORKDIR=$(mktemp -d "rpi-naked-provisioner.XXX" --tmpdir="/srv/")
+    RPI_SB_WORKDIR=$(mktemp -d "rpi-sb-provisioner.XXX" --tmpdir="/srv/")
     announce_stop "Finding the cache directory: Created a new one as unspecified"
     DELETE_PRIVATE_TMPDIR="true"
 elif [ ! -d "${RPI_SB_WORKDIR}" ]; then
-    RPI_SB_WORKDIR=$(mktemp -d "rpi-naked-provisioner.XXX" --tmpdir="/srv/")
+    RPI_SB_WORKDIR=$(mktemp -d "rpi-sb-provisioner.XXX" --tmpdir="/srv/")
     announce_stop "Finding the cache directory: Created a new one in /srv, as supplied path isn't a directory"
     DELETE_PRIVATE_TMPDIR="true"
 else
     # Deliberately do nothing
     announce_stop "Finding the cache directory: Using specified name"
-fi
-
-announce_start "Staging fastboot image"
-
-cp /usr/share/rpiboot/mass-storage-gadget64/bootfiles.bin "${RPI_SB_WORKDIR}/bootfiles.bin"
-cp "$(get_fastboot_gadget)" "${RPI_SB_WORKDIR}"/boot.img
-cp "$(get_fastboot_config_file)" "${RPI_SB_WORKDIR}"/config.txt
-announce_stop "Staging fastboot image"
-
-announce_start "Starting fastboot"
-set +e
-[ -z "${DEMO_MODE_ONLY}" ] && timeout 120 rpiboot -v -d "${RPI_SB_WORKDIR}" -i "${TARGET_DEVICE_SERIAL}" -j "/var/log/rpi-naked-provisioner/${TARGET_DEVICE_SERIAL}/metadata/"
-set -e
-FLASHING_GADGET_EXIT_STATUS=$?
-if [ $FLASHING_GADGET_EXIT_STATUS -eq 124 ]; then
-    provisioner_log "Loading Fastboot failed, timed out."
-    echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-naked-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
-    return 124
-elif [ $FLASHING_GADGET_EXIT_STATUS -ne 0 ]; then
-    provisioner_log "Fastboot failed to load: ${FLASHING_GADGET_EXIT_STATUS}"
-else
-    provisioner_log "Fastboot loaded."
-fi
-announce_stop "Starting fastboot"
-
-if [ -z "${DEMO_MODE_ONLY}" ] && [ -n "${RPI_DEVICE_FETCH_METADATA}" ]; then
-    USER_BOARDREV="0x$(jq -r '.USER_BOARDREV' < /var/log/rpi-naked-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)"
-    MAC_ADDRESS=$(jq -r '.MAC_ADDR' < /var/log/rpi-naked-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
-    CUSTOMER_KEY_HASH=$(jq -r '.CUSTOMER_KEY_HASH' < /var/log/rpi-naked-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
-    JTAG_LOCKED=$(jq -r '.JTAG_LOCKED' < /var/log/rpi-naked-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
-    ADVANCED_BOOT=$(jq -r '.ADVANCED_BOOT' < /var/log/rpi-naked-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
-    BOOT_ROM=$(jq -r '.BOOT_ROM' < /var/log/rpi-naked-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
-    BOARD_ATTR=$(jq -r '.BOARD_ATTR' < /var/log/rpi-naked-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
-
-    TYPE=$(printf "0x%X\n" $(((USER_BOARDREV & 0xFF0) >> 4)))
-    PROCESSOR=$(printf "0x%X\n" $(((USER_BOARDREV & 0xF000) >> 12)))
-    MEMORY=$(printf "0x%X\n" $(((USER_BOARDREV & 0x700000) >> 20)))
-    MANUFACTURER=$(printf "0x%X\n" $(((USER_BOARDREV & 0xF0000) >> 16)))
-    REVISION=$((USER_BOARDREV & 0xF))
-
-    case ${TYPE} in
-        "0x06") BOARD_STR="CM1" ;;
-        "0x08") BOARD_STR="3B" ;;
-        "0x09") BOARD_STR="Zero" ;;
-        "0x0A") BOARD_STR="CM3" ;;
-        "0x0D") BOARD_STR="3B+" ;;
-        "0x0E") BOARD_STR="3A+" ;;
-        "0x10") BOARD_STR="CM3+" ;;
-        "0x11") BOARD_STR="4B" ;;
-        "0x12") BOARD_STR="Zero 2 W" ;;
-        "0x13") BOARD_STR="400" ;;
-        "0x14") BOARD_STR="CM4" ;;
-        "0x15") BOARD_STR="CM4S" ;;
-        "0x17") BOARD_STR="5" ;;
-        *)
-            BOARD_STR="Unsupported Board"
-    esac
-
-    case ${PROCESSOR} in
-        "0x0") PROCESSOR_STR="BCM2835" ;;
-        "0x1") PROCESSOR_STR="BCM2836" ;;
-        "0x2") PROCESSOR_STR="BCM2837" ;;
-        "0x3") PROCESSOR_STR="BCM2711" ;;
-        "0x4") PROCESSOR_STR="BCM2712" ;;
-        *)
-            PROCESSOR_STR="Unknown"
-    esac
-
-    case ${MEMORY} in
-        "0x0") MEMORY_STR="256MB" ;;
-        "0x1") MEMORY_STR="512MB" ;;
-        "0x2") MEMORY_STR="1GB" ;;
-        "0x3") MEMORY_STR="2GB" ;;
-        "0x4") MEMORY_STR="4GB" ;;
-        "0x5") MEMORY_STR="8GB" ;;
-        *)
-            MEMORY_STR="Unknown"
-    esac
-
-    case ${MANUFACTURER} in
-        "0x0") MANUFACTURER_STR="Sony UK" ;;
-        "0x1") MANUFACTURER_STR="Egoman" ;;
-        "0x2") MANUFACTURER_STR="Embest" ;;
-        "0x3") MANUFACTURER_STR="Sony Japan" ;;
-        "0x4") MANUFACTURER_STR="Embest" ;;
-        "0x5") MANUFACTURER_STR="Stadium" ;;
-        *)
-            MANUFACTURER_STR="Unknown"
-    esac
-
-    keywriter_log "Board is: ${BOARD_STR}, with revision number ${REVISION}. Has Processor ${PROCESSOR_STR} with Memory ${MEMORY_STR}. Was manufactured by ${MANUFACTURER_STR}"
-
-    if [ -f "${RPI_SB_PROVISONER_MANUFACTURING_DB}" ]; then
-        check_command_exists sqlite3
-        sqlite3 "${RPI_SB_PROVISONER_MANUFACTURING_DB}"         \
-            -cmd "PRAGMA journal_mode=WAL;"                     \
-            "CREATE TABLE IF NOT EXISTS rpi_sb_provisioner(     \
-                id              integer primary key,   \
-                boardname       varchar(255)        not null,   \
-                serial          char(8)             not null,   \
-                keyhash         char(64)            not null,   \
-                mac             char(17)            not null,   \
-                jtag_locked     int2                not null,   \
-                advanced_boot   char(8)             not null,   \
-                boot_rom        char(8)             not null,   \
-                board_attr      char(8)             not null,   \
-                board_revision  varchar(255)        not null,   \
-                processor       varchar(255)        not null,   \
-                memory          varchar(255)        not null,   \
-                manufacturer    varchar(255)        not null    \
-                );"
-        sqlite3 "${RPI_SB_PROVISONER_MANUFACTURING_DB}" \
-            "INSERT INTO rpi_sb_provisioner(\
-                boardname,                  \
-                serial,                     \
-                keyhash,                    \
-                mac,                        \
-                jtag_locked,                \
-                advanced_boot,              \
-                boot_rom,                   \
-                board_attr,                 \
-                board_revision,             \
-                processor,                  \
-                memory,                     \
-                manufacturer                \
-            ) VALUES (                      \
-                '${BOARD_STR}',               \
-                '${TARGET_DEVICE_SERIAL}',    \
-                '${CUSTOMER_KEY_HASH}',       \
-                '${MAC_ADDRESS}',             \
-                '${JTAG_LOCKED}',             \
-                '${ADVANCED_BOOT}',           \
-                '${BOOT_ROM}',                \
-                '${BOARD_ATTR}',              \
-                '${REVISION}',                \
-                '${PROCESSOR_STR}',           \
-                '${MEMORY_STR}',              \
-                '${MANUFACTURER_STR}'        \
-            );"
-    fi
 fi
 
 # Fast path: If we've already generated the assets, just move to flashing.
@@ -431,10 +290,10 @@ set -e
 FASTBOOT_EXIT_STATUS=$?
 if [ $FASTBOOT_EXIT_STATUS -eq 124 ]; then
     provisioner_log "Loading Fastboot failed, timed out."
-    [ -n "${TARGET_DEVICE_SERIAL}" ] && echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-naked-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+    [ -n "${TARGET_DEVICE_SERIAL}" ] && echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
     return 124
 elif [ $FASTBOOT_EXIT_STATUS -ne 0 ]; then
-    provisioner_log "Fastboot failed to load: ${FASTBOOT_EXIT_STATUS}"
+    die "Fastboot failed to load: ${FASTBOOT_EXIT_STATUS}"
 else
     provisioner_log "Fastboot loaded."
 fi
@@ -458,7 +317,7 @@ announce_start "Resizing OS images"
 # https://dl.google.com/android/repository/platform-tools-latest-darwin.zip
 # https://dl.google.com/android/repository/platform-tools-latest-windows.zip
 TARGET_STORAGE_ROOT_EXTENT="$(get_variable partition-size:"${RPI_DEVICE_STORAGE_TYPE}"p2)"
-if [ -f "${RPI_SB_WORKDIR}/rootfs-temporary.simg" ] && [ "$((TARGET_STORAGE_ROOT_EXTENT))" -eq "$(stat -c%s "${RPI_SB_WORKDIR}"/rootfs-temporary.simg)" ]; then
+if [ -f "${RPI_SB_WORKDIR}/rootfs-temporary.simg" ] && [ "$((TARGET_STORAGE_ROOT_EXTENT))" -eq "$(stat -c%b*%B "${RPI_SB_WORKDIR}"/rootfs-temporary.simg)" ]; then
     announce_stop "Resizing OS images: Not required, already the correct size"
 else
     mke2fs -t ext4 -b 4096 -d "${TMP_DIR}"/rpi-rootfs-img-mount "${RPI_SB_WORKDIR}"/rootfs-temporary.img $((TARGET_STORAGE_ROOT_EXTENT / 4096))
@@ -486,6 +345,6 @@ announce_start "Set LED status"
 [ -z "${DEMO_MODE_ONLY}" ] && fastboot oem led PWR 0
 announce_stop "Set LED status"
 
-echo "${PROVISIONER_FINISHED}" >> /var/log/rpi-naked-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+echo "${PROVISIONER_FINISHED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
 
 provisioner_log "Provisioning completed. Remove the device from this machine."
