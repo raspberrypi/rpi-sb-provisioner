@@ -459,41 +459,50 @@ fi
 announce_start "Staging fastboot image"
 cp "$(get_fastboot_gadget)" "${RPI_SB_WORKDIR}"/boot.img
 
-# Generate the boot.sig unconditionally - the bootloader won't use it in the
-# absence of SIGNED_BOOT=1, but it's useful for debugging.
-sha256sum "${RPI_SB_WORKDIR}"/boot.img | awk '{print $1}' > "${RPI_SB_WORKDIR}"/boot.sig
-printf 'rsa2048: ' >> "${RPI_SB_WORKDIR}"/boot.sig
-# Prefer PKCS11 over PEM keyfiles, if both are specified.
-# shellcheck disable=SC2046
-${OPENSSL} dgst -sign $(get_signing_directives) -sha256 "${RPI_SB_WORKDIR}"/boot.img | xxd -c 4096 -p >> "${RPI_SB_WORKDIR}"/boot.sig
+if [ "$ALLOW_SIGNED_BOOT" -eq 1 ] && [ "${PROVISIONING_STYLE}" = "secure-boot" ]; then
+    sha256sum "${RPI_SB_WORKDIR}"/boot.img | awk '{print $1}' > "${RPI_SB_WORKDIR}"/boot.sig
+    printf 'rsa2048: ' >> "${RPI_SB_WORKDIR}"/boot.sig
+    # Prefer PKCS11 over PEM keyfiles, if both are specified.
+    # shellcheck disable=SC2046
+    ${OPENSSL} dgst -sign $(get_signing_directives) -sha256 "${RPI_SB_WORKDIR}"/boot.img | xxd -c 4096 -p >> "${RPI_SB_WORKDIR}"/boot.sig
+fi
 
 cp "$(get_fastboot_config_file)" "${RPI_SB_WORKDIR}"/config.txt
 announce_stop "Staging fastboot image"
 
 announce_start "Starting fastboot"
 
-
 set +e
 [ -z "${DEMO_MODE_ONLY}" ] && timeout 120 rpiboot -v -d "${RPI_SB_WORKDIR}" -p "${TARGET_DEVICE_PATH}" -j "${EARLY_LOG_DIRECTORY}/metadata"
 set -e
 FLASHING_GADGET_EXIT_STATUS=$?
 if [ $FLASHING_GADGET_EXIT_STATUS -eq 124 ]; then
-    bootstrap_log "Loading Fastboot failed, timed out."
+    bootstrap_log "rpiboot timed out, aborting."
     return 124
 elif [ $FLASHING_GADGET_EXIT_STATUS -ne 0 ]; then
-    die "Fastboot failed to load: ${FLASHING_GADGET_EXIT_STATUS}"
+    die "rpiboot returned error: ${FLASHING_GADGET_EXIT_STATUS}"
+else
+    bootstrap_log "rpiboot complete."
+fi
+
+set +e
+[ -z "${DEMO_MODE_ONLY}" ] && TARGET_DEVICE_SERIAL=$(timeout 120 fastboot wait-for-device getvar serialno)
+set -e
+FASTBOOT_EXIT_STATUS=$?
+if [ $FASTBOOT_EXIT_STATUS -eq 124 ]; then
+    bootstrap_log "Fastboot failed, timed out."
+    return 124
+elif [ $FASTBOOT_EXIT_STATUS -ne 0 ]; then
+    die "Fastboot failed to load: ${FASTBOOT_EXIT_STATUS}"
 else
     bootstrap_log "Fastboot loaded."
 fi
-
-TARGET_DEVICE_SERIAL=$(get_variable "serialno")
 
 if [ -n "${TARGET_DEVICE_SERIAL}" ]; then
     mkdir -p "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}"
     mv "${EARLY_LOG_DIRECTORY}/metadata" "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata"
     mv "${EARLY_LOG_DIRECTORY}/bootstrap.log" "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/bootstrap.log"
     EARLY_LOG_DIRECTORY="/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/early"
-
 fi
 
 if [ -z "${DEMO_MODE_ONLY}" ] && [ -n "${RPI_DEVICE_FETCH_METADATA}" ]; then
