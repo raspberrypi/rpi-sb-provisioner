@@ -2,6 +2,11 @@
 import os
 import subprocess
 
+def validate_PROVISIONING_STYLE(text) -> tuple[bool, str]:
+    if text in ["secure-boot", "fde-only", "naked"]:
+        return (True, "")
+    else:
+        return (False, "Unexpected provisioning style: `" + text + "` is not one of secure-boot, fde-only, naked")
 
 def validate_CUSTOMER_KEY_FILE_PEM(text) -> tuple[bool, str]:
     if not os.path.exists(text):
@@ -51,10 +56,10 @@ def validate_RPI_DEVICE_STORAGE_CIPHER(text) -> tuple[bool, str]:
 
 
 def validate_RPI_DEVICE_FAMILY(text) -> tuple[bool, str]:
-    if text in "45":
+    if text in ["4", "5", "2W"]:
         return (True, "")
     else:
-        return (False, "type `" + text + "` was not any of 4 or 5")
+        return (False, "type `" + text + "` was not any of 4, 5, or 2W")
 
 
 def validate_RPI_DEVICE_BOOTLOADER_CONFIG_FILE(text) -> tuple[bool, str]:
@@ -65,7 +70,6 @@ def validate_RPI_DEVICE_BOOTLOADER_CONFIG_FILE(text) -> tuple[bool, str]:
 
 def validate_RPI_DEVICE_LOCK_JTAG(text) -> tuple[bool, str]:
     return (True, "")
-
 
 def validate_RPI_DEVICE_EEPROM_WP_SET(text) -> tuple[bool, str]:
     return (True, "")
