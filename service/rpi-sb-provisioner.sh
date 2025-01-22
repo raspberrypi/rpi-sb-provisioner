@@ -960,9 +960,27 @@ else
     announce_stop "Resizing OS images: Resized to $((TARGET_STORAGE_ROOT_EXTENT))"
 fi
 
+announce_start "Testing Fastboot IP connectivity"
+USE_IPV4=
+USE_IPV6=
+IPV6_ADDRESS="$(timeout_nonfatal fastboot getvar ipv6-address_0)"
+timeout_nonfatal fastboot -s tcp:"${IPV6_ADDRESS}" getvar version && USE_IPV6=$?
+IPV4_ADDRESS="$(timeout_nonfatal fastboot getvar ipv4-address_0)"
+timeout_nonfatal fastboot -s tcp:"${IPV4_ADDRESS}" getvar version && USE_IPV4=$?
+announce_stop "Testing Fastboot IP connectivity"
+
 announce_start "Writing OS images"
-fastboot flash "${RPI_DEVICE_STORAGE_TYPE}"p1 "${RPI_SB_WORKDIR}"/bootfs-temporary.img
-fastboot flash mapper/cryptroot "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
+# Favour using IPv6 if available, and ethernet regardless to get 1024-byte chunks in Fastboot without USB3
+FASTBOOT_DEVICE_SPECIFIER=
+if [ -n "${USE_IPV6}" ]; then
+FASTBOOT_DEVICE_SPECIFIER="tcp:${IPV6_ADDRESS}"
+elif [ -n "${USE_IPV4}" ]; then
+FASTBOOT_DEVICE_SPECIFIER="tcp:${IPV4_ADDRESS}"
+else
+FASTBOOT_DEVICE_SPECIFIER="${TARGET_DEVICE_SERIAL}"
+fi
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}"p1 "${RPI_SB_WORKDIR}"/bootfs-temporary.img
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash mapper/cryptroot "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
 announce_stop "Writing OS images"
 
 if [ -d "${RPI_DEVICE_RETRIEVE_KEYPAIR}" ]; then
