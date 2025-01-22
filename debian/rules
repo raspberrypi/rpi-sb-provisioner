@@ -7,3 +7,7 @@ export DH_VIRTUALENV_INSTALL_ROOT=/usr/share/
 	dh $@ --with python-virtualenv --with systemd
 
 override_dh_usrlocal:
+
+override_dh_auto_build:
+	pandoc README.adoc -s -t man --shift-heading-level-by=-1 >\
+	 debian/rpi-sb-provisioner.1
