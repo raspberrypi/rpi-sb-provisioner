@@ -2,9 +2,9 @@ Source: rpi-sb-provisioner
 Section: admin
 Priority: optional
 Maintainer: Tom Dewey <tom.dewey@raspberrypi.com>
-Build-Depends: debhelper (>= 11), python3, python3-virtualenv, dh-virtualenv (>= 0.8)
+Build-Depends: debhelper (>= 11), python3, python3-virtualenv, dh-virtualenv (>= 0.8), pandoc
 Standards-Version: 1.0.2
-homepage: https://www.raspberrypi.com/software
+Homepage: https://www.raspberrypi.com/software
 
 Package: rpi-sb-provisioner
 Architecture: arm64
