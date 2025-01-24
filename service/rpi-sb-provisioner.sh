@@ -963,18 +963,18 @@ fi
 announce_start "Testing Fastboot IP connectivity"
 USE_IPV4=
 USE_IPV6=
-IPV6_ADDRESS="$(timeout_nonfatal fastboot getvar ipv6-address_0 2>&1 | grep -oP 'ipv6-address_0: \K[^\r\n]*')"
+IPV6_ADDRESS="$(get_variable ipv6-address_0)"
 timeout_nonfatal fastboot -s tcp:"${IPV6_ADDRESS}" getvar version && USE_IPV6=$?
-IPV4_ADDRESS="$(timeout_nonfatal fastboot getvar ipv4-address_0 2>&1 | grep -oP 'ipv4-address_0: \K[^\r\n]*')"
+IPV4_ADDRESS="$(get_variable ipv4-address_0)"
 timeout_nonfatal fastboot -s tcp:"${IPV4_ADDRESS}" getvar version && USE_IPV4=$?
 announce_stop "Testing Fastboot IP connectivity"
 
 announce_start "Writing OS images"
 # Favour using IPv6 if available, and ethernet regardless to get 1024-byte chunks in Fastboot without USB3
 FASTBOOT_DEVICE_SPECIFIER=
-if [ -n "${USE_IPV6}" ]; then
+if [ "${USE_IPV6}" -eq 0 ]; then
 FASTBOOT_DEVICE_SPECIFIER="tcp:${IPV6_ADDRESS}"
-elif [ -n "${USE_IPV4}" ]; then
+elif [ "${USE_IPV4}" -eq 0 ]; then
 FASTBOOT_DEVICE_SPECIFIER="tcp:${IPV4_ADDRESS}"
 else
 FASTBOOT_DEVICE_SPECIFIER="${TARGET_DEVICE_SERIAL}"
