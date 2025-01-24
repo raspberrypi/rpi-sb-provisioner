@@ -336,6 +336,42 @@ unmount_image() {
     fi
 }
 
+# TODO: Refactor these two functions to use the same logic, but with different consequences for failure.
+timeout_nonfatal() {
+    command="$*"
+    set +e
+    [ -z "${DEMO_MODE_ONLY}" ] && timeout 120 "${command}"
+    set -e
+    command_exit_status=$?
+    if [ ${command_exit_status} -eq 124 ]; then
+        provisioner_log "\"${command}\" failed, timed out."
+        echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+        return 124
+    elif [ ${command_exit_status} -ne 0 ]; then
+        echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+        provisioner_log "\"$command\" failed: ${command_exit_status}"
+    else
+        provisioner_log "\"$command\" succeeded."
+    fi
+}
+
+timeout_fatal() {
+    command="$*"
+    set +e
+    [ -z "${DEMO_MODE_ONLY}" ] && timeout 120 "${command}"
+    set -e
+    command_exit_status=$?
+    if [ ${command_exit_status} -eq 124 ]; then
+        echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+        die "\"${command}\" failed, timed out."
+    elif [ ${command_exit_status} -ne 0 ]; then
+        echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+        die "\"$command\" failed: ${command_exit_status}"
+    else
+        provisioner_log "\"$command\" succeeded."
+    fi
+}
+
 cleanup() {
     if [ -d "${TMP_DIR}" ]; then
         rm -rf "${TMP_DIR}"
@@ -972,9 +1008,27 @@ else
     announce_stop "Resizing OS images: Resized to $((TARGET_STORAGE_ROOT_EXTENT))"
 fi
 
+announce_start "Testing Fastboot IP connectivity"
+USE_IPV4=
+USE_IPV6=
+[ -z "${DEMO_MODE_ONLY}" ] && IPV6_ADDRESS="$(timeout_nonfatal fastboot getvar ipv6-address_0 2>&1 | grep -oP 'ipv6-address_0: \K[^\r\n]*')"
+[ -z "${DEMO_MODE_ONLY}" ] && timeout_nonfatal fastboot -s tcp:"${IPV6_ADDRESS}" getvar version && USE_IPV6=$?
+[ -z "${DEMO_MODE_ONLY}" ] && IPV4_ADDRESS="$(timeout_nonfatal fastboot getvar ipv4-address_0 2>&1 | grep -oP 'ipv4-address_0: \K[^\r\n]*')"
+[ -z "${DEMO_MODE_ONLY}" ] && timeout_nonfatal fastboot -s tcp:"${IPV4_ADDRESS}" getvar version && USE_IPV4=$?
+announce_stop "Testing Fastboot IP connectivity"
+
 announce_start "Writing OS images"
-[ -z "${DEMO_MODE_ONLY}" ] && fastboot flash "${RPI_DEVICE_STORAGE_TYPE}"p1 "${RPI_SB_WORKDIR}"/bootfs-temporary.img
-[ -z "${DEMO_MODE_ONLY}" ] && fastboot flash mapper/cryptroot "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
+# Favour using IPv6 if available, and ethernet regardless to get 1024-byte chunks in Fastboot without USB3
+FASTBOOT_DEVICE_SPECIFIER=
+if [ -n "${USE_IPV6}" ]; then
+FASTBOOT_DEVICE_SPECIFIER="tcp:${IPV6_ADDRESS}"
+elif [ -n "${USE_IPV4}" ]; then
+FASTBOOT_DEVICE_SPECIFIER="tcp:${IPV4_ADDRESS}"
+else
+FASTBOOT_DEVICE_SPECIFIER="${TARGET_DEVICE_SERIAL}"
+fi
+[ -z "${DEMO_MODE_ONLY}" ] && fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}"p1 "${RPI_SB_WORKDIR}"/bootfs-temporary.simg
+[ -z "${DEMO_MODE_ONLY}" ] && fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash mapper/cryptroot "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
 announce_stop "Writing OS images"
 
 if [ -z "${DEMO_MODE_ONLY}" ] && [ -d "${RPI_DEVICE_RETRIEVE_KEYPAIR}" ]; then
