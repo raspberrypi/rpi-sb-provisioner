@@ -240,7 +240,7 @@ unmount_image() {
 timeout_nonfatal() {
     command="$*"
     set +e
-    [ -z "${DEMO_MODE_ONLY}" ] && timeout 120 "${command}"
+    timeout 120 "${command}"
     set -e
     command_exit_status=$?
     if [ ${command_exit_status} -eq 124 ]; then
@@ -258,7 +258,7 @@ timeout_nonfatal() {
 timeout_fatal() {
     command="$*"
     set +e
-    [ -z "${DEMO_MODE_ONLY}" ] && timeout 120 "${command}"
+    timeout 120 "${command}"
     set -e
     command_exit_status=$?
     if [ ${command_exit_status} -eq 124 ]; then
@@ -330,7 +330,7 @@ check_command_exists blockdev
 check_command_exists grep
 
 get_variable() {
-    [ -z "${DEMO_MODE_ONLY}" ] && fastboot getvar "$1" 2>&1 | grep -oP "${1}"': \K[^\r\n]*'
+    fastboot getvar "$1" 2>&1 | grep -oP "${1}"': \K[^\r\n]*'
 }
 
 TARGET_DEVICE_SERIAL="$(get_variable serialno)"
@@ -340,47 +340,17 @@ RPI_DEVICE_STORAGE_TYPE="$(check_pidevice_storage_type "${RPI_DEVICE_STORAGE_TYP
 DELETE_PRIVATE_TMPDIR=
 announce_start "Finding the cache directory"
 if [ -z "${RPI_SB_WORKDIR}" ]; then
-    RPI_SB_WORKDIR=$(mktemp -d "pi-sb-provisioner.XXX" --tmpdir="/srv/")
+    RPI_SB_WORKDIR=$(mktemp -d "rpi-sb-provisioner.XXX" --tmpdir="/srv/")
     announce_stop "Finding the cache directory: Created a new one as unspecified"
     DELETE_PRIVATE_TMPDIR="true"
 elif [ ! -d "${RPI_SB_WORKDIR}" ]; then
-    RPI_SB_WORKDIR=$(mktemp -d "pi-sb-provisioner.XXX" --tmpdir="/srv/")
+    RPI_SB_WORKDIR=$(mktemp -d "rpi-sb-provisioner.XXX" --tmpdir="/srv/")
     announce_stop "Finding the cache directory: Created a new one in /srv, as supplied path isn't a directory"
     DELETE_PRIVATE_TMPDIR="true"
 else
     # Deliberately do nothing
     announce_stop "Finding the cache directory: Using specified name"
 fi
-
-announce_start "Selecting and interrogating device"
-
-#announce_start "Getting target information"
-#TARGET_STORAGE_LIST_RESULT="$(get_variable storage-types-list)"
-#TARGET_PI_GENERATION="$(get_variable hw-generation)"
-#TARGET_DUID="$(get_variable device-uuid)"
-#TARGET_SERIAL="$(get_variable serialno)"
-#announce_stop "Getting target information"
-
-#announce_start "Storage device check"
-#STORAGE_FOUND=0
-#for device in ${TARGET_STORAGE_LIST_RESULT}
-#do
-#    if [ ${device} == ${RPI_DEVICE_STORAGE_TYPE} ]; then
-#        STORAGE_FOUND=1
-#    fi
-#done
-
-#if ! ${STORAGE_FOUND}; then
-#    die "Selected storage type is not available, wanted one of [${TARGET_STORAGE_LIST_RESULT}], got ${RPI_DEVICE_STORAGE_TYPE}"
-#fi
-
-#announce_stop "Storage device check"
-
-#announce_start "Raspberry Pi Generation check"
-#if ${RPI_DEVICE_FAMILY} != ${TARGET_PI_GENERATION}; then
-#    die "Raspberry Pi Generation mismatch. Expected a Raspberry Pi ${TARGET_PI_GENERATION} class device, you supplied ${RPI_DEVICE_FAMILY}"
-#fi
-#announce_stop "Raspberry Pi Generation check"
 
 # Fast path: If we've already generated the assets, just move to flashing.
 if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.simg" ] ||
@@ -572,6 +542,7 @@ if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.simg" ] ||
     umount "${META_BOOTIMG_MOUNT_PATH}"
     rm -rf "${META_BOOTIMG_MOUNT_PATH}"
     img2simg "${TMP_DIR}"/bootfs-temporary.img "${RPI_SB_WORKDIR}"/bootfs-temporary.simg
+    rm -f "${TMP_DIR}"/bootfs-temporary.img
     announce_stop "Boot Image partition extraction"
 fi # Slow path
 
@@ -579,19 +550,19 @@ announce_start "Erase / Partition Device Storage"
 
 # Arbitrary sleeps to handle lack of correct synchronisation in fastbootd.
 
-[ -z "${DEMO_MODE_ONLY}" ] && timeout_fatal fastboot getvar version
+timeout_fatal fastboot getvar version
 
-[ -z "${DEMO_MODE_ONLY}" ] && fastboot erase "${RPI_DEVICE_STORAGE_TYPE}"
+fastboot erase "${RPI_DEVICE_STORAGE_TYPE}"
 sleep 2
-[ -z "${DEMO_MODE_ONLY}" ] && fastboot oem partinit "${RPI_DEVICE_STORAGE_TYPE}" DOS
+fastboot oem partinit "${RPI_DEVICE_STORAGE_TYPE}" DOS
 sleep 2
-[ -z "${DEMO_MODE_ONLY}" ] && fastboot oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 0c "$(stat -c%s "${RPI_SB_WORKDIR}"/bootfs-temporary.img)"
+fastboot oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 0c "$(stat -c%b*%B "${RPI_SB_WORKDIR}"/bootfs-temporary.simg)"
 sleep 2
-[ -z "${DEMO_MODE_ONLY}" ] && fastboot oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 83 # Grow to fill storage
+fastboot oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 83 # Grow to fill storage
 sleep 2
-[ -z "${DEMO_MODE_ONLY}" ] && fastboot oem cryptinit "${RPI_DEVICE_STORAGE_TYPE}"p2 root "${RPI_DEVICE_STORAGE_CIPHER}"
+fastboot oem cryptinit "${RPI_DEVICE_STORAGE_TYPE}"p2 root "${RPI_DEVICE_STORAGE_CIPHER}"
 sleep 2
-[ -z "${DEMO_MODE_ONLY}" ] && fastboot oem cryptopen "${RPI_DEVICE_STORAGE_TYPE}"p2 cryptroot
+fastboot oem cryptopen "${RPI_DEVICE_STORAGE_TYPE}"p2 cryptroot
 sleep 2
 announce_stop "Erase / Partition Device Storage"
 
@@ -618,32 +589,33 @@ fi
 announce_start "Testing Fastboot IP connectivity"
 USE_IPV4=
 USE_IPV6=
-[ -z "${DEMO_MODE_ONLY}" ] && IPV6_ADDRESS="$(timeout_nonfatal fastboot getvar ipv6-address_0)"
-[ -z "${DEMO_MODE_ONLY}" ] && timeout_nonfatal fastboot -s tcp:"${IPV6_ADDRESS}" getvar version && USE_IPV6=$?
-[ -z "${DEMO_MODE_ONLY}" ] && IPV4_ADDRESS="$(timeout_nonfatal fastboot getvar ipv4-address_0)"
-[ -z "${DEMO_MODE_ONLY}" ] && timeout_nonfatal fastboot -s tcp:"${IPV4_ADDRESS}" getvar version && USE_IPV4=$?
+IPV6_ADDRESS="$(get_variable ipv6-address_0)"
+timeout_nonfatal fastboot -s tcp:"${IPV6_ADDRESS}" getvar version && USE_IPV6=$?
+IPV4_ADDRESS="$(get_variable ipv4-address_0)"
+timeout_nonfatal fastboot -s tcp:"${IPV4_ADDRESS}" getvar version && USE_IPV4=$?
 announce_stop "Testing Fastboot IP connectivity"
 
 announce_start "Writing OS images"
 # Favour using IPv6 if available, and ethernet regardless to get 1024-byte chunks in Fastboot without USB3
 FASTBOOT_DEVICE_SPECIFIER=
-if [ -n "${USE_IPV6}" ]; then
+if [ "${USE_IPV6}" -eq 0 ]; then
 FASTBOOT_DEVICE_SPECIFIER="tcp:${IPV6_ADDRESS}"
-elif [ -n "${USE_IPV4}" ]; then
+elif [ "${USE_IPV4}" -eq 0 ]; then
 FASTBOOT_DEVICE_SPECIFIER="tcp:${IPV4_ADDRESS}"
 else
 FASTBOOT_DEVICE_SPECIFIER="${TARGET_DEVICE_SERIAL}"
 fi
-[ -z "${DEMO_MODE_ONLY}" ] && fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}"p1 "${RPI_SB_WORKDIR}"/bootfs-temporary.simg
-[ -z "${DEMO_MODE_ONLY}" ] && fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash mapper/cryptroot "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
+
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}"p1 "${RPI_SB_WORKDIR}"/bootfs-temporary.simg
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash mapper/cryptroot "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
 announce_stop "Writing OS images"
 
-if [ -z "${DEMO_MODE_ONLY}" ] && [ -d "${RPI_DEVICE_RETRIEVE_KEYPAIR}" ]; then
+if [ -d "${RPI_DEVICE_RETRIEVE_KEYPAIR}" ]; then
     announce_start "Capturing device keypair to ${RPI_DEVICE_RETRIEVE_KEYPAIR}"
     N_ALREADY_PROVISIONED=0
     get_variable private-key > "${RPI_DEVICE_RETRIEVE_KEYPAIR}/${TARGET_DEVICE_SERIAL}.der" || N_ALREADY_PROVISIONED=$?
     if [ 0 -ne "$N_ALREADY_PROVISIONED" ]; then
-        keywriter_log "Warning: Unable to retrieve device private key; already provisioned"
+        provisioner_log "Warning: Unable to retrieve device private key; already provisioned"
     fi
     get_variable public-key > "${RPI_DEVICE_RETRIEVE_KEYPAIR}/${TARGET_DEVICE_SERIAL}.pub"
     announce_stop "Capturing device keypair to ${RPI_DEVICE_RETRIEVE_KEYPAIR}"
@@ -660,7 +632,7 @@ rm -rf "${TMP_DIR}" ${DEBUG}
 announce_stop "Cleaning up"
 
 announce_start "Set LED status"
-[ -z "${DEMO_MODE_ONLY}" ] && fastboot oem led PWR 0
+fastboot oem led PWR 0
 announce_stop "Set LED status"
 
 echo "${PROVISIONER_FINISHED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
