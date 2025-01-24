@@ -3,15 +3,13 @@
 set -e
 set -x
 
-DEBUG=
-
 OPENSSL=${OPENSSL:-openssl}
 
 export TRIAGE_FINISHED="BOOTSTRAP-FINISHED"
 export TRIAGE_ABORTED="BOOTSTRAP-ABORTED"
 export TRIAGE_STARTED="BOOTSTRAP-STARTED"
 
-TARGET_DEVICE_SERIAL="$(get_variable serialno)"
+TARGET_DEVICE_SERIAL="${1}"
 
 LOG_DIRECTORY="/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}"
 mkdir -p "${LOG_DIRECTORY}"
@@ -33,82 +31,25 @@ read_config() {
 
 read_config
 
-ring_bell() {
-    tput bel
-}
-
 announce_start() {
-    bootstrap_log "================================================================================"
+    triage_log "================================================================================"
 
-    bootstrap_log "Starting $1"
+    triage_log "Starting $1"
 
-    bootstrap_log "================================================================================"
+    triage_log "================================================================================"
 }
 
 announce_stop() {
-    bootstrap_log "================================================================================"
+    triage_log "================================================================================"
 
-    bootstrap_log "Stopping $1"
+    triage_log "Stopping $1"
 
-    bootstrap_log "================================================================================"
+    triage_log "================================================================================"
 }
 
-bootstrap_log() {
+triage_log() {
     echo "$@" >> "${LOG_DIRECTORY}"/triage.log
     printf "%s\n" "$@"
-}
-
-get_fastboot_gadget() {
-    if [ -f /etc/rpi-sb-provisioner/fastboot-gadget.img ]; then
-        echo "/etc/rpi-sb-provisioner/fastboot-gadget.img"
-    else
-        echo "/var/lib/rpi-sb-provisioner/fastboot-gadget.img"
-    fi
-}
-
-get_fastboot_config_file() {
-    if [ -f /etc/rpi-sb-provisioner/boot_ramdisk_config.txt ]; then
-        echo "/etc/rpi-sb-provisioner/boot_ramdisk_config.txt"
-    else
-        echo "/var/lib/rpi-sb-provisioner/boot_ramdisk_config.txt"
-    fi
-}
-
-# check_file_is_expected ${path_to_file} ${expected_file_extension}
-# Checks if a file exists, is not a directory, is not zero and has the right extension.
-# If any of those checks fail, exit the script entirely and print a debug message
-# If all checks succeed, supply the filepath via stdout
-check_file_is_expected() {
-    filepath="$1"
-    ext="$2"
-
-    if [ ! -e "${filepath}" ]; then
-        die "Specified file does not exist: ${filepath}"
-    fi
-
-    if [ -d "${filepath}" ]; then
-        die "Expected a file, got a directory for ${filepath}"
-    fi
-
-    if [ -z "${filepath}" ]; then
-        die "Provided file is empty: ${filepath}"
-    fi
-
-    if [ -z "${ext}" ] || echo "${filepath}" | grep -q "${ext}"; then
-        echo "${filepath}"
-        return 0
-    else
-        die "Provided file is of the wrong extension, wanted ${ext}, provided ${filepath}"
-    fi
-}
-
-check_command_exists() {
-    command_to_test=$1
-    if ! command -v "${command_to_test}" 1> /dev/null; then
-        die "${command_to_test} could not be found"
-    else
-        echo "$command_to_test"
-    fi
 }
 
 cleanup() {
