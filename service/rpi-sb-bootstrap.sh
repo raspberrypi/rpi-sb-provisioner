@@ -13,7 +13,6 @@ export BOOTSTRAP_STARTED="BOOTSTRAP-STARTED"
 
 # On pre-Pi4 devices, only TARGET_DEVICE_PATH is likely to be unique.
 TARGET_DEVICE_PATH="$1"
-TARGET_DEVICE_SERIAL="$(udevadm info --name="$TARGET_DEVICE_PATH" --query=property --property=ID_SERIAL_SHORT --value)"
 TARGET_DEVICE_FAMILY="$(udevadm info --name="$TARGET_DEVICE_PATH" --query=property --property=ID_MODEL_ID --value)"
 
 EARLY_LOG_DIRECTORY="/var/log/rpi-sb-provisioner/early/${TARGET_DEVICE_PATH}"
@@ -68,6 +67,15 @@ get_fastboot_gadget() {
         echo "/var/lib/rpi-sb-provisioner/fastboot-gadget.img"
     fi
 }
+
+get_fastboot_gadget_2710() {
+    if [ -f /etc/rpi-sb-provisioner/fastboot-gadget.2710-bootfiles-bin ]; then
+        echo "/etc/rpi-sb-provisioner/fastboot-gadget.2710-bootfiles-bin"
+    else
+        echo "/var/lib/rpi-sb-provisioner/fastboot-gadget.2710-bootfiles-bin"
+    fi
+}
+
 
 get_fastboot_config_file() {
     if [ -f /etc/rpi-sb-provisioner/boot_ramdisk_config.txt ]; then
@@ -288,7 +296,7 @@ check_command_exists findmnt
 check_command_exists grep
 
 get_variable() {
-    [ -z "${DEMO_MODE_ONLY}" ] && fastboot getvar "$1" 2>&1 | grep -oP "${1}"': \K[^\r\n]*'
+    fastboot getvar "$1" 2>&1 | grep -oP "${1}"': \K[^\r\n]*'
 }
 
 DELETE_PRIVATE_TMPDIR=
@@ -395,39 +403,51 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ] && [ "${PROVISIONING_STYLE}" = "secure-boot" ]
 
         bootstrap_log "Writing key and EEPROM configuration to the device"
         set +e
-        [ -z "${DEMO_MODE_ONLY}" ] && timeout 10s rpiboot -d "${RPI_SB_WORKDIR}" -i "${TARGET_DEVICE_SERIAL}" -j "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/"
+        timeout 10s rpiboot -d "${RPI_SB_WORKDIR}" -p "${TARGET_USB_PATH}" -j "${EARLY_LOG_DIRECTORY}/metadata/"
         set -e
         KEYWRITER_EXIT_STATUS=$?
-        if [ ${KEYWRITER_EXIT_STATUS} -eq 124 ]; then
-            bootstrap_log "Writing failed, timed out."
-            case "${TARGET_DEVICE_FAMILY}" in
-                2712)
-                    # Raspberry Pi 5-family hardware may already have a key provisioned - so retry with a signed bootcode.
-                    rpi-sign-bootcode --debug -c 2712 -i "${BOOTCODE_BINARY_IMAGE}" -o "${BOOTCODE_FLASHING_NAME}" -k "${CUSTOMER_KEY_FILE_PEM}" -v 0 -n 16
-                    [ -z "${DEMO_MODE_ONLY}" ] && timeout 10s rpiboot -d "${RPI_SB_WORKDIR}" -i "${TARGET_DEVICE_SERIAL}" -j "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/"
-                    KEYWRITER_RETRY_EXIT_STATUS=$?
-                    if [ ${KEYWRITER_RETRY_EXIT_STATUS} -eq 124 ]; then
-                        # If the retry with a signed recovery image fails, this is likely a hard failure.
+        case $KEYWRITER_EXIT_STATUS in
+            124)
+                bootstrap_log "Writing failed, timed out."
+                case "${TARGET_DEVICE_FAMILY}" in
+                    2712)
+                        # Raspberry Pi 5-family hardware may already have a key provisioned - so retry with a signed bootcode.
+                        rpi-sign-bootcode --debug -c 2712 -i "${BOOTCODE_BINARY_IMAGE}" -o "${BOOTCODE_FLASHING_NAME}" -k "${CUSTOMER_KEY_FILE_PEM}" -v 0 -n 16
+                        timeout 10s rpiboot -d "${RPI_SB_WORKDIR}" -p "${TARGET_USB_PATH}" -j "${EARLY_LOG_DIRECTORY}/metadata/"
+                        KEYWRITER_RETRY_EXIT_STATUS=$?
+                        case ${KEYWRITER_RETRY_EXIT_STATUS} in
+                            124)
+                                # If the retry with a signed recovery image fails, this is likely a hard failure.
+                                echo "${BOOTSTRAP_ABORTED}" >> "${EARLY_LOG_DIRECTORY}"/bootstrap.log
+                                return 124
+                                ;;
+                            0)
+                                # If the retry with a signed recovery image succeeds, then we're done.
+                                echo "Keywriter retry-launched successfully."
+                                ;;
+                            *)
+                                bootstrap_log "Failed to load keywriter: ${KEYWRITER_RETRY_EXIT_STATUS}"
+                                echo "${BOOTSTRAP_ABORTED}" >> "${EARLY_LOG_DIRECTORY}"/bootstrap.log
+                                return ${KEYWRITER_RETRY_EXIT_STATUS}
+                            ;;
+                        esac
+                    ;;
+                    *)
+                        # If we're not Raspberry Pi 5-family, then this is the end of the line, no retry will help.
                         echo "${BOOTSTRAP_ABORTED}" >> "${EARLY_LOG_DIRECTORY}"/bootstrap.log
                         return 124
-                    elif [ ${KEYWRITER_RETRY_EXIT_STATUS} -ne 0 ]; then
-                        bootstrap_log "Failed to load keywriter: ${KEYWRITER_RETRY_EXIT_STATUS}"
-                        echo "${BOOTSTRAP_ABORTED}" >> "${EARLY_LOG_DIRECTORY}"/bootstrap.log
-                        return ${KEYWRITER_RETRY_EXIT_STATUS}
-                    fi
+                    ;;
+                esac
                 ;;
-                *)
-                    # If we're not Raspberry Pi 5-family, then this is the end of the line, no retry will help.
-                    echo "${BOOTSTRAP_ABORTED}" >> "${EARLY_LOG_DIRECTORY}"/bootstrap.log
-                    return 124
+            0)
+                bootstrap_log "Keywriter launched successfully."
                 ;;
-            esac
-        elif [ ${KEYWRITER_EXIT_STATUS} -ne 0 ]; then
-            bootstrap_log "Failed to load keywriter: ${KEYWRITER_EXIT_STATUS}"
-            echo "${BOOTSTRAP_ABORTED}" >> "${EARLY_LOG_DIRECTORY}"/bootstrap.log
-            return ${KEYWRITER_EXIT_STATUS}
-        fi
-
+            *)
+                bootstrap_log "Failed to load keywriter: ${KEYWRITER_EXIT_STATUS}"
+                echo "${BOOTSTRAP_ABORTED}" >> "${EARLY_LOG_DIRECTORY}"/bootstrap.log
+                return ${KEYWRITER_EXIT_STATUS}
+                ;;
+        esac
     else
         bootstrap_log "No key specified, skipping eeprom update"
     fi
@@ -453,61 +473,79 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ] && [ "${PROVISIONING_STYLE}" = "secure-boot" ]
     esac
 else
     # No signed boot means we never have to sign the fastboot gadget, so go go go!
-    cp /usr/share/rpiboot/mass-storage-gadget64/bootfiles.bin "${RPI_SB_WORKDIR}/bootfiles.bin"
+    cp "$(get_fastboot_gadget_2710)" "${RPI_SB_WORKDIR}/bootfiles.bin"
 fi
 
 announce_start "Staging fastboot image"
-cp "$(get_fastboot_gadget)" "${RPI_SB_WORKDIR}"/boot.img
 
 if [ "$ALLOW_SIGNED_BOOT" -eq 1 ] && [ "${PROVISIONING_STYLE}" = "secure-boot" ]; then
     announce_start "Signing fastboot image"
+    cp "$(get_fastboot_gadget)" "${RPI_SB_WORKDIR}"/boot.img
     sha256sum "${RPI_SB_WORKDIR}"/boot.img | awk '{print $1}' > "${RPI_SB_WORKDIR}"/boot.sig
     printf 'rsa2048: ' >> "${RPI_SB_WORKDIR}"/boot.sig
     # Prefer PKCS11 over PEM keyfiles, if both are specified.
     # shellcheck disable=SC2046
     ${OPENSSL} dgst -sign $(get_signing_directives) -sha256 "${RPI_SB_WORKDIR}"/boot.img | xxd -c 4096 -p >> "${RPI_SB_WORKDIR}"/boot.sig
+    cp "$(get_fastboot_config_file)" "${RPI_SB_WORKDIR}"/config.txt
     announce_stop "Signing fastboot image"
 fi
 
-cp "$(get_fastboot_config_file)" "${RPI_SB_WORKDIR}"/config.txt
 announce_stop "Staging fastboot image"
 
 announce_start "Starting fastboot"
 
+TARGET_USB_PATH="$(udevadm info "${TARGET_DEVICE_PATH}" | grep -oP '^M: \K.*')"
 set +e
-[ -z "${DEMO_MODE_ONLY}" ] && timeout 120 rpiboot -v -d "${RPI_SB_WORKDIR}" -p "${TARGET_DEVICE_PATH}" -j "${EARLY_LOG_DIRECTORY}/metadata"
+# -j option not supported pre BCM2711/BCM2712
+case "${TARGET_DEVICE_FAMILY}" in
+    2712 | 2711)
+        mkdir -p "${EARLY_LOG_DIRECTORY}/metadata"
+        timeout 120 rpiboot -v -d "${RPI_SB_WORKDIR}" -p "${TARGET_USB_PATH}" -j "${EARLY_LOG_DIRECTORY}/metadata"
+        ;;
+    *)
+        timeout 120 rpiboot -v -d "${RPI_SB_WORKDIR}" -p "${TARGET_USB_PATH}"
+        ;;
+esac
 set -e
 FLASHING_GADGET_EXIT_STATUS=$?
-if [ $FLASHING_GADGET_EXIT_STATUS -eq 124 ]; then
-    bootstrap_log "rpiboot timed out, aborting."
-    return 124
-elif [ $FLASHING_GADGET_EXIT_STATUS -ne 0 ]; then
-    die "rpiboot returned error: ${FLASHING_GADGET_EXIT_STATUS}"
-else
-    bootstrap_log "rpiboot complete."
-fi
+case $FLASHING_GADGET_EXIT_STATUS in
+    124)
+        bootstrap_log "rpiboot timed out, aborting."
+        return 124
+        ;;
+    0)
+        bootstrap_log "rpiboot complete."
+        ;;
+    *)
+        die "rpiboot returned error: ${FLASHING_GADGET_EXIT_STATUS}"
+        ;;
+esac
 
 set +e
-[ -z "${DEMO_MODE_ONLY}" ] && TARGET_DEVICE_SERIAL=$(timeout 120 fastboot wait-for-device getvar serialno)
+TARGET_DEVICE_SERIAL="$(timeout 120 fastboot -s usb:"${TARGET_USB_PATH}" getvar serialno 2>&1 | grep -oP 'serialno: \K[^\r\n]*')"
 set -e
 FASTBOOT_EXIT_STATUS=$?
-if [ $FASTBOOT_EXIT_STATUS -eq 124 ]; then
-    bootstrap_log "Fastboot failed, timed out."
-    return 124
-elif [ $FASTBOOT_EXIT_STATUS -ne 0 ]; then
-    die "Fastboot failed to load: ${FASTBOOT_EXIT_STATUS}"
-else
-    bootstrap_log "Fastboot loaded."
-fi
+case $FASTBOOT_EXIT_STATUS in
+    124)
+        bootstrap_log "Fastboot timed out, aborting."
+        return 124
+        ;;
+    0)
+        bootstrap_log "Fastboot loaded."
+        ;;
+    *)
+        die "Fastboot failed to load: ${FASTBOOT_EXIT_STATUS}"
+        ;;
+esac
 
 if [ -n "${TARGET_DEVICE_SERIAL}" ]; then
     mkdir -p "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}"
-    mv "${EARLY_LOG_DIRECTORY}/metadata" "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata"
+    [ -d "${EARLY_LOG_DIRECTORY}/metadata" ] && mv "${EARLY_LOG_DIRECTORY}/metadata" "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata"
     mv "${EARLY_LOG_DIRECTORY}/bootstrap.log" "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/bootstrap.log"
-    EARLY_LOG_DIRECTORY="/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/early"
 fi
 
-if [ -z "${DEMO_MODE_ONLY}" ] && [ -n "${RPI_DEVICE_FETCH_METADATA}" ]; then
+# If we've been asked to fetch metadata, and we have it, then we should use it.
+if [ -n "${RPI_DEVICE_FETCH_METADATA}" ] && [ -d "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/" ]; then
         USER_BOARDREV="0x$(jq -r '.USER_BOARDREV' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)"
         MAC_ADDRESS=$(jq -r '.MAC_ADDR' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
         CUSTOMER_KEY_HASH=$(jq -r '.CUSTOMER_KEY_HASH' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
