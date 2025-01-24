@@ -963,9 +963,9 @@ fi
 announce_start "Testing Fastboot IP connectivity"
 USE_IPV4=
 USE_IPV6=
-IPV6_ADDRESS="$(timeout_nonfatal fastboot getvar ipv6-address_0)"
+IPV6_ADDRESS="$(timeout_nonfatal fastboot getvar ipv6-address_0 2>&1 | grep -oP 'ipv6-address_0: \K[^\r\n]*')"
 timeout_nonfatal fastboot -s tcp:"${IPV6_ADDRESS}" getvar version && USE_IPV6=$?
-IPV4_ADDRESS="$(timeout_nonfatal fastboot getvar ipv4-address_0)"
+IPV4_ADDRESS="$(timeout_nonfatal fastboot getvar ipv4-address_0 2>&1 | grep -oP 'ipv4-address_0: \K[^\r\n]*')"
 timeout_nonfatal fastboot -s tcp:"${IPV4_ADDRESS}" getvar version && USE_IPV4=$?
 announce_stop "Testing Fastboot IP connectivity"
 
