@@ -27,9 +27,10 @@ fetch-repo-package-list/fetch-repo-package-list@.timer      /usr/local/lib/syste
 fetch-repo-package-list/fetch-repo-package-list@.service    /usr/local/lib/systemd/system
 rpi-package-download/rpi-package-download@.service          /usr/local/lib/systemd/system
 
-host-support/cryptroot_initramfs        /var/lib/rpi-sb-provisioner
-host-support/boot_ramdisk_config.txt    /var/lib/rpi-sb-provisioner
-host-support/fastboot-gadget.img        /var/lib/rpi-sb-provisioner
-host-support/bootloader.config          /var/lib/rpi-sb-provisioner
+host-support/cryptroot_initramfs                    /var/lib/rpi-sb-provisioner
+host-support/boot_ramdisk_config.txt                /var/lib/rpi-sb-provisioner
+host-support/fastboot-gadget.img                    /var/lib/rpi-sb-provisioner
+host-support/fastboot-gadget.2710-bootfiles-bin     /var/lib/rpi-sb-provisioner
+host-support/bootloader.config                      /var/lib/rpi-sb-provisioner
 
 host-support/rpi-sb-provisioner         /etc/default
