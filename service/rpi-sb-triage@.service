@@ -1,7 +1,7 @@
 [Unit]
-Description=Bootstrap a Raspberry Pi device in to Fastboot, for full-disk encryption setup
+Description=Triage a Raspberry Pi Fastboot device
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/rpi-sb-bootstrap.sh %I
+ExecStart=/usr/local/bin/rpi-sb-triage.sh %I
 EnvironmentFile=/etc/rpi-sb-provisioner/config
