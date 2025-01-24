@@ -1016,7 +1016,7 @@ FASTBOOT_DEVICE_SPECIFIER="tcp:${IPV4_ADDRESS}"
 else
 FASTBOOT_DEVICE_SPECIFIER="${TARGET_DEVICE_SERIAL}"
 fi
-[ -z "${DEMO_MODE_ONLY}" ] && fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}"p1 "${RPI_SB_WORKDIR}"/bootfs-temporary.simg
+[ -z "${DEMO_MODE_ONLY}" ] && fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}"p1 "${RPI_SB_WORKDIR}"/bootfs-temporary.img
 [ -z "${DEMO_MODE_ONLY}" ] && fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash mapper/cryptroot "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
 announce_stop "Writing OS images"
 
