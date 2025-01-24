@@ -19,11 +19,7 @@ read_config() {
 
 read_config
 
-TARGET_DEVICE_SERIAL="$(udevadm info --name="$1" --query=property --property=ID_SERIAL_SHORT --value)"
-
-ring_bell() {
-    tput bel
-}
+TARGET_DEVICE_SERIAL="${1}"
 
 announce_start() {
     provisioner_log "================================================================================"
@@ -54,22 +50,6 @@ provisioner_log() {
 }
 
 TMP_DIR=""
-
-get_fastboot_gadget() {
-    if [ -f /etc/rpi-sb-provisioner/fastboot-gadget.img ]; then
-        echo "/etc/rpi-sb-provisioner/fastboot-gadget.img"
-    else
-        echo "/var/lib/rpi-sb-provisioner/fastboot-gadget.img"
-    fi
-}
-
-get_fastboot_config_file() {
-    if [ -f /etc/rpi-sb-provisioner/boot_ramdisk_config.txt ]; then
-        echo "/etc/rpi-sb-provisioner/boot_ramdisk_config.txt"
-    else
-        echo "/var/lib/rpi-sb-provisioner/boot_ramdisk_config.txt"
-    fi
-}
 
 # check_file_is_expected ${path_to_file} ${expected_file_extension}
 # Checks if a file exists, is not a directory, is not zero and has the right extension.
@@ -105,15 +85,6 @@ check_command_exists() {
         die "${command_to_test} could not be found"
     else
         echo "$command_to_test"
-    fi
-}
-
-check_python_module_exists() {
-    module_name=$1
-    if ! python -c "import ${module_name}" 1> /dev/null; then
-        die "Failed to load Python module '${module_name}'"
-    else
-        echo "${module_name}"
     fi
 }
 
@@ -168,6 +139,23 @@ unmount() {
     done
 }
 
+timeout_fatal() {
+    command="$*"
+    set +e
+    [ -z "${DEMO_MODE_ONLY}" ] && timeout 120 "${command}"
+    set -e
+    command_exit_status=$?
+    if [ ${command_exit_status} -eq 124 ]; then
+        echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+        die "\"${command}\" failed, timed out."
+    elif [ ${command_exit_status} -ne 0 ]; then
+        echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+        die "\"$command\" failed: ${command_exit_status}"
+    else
+        provisioner_log "\"$command\" succeeded."
+    fi
+}
+
 # Lifted from pi-gen/scripts/common
 unmount_image() {
     sync
@@ -217,7 +205,7 @@ check_command_exists blockdev
 check_command_exists grep
 
 get_variable() {
-    [ -z "${DEMO_MODE_ONLY}" ] && fastboot getvar "$1" 2>&1 | grep -oP "${1}"': \K[^\r\n]*'
+    fastboot getvar "$1" 2>&1 | grep -oP "${1}"': \K[^\r\n]*'
 }
 
 TMP_DIR=$(mktemp -d)
@@ -225,11 +213,11 @@ RPI_DEVICE_STORAGE_TYPE="$(check_pidevice_storage_type "${RPI_DEVICE_STORAGE_TYP
 DELETE_PRIVATE_TMPDIR=
 announce_start "Finding the cache directory"
 if [ -z "${RPI_SB_WORKDIR}" ]; then
-    RPI_SB_WORKDIR=$(mktemp -d "rpi-sb-provisioner.XXX" --tmpdir="/srv/")
+    RPI_SB_WORKDIR=$(mktemp -d "rpi-naked-provisioner.XXX" --tmpdir="/srv/")
     announce_stop "Finding the cache directory: Created a new one as unspecified"
     DELETE_PRIVATE_TMPDIR="true"
 elif [ ! -d "${RPI_SB_WORKDIR}" ]; then
-    RPI_SB_WORKDIR=$(mktemp -d "rpi-sb-provisioner.XXX" --tmpdir="/srv/")
+    RPI_SB_WORKDIR=$(mktemp -d "rpi-naked-provisioner.XXX" --tmpdir="/srv/")
     announce_stop "Finding the cache directory: Created a new one in /srv, as supplied path isn't a directory"
     DELETE_PRIVATE_TMPDIR="true"
 else
@@ -260,8 +248,6 @@ if [ ! -e "${RPI_SB_WORKDIR}"/bootfs-temporary.img ] ||
     ROOT_DEV="${LOOP_DEV}"p2
 
     # shellcheck disable=SC2086
-    # mkdir -p "${TMP_DIR}"/rpi-boot-img-mount ${DEBUG}
-    # shellcheck disable=SC2086
     mkdir -p "${TMP_DIR}"/rpi-rootfs-img-mount ${DEBUG}
 
     # OS Images are, by convention, packed as a MBR whole-disk file,
@@ -271,40 +257,28 @@ if [ ! -e "${RPI_SB_WORKDIR}"/bootfs-temporary.img ] ||
     # Note that this mechanism is _assuming_ Linux. We may revise that in the future, but
     # to do so would require a concrete support commitment from the vendor - and Raspberry Pi only
     # support Linux.
-    # shellcheck disable=SC2086
-    # mount -t vfat "${BOOT_DEV}" "${TMP_DIR}"/rpi-boot-img-mount ${DEBUG}
-    # shellcheck disable=SC2086
-    mount -t ext4 "${ROOT_DEV}" "${TMP_DIR}"/rpi-rootfs-img-mount ${DEBUG}
 
     # Immediately copy the boot files to the boot partition
     dd if="${BOOT_DEV}" of="${RPI_SB_WORKDIR}"/bootfs-temporary.img
+
+    # shellcheck disable=SC2086
+    mount -t ext4 "${ROOT_DEV}" "${TMP_DIR}"/rpi-rootfs-img-mount ${DEBUG}
+
     announce_stop "OS Image Mounting"
 fi
 
 announce_start "Erase / Partition Device Storage"
 
 # Arbitrary sleeps to handle lack of correct synchronisation in fastbootd.
-set +e
-[ -z "${DEMO_MODE_ONLY}" ] && timeout 30 fastboot wait-for-device getvar version
-set -e
-FASTBOOT_EXIT_STATUS=$?
-if [ $FASTBOOT_EXIT_STATUS -eq 124 ]; then
-    provisioner_log "Loading Fastboot failed, timed out."
-    [ -n "${TARGET_DEVICE_SERIAL}" ] && echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
-    return 124
-elif [ $FASTBOOT_EXIT_STATUS -ne 0 ]; then
-    die "Fastboot failed to load: ${FASTBOOT_EXIT_STATUS}"
-else
-    provisioner_log "Fastboot loaded."
-fi
+timeout_fatal fastboot getvar version
 
-[ -z "${DEMO_MODE_ONLY}" ] && fastboot erase "${RPI_DEVICE_STORAGE_TYPE}"
+fastboot erase "${RPI_DEVICE_STORAGE_TYPE}"
 sleep 2
-[ -z "${DEMO_MODE_ONLY}" ] && fastboot oem partinit "${RPI_DEVICE_STORAGE_TYPE}" DOS
+fastboot oem partinit "${RPI_DEVICE_STORAGE_TYPE}" DOS
 sleep 2
-[ -z "${DEMO_MODE_ONLY}" ] && fastboot oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 0c "$(stat -c%s "${BOOT_DEV}")"
+fastboot oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 0c "$(stat -c%s "${RPI_SB_WORKDIR}/bootfs-temporary.img")"
 sleep 2
-[ -z "${DEMO_MODE_ONLY}" ] && fastboot oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 11 # Grow to fill storage
+fastboot oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 11 # Grow to fill storage
 sleep 2
 announce_stop "Erase / Partition Device Storage"
 
@@ -329,20 +303,18 @@ else
 fi
 
 announce_start "Writing OS images"
-[ -z "${DEMO_MODE_ONLY}" ] && fastboot flash "${RPI_DEVICE_STORAGE_TYPE}"p1 "${RPI_SB_WORKDIR}"/bootfs-temporary.img
-[ -z "${DEMO_MODE_ONLY}" ] && fastboot flash "${RPI_DEVICE_STORAGE_TYPE}"p2 "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
+fastboot flash "${RPI_DEVICE_STORAGE_TYPE}"p1 "${RPI_SB_WORKDIR}"/bootfs-temporary.img
+fastboot flash "${RPI_DEVICE_STORAGE_TYPE}"p2 "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
 announce_stop "Writing OS images"
 
 announce_start "Cleaning up"
 [ -d "${TMP_DIR}/rpi-rootfs-img-mount" ] && umount "${TMP_DIR}"/rpi-rootfs-img-mount
 # shellcheck disable=SC2086
-# We also delete the temporary directory - preserving the cached generated asset
-# shellcheck disable=SC2086
 rm -rf "${TMP_DIR}" ${DEBUG}
 announce_stop "Cleaning up"
 
 announce_start "Set LED status"
-[ -z "${DEMO_MODE_ONLY}" ] && fastboot oem led PWR 0
+fastboot oem led PWR 0
 announce_stop "Set LED status"
 
 echo "${PROVISIONER_FINISHED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
