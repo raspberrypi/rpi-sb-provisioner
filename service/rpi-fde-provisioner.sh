@@ -64,6 +64,14 @@ get_cryptroot() {
     fi
 }
 
+get_fastboot_config_file() {
+    if [ -f /etc/rpi-sb-provisioner/boot_ramdisk_config.txt ]; then
+        echo "/etc/rpi-sb-provisioner/boot_ramdisk_config.txt"
+    else
+        echo "/var/lib/rpi-sb-provisioner/boot_ramdisk_config.txt"
+    fi
+}
+
 # check_file_is_expected ${path_to_file} ${expected_file_extension}
 # Checks if a file exists, is not a directory, is not zero and has the right extension.
 # If any of those checks fail, exit the script entirely and print a debug message
