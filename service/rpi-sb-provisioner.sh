@@ -839,7 +839,7 @@ if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.simg" ] ||
 
     umount "${META_BOOTIMG_MOUNT_PATH}"
     rm -rf "${META_BOOTIMG_MOUNT_PATH}"
-    img2simg "${TMP_DIR}"/bootfs-temporary.img "${RPI_SB_WORKDIR}"/bootfs-temporary.simg
+    img2simg -s "${TMP_DIR}"/bootfs-temporary.img "${RPI_SB_WORKDIR}"/bootfs-temporary.simg
     rm -f "${TMP_DIR}"/bootfs-temporary.img
     announce_stop "Boot Image partition extraction"
 fi # Slow path
