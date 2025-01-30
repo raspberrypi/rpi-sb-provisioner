@@ -486,7 +486,14 @@ rm -rf "${TMP_DIR}" ${DEBUG}
 announce_stop "Cleaning up"
 
 announce_start "Set LED status"
-fastboot oem led PWR 0
+case "${RPI_DEVICE_FAMILY}" in
+    2W)
+        fastboot oem led ACT 0
+        ;;
+    *)
+        fastboot oem led PWR 0
+        ;;
+esac
 announce_stop "Set LED status"
 
 echo "${PROVISIONER_FINISHED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
