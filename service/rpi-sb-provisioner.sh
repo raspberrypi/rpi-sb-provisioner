@@ -541,7 +541,7 @@ if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.simg" ] ||
 
     umount "${META_BOOTIMG_MOUNT_PATH}"
     rm -rf "${META_BOOTIMG_MOUNT_PATH}"
-    img2simg "${TMP_DIR}"/bootfs-temporary.img "${RPI_SB_WORKDIR}"/bootfs-temporary.simg
+    img2simg -s "${TMP_DIR}"/bootfs-temporary.img "${RPI_SB_WORKDIR}"/bootfs-temporary.simg
     rm -f "${TMP_DIR}"/bootfs-temporary.img
     announce_stop "Boot Image partition extraction"
 fi # Slow path
@@ -579,7 +579,7 @@ if [ -f "${RPI_SB_WORKDIR}/rootfs-temporary.simg" ] && [ "$((TARGET_STORAGE_ROOT
     announce_stop "Resizing OS images: Not required, already the correct size"
 else
     mke2fs -t ext4 -b 4096 -d "${TMP_DIR}"/rpi-rootfs-img-mount "${RPI_SB_WORKDIR}"/rootfs-temporary.img $((TARGET_STORAGE_ROOT_EXTENT / 4096))
-    img2simg "${RPI_SB_WORKDIR}"/rootfs-temporary.img "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
+    img2simg -s "${RPI_SB_WORKDIR}"/rootfs-temporary.img "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
     rm -f "${RPI_SB_WORKDIR}"/rootfs-temporary.img
     #TODO: Re-enable android_sparse
     #mke2fs -t ext4 -b 4096 -d ${TMP_DIR}/rpi-rootfs-img-mount -E android_sparse ${RPI_SB_WORKDIR}/rootfs-temporary.simg $((TARGET_STORAGE_ROOT_EXTENT / 4096))
