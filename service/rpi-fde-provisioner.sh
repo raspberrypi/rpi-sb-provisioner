@@ -261,7 +261,7 @@ fi
 mkdir -p /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/
 
 # Fast path: If we've already generated the assets, just move to flashing.
-if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.simg" ] ||
+if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.img" ] ||
    [ ! -e "${RPI_SB_WORKDIR}/rootfs-temporary.simg" ]; then
 
     announce_start "OS Image Mounting"
