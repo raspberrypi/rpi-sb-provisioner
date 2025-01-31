@@ -406,8 +406,9 @@ if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.img" ] ||
     cp "$(get_fastboot_config_file)" "${TMP_DIR}"/config.txt
 
     announce_start "Copying boot image to working directory"
-    dd if="${BOOT_DEV}" of="${RPI_SB_WORKDIR}"/bootfs-temporary.img
+    umount "${BOOT_DEV}"
     sync; sync; sync;
+    cp "${BOOT_DEV}" "${RPI_SB_WORKDIR}"/bootfs-temporary.img
     announce_stop "Copying boot image to working directory"
 fi # Slow path
 
