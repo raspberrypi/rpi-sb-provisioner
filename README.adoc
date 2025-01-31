@@ -348,17 +348,13 @@ To re-enable the trigger, remove the override file:
 $ sudo rm /etc/udev/rules.d/60-rpi-sb-provisioner.rules
 ----
 
-=== Handling pre-signed devices
+=== Disable Triage / Provision (Bootstrap Only)
 
-Pre-signed Raspberry Pi 5 devices cannot execute the key writer without a modification to `rpi-sb-provisioner`, but you can bypass the key writer entirely by using a special file and removing the progress file:
+rpi-sb-provisioner's udev rules cause all devices to be bootstrapped into
+fastboot mode before they are triaged and provisioned. It is possible to
+temporarily disable the triage service (until next boot) so that detected
+devices are bootstrapped into fastboot mode only:
 
 ----
-$ sudo rm /var/log/rpi-sb-provisioner/<serial>/progress
-$ sudo touch /var/log/rpi-sb-provisioner/<serial>/special-skip-keywriter
+$ sudo systemctl mask --runtime rpi-sb-triage@.service
 ----
-
-WARNING: This will disable metadata fetching and manufacturing database creation as of writing. This may be resolved in a future version of `rpi-sb-provisioner`.
-
-=== Changing config.txt
-
-Modify the config.txt contained within your gold master image as you typically would, and `rpi-sb-provisioner` will include this as part of provisioning.
