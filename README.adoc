@@ -354,3 +354,14 @@ To re-enable the trigger, remove the override file:
 ----
 $ sudo rm /etc/udev/rules.d/60-rpi-sb-provisioner.rules
 ----
+
+=== Disable Triage / Provision (Bootstrap Only)
+
+rpi-sb-provisioner's udev rules cause all devices to be bootstrapped into
+fastboot mode before they are triaged and provisioned. It is possible to
+temporarily disable the triage service (until next boot) so that detected
+devices are bootstrapped into fastboot mode only:
+
+----
+$ sudo systemctl mask --runtime rpi-sb-triage@.service
+----
