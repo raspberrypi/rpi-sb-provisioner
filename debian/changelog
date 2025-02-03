@@ -1,3 +1,12 @@
+rpi-sb-provisioner (1.3.2) unstable; urgency=critical
+
+  * provisioner: Update cryptroot to address GHSA-pwq3-7gpg-qpcj
+  * provisioner: Attempt automatic pre-signed device recovery on
+      Rapsberry Pi 5-family devices
+  * provisioner: Use rpi-eeprom-update logic to find source eeprom image
+
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Mon, 03 Feb 2025 12:15:00 +0000
+
 rpi-sb-provisioner (1.3.1) unstable; urgency=medium
 
   * provisioner: Generate depmod information for pre-boot
