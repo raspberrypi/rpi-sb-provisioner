@@ -9,5 +9,5 @@ export DH_VIRTUALENV_INSTALL_ROOT=/usr/share/
 override_dh_usrlocal:
 
 override_dh_auto_build:
-	pandoc README.adoc -s -t man --shift-heading-level-by=-1 >\
-	 debian/rpi-sb-provisioner.1
+	asciidoctor -b docbook --attribute leveloffset=+1 --out-file - README.adoc |\
+	  pandoc -f docbook -s -t man --shift-heading-level-by=-1 > debian/rpi-sb-provisioner.1
