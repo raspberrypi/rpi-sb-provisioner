@@ -84,6 +84,45 @@ provisioner_log() {
     echo "$@" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/provisioner.log
 }
 
+
+# TODO: Refactor these two functions to use the same logic, but with different consequences for failure.
+timeout_nonfatal() {
+    command="$*"
+    set +e
+    [ -z "${DEMO_MODE_ONLY}" ] && timeout 120 "${command}"
+
+
+    command_exit_status=$?
+    if [ ${command_exit_status} -eq 124 ]; then
+        provisioner_log "\"${command}\" failed, timed out."
+        echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+        return 124
+    elif [ ${command_exit_status} -ne 0 ]; then
+        echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+        provisioner_log "\"$command\" failed: ${command_exit_status}"
+    else
+        provisioner_log "\"$command\" succeeded."
+    fi
+    set -e
+}
+
+timeout_fatal() {
+    command="$*"
+    set +e
+    [ -z "${DEMO_MODE_ONLY}" ] && timeout 120 "${command}"
+    command_exit_status=$?
+    if [ ${command_exit_status} -eq 124 ]; then
+        echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+        die "\"${command}\" failed, timed out."
+    elif [ ${command_exit_status} -ne 0 ]; then
+        echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+        die "\"$command\" failed: ${command_exit_status}"
+    else
+        provisioner_log "\"$command\" succeeded."
+    fi
+    set -e
+}
+
 CUSTOMER_PUBLIC_KEY_FILE=
 derivePublicKey() {
     CUSTOMER_PUBLIC_KEY_FILE="$(mktemp)"
@@ -447,34 +486,7 @@ fi
 # With the EEPROMs configured and signed, RPIBoot them.
 mkdir -p "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/"
 keywriter_log "Writing key and EEPROM configuration to the device"
-set +e
-[ -z "${DEMO_MODE_ONLY}" ] && timeout 120 rpiboot -d "${FLASHING_DIR}" -i "${TARGET_DEVICE_SERIAL}" -j "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/"
-KEYWRITER_EXIT_STATUS=$?
-if [ ${KEYWRITER_EXIT_STATUS} -eq 124 ]
-then
-keywriter_log "Writing failed, timed out."
-    case "${RPI_DEVICE_FAMILY}" in
-        5)
-            # Raspberry Pi 5-family hardware may already have a key provisioned - so retry with a signed bootcode.
-            rpi-sign-bootcode --debug -c 2712 -i "${BOOTCODE_BINARY_IMAGE}" -o "${BOOTCODE_FLASHING_NAME}" -k "${CUSTOMER_KEY_FILE_PEM}" -v 0 -n 16
-            [ -z "${DEMO_MODE_ONLY}" ] && timeout 120 rpiboot -d "${FLASHING_DIR}" -i "${TARGET_DEVICE_SERIAL}" -j "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/"
-            KEYWRITER_RETRY_EXIT_STATUS=$?
-            if [ ${KEYWRITER_RETRY_EXIT_STATUS} -eq 124 ]; then
-                # If the retry with a signed recovery image fails, this is likely a hard failure.
-                echo "${KEYWRITER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
-                return 124
-            fi
-        ;;
-        *)
-            # If we're not Raspberry Pi 5-family, then this is the end of the line, no retry will help.
-            echo "${KEYWRITER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
-            return 124
-        ;;
-    esac
-else
-keywriter_log "Writing completed."
-fi
-set -e
+[ -z "${DEMO_MODE_ONLY}" ] && timeout_fatal rpiboot -d "${FLASHING_DIR}" -i "${TARGET_DEVICE_SERIAL}" -j "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/"
 
 rm -rf "${FLASHING_DIR}"
 
@@ -687,18 +699,7 @@ ${OPENSSL} dgst -sign $(get_signing_directives) -sha256 "${RPI_SB_WORKDIR}"/boot
 announce_stop "Finding/generating fastboot image"
 
 announce_start "Starting fastboot"
-set +e
-[ -z "${DEMO_MODE_ONLY}" ] && timeout 120 rpiboot -v -d "${RPI_SB_WORKDIR}" -i "${TARGET_DEVICE_SERIAL}"
-FLASHING_GADGET_EXIT_STATUS=$?
-if [ $FLASHING_GADGET_EXIT_STATUS -eq 124 ]
-then
-provisioner_log "Loading Fastboot failed, timed out."
-echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
-return 124
-else
-provisioner_log "Fastboot loaded."
-fi
-set -e
+[ -z "${DEMO_MODE_ONLY}" ] && timeout_fatal rpiboot -v -d "${RPI_SB_WORKDIR}" -i "${TARGET_DEVICE_SERIAL}"
 announce_stop "Starting fastboot"
 
 announce_start "Selecting and interrogating device"
@@ -926,20 +927,9 @@ fi # Slow path
 
 announce_start "Erase / Partition Device Storage"
 
-# Arbitrary sleeps to handle lack of correct synchronisation in fastbootd.
-set +e
-[ -z "${DEMO_MODE_ONLY}" ] && timeout 30 fastboot getvar version
-FASTBOOT_EXIT_STATUS=$?
-if [ $FASTBOOT_EXIT_STATUS -eq 124 ]
-then
-provisioner_log "Loading Fastboot failed, timed out."
-echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
-return 124
-else
-provisioner_log "Fastboot loaded."
-fi
-set -e
+[ -z "${DEMO_MODE_ONLY}" ] && timeout_fatal fastboot getvar version
 
+# Arbitrary sleeps to handle lack of correct synchronisation in fastbootd.
 [ -z "${DEMO_MODE_ONLY}" ] && fastboot erase "${RPI_DEVICE_STORAGE_TYPE}"
 sleep 2
 [ -z "${DEMO_MODE_ONLY}" ] && fastboot oem partinit "${RPI_DEVICE_STORAGE_TYPE}" DOS
