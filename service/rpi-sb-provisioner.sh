@@ -486,7 +486,7 @@ fi
 # With the EEPROMs configured and signed, RPIBoot them.
 mkdir -p "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/"
 keywriter_log "Writing key and EEPROM configuration to the device"
-[ -z "${DEMO_MODE_ONLY}" ] && [ ! -f "/var/log/rpi-sb-provosioner/${TARGET_DEVICE_SERIAL}/special-skip-keywriter" ] && timeout_fatal rpiboot -d "${FLASHING_DIR}" -i "${TARGET_DEVICE_SERIAL}" -j "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/"
+[ -z "${DEMO_MODE_ONLY}" ] && [ ! -f "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/special-skip-keywriter" ] && timeout_fatal rpiboot -d "${FLASHING_DIR}" -i "${TARGET_DEVICE_SERIAL}" -j "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/"
 
 rm -rf "${FLASHING_DIR}"
 
