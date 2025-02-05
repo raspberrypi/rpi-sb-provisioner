@@ -490,7 +490,7 @@ keywriter_log "Writing key and EEPROM configuration to the device"
 
 rm -rf "${FLASHING_DIR}"
 
-if [ -z "${DEMO_MODE_ONLY}" ] && [ -n "${RPI_DEVICE_FETCH_METADATA}" ] && [ ! -f "/var/log/rpi-sb-provosioner/${TARGET_DEVICE_SERIAL}/special-skip-keywriter" ]; then
+if [ -z "${DEMO_MODE_ONLY}" ] && [ -n "${RPI_DEVICE_FETCH_METADATA}" ] && [ ! -f "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/special-skip-keywriter" ]; then
     USER_BOARDREV="0x$(jq -r '.USER_BOARDREV' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)"
     MAC_ADDRESS=$(jq -r '.MAC_ADDR' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
     CUSTOMER_KEY_HASH=$(jq -r '.CUSTOMER_KEY_HASH' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
