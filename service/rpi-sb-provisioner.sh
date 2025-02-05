@@ -89,7 +89,7 @@ provisioner_log() {
 timeout_nonfatal() {
     command="$*"
     set +e
-    [ -z "${DEMO_MODE_ONLY}" ] && timeout 120 "${command}"
+    [ -z "${DEMO_MODE_ONLY}" ] && timeout 120 ${command}
 
 
     command_exit_status=$?
@@ -109,7 +109,7 @@ timeout_nonfatal() {
 timeout_fatal() {
     command="$*"
     set +e
-    [ -z "${DEMO_MODE_ONLY}" ] && timeout 120 "${command}"
+    [ -z "${DEMO_MODE_ONLY}" ] && timeout 120 ${command}
     command_exit_status=$?
     if [ ${command_exit_status} -eq 124 ]; then
         echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
