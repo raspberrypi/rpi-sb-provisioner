@@ -6,6 +6,7 @@ Only listed versions receive active support, and $HEAD may be changed at any tim
 
 | Version | Supported          |
 | ------- | ------------------ |
+| 1.3.3   | ✅ |
 | 1.3.2   | ✅ |
 | 1.3.1   |  |
 | 1.3.0   |  |
