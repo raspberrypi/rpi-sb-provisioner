@@ -216,11 +216,6 @@ Set to a location to cache OS assets between provisioning sessions. Recommended 
 RPI_SB_WORKDIR=/srv/rpi-sb-provisioner/
 ----
 
-=== DEMO_MODE_ONLY
-*Optional*
-
-Set to `1` to allow the service to run without actually writing keys or OS images. You may, for example, use `DEMO_MODE_ONLY` in combination with `RPI_SB_WORKDIR` to inspect the modifications `rpi-sb-provisioner` would make to your OS ahead of deployment.
-
 == Using rpi-sb-provisioner
 `rpi-sb-provisioner` is composed of three `systemd` services that are triggered by the connection of a device in RPIBOOT mode to a USB port. With `rpi-sb-provisioner` configured to your requirements, all that is therefore required is to connect your target Raspberry Pi device in RPIBOOT mode.
 
@@ -313,18 +308,6 @@ Obtain this by inspecting the rpi-sb-provisioner logs:
 ----
 grep -R /var/log/rpi-sb-provisioner/ --include="progress" -e "PROVISIONER-FINISHED" | tail -n 1 | cut -d '/' -f 5
 ----
-
-=== Inspecting the image to be flashed
-
-When run with `DEMO_MODE_ONLY=1`, `rpi-sb-provisioner` will only prepare images to be provisioned - allowing you to inspect the OS images prior to mass deployment.
-
-WARNING: You must set `RPI_SB_WORKDIR` in the configuration file to observe the modified image. If you do not set `RPI_SB_WORKDIR`, the intermediates will be deleted at the completion of the run.
-
-With both variables set, connect a device to be demo-provisioned per the provisoning instructions above.
-
-The images will be located in the directory pointed to by `RPI_SB_WORKDIR`.
-
-WARNING: Remember to unset `DEMO_MODE_ONLY` before moving to mass deployment.
 
 === Debugging unexpected results
 

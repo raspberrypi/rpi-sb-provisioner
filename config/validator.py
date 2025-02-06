@@ -76,9 +76,6 @@ def validate_RPI_DEVICE_RETRIEVE_KEYPAIR(text) -> tuple[bool, str]:
 def validate_RPI_DEVICE_FETCH_METADATA(text) -> tuple[bool, str]:
     return (True, "")
 
-def validate_DEMO_MODE_ONLY(text) -> tuple[bool, str]:
-    return (True, "")
-
 def validate_RPI_SB_WORKDIR(text) -> tuple[bool, str]:
     if text and text[0] != "/":
         return (False, "Please specify absolute path, beginning with /")

@@ -89,9 +89,7 @@ provisioner_log() {
 timeout_nonfatal() {
     command="$*"
     set +e
-    [ -z "${DEMO_MODE_ONLY}" ] && timeout 120 ${command}
-
-
+    timeout 120 ${command}
     command_exit_status=$?
     if [ ${command_exit_status} -eq 124 ]; then
         provisioner_log "\"${command}\" failed, timed out."
@@ -109,7 +107,7 @@ timeout_nonfatal() {
 timeout_fatal() {
     command="$*"
     set +e
-    [ -z "${DEMO_MODE_ONLY}" ] && timeout 120 ${command}
+    timeout 120 ${command}
     command_exit_status=$?
     if [ ${command_exit_status} -eq 124 ]; then
         echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
@@ -486,11 +484,11 @@ fi
 # With the EEPROMs configured and signed, RPIBoot them.
 mkdir -p "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/"
 keywriter_log "Writing key and EEPROM configuration to the device"
-[ -z "${DEMO_MODE_ONLY}" ] && [ ! -f "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/special-skip-keywriter" ] && timeout_fatal rpiboot -d "${FLASHING_DIR}" -i "${TARGET_DEVICE_SERIAL}" -j "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/"
+[ ! -f "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/special-skip-keywriter" ] && timeout_fatal rpiboot -d "${FLASHING_DIR}" -i "${TARGET_DEVICE_SERIAL}" -j "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/"
 
 rm -rf "${FLASHING_DIR}"
 
-if [ -z "${DEMO_MODE_ONLY}" ] && [ -n "${RPI_DEVICE_FETCH_METADATA}" ] && [ ! -f "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/special-skip-keywriter" ]; then
+if [ -n "${RPI_DEVICE_FETCH_METADATA}" ] && [ ! -f "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/special-skip-keywriter" ]; then
     USER_BOARDREV="0x$(jq -r '.USER_BOARDREV' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)"
     MAC_ADDRESS=$(jq -r '.MAC_ADDR' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
     CUSTOMER_KEY_HASH=$(jq -r '.CUSTOMER_KEY_HASH' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
@@ -644,7 +642,7 @@ check_command_exists blockdev
 check_command_exists grep
 
 get_variable() {
-    [ -z "${DEMO_MODE_ONLY}" ] && fastboot getvar "$1" 2>&1 | grep -oP "${1}"': \K[^\r\n]*'
+    fastboot getvar "$1" 2>&1 | grep -oP "${1}"': \K[^\r\n]*'
 }
 
 TMP_DIR=$(mktemp -d)
@@ -699,7 +697,7 @@ ${OPENSSL} dgst -sign $(get_signing_directives) -sha256 "${RPI_SB_WORKDIR}"/boot
 announce_stop "Finding/generating fastboot image"
 
 announce_start "Starting fastboot"
-[ -z "${DEMO_MODE_ONLY}" ] && timeout_fatal rpiboot -v -d "${RPI_SB_WORKDIR}" -i "${TARGET_DEVICE_SERIAL}"
+timeout_fatal rpiboot -v -d "${RPI_SB_WORKDIR}" -i "${TARGET_DEVICE_SERIAL}"
 announce_stop "Starting fastboot"
 
 announce_start "Selecting and interrogating device"
@@ -927,20 +925,20 @@ fi # Slow path
 
 announce_start "Erase / Partition Device Storage"
 
-[ -z "${DEMO_MODE_ONLY}" ] && timeout_fatal fastboot getvar version
+timeout_fatal fastboot getvar version
 
 # Arbitrary sleeps to handle lack of correct synchronisation in fastbootd.
-[ -z "${DEMO_MODE_ONLY}" ] && fastboot erase "${RPI_DEVICE_STORAGE_TYPE}"
+fastboot erase "${RPI_DEVICE_STORAGE_TYPE}"
 sleep 2
-[ -z "${DEMO_MODE_ONLY}" ] && fastboot oem partinit "${RPI_DEVICE_STORAGE_TYPE}" DOS
+fastboot oem partinit "${RPI_DEVICE_STORAGE_TYPE}" DOS
 sleep 2
-[ -z "${DEMO_MODE_ONLY}" ] && fastboot oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 0c "$(stat -c%s "${RPI_SB_WORKDIR}"/bootfs-temporary.img)"
+fastboot oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 0c "$(stat -c%s "${RPI_SB_WORKDIR}"/bootfs-temporary.img)"
 sleep 2
-[ -z "${DEMO_MODE_ONLY}" ] && fastboot oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 83 # Grow to fill storage
+fastboot oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 83 # Grow to fill storage
 sleep 2
-[ -z "${DEMO_MODE_ONLY}" ] && fastboot oem cryptinit "${RPI_DEVICE_STORAGE_TYPE}"p2 root "${RPI_DEVICE_STORAGE_CIPHER}"
+fastboot oem cryptinit "${RPI_DEVICE_STORAGE_TYPE}"p2 root "${RPI_DEVICE_STORAGE_CIPHER}"
 sleep 2
-[ -z "${DEMO_MODE_ONLY}" ] && fastboot oem cryptopen "${RPI_DEVICE_STORAGE_TYPE}"p2 cryptroot
+fastboot oem cryptopen "${RPI_DEVICE_STORAGE_TYPE}"p2 cryptroot
 sleep 2
 announce_stop "Erase / Partition Device Storage"
 
@@ -963,11 +961,11 @@ else
 fi
 
 announce_start "Writing OS images"
-[ -z "${DEMO_MODE_ONLY}" ] && fastboot flash "${RPI_DEVICE_STORAGE_TYPE}"p1 "${RPI_SB_WORKDIR}"/bootfs-temporary.img
-[ -z "${DEMO_MODE_ONLY}" ] && fastboot flash mapper/cryptroot "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
+fastboot flash "${RPI_DEVICE_STORAGE_TYPE}"p1 "${RPI_SB_WORKDIR}"/bootfs-temporary.img
+fastboot flash mapper/cryptroot "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
 announce_stop "Writing OS images"
 
-if [ -z "${DEMO_MODE_ONLY}" ] && [ -d "${RPI_DEVICE_RETRIEVE_KEYPAIR}" ]; then
+if [ -d "${RPI_DEVICE_RETRIEVE_KEYPAIR}" ]; then
     announce_start "Capturing device keypair to ${RPI_DEVICE_RETRIEVE_KEYPAIR}"
     N_ALREADY_PROVISIONED=0
     get_variable private-key > "${RPI_DEVICE_RETRIEVE_KEYPAIR}/${TARGET_DEVICE_SERIAL}.der" || N_ALREADY_PROVISIONED=$?
@@ -989,7 +987,7 @@ rm -rf "${TMP_DIR}" ${DEBUG}
 announce_stop "Cleaning up"
 
 announce_start "Set LED status"
-[ -z "${DEMO_MODE_ONLY}" ] && fastboot oem led PWR 0
+fastboot oem led PWR 0
 announce_stop "Set LED status"
 
 mkdir -p /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/
