@@ -1,6 +1,5 @@
 config/config.sh                                /usr/local/bin
 monitor/monitor.sh                              /usr/local/bin
-host-support/make-boot-image                    /usr/local/bin
 service/rpi-sb-provisioner.sh                   /usr/local/bin
 fetch-repo-package-list/fetch-repo-package-list /usr/local/bin
 rpi-package-download/rpi-package-download       /usr/local/bin
