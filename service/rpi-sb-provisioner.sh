@@ -883,7 +883,7 @@ if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.img" ] ||
     announce_start "boot.img creation"
     cp "$(get_fastboot_config_file)" "${TMP_DIR}"/config.txt
 
-    make-boot-image -b "pi${RPI_DEVICE_FAMILY}" -d "${TMP_DIR}"/rpi-boot-img-mount -o "${TMP_DIR}"/boot.img
+    rpi-make-boot-image -b "pi${RPI_DEVICE_FAMILY}" -d "${TMP_DIR}"/rpi-boot-img-mount -o "${TMP_DIR}"/boot.img
     announce_stop "boot.img creation"
 
     announce_start "boot.img signing"
