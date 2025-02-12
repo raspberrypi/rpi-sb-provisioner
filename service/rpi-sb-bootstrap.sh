@@ -438,7 +438,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ] && [ "${PROVISIONING_STYLE}" = "secure-boot" ]
         fi
 
         bootstrap_log "Writing key and EEPROM configuration to the device"
-        timeout_fatal rpiboot -d "${RPI_SB_WORKDIR}" -p "${TARGET_USB_PATH}" -j "${EARLY_LOG_DIRECTORY}/metadata/"
+        [ ! -f"/var/log/rpi-sb-provosioner/${TARGET_DEVICE_SERIAL}/special-skip-keywriter" ] && timeout_fatal rpiboot -d "${RPI_SB_WORKDIR}" -p "${TARGET_USB_PATH}" -j "${EARLY_LOG_DIRECTORY}/metadata/"
     else
         bootstrap_log "No key specified, skipping eeprom update"
     fi
