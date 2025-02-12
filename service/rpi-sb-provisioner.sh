@@ -76,6 +76,10 @@ die() {
     exit 1
 }
 
+simg_expanded_size() {
+    echo "$(($(simg_dump "$1" | sed -E 's/.*?Total of ([0-9]+) ([0-9]+)-byte .*/\1 * \2/')))"
+}
+
 keywriter_log() {
     echo "$@" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/keywriter.log
 }
@@ -636,6 +640,7 @@ check_command_exists mount
 
 # Fastboot is used as a transfer mechanism to get images and metadata to and from the Raspberry Pi device
 check_command_exists fastboot
+check_command_exists simg_dump
 
 check_command_exists blockdev
 
@@ -969,12 +974,12 @@ announce_start "Resizing OS images"
 # https://dl.google.com/android/repository/platform-tools-latest-darwin.zip
 # https://dl.google.com/android/repository/platform-tools-latest-windows.zip
 TARGET_STORAGE_ROOT_EXTENT="$(get_variable partition-size:mapper/cryptroot)"
-if [ -f "${RPI_SB_WORKDIR}/rootfs-temporary.simg" ] && [ "$((TARGET_STORAGE_ROOT_EXTENT))" -eq "$(stat -c%s "${RPI_SB_WORKDIR}"/rootfs-temporary.simg)" ]; then
+if [ -f "${RPI_SB_WORKDIR}/rootfs-temporary.simg" ] && [ "$((TARGET_STORAGE_ROOT_EXTENT))" -eq "$(simg_expanded_size "${RPI_SB_WORKDIR}"/rootfs-temporary.simg)" ]; then
     announce_stop "Resizing OS images: Not required, already the correct size"
 else
-    mke2fs -t ext4 -b 4096 -d "${TMP_DIR}"/rpi-rootfs-img-mount "${RPI_SB_WORKDIR}"/rootfs-temporary.simg $((TARGET_STORAGE_ROOT_EXTENT / 4096))
-    #TODO: Re-enable android_sparse
-    #mke2fs -t ext4 -b 4096 -d ${TMP_DIR}/rpi-rootfs-img-mount -E android_sparse ${RPI_SB_WORKDIR}/rootfs-temporary.simg $((TARGET_STORAGE_ROOT_EXTENT / 4096))
+    mke2fs -t ext4 -b 4096 -d "${TMP_DIR}"/rpi-rootfs-img-mount "${RPI_SB_WORKDIR}"/rootfs-temporary.img $((TARGET_STORAGE_ROOT_EXTENT / 4096))
+    img2simg -s "${RPI_SB_WORKDIR}"/rootfs-temporary.img "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
+    rm -f "${RPI_SB_WORKDIR}"/rootfs-temporary.img
     announce_stop "Resizing OS images: Resized to $((TARGET_STORAGE_ROOT_EXTENT))"
 fi
 
