@@ -438,7 +438,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ] && [ "${PROVISIONING_STYLE}" = "secure-boot" ]
         fi
 
         bootstrap_log "Writing key and EEPROM configuration to the device"
-        [ ! -f"/var/log/rpi-sb-provosioner/${TARGET_DEVICE_SERIAL}/special-skip-keywriter" ] && timeout_fatal rpiboot -d "${RPI_SB_WORKDIR}" -p "${TARGET_USB_PATH}" -j "${EARLY_LOG_DIRECTORY}/metadata/"
+        [ ! -f "/var/log/rpi-sb-provosioner/${TARGET_DEVICE_SERIAL}/special-skip-keywriter" ] && timeout_fatal rpiboot -d "${RPI_SB_WORKDIR}" -p "${TARGET_USB_PATH}" -j "${EARLY_LOG_DIRECTORY}/metadata/"
     else
         bootstrap_log "No key specified, skipping eeprom update"
     fi
@@ -507,7 +507,7 @@ if [ -n "${TARGET_DEVICE_SERIAL}" ]; then
 fi
 
 # If we've been asked to fetch metadata, and we have it, then we should use it.
-if [ -n "${RPI_DEVICE_FETCH_METADATA}" ] && [ -d "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/" ]; then
+if [ -n "${RPI_DEVICE_FETCH_METADATA}" ] && [ ! -f "/var/log/rpi-sb-provosioner/${TARGET_DEVICE_SERIAL}/special-skip-keywriter" ] && [ -d "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/" ]; then
         USER_BOARDREV="0x$(jq -r '.USER_BOARDREV' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)"
         MAC_ADDRESS=$(jq -r '.MAC_ADDR' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
         CUSTOMER_KEY_HASH=$(jq -r '.CUSTOMER_KEY_HASH' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
