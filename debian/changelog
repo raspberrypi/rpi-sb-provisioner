@@ -1,3 +1,9 @@
+rpi-sb-provisioner (1.3.7) unstable; urgency=medium
+
+  * provisioner: Clean up ephemeral RPI_SB_WORKDIRs
+
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Wed, 12 Feb 2025 15:20:00 +0000
+
 rpi-sb-provisioner (1.3.6) unstable; urgency=medium
 
   * provisioner: Always sparse the rootfs for improved transfer speeds
