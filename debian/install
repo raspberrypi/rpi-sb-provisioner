@@ -1,6 +1,5 @@
 config/config.sh                                /usr/local/bin
 monitor/monitor.sh                              /usr/local/bin
-host-support/make-boot-image                    /usr/local/bin
 service/rpi-sb-provisioner.sh                   /usr/local/bin
 service/rpi-fde-provisioner.sh                  /usr/local/bin
 service/rpi-naked-provisioner.sh                /usr/local/bin
