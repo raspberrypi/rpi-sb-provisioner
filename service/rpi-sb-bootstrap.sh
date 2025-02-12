@@ -123,6 +123,42 @@ check_command_exists() {
     fi
 }
 
+# TODO: Refactor these two functions to use the same logic, but with different consequences for failure.
+timeout_nonfatal() {
+    command="$*"
+    set +e
+    timeout 120 "${command}"
+    set -e
+    command_exit_status=$?
+    if [ ${command_exit_status} -eq 124 ]; then
+        provisioner_log "\"${command}\" failed, timed out."
+        echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+        return 124
+    elif [ ${command_exit_status} -ne 0 ]; then
+        echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+        provisioner_log "\"$command\" failed: ${command_exit_status}"
+    else
+        provisioner_log "\"$command\" succeeded."
+    fi
+}
+
+timeout_fatal() {
+    command="$*"
+    set +e
+    timeout 120 "${command}"
+    set -e
+    command_exit_status=$?
+    if [ ${command_exit_status} -eq 124 ]; then
+        echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+        die "\"${command}\" failed, timed out."
+    elif [ ${command_exit_status} -ne 0 ]; then
+        echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+        die "\"$command\" failed: ${command_exit_status}"
+    else
+        provisioner_log "\"$command\" succeeded."
+    fi
+}
+
 cleanup() {
     if [ -n "${CUSTOMER_PUBLIC_KEY_FILE}" ]; then
         announce_start "Deleting public key"
@@ -402,52 +438,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ] && [ "${PROVISIONING_STYLE}" = "secure-boot" ]
         fi
 
         bootstrap_log "Writing key and EEPROM configuration to the device"
-        set +e
-        timeout 10s rpiboot -d "${RPI_SB_WORKDIR}" -p "${TARGET_USB_PATH}" -j "${EARLY_LOG_DIRECTORY}/metadata/"
-        set -e
-        KEYWRITER_EXIT_STATUS=$?
-        case $KEYWRITER_EXIT_STATUS in
-            124)
-                bootstrap_log "Writing failed, timed out."
-                case "${TARGET_DEVICE_FAMILY}" in
-                    2712)
-                        # Raspberry Pi 5-family hardware may already have a key provisioned - so retry with a signed bootcode.
-                        rpi-sign-bootcode --debug -c 2712 -i "${BOOTCODE_BINARY_IMAGE}" -o "${BOOTCODE_FLASHING_NAME}" -k "${CUSTOMER_KEY_FILE_PEM}" -v 0 -n 16
-                        timeout 10s rpiboot -d "${RPI_SB_WORKDIR}" -p "${TARGET_USB_PATH}" -j "${EARLY_LOG_DIRECTORY}/metadata/"
-                        KEYWRITER_RETRY_EXIT_STATUS=$?
-                        case ${KEYWRITER_RETRY_EXIT_STATUS} in
-                            124)
-                                # If the retry with a signed recovery image fails, this is likely a hard failure.
-                                echo "${BOOTSTRAP_ABORTED}" >> "${EARLY_LOG_DIRECTORY}"/bootstrap.log
-                                return 124
-                                ;;
-                            0)
-                                # If the retry with a signed recovery image succeeds, then we're done.
-                                echo "Keywriter retry-launched successfully."
-                                ;;
-                            *)
-                                bootstrap_log "Failed to load keywriter: ${KEYWRITER_RETRY_EXIT_STATUS}"
-                                echo "${BOOTSTRAP_ABORTED}" >> "${EARLY_LOG_DIRECTORY}"/bootstrap.log
-                                return ${KEYWRITER_RETRY_EXIT_STATUS}
-                            ;;
-                        esac
-                    ;;
-                    *)
-                        # If we're not Raspberry Pi 5-family, then this is the end of the line, no retry will help.
-                        echo "${BOOTSTRAP_ABORTED}" >> "${EARLY_LOG_DIRECTORY}"/bootstrap.log
-                        return 124
-                    ;;
-                esac
-                ;;
-            0)
-                bootstrap_log "Keywriter launched successfully."
-                ;;
-            *)
-                bootstrap_log "Failed to load keywriter: ${KEYWRITER_EXIT_STATUS}"
-                echo "${BOOTSTRAP_ABORTED}" >> "${EARLY_LOG_DIRECTORY}"/bootstrap.log
-                return ${KEYWRITER_EXIT_STATUS}
-                ;;
-        esac
+        timeout_fatal rpiboot -d "${RPI_SB_WORKDIR}" -p "${TARGET_USB_PATH}" -j "${EARLY_LOG_DIRECTORY}/metadata/"
     else
         bootstrap_log "No key specified, skipping eeprom update"
     fi
@@ -500,43 +491,14 @@ set +e
 case "${TARGET_DEVICE_FAMILY}" in
     2712 | 2711)
         mkdir -p "${EARLY_LOG_DIRECTORY}/metadata"
-        timeout 120 rpiboot -v -d "${RPI_SB_WORKDIR}" -p "${TARGET_USB_PATH}" -j "${EARLY_LOG_DIRECTORY}/metadata"
+        timeout_fatal rpiboot -v -d "${RPI_SB_WORKDIR}" -p "${TARGET_USB_PATH}" -j "${EARLY_LOG_DIRECTORY}/metadata"
         ;;
     *)
-        timeout 120 rpiboot -v -d "${RPI_SB_WORKDIR}" -p "${TARGET_USB_PATH}"
-        ;;
-esac
-set -e
-FLASHING_GADGET_EXIT_STATUS=$?
-case $FLASHING_GADGET_EXIT_STATUS in
-    124)
-        bootstrap_log "rpiboot timed out, aborting."
-        return 124
-        ;;
-    0)
-        bootstrap_log "rpiboot complete."
-        ;;
-    *)
-        die "rpiboot returned error: ${FLASHING_GADGET_EXIT_STATUS}"
+        timeout_fatal rpiboot -v -d "${RPI_SB_WORKDIR}" -p "${TARGET_USB_PATH}"
         ;;
 esac
 
-set +e
-TARGET_DEVICE_SERIAL="$(timeout 120 fastboot -s usb:"${TARGET_USB_PATH}" getvar serialno 2>&1 | grep -oP 'serialno: \K[^\r\n]*')"
-set -e
-FASTBOOT_EXIT_STATUS=$?
-case $FASTBOOT_EXIT_STATUS in
-    124)
-        bootstrap_log "Fastboot timed out, aborting."
-        return 124
-        ;;
-    0)
-        bootstrap_log "Fastboot loaded."
-        ;;
-    *)
-        die "Fastboot failed to load: ${FASTBOOT_EXIT_STATUS}"
-        ;;
-esac
+TARGET_DEVICE_SERIAL="$(timeout_fatal fastboot -s usb:"${TARGET_USB_PATH}" getvar serialno 2>&1 | grep -oP 'serialno: \K[^\r\n]*')"
 
 if [ -n "${TARGET_DEVICE_SERIAL}" ]; then
     mkdir -p "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}"

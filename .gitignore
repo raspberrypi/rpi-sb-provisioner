@@ -7,3 +7,4 @@
 
 build
 *.egg-info
+debian/rpi-sb-provisioner.1

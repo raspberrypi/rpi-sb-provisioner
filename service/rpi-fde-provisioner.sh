@@ -187,6 +187,42 @@ unmount_image() {
     fi
 }
 
+# TODO: Refactor these two functions to use the same logic, but with different consequences for failure.
+timeout_nonfatal() {
+    command="$*"
+    set +e
+    timeout 120 "${command}"
+    set -e
+    command_exit_status=$?
+    if [ ${command_exit_status} -eq 124 ]; then
+        provisioner_log "\"${command}\" failed, timed out."
+        echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+        return 124
+    elif [ ${command_exit_status} -ne 0 ]; then
+        echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+        provisioner_log "\"$command\" failed: ${command_exit_status}"
+    else
+        provisioner_log "\"$command\" succeeded."
+    fi
+}
+
+timeout_fatal() {
+    command="$*"
+    set +e
+    timeout 120 "${command}"
+    set -e
+    command_exit_status=$?
+    if [ ${command_exit_status} -eq 124 ]; then
+        echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+        die "\"${command}\" failed, timed out."
+    elif [ ${command_exit_status} -ne 0 ]; then
+        echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+        die "\"$command\" failed: ${command_exit_status}"
+    else
+        provisioner_log "\"$command\" succeeded."
+    fi
+}
+
 cleanup() {
     unmount_image "${COPY_OS_COMBINED_FILE}"
     if [ -d "${TMP_DIR}" ]; then
@@ -414,22 +450,9 @@ fi # Slow path
 
 announce_start "Erase / Partition Device Storage"
 
-# Arbitrary sleeps to handle lack of correct synchronisation in fastbootd.
-set +e
-timeout 30 fastboot getvar version
-set -e
-FASTBOOT_EXIT_STATUS=$?
-if [ $FASTBOOT_EXIT_STATUS -eq 124 ]; then
-    provisioner_log "Loading Fastboot failed, timed out."
-    echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
-    return 124
-elif [ $FASTBOOT_EXIT_STATUS -ne 0 ]; then
-    echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
-    die "Fastboot failed to load: ${FASTBOOT_EXIT_STATUS}"
-else
-    provisioner_log "Fastboot loaded."
-fi
+timeout_fatal fastboot getvar version
 
+# Arbitrary sleeps to handle lack of correct synchronisation in fastbootd.
 fastboot erase "${RPI_DEVICE_STORAGE_TYPE}"
 sleep 2
 fastboot oem partinit "${RPI_DEVICE_STORAGE_TYPE}" DOS

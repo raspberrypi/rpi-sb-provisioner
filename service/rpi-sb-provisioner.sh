@@ -548,10 +548,9 @@ fi # Slow path
 
 announce_start "Erase / Partition Device Storage"
 
-# Arbitrary sleeps to handle lack of correct synchronisation in fastbootd.
-
 timeout_fatal fastboot getvar version
 
+# Arbitrary sleeps to handle lack of correct synchronisation in fastbootd.
 fastboot erase "${RPI_DEVICE_STORAGE_TYPE}"
 sleep 2
 fastboot oem partinit "${RPI_DEVICE_STORAGE_TYPE}" DOS

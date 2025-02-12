@@ -139,23 +139,6 @@ unmount() {
     done
 }
 
-timeout_fatal() {
-    command="$*"
-    set +e
-    [ -z "${DEMO_MODE_ONLY}" ] && timeout 120 "${command}"
-    set -e
-    command_exit_status=$?
-    if [ ${command_exit_status} -eq 124 ]; then
-        echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
-        die "\"${command}\" failed, timed out."
-    elif [ ${command_exit_status} -ne 0 ]; then
-        echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
-        die "\"$command\" failed: ${command_exit_status}"
-    else
-        provisioner_log "\"$command\" succeeded."
-    fi
-}
-
 # Lifted from pi-gen/scripts/common
 unmount_image() {
     sync
@@ -168,6 +151,42 @@ unmount_image() {
             fi
         done
         losetup -d "$LOOP_DEVICE"
+    fi
+}
+
+# TODO: Refactor these two functions to use the same logic, but with different consequences for failure.
+timeout_nonfatal() {
+    command="$*"
+    set +e
+    timeout 120 "${command}"
+    set -e
+    command_exit_status=$?
+    if [ ${command_exit_status} -eq 124 ]; then
+        provisioner_log "\"${command}\" failed, timed out."
+        echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+        return 124
+    elif [ ${command_exit_status} -ne 0 ]; then
+        echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+        provisioner_log "\"$command\" failed: ${command_exit_status}"
+    else
+        provisioner_log "\"$command\" succeeded."
+    fi
+}
+
+timeout_fatal() {
+    command="$*"
+    set +e
+    timeout 120 "${command}"
+    set -e
+    command_exit_status=$?
+    if [ ${command_exit_status} -eq 124 ]; then
+        echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+        die "\"${command}\" failed, timed out."
+    elif [ ${command_exit_status} -ne 0 ]; then
+        echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+        die "\"$command\" failed: ${command_exit_status}"
+    else
+        provisioner_log "\"$command\" succeeded."
     fi
 }
 
@@ -269,9 +288,9 @@ fi
 
 announce_start "Erase / Partition Device Storage"
 
-# Arbitrary sleeps to handle lack of correct synchronisation in fastbootd.
 timeout_fatal fastboot getvar version
 
+# Arbitrary sleeps to handle lack of correct synchronisation in fastbootd.
 fastboot erase "${RPI_DEVICE_STORAGE_TYPE}"
 sleep 2
 fastboot oem partinit "${RPI_DEVICE_STORAGE_TYPE}" DOS
