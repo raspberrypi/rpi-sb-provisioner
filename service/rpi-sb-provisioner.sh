@@ -240,7 +240,7 @@ unmount_image() {
 timeout_nonfatal() {
     command="$*"
     set +e
-    timeout 120 "${command}"
+    timeout 120 ${command}
     set -e
     command_exit_status=$?
     if [ ${command_exit_status} -eq 124 ]; then
@@ -258,7 +258,7 @@ timeout_nonfatal() {
 timeout_fatal() {
     command="$*"
     set +e
-    timeout 120 "${command}"
+    timeout 120 ${command}
     set -e
     command_exit_status=$?
     if [ ${command_exit_status} -eq 124 ]; then
