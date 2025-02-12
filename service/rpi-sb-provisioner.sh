@@ -1013,7 +1013,7 @@ rm -rf "${TMP_DIR}" ${DEBUG}
 announce_stop "Cleaning up"
 
 announce_start "Set LED status"
-fastboot oem led PWR 0
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem led PWR 0
 announce_stop "Set LED status"
 
 mkdir -p /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/
