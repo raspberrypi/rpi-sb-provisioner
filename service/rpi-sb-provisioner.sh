@@ -14,6 +14,8 @@ export PROVISIONER_FINISHED="PROVISIONER-FINISHED"
 export PROVISIONER_ABORTED="PROVISIONER-ABORTED"
 export PROVISIONER_STARTED="PROVISIONER-STARTED"
 
+TARGET_DEVICE_SERIAL="${1}"
+FASTBOOT_DEVICE_SPECIFIER="${TARGET_DEVICE_SERIAL}"
 
 ring_bell() {
     tput bel
@@ -327,7 +329,7 @@ check_command_exists blockdev
 check_command_exists grep
 
 get_variable() {
-    fastboot getvar "$1" 2>&1 | grep -oP "${1}"': \K[^\r\n]*'
+    fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar "$1" 2>&1 | grep -oP "${1}"': \K[^\r\n]*'
 }
 
 TARGET_DEVICE_SERIAL="$(get_variable serialno)"
@@ -545,20 +547,34 @@ fi # Slow path
 
 announce_start "Erase / Partition Device Storage"
 
-timeout_fatal fastboot getvar version
+timeout_fatal fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar version
+
+KEYPAIR_DIR=/var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/keypair
+if [ -d "${RPI_DEVICE_RETRIEVE_KEYPAIR}" ]; then
+    KEYPAIR_DIR="${RPI_DEVICE_RETRIEVE_KEYPAIR}"
+fi
+mkdir -p "${KEYPAIR_DIR}"
+announce_start "Capturing device keypair to ${KEYPAIR_DIR}"
+N_ALREADY_PROVISIONED=0
+get_variable private-key > "${KEYPAIR_DIR}/${TARGET_DEVICE_SERIAL}.der" || N_ALREADY_PROVISIONED=$?
+if [ 0 -ne "$N_ALREADY_PROVISIONED" ]; then
+    keywriter_log "Warning: Unable to retrieve device private key; already provisioned"
+fi
+get_variable public-key > "${KEYPAIR_DIR}/${TARGET_DEVICE_SERIAL}.pub"
+announce_stop "Capturing device keypair to ${KEYPAIR_DIR}"
 
 # Arbitrary sleeps to handle lack of correct synchronisation in fastbootd.
-fastboot erase "${RPI_DEVICE_STORAGE_TYPE}"
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" erase "${RPI_DEVICE_STORAGE_TYPE}"
 sleep 2
-fastboot oem partinit "${RPI_DEVICE_STORAGE_TYPE}" DOS
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem partinit "${RPI_DEVICE_STORAGE_TYPE}" DOS
 sleep 2
-fastboot oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 0c "$(stat -c%b*%B "${RPI_SB_WORKDIR}"/bootfs-temporary.simg)"
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 0c "$(stat -c%b*%B "${RPI_SB_WORKDIR}"/bootfs-temporary.simg)"
 sleep 2
-fastboot oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 83 # Grow to fill storage
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 83 # Grow to fill storage
 sleep 2
-fastboot oem cryptinit "${RPI_DEVICE_STORAGE_TYPE}"p2 root "${RPI_DEVICE_STORAGE_CIPHER}"
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem cryptinit "${RPI_DEVICE_STORAGE_TYPE}"p2 root "${RPI_DEVICE_STORAGE_CIPHER}"
 sleep 2
-fastboot oem cryptopen "${RPI_DEVICE_STORAGE_TYPE}"p2 cryptroot
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem cryptopen "${RPI_DEVICE_STORAGE_TYPE}"p2 cryptroot
 sleep 2
 announce_stop "Erase / Partition Device Storage"
 
@@ -593,29 +609,15 @@ announce_stop "Testing Fastboot IP connectivity"
 
 announce_start "Writing OS images"
 # Favour using IPv6 if available, and ethernet regardless to get 1024-byte chunks in Fastboot without USB3
-FASTBOOT_DEVICE_SPECIFIER=
-if [ "${USE_IPV6}" -eq 0 ]; then
-FASTBOOT_DEVICE_SPECIFIER="tcp:${IPV6_ADDRESS}"
-elif [ "${USE_IPV4}" -eq 0 ]; then
-FASTBOOT_DEVICE_SPECIFIER="tcp:${IPV4_ADDRESS}"
-else
-FASTBOOT_DEVICE_SPECIFIER="${TARGET_DEVICE_SERIAL}"
+if [ ${USE_IPV6} -eq 0 ]; then
+    FASTBOOT_DEVICE_SPECIFIER="tcp:${IPV6_ADDRESS}"
+elif [ ${USE_IPV4} -eq 0 ]; then
+    FASTBOOT_DEVICE_SPECIFIER="tcp:${IPV4_ADDRESS}"
 fi
 
 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}"p1 "${RPI_SB_WORKDIR}"/bootfs-temporary.simg
 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash mapper/cryptroot "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
 announce_stop "Writing OS images"
-
-if [ -d "${RPI_DEVICE_RETRIEVE_KEYPAIR}" ]; then
-    announce_start "Capturing device keypair to ${RPI_DEVICE_RETRIEVE_KEYPAIR}"
-    N_ALREADY_PROVISIONED=0
-    get_variable private-key > "${RPI_DEVICE_RETRIEVE_KEYPAIR}/${TARGET_DEVICE_SERIAL}.der" || N_ALREADY_PROVISIONED=$?
-    if [ 0 -ne "$N_ALREADY_PROVISIONED" ]; then
-        provisioner_log "Warning: Unable to retrieve device private key; already provisioned"
-    fi
-    get_variable public-key > "${RPI_DEVICE_RETRIEVE_KEYPAIR}/${TARGET_DEVICE_SERIAL}.pub"
-    announce_stop "Capturing device keypair to ${RPI_DEVICE_RETRIEVE_KEYPAIR}"
-fi
 
 announce_start "Cleaning up"
 [ -d "${TMP_DIR}/rpi-boot-img-mount" ] && umount "${TMP_DIR}"/rpi-boot-img-mount
@@ -628,7 +630,7 @@ rm -rf "${TMP_DIR}" ${DEBUG}
 announce_stop "Cleaning up"
 
 announce_start "Set LED status"
-fastboot oem led PWR 0
+fastboot -s "${FASBOOT_DEVICE_SPECIFIER}" oem led PWR 0
 announce_stop "Set LED status"
 
 echo "${PROVISIONER_FINISHED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress

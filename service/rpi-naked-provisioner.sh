@@ -9,6 +9,9 @@ export PROVISIONER_FINISHED="PROVISIONER-FINISHED"
 export PROVISIONER_ABORTED="PROVISIONER-ABORTED"
 export PROVISIONER_STARTED="PROVISIONER-STARTED"
 
+TARGET_DEVICE_SERIAL="${1}"
+FASTBOOT_DEVICE_SPECIFIER="${TARGET_DEVICE_SERIAL}"
+
 read_config() {
     if [ -f /etc/rpi-sb-provisioner/config ]; then
         . /etc/rpi-sb-provisioner/config
@@ -221,7 +224,7 @@ check_command_exists blockdev
 check_command_exists grep
 
 get_variable() {
-    fastboot getvar "$1" 2>&1 | grep -oP "${1}"': \K[^\r\n]*'
+    fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar "$1" 2>&1 | grep -oP "${1}"': \K[^\r\n]*'
 }
 
 TMP_DIR=$(mktemp -d)
@@ -285,16 +288,16 @@ fi
 
 announce_start "Erase / Partition Device Storage"
 
-timeout_fatal fastboot getvar version
+timeout_fatal fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar version
 
 # Arbitrary sleeps to handle lack of correct synchronisation in fastbootd.
-fastboot erase "${RPI_DEVICE_STORAGE_TYPE}"
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" erase "${RPI_DEVICE_STORAGE_TYPE}"
 sleep 2
-fastboot oem partinit "${RPI_DEVICE_STORAGE_TYPE}" DOS
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem partinit "${RPI_DEVICE_STORAGE_TYPE}" DOS
 sleep 2
-fastboot oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 0c "$(stat -c%s "${RPI_SB_WORKDIR}/bootfs-temporary.img")"
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 0c "$(stat -c%s "${RPI_SB_WORKDIR}/bootfs-temporary.img")"
 sleep 2
-fastboot oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 11 # Grow to fill storage
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 11 # Grow to fill storage
 sleep 2
 announce_stop "Erase / Partition Device Storage"
 
@@ -319,8 +322,8 @@ else
 fi
 
 announce_start "Writing OS images"
-fastboot flash "${RPI_DEVICE_STORAGE_TYPE}"p1 "${RPI_SB_WORKDIR}"/bootfs-temporary.img
-fastboot flash "${RPI_DEVICE_STORAGE_TYPE}"p2 "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}"p1 "${RPI_SB_WORKDIR}"/bootfs-temporary.img
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}"p2 "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
 announce_stop "Writing OS images"
 
 announce_start "Cleaning up"
@@ -330,7 +333,7 @@ rm -rf "${TMP_DIR}" ${DEBUG}
 announce_stop "Cleaning up"
 
 announce_start "Set LED status"
-fastboot oem led PWR 0
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem led PWR 0
 announce_stop "Set LED status"
 
 echo "${PROVISIONER_FINISHED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress

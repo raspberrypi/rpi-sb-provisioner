@@ -328,10 +328,6 @@ check_command_exists cut
 check_command_exists findmnt
 check_command_exists grep
 
-get_variable() {
-    fastboot getvar "$1" 2>&1 | grep -oP "${1}"': \K[^\r\n]*'
-}
-
 DELETE_PRIVATE_TMPDIR=
 announce_start "Finding the cache directory"
 if [ -z "${RPI_SB_WORKDIR}" ]; then

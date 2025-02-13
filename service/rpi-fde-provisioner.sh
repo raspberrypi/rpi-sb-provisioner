@@ -12,6 +12,7 @@ export PROVISIONER_ABORTED="FDE-PROVISIONER-ABORTED"
 export PROVISIONER_STARTED="FDE-PROVISIONER-STARTED"
 
 TARGET_DEVICE_SERIAL="${1}"
+FASTBOOT_DEVICE_SPECIFIER="${TARGET_DEVICE_SERIAL}"
 
 read_config() {
     if [ -f /etc/rpi-sb-provisioner/config ]; then
@@ -268,7 +269,7 @@ check_command_exists blockdev
 check_command_exists grep
 
 get_variable() {
-    fastboot -s "${TARGET_DEVICE_SERIAL}" getvar "$1" 2>&1 | grep -oP "${1}"': \K[^\r\n]*'
+    fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar "$1" 2>&1 | grep -oP "${1}"': \K[^\r\n]*'
 }
 
 echo "${PROVISIONER_STARTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
@@ -447,20 +448,34 @@ fi # Slow path
 
 announce_start "Erase / Partition Device Storage"
 
-timeout_fatal fastboot getvar version
+timeout_fatal fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar version
+
+KEYPAIR_DIR=/var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/keypair
+if [ -d "${RPI_DEVICE_RETRIEVE_KEYPAIR}" ]; then
+    KEYPAIR_DIR="${RPI_DEVICE_RETRIEVE_KEYPAIR}"
+fi
+mkdir -p "${KEYPAIR_DIR}"
+announce_start "Capturing device keypair to ${KEYPAIR_DIR}"
+N_ALREADY_PROVISIONED=0
+get_variable private-key > "${KEYPAIR_DIR}/${TARGET_DEVICE_SERIAL}.der" || N_ALREADY_PROVISIONED=$?
+if [ 0 -ne "$N_ALREADY_PROVISIONED" ]; then
+    keywriter_log "Warning: Unable to retrieve device private key; already provisioned"
+fi
+get_variable public-key > "${KEYPAIR_DIR}/${TARGET_DEVICE_SERIAL}.pub"
+announce_stop "Capturing device keypair to ${KEYPAIR_DIR}"
 
 # Arbitrary sleeps to handle lack of correct synchronisation in fastbootd.
-fastboot erase "${RPI_DEVICE_STORAGE_TYPE}"
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" erase "${RPI_DEVICE_STORAGE_TYPE}"
 sleep 2
-fastboot oem partinit "${RPI_DEVICE_STORAGE_TYPE}" DOS
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem partinit "${RPI_DEVICE_STORAGE_TYPE}" DOS
 sleep 2
-fastboot oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 0c "$(stat -c%s "${RPI_SB_WORKDIR}"/bootfs-temporary.img)"
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 0c "$(stat -c%s "${RPI_SB_WORKDIR}"/bootfs-temporary.img)"
 sleep 2
-fastboot oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 83 # Grow to fill storage
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 83 # Grow to fill storage
 sleep 2
-fastboot oem cryptinit "${RPI_DEVICE_STORAGE_TYPE}"p2 root "${RPI_DEVICE_STORAGE_CIPHER}"
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem cryptinit "${RPI_DEVICE_STORAGE_TYPE}"p2 root "${RPI_DEVICE_STORAGE_CIPHER}"
 sleep 2
-fastboot oem cryptopen "${RPI_DEVICE_STORAGE_TYPE}"p2 cryptroot
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem cryptopen "${RPI_DEVICE_STORAGE_TYPE}"p2 cryptroot
 sleep 2
 announce_stop "Erase / Partition Device Storage"
 
@@ -485,20 +500,9 @@ else
 fi
 
 announce_start "Writing OS images"
-fastboot flash "${RPI_DEVICE_STORAGE_TYPE}"p1 "${RPI_SB_WORKDIR}"/bootfs-temporary.img
-fastboot flash mapper/cryptroot "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}"p1 "${RPI_SB_WORKDIR}"/bootfs-temporary.img
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash mapper/cryptroot "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
 announce_stop "Writing OS images"
-
-if [ -d "${RPI_DEVICE_RETRIEVE_KEYPAIR}" ]; then
-    announce_start "Capturing device keypair to ${RPI_DEVICE_RETRIEVE_KEYPAIR}"
-    N_ALREADY_PROVISIONED=0
-    get_variable private-key > "${RPI_DEVICE_RETRIEVE_KEYPAIR}/${TARGET_DEVICE_SERIAL}.der" || N_ALREADY_PROVISIONED=$?
-    if [ 0 -ne "$N_ALREADY_PROVISIONED" ]; then
-        provisioner_log "Warning: Unable to retrieve device private key; already provisioned"
-    fi
-    get_variable public-key > "${RPI_DEVICE_RETRIEVE_KEYPAIR}/${TARGET_DEVICE_SERIAL}.pub"
-    announce_stop "Capturing device keypair to ${RPI_DEVICE_RETRIEVE_KEYPAIR}"
-fi
 
 announce_start "Cleaning up"
 [ -d "${TMP_DIR}/rpi-boot-img-mount" ] && umount "${TMP_DIR}"/rpi-boot-img-mount
@@ -513,10 +517,10 @@ announce_stop "Cleaning up"
 announce_start "Set LED status"
 case "${RPI_DEVICE_FAMILY}" in
     2W)
-        fastboot oem led ACT 0
+        fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem led ACT 0
         ;;
     *)
-        fastboot oem led PWR 0
+        fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem led PWR 0
         ;;
 esac
 announce_stop "Set LED status"
