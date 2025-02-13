@@ -848,6 +848,9 @@ if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.img" ] ||
             depmod --basedir "${initramfs_dir}" "${kernel}"
         done
 
+        # Configure the cryptroot script to use the correct storage device
+        sed -i "s/mmcblk0/${RPI_DEVICE_STORAGE_TYPE}/g" "${initramfs_dir}usr/bin/init_cryptroot.sh"
+
         find . -print0 | cpio --null -ov --format=newc > ../initramfs.cpio
         cd "${TMP_DIR}"
         rm -rf "${TMP_DIR}"/initramfs
