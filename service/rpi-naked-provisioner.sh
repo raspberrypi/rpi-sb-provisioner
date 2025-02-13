@@ -205,7 +205,7 @@ cleanup() {
     if [ -n "${DELETE_PRIVATE_TMPDIR}" ]; then
         announce_start "Deleting customised intermediates"
         # shellcheck disable=SC2086
-        rm -rf "${DELETE_PRIVATE_TMPDIR}" ${DEBUG}
+        rm -rf "${RPI_SB_WORKDIR}" ${DEBUG}
         DELETE_PRIVATE_TMPDIR=
         announce_stop "Deleting customised intermediates"
     fi
@@ -336,6 +336,13 @@ announce_start "Cleaning up"
 [ -d "${TMP_DIR}/rpi-rootfs-img-mount" ] && umount "${TMP_DIR}"/rpi-rootfs-img-mount
 # shellcheck disable=SC2086
 rm -rf "${TMP_DIR}" ${DEBUG}
+
+if [ -n "${DELETE_PRIVATE_TMPDIR}" ]; then
+    announce_start "Deleting customised intermediates"
+    # shellcheck disable=SC2086
+    rm -rf "${RPI_SB_WORKDIR}" ${DEBUG}
+    announce_stop "Deleting customised intermediates"
+fi
 announce_stop "Cleaning up"
 
 announce_start "Set LED status"

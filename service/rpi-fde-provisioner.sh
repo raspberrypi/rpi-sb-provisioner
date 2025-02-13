@@ -236,7 +236,7 @@ cleanup() {
     if [ -n "${DELETE_PRIVATE_TMPDIR}" ]; then
         announce_start "Deleting customised intermediates"
         # shellcheck disable=SC2086
-        rm -rf "${DELETE_PRIVATE_TMPDIR}" ${DEBUG}
+        rm -rf "${RPI_SB_WORKDIR}" ${DEBUG}
         DELETE_PRIVATE_TMPDIR=
         announce_stop "Deleting customised intermediates"
     fi
@@ -410,6 +410,9 @@ if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.img" ] ||
             depmod --basedir "${initramfs_dir}" "${kernel}"
         done
 
+        # Configure the cryptroot script to use the correct storage device
+        sed -i "s/mmcblk0/${RPI_DEVICE_STORAGE_TYPE}/g" "${initramfs_dir}usr/bin/init_cryptroot.sh"
+
         find . -print0 | cpio --null -ov --format=newc > ../initramfs.cpio
         cd "${TMP_DIR}"
         rm -rf "${TMP_DIR}"/initramfs
@@ -514,6 +517,13 @@ unmount_image "${COPY_OS_COMBINED_FILE}" ${DEBUG}
 # We also delete the temporary directory - preserving the cached generated asset
 # shellcheck disable=SC2086
 rm -rf "${TMP_DIR}" ${DEBUG}
+
+if [ -n "${DELETE_PRIVATE_TMPDIR}" ]; then
+    announce_start "Deleting customised intermediates"
+    # shellcheck disable=SC2086
+    rm -rf "${RPI_SB_WORKDIR}" ${DEBUG}
+    announce_stop "Deleting customised intermediates"
+fi
 announce_stop "Cleaning up"
 
 announce_start "Set LED status"
