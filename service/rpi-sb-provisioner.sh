@@ -604,10 +604,14 @@ fi
 announce_start "Testing Fastboot IP connectivity"
 USE_IPV4=
 USE_IPV6=
+set +e
 IPV6_ADDRESS="$(get_variable ipv6-address_0)"
-timeout_nonfatal fastboot -s tcp:"${IPV6_ADDRESS}" getvar version && USE_IPV6=$?
+(timeout_nonfatal fastboot -s tcp:"${IPV6_ADDRESS}" getvar version)
+USE_IPV6=$?
 IPV4_ADDRESS="$(get_variable ipv4-address_0)"
-timeout_nonfatal fastboot -s tcp:"${IPV4_ADDRESS}" getvar version && USE_IPV4=$?
+(timeout_nonfatal fastboot -s tcp:"${IPV4_ADDRESS}" getvar version)
+USE_IPV4=$?
+set -e
 announce_stop "Testing Fastboot IP connectivity"
 
 announce_start "Writing OS images"
@@ -633,7 +637,7 @@ rm -rf "${TMP_DIR}" ${DEBUG}
 announce_stop "Cleaning up"
 
 announce_start "Set LED status"
-fastboot -s "${FASBOOT_DEVICE_SPECIFIER}" oem led PWR 0
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem led PWR 0
 announce_stop "Set LED status"
 
 echo "${PROVISIONER_FINISHED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
