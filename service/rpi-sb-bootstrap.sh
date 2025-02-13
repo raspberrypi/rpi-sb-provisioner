@@ -127,36 +127,33 @@ check_command_exists() {
 timeout_nonfatal() {
     command="$*"
     set +e
-    timeout 120 ${command}
-    set -e
+    timeout 10 ${command}
     command_exit_status=$?
     if [ ${command_exit_status} -eq 124 ]; then
         provisioner_log "\"${command}\" failed, timed out."
-        echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
-        return 124
     elif [ ${command_exit_status} -ne 0 ]; then
-        echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
-        provisioner_log "\"$command\" failed: ${command_exit_status}"
+        provisioner_log "\"${command}\" failed, exit status: ${command_exit_status}"
     else
         provisioner_log "\"$command\" succeeded."
     fi
+    set -e
 }
 
 timeout_fatal() {
     command="$*"
     set +e
     timeout 120 ${command}
-    set -e
     command_exit_status=$?
     if [ ${command_exit_status} -eq 124 ]; then
         echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
         die "\"${command}\" failed, timed out."
     elif [ ${command_exit_status} -ne 0 ]; then
         echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
-        die "\"$command\" failed: ${command_exit_status}"
+        die "\"$command\" failed, exit status: ${command_exit_status}"
     else
         provisioner_log "\"$command\" succeeded."
     fi
+    set -e
 }
 
 cleanup() {
