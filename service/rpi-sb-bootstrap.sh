@@ -137,6 +137,7 @@ timeout_nonfatal() {
         provisioner_log "\"$command\" succeeded."
     fi
     set -e
+    return ${command_exit_status}
 }
 
 timeout_fatal() {
