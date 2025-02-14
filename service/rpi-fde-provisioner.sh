@@ -379,9 +379,6 @@ if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.img" ] ||
     }
 
     # Use subshells to avoid polluting our CWD.
-    if check_file_is_expected "${TMP_DIR}"/rpi-boot-img-mount/initramfs_2712 ""; then
-        ( augment_initramfs "${TMP_DIR}"/rpi-boot-img-mount/initramfs_2712 )
-    fi
     if check_file_is_expected "${TMP_DIR}"/rpi-boot-img-mount/initramfs8 ""; then
         ( augment_initramfs "${TMP_DIR}"/rpi-boot-img-mount/initramfs8 )
     fi
