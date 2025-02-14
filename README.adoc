@@ -126,6 +126,8 @@ WARNING: The PKCS11 provider, and it's associated HSM, should be considered key 
 
 This should be your 'gold master' OS image. No customisation should be present in this image that you would not expect to be deployed to your entire fleet. `rpi-sb-provisioner` assumes this image has been created using `pi-gen`, and using a non-`pi-gen` image may produce undefined behaviour.
 
+WARNING: This file *must* be the uncompressed image.
+
 === RPI_DEVICE_STORAGE_TYPE
 *Mandatory*
 
