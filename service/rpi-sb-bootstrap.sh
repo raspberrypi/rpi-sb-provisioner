@@ -13,6 +13,7 @@ export BOOTSTRAP_STARTED="BOOTSTRAP-STARTED"
 
 # On pre-Pi4 devices, only TARGET_DEVICE_PATH is likely to be unique.
 TARGET_DEVICE_PATH="$1"
+TARGET_USB_PATH="$(udevadm info "${TARGET_DEVICE_PATH}" | grep -oP '^M: \K.*')"
 TARGET_DEVICE_FAMILY="$(udevadm info --name="$TARGET_DEVICE_PATH" --query=property --property=ID_MODEL_ID --value)"
 
 EARLY_LOG_DIRECTORY="/var/log/rpi-sb-provisioner/early/${TARGET_DEVICE_PATH}"
@@ -463,7 +464,6 @@ announce_stop "Staging fastboot image"
 
 announce_start "Starting fastboot"
 
-TARGET_USB_PATH="$(udevadm info "${TARGET_DEVICE_PATH}" | grep -oP '^M: \K.*')"
 set +e
 # -j option not supported pre BCM2711/BCM2712
 case "${TARGET_DEVICE_FAMILY}" in
