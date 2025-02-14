@@ -265,7 +265,7 @@ Clicking on the device name will open up a second window, with buttons to view t
 To return to the main monitoring screen, just press the key `m`.
 To quit the app use the key combination `CTRL-C` or `q`.
 
-== Debugging and audit
+== Tips and Tricks
 
 === Observing active provisioning operations
 
@@ -287,6 +287,14 @@ For example, to observe the progress of an individual device through a phase, yo
 $ tail -f -n 100 /var/log/rpi-sb-provisioner/<serial>/provisioner.log
 $ tail -f -n 100 /var/log/rpi-sb-provisioner/<serial>/triage.log
 ----
+
+More verbose logs are available from the `journalctl` command:
+
+----
+$ journalctl -xeu rpi-sb-provisioner@<serial> -f
+----
+
+Where the `-f` flag will follow the logs as they are written, letting you observe the progress of the device in real-time.
 
 === Processing the manufacturing database
 
@@ -347,3 +355,7 @@ $ sudo touch /var/log/rpi-sb-provisioner/<serial>/special-skip-keywriter
 ----
 
 WARNING: This will disable metadata fetching and manufacturing database creation as of writing. This may be resolved in a future version of `rpi-sb-provisioner`.
+
+=== Changing config.txt
+
+Modify the config.txt contained within your gold master image as you typically would, and `rpi-sb-provisioner` will include this as part of provisioning.
