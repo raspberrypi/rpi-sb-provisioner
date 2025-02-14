@@ -72,7 +72,7 @@ read_config
 die() {
     echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
     # shellcheck disable=SC2086
-    echo "$@" ${DEBUG}
+    echo "$@" >&2
     exit 1
 }
 
@@ -82,10 +82,12 @@ simg_expanded_size() {
 
 keywriter_log() {
     echo "$@" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/keywriter.log
+    echo "$@" >&2
 }
 
 provisioner_log() {
     echo "$@" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/provisioner.log
+    echo "$@" >&2
 }
 
 
