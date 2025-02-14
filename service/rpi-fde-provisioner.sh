@@ -49,6 +49,10 @@ die() {
     exit 1
 }
 
+keywriter_log() {
+    echo "$@" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/keywriter.log
+}
+
 provisioner_log() {
     echo "$@" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/provisioner.log
     printf "%s\n" "$@"
