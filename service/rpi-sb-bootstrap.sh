@@ -454,6 +454,9 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ] && [ "${PROVISIONING_STYLE}" = "secure-boot" ]
     ${OPENSSL} dgst -sign $(get_signing_directives) -sha256 "${RPI_SB_WORKDIR}"/boot.img | xxd -c 4096 -p >> "${RPI_SB_WORKDIR}"/boot.sig
     cp "$(get_fastboot_config_file)" "${RPI_SB_WORKDIR}"/config.txt
     announce_stop "Signing fastboot image"
+else # !ALLOW_SIGNED_BOOT || PROVISIONING_STYLE != secure-boot
+    cp "$(get_fastboot_gadget)" "${RPI_SB_WORKDIR}"/boot.img
+    cp "$(get_fastboot_config_file)" "${RPI_SB_WORKDIR}"/config.txt
 fi
 
 announce_stop "Staging fastboot image"
