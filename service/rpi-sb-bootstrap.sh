@@ -15,6 +15,8 @@ export BOOTSTRAP_STARTED="BOOTSTRAP-STARTED"
 TARGET_DEVICE_PATH="$1"
 TARGET_USB_PATH="$(udevadm info "${TARGET_DEVICE_PATH}" | grep -oP '^M: \K.*')"
 TARGET_DEVICE_FAMILY="$(udevadm info --name="$TARGET_DEVICE_PATH" --query=property --property=ID_MODEL_ID --value)"
+# TARGET_DEVICE_SERIAL is best-effort, not all rpiboot devices have it set (some only show 32-bits)
+TARGET_DEVICE_SERIAL="$(udevadm info --name="$TARGET_DEVICE_PATH" --query=property --property=ID_SERIAL_SHORT --value)"
 
 EARLY_LOG_DIRECTORY="/var/log/rpi-sb-provisioner/early/${TARGET_DEVICE_PATH}"
 mkdir -p "${EARLY_LOG_DIRECTORY}"
@@ -505,8 +507,6 @@ case "${TARGET_DEVICE_FAMILY}" in
         timeout_fatal rpiboot -v -d "${RPI_SB_WORKDIR}" -p "${TARGET_USB_PATH}"
         ;;
 esac
-
-TARGET_DEVICE_SERIAL="$(timeout_fatal fastboot -s usb:"${TARGET_USB_PATH}" getvar serialno 2>&1 | grep -oP 'serialno: \K[^\r\n]*')"
 
 if [ -n "${TARGET_DEVICE_SERIAL}" ]; then
     mkdir -p "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}"
