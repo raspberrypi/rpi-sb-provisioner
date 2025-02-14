@@ -329,150 +329,116 @@ esac
 
 
 # Determine if we're enforcing secure boot, and if so, prepare the environment & eeprom accordingly.
-if [ "$ALLOW_SIGNED_BOOT" -eq 1 ] && [ "${PROVISIONING_STYLE}" = "secure-boot" ]; then
-    announce_start "Setting up the environment for a signed-boot capable device"
-    if [ -z "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" ]; then
-        RPI_DEVICE_BOOTLOADER_CONFIG_FILE=/var/lib/rpi-sb-provisioner/bootloader.default
-    fi
-
-    SOURCE_EEPROM_IMAGE=
-    DESTINATION_EEPROM_IMAGE=
-    DESTINATION_EEPROM_SIGNATURE=
-    BOOTCODE_BINARY_IMAGE=
-    BOOTCODE_FLASHING_NAME=
-    case $TARGET_DEVICE_FAMILY in
-        2711)
-            BCM_CHIP=2711
-            EEPROM_SIZE=524288
-            FIRMWARE_IMAGE_DIR="${FIRMWARE_ROOT}-${BCM_CHIP}/${FIRMWARE_RELEASE_STATUS}"
-            getBootloaderUpdateVersion
-            SOURCE_EEPROM_IMAGE="${BOOTLOADER_UPDATE_IMAGE}"
-            BOOTCODE_BINARY_IMAGE="${FIRMWARE_IMAGE_DIR}/recovery.bin"
-            BOOTCODE_FLASHING_NAME="${RPI_SB_WORKDIR}/bootcode4.bin"
-            ;;
-        2712)
-            BCM_CHIP=2712
-            EEPROM_SIZE=2097152
-            FIRMWARE_IMAGE_DIR="${FIRMWARE_ROOT}-${BCM_CHIP}/${FIRMWARE_RELEASE_STATUS}"
-            getBootloaderUpdateVersion
-            SOURCE_EEPROM_IMAGE="${BOOTLOADER_UPDATE_IMAGE}"
-            BOOTCODE_BINARY_IMAGE="${FIRMWARE_IMAGE_DIR}/recovery.bin"
-            BOOTCODE_FLASHING_NAME="${RPI_SB_WORKDIR}/bootcode5.bin"
-            ;;
-        *)
-            die "Unable to identify EEPROM parameters for non-Pi4, Pi5 device. Aborting."
-    esac
-
-    DESTINATION_EEPROM_IMAGE="${RPI_SB_WORKDIR}/pieeprom.bin"
-    DESTINATION_EEPROM_SIGNATURE="${RPI_SB_WORKDIR}/pieeprom.sig"
-
-    ### In the completely-unprovisioned state, where you have not yet written a customer OTP key, simply make the copy of the unsigned bootcode
-    cp "${BOOTCODE_BINARY_IMAGE}" "${BOOTCODE_FLASHING_NAME}"
-    ####
-
-    if [ -n "${CUSTOMER_KEY_FILE_PEM}" ] || [ -n "${CUSTOMER_KEY_PKCS11_NAME}" ]; then
-        derivePublicKey
-        identifyBootloaderConfig
-        enforceSecureBootloaderConfig
-
-        if [ ! -e "${DESTINATION_EEPROM_SIGNATURE}" ]; then
-            if [ ! -e "${SOURCE_EEPROM_IMAGE}" ]; then
-                die "No Raspberry Pi EEPROM file to use as key vector"
-            else
-                update_eeprom "${SOURCE_EEPROM_IMAGE}" "${DESTINATION_EEPROM_IMAGE}" "${CUSTOMER_KEY_FILE_PEM}" "${CUSTOMER_PUBLIC_KEY_FILE}"
-                writeSig "${DESTINATION_EEPROM_IMAGE}" "${DESTINATION_EEPROM_SIGNATURE}"
-            fi
+if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then 
+    if [ "${PROVISIONING_STYLE}" = "secure-boot" ]; then
+        announce_start "Setting up the environment for a signed-boot capable device"
+        if [ -z "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" ]; then
+            RPI_DEVICE_BOOTLOADER_CONFIG_FILE=/var/lib/rpi-sb-provisioner/bootloader.default
         fi
 
-        # This directive informs the bootloader to write the public key into OTP
-        echo "program_pubkey=1" > "${RPI_SB_WORKDIR}/config.txt"
-        # This directive tells the bootloader to reboot once it's written the OTP
-        echo "recovery_reboot=1" >> "${RPI_SB_WORKDIR}/config.txt"
-
-        if [ -n "${RPI_DEVICE_FETCH_METADATA}" ]; then
-            echo "recovery_metadata=1" >> "${RPI_SB_WORKDIR}/config.txt"
-        fi
-
-        if [ -n "${RPI_DEVICE_JTAG_LOCK}" ]; then
-            echo "program_jtag_lock=1" >> "${RPI_SB_WORKDIR}/config.txt"
-        fi
-
-        if [ -n "${RPI_DEVICE_EEPROM_WP_SET}" ]; then
-            echo "eeprom_write_protect=1" >> "${RPI_SB_WORKDIR}/config.txt"
-        fi
-
-        bootstrap_log "Writing key and EEPROM configuration to the device"
-        set +e
-        timeout 10s rpiboot -d "${RPI_SB_WORKDIR}" -p "${TARGET_USB_PATH}" -j "${EARLY_LOG_DIRECTORY}/metadata/"
-        set -e
-        KEYWRITER_EXIT_STATUS=$?
-        case $KEYWRITER_EXIT_STATUS in
-            124)
-                bootstrap_log "Writing failed, timed out."
-                case "${TARGET_DEVICE_FAMILY}" in
-                    2712)
-                        # Raspberry Pi 5-family hardware may already have a key provisioned - so retry with a signed bootcode.
-                        rpi-sign-bootcode --debug -c 2712 -i "${BOOTCODE_BINARY_IMAGE}" -o "${BOOTCODE_FLASHING_NAME}" -k "${CUSTOMER_KEY_FILE_PEM}" -v 0 -n 16
-                        timeout 10s rpiboot -d "${RPI_SB_WORKDIR}" -p "${TARGET_USB_PATH}" -j "${EARLY_LOG_DIRECTORY}/metadata/"
-                        KEYWRITER_RETRY_EXIT_STATUS=$?
-                        case ${KEYWRITER_RETRY_EXIT_STATUS} in
-                            124)
-                                # If the retry with a signed recovery image fails, this is likely a hard failure.
-                                echo "${BOOTSTRAP_ABORTED}" >> "${EARLY_LOG_DIRECTORY}"/bootstrap.log
-                                return 124
-                                ;;
-                            0)
-                                # If the retry with a signed recovery image succeeds, then we're done.
-                                echo "Keywriter retry-launched successfully."
-                                ;;
-                            *)
-                                bootstrap_log "Failed to load keywriter: ${KEYWRITER_RETRY_EXIT_STATUS}"
-                                echo "${BOOTSTRAP_ABORTED}" >> "${EARLY_LOG_DIRECTORY}"/bootstrap.log
-                                return ${KEYWRITER_RETRY_EXIT_STATUS}
-                            ;;
-                        esac
-                    ;;
-                    *)
-                        # If we're not Raspberry Pi 5-family, then this is the end of the line, no retry will help.
-                        echo "${BOOTSTRAP_ABORTED}" >> "${EARLY_LOG_DIRECTORY}"/bootstrap.log
-                        return 124
-                    ;;
-                esac
+        SOURCE_EEPROM_IMAGE=
+        DESTINATION_EEPROM_IMAGE=
+        DESTINATION_EEPROM_SIGNATURE=
+        BOOTCODE_BINARY_IMAGE=
+        BOOTCODE_FLASHING_NAME=
+        case $TARGET_DEVICE_FAMILY in
+            2711)
+                BCM_CHIP=2711
+                EEPROM_SIZE=524288
+                FIRMWARE_IMAGE_DIR="${FIRMWARE_ROOT}-${BCM_CHIP}/${FIRMWARE_RELEASE_STATUS}"
+                getBootloaderUpdateVersion
+                SOURCE_EEPROM_IMAGE="${BOOTLOADER_UPDATE_IMAGE}"
+                BOOTCODE_BINARY_IMAGE="${FIRMWARE_IMAGE_DIR}/recovery.bin"
+                BOOTCODE_FLASHING_NAME="${RPI_SB_WORKDIR}/bootcode4.bin"
                 ;;
-            0)
-                bootstrap_log "Keywriter launched successfully."
+            2712)
+                BCM_CHIP=2712
+                EEPROM_SIZE=2097152
+                FIRMWARE_IMAGE_DIR="${FIRMWARE_ROOT}-${BCM_CHIP}/${FIRMWARE_RELEASE_STATUS}"
+                getBootloaderUpdateVersion
+                SOURCE_EEPROM_IMAGE="${BOOTLOADER_UPDATE_IMAGE}"
+                BOOTCODE_BINARY_IMAGE="${FIRMWARE_IMAGE_DIR}/recovery.bin"
+                BOOTCODE_FLASHING_NAME="${RPI_SB_WORKDIR}/bootcode5.bin"
                 ;;
             *)
-                bootstrap_log "Failed to load keywriter: ${KEYWRITER_EXIT_STATUS}"
-                echo "${BOOTSTRAP_ABORTED}" >> "${EARLY_LOG_DIRECTORY}"/bootstrap.log
-                return ${KEYWRITER_EXIT_STATUS}
+                die "Unable to identify EEPROM parameters for non-Pi4, Pi5 device. Aborting."
+        esac
+
+        DESTINATION_EEPROM_IMAGE="${RPI_SB_WORKDIR}/pieeprom.bin"
+        DESTINATION_EEPROM_SIGNATURE="${RPI_SB_WORKDIR}/pieeprom.sig"
+
+        ### In the completely-unprovisioned state, where you have not yet written a customer OTP key, simply make the copy of the unsigned bootcode
+        cp "${BOOTCODE_BINARY_IMAGE}" "${BOOTCODE_FLASHING_NAME}"
+        ####
+
+        if [ -n "${CUSTOMER_KEY_FILE_PEM}" ] || [ -n "${CUSTOMER_KEY_PKCS11_NAME}" ]; then
+            derivePublicKey
+            identifyBootloaderConfig
+            enforceSecureBootloaderConfig
+
+            if [ ! -e "${DESTINATION_EEPROM_SIGNATURE}" ]; then
+                if [ ! -e "${SOURCE_EEPROM_IMAGE}" ]; then
+                    die "No Raspberry Pi EEPROM file to use as key vector"
+                else
+                    update_eeprom "${SOURCE_EEPROM_IMAGE}" "${DESTINATION_EEPROM_IMAGE}" "${CUSTOMER_KEY_FILE_PEM}" "${CUSTOMER_PUBLIC_KEY_FILE}"
+                    writeSig "${DESTINATION_EEPROM_IMAGE}" "${DESTINATION_EEPROM_SIGNATURE}"
+                fi
+            fi
+
+            # This directive informs the bootloader to write the public key into OTP
+            echo "program_pubkey=1" > "${RPI_SB_WORKDIR}/config.txt"
+            # This directive tells the bootloader to reboot once it's written the OTP
+            echo "recovery_reboot=1" >> "${RPI_SB_WORKDIR}/config.txt"
+
+            if [ -n "${RPI_DEVICE_FETCH_METADATA}" ]; then
+                echo "recovery_metadata=1" >> "${RPI_SB_WORKDIR}/config.txt"
+            fi
+
+            if [ -n "${RPI_DEVICE_JTAG_LOCK}" ]; then
+                echo "program_jtag_lock=1" >> "${RPI_SB_WORKDIR}/config.txt"
+            fi
+
+            if [ -n "${RPI_DEVICE_EEPROM_WP_SET}" ]; then
+                echo "eeprom_write_protect=1" >> "${RPI_SB_WORKDIR}/config.txt"
+            fi
+
+            bootstrap_log "Writing key and EEPROM configuration to the device"
+            [ ! -f "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/special-skip-keywriter" ] && timeout_fatal rpiboot -d "${RPI_SB_WORKDIR}" -p "${TARGET_USB_PATH}" -j "${EARLY_LOG_DIRECTORY}/metadata/"
+        else
+            bootstrap_log "No key specified, skipping eeprom update"
+        fi
+        bootstrap_log "Keywriting completed. Rebooting for next phase."
+        # Clear signing intermediates
+        rm -rf "${RPI_SB_WORKDIR:?}/*"
+
+        case "${TARGET_DEVICE_FAMILY}" in
+            2712)
+                FASTBOOT_SIGN_DIR=$(mktemp -d)
+                cd "${FASTBOOT_SIGN_DIR}"
+                tar -vxf /usr/share/rpiboot/mass-storage-gadget64/bootfiles.bin
+                rpi-sign-bootcode --debug -c 2712 -i 2712/bootcode5.bin -o 2712/bootcode5.bin.signed -k "${CUSTOMER_KEY_FILE_PEM}" -v 0 -n 16
+                mv -f "2712/bootcode5.bin.signed" "2712/bootcode5.bin"
+                tar -vcf "${RPI_SB_WORKDIR}/bootfiles.bin" -- *
+                cd -
+                rm -rf "${FASTBOOT_SIGN_DIR}"
+                ;;
+            *)
+                # Raspberry Pi 4-class devices do not use signed bootcode files, so just copy the file into the relevant place.
+                cp /usr/share/rpiboot/mass-storage-gadget64/bootfiles.bin "${RPI_SB_WORKDIR}/bootfiles.bin"
                 ;;
         esac
-    else
-        bootstrap_log "No key specified, skipping eeprom update"
+    else # !PROVISIONING_STYLE=secure-boot
+        case ${TARGET_DEVICE_FAMILY} in
+            2712|2711)
+                cp /usr/share/rpiboot/mass-storage-gadget64/bootfiles.bin "${RPI_SB_WORKDIR}/bootfiles.bin"
+                ;;
+            *)
+                cp "$(get_fastboot_gadget_2710)" "${RPI_SB_WORKDIR}/bootfiles.bin"
+                ;;
+        esac
     fi
-    bootstrap_log "Keywriting completed. Rebooting for next phase."
-    # Clear signing intermediates
-    rm -rf "${RPI_SB_WORKDIR:?}/*"
-
-    case "${TARGET_DEVICE_FAMILY}" in
-        2712)
-            FASTBOOT_SIGN_DIR=$(mktemp -d)
-            cd "${FASTBOOT_SIGN_DIR}"
-            tar -vxf /usr/share/rpiboot/mass-storage-gadget64/bootfiles.bin
-            rpi-sign-bootcode --debug -c 2712 -i 2712/bootcode5.bin -o 2712/bootcode5.bin.signed -k "${CUSTOMER_KEY_FILE_PEM}" -v 0 -n 16
-            mv -f "2712/bootcode5.bin.signed" "2712/bootcode5.bin"
-            tar -vcf "${RPI_SB_WORKDIR}/bootfiles.bin" -- *
-            cd -
-            rm -rf "${FASTBOOT_SIGN_DIR}"
-            ;;
-        *)
-            # Raspberry Pi 4-class devices do not use signed bootcode files, so just copy the file into the relevant place.
-            cp /usr/share/rpiboot/mass-storage-gadget64/bootfiles.bin "${RPI_SB_WORKDIR}/bootfiles.bin"
-            ;;
-    esac
-else
-    # No signed boot means we never have to sign the fastboot gadget, so go go go!
+else # !ALLOW_SIGNED_BOOT
+    # No allowed signed boot? Must be pre-Pi4!
     cp "$(get_fastboot_gadget_2710)" "${RPI_SB_WORKDIR}/bootfiles.bin"
 fi
 
