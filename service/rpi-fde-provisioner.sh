@@ -409,6 +409,7 @@ if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.img" ] ||
     announce_start "Copying boot image to working directory"
     umount "${BOOT_DEV}"
     sync; sync; sync;
+    rm -rf "${TMP_DIR}"/rpi-boot-img-mount
     cp "${BOOT_DEV}" "${RPI_SB_WORKDIR}"/bootfs-temporary.img
     announce_stop "Copying boot image to working directory"
 fi # Slow path
