@@ -22,7 +22,7 @@ For more information on creating an OS based on Raspberry Pi OS in `pi-gen`, con
 === Required hardware for the provisioning system
 
 * A Raspberry Pi 5 (or other 64-bit Raspberry Pi device)
-* An official Raspberry Pi 5 Power Supply
+* An official Raspberry Pi 27W USB-C Power Supply
 * An installation of Raspberry Pi OS Bookworm, or later
 * At least 32GB of storage, for temporary working files
 * For provisoning Raspberry Pi Compute Module 4:
