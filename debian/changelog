@@ -1,3 +1,12 @@
+rpi-sb-provisioner (2.0.0) unstable; urgency=medium
+
+  * global: Introduce FDE-Only, Naked and Secure-Boot modes
+  * global: Add support for Raspberry Pi Zero 2-family devices
+  * architectural: Split pre-and-post-Fastboot phases
+  * architectural: Add support for multiple Fastboot devices
+
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Mon, 17 Feb 2025 12:20:00 +0000
+
 rpi-sb-provisioner (1.3.7) unstable; urgency=medium
 
   * provisioner: Clean up ephemeral RPI_SB_WORKDIRs
