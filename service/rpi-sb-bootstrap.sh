@@ -11,6 +11,57 @@ export BOOTSTRAP_FINISHED="BOOTSTRAP-FINISHED"
 export BOOTSTRAP_ABORTED="BOOTSTRAP-ABORTED"
 export BOOTSTRAP_STARTED="BOOTSTRAP-STARTED"
 
+HOLDING_LOCKFILE=0
+
+announce_start() {
+    bootstrap_log "================================================================================"
+
+    bootstrap_log "Starting $1"
+
+    bootstrap_log "================================================================================"
+}
+
+announce_stop() {
+    bootstrap_log "================================================================================"
+
+    bootstrap_log "Stopping $1"
+
+    bootstrap_log "================================================================================"
+}
+
+bootstrap_log() {
+    echo "$@" >> "${EARLY_LOG_DIRECTORY}"/bootstrap.log
+    printf "%s\n" "$@"
+}
+
+cleanup() {
+    returnvalue=$?
+    if [ ${HOLDING_LOCKFILE} -eq 1 ]; then
+        if [ -n "${CUSTOMER_PUBLIC_KEY_FILE}" ]; then
+            announce_start "Deleting public key"
+            # shellcheck disable=SC2086
+            rm -f "${CUSTOMER_PUBLIC_KEY_FILE}" ${DEBUG}
+            CUSTOMER_PUBLIC_KEY_FILE=
+            announce_stop "Deleting public key"
+        fi
+
+        if [ -n "${DELETE_PRIVATE_TMPDIR}" ]; then
+            announce_start "Deleting customised intermediates"
+            # shellcheck disable=SC2086
+            rm -rf "${DELETE_PRIVATE_TMPDIR}" ${DEBUG}
+            DELETE_PRIVATE_TMPDIR=
+            announce_stop "Deleting customised intermediates"
+        fi
+
+        announce_start "Deleting bootstrap lock"
+        rm -f "/etc/udev/rules.d/99-rpi-sb-bootstrap-${TARGET_DEVICE_SERIAL}.rules"
+        udevadm control --reload-rules
+        announce_stop "Deleting bootstrap lock"
+    fi
+    exit $returnvalue
+}
+trap cleanup EXIT
+
 # On pre-Pi4 devices, only TARGET_DEVICE_PATH is likely to be unique.
 TARGET_DEVICE_PATH="$1"
 TARGET_USB_PATH="$(udevadm info "${TARGET_DEVICE_PATH}" | grep -oP '^M: \K.*')"
@@ -38,30 +89,14 @@ read_config() {
 
 read_config
 
-ring_bell() {
-    tput bel
-}
-
-announce_start() {
-    bootstrap_log "================================================================================"
-
-    bootstrap_log "Starting $1"
-
-    bootstrap_log "================================================================================"
-}
-
-announce_stop() {
-    bootstrap_log "================================================================================"
-
-    bootstrap_log "Stopping $1"
-
-    bootstrap_log "================================================================================"
-}
-
-bootstrap_log() {
-    echo "$@" >> "${EARLY_LOG_DIRECTORY}"/bootstrap.log
-    printf "%s\n" "$@"
-}
+if [ ! -f "/etc/udev/rules.d/99-rpi-sb-bootstrap-${TARGET_DEVICE_SERIAL}.rules" ]; then
+    echo "ACTION==\"*\", ATTRS{idSerial}==\"${TARGET_DEVICE_SERIAL}\", GOTO=\"end\"" > "/etc/udev/rules.d/99-rpi-sb-bootstrap-${TARGET_DEVICE_SERIAL}.rules"
+    echo "LABEL=\"end\"" >> "/etc/udev/rules.d/99-rpi-sb-bootstrap-${TARGET_DEVICE_SERIAL}.rules"
+    udevadm control --reload-rules
+    HOLDING_LOCKFILE=1
+else
+    die "Bootstrap already in progress for ${TARGET_DEVICE_SERIAL}"
+fi
 
 get_fastboot_gadget() {
     if [ -f /etc/rpi-sb-provisioner/fastboot-gadget.img ]; then
