@@ -16,7 +16,6 @@ LOG_DIRECTORY="/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}"
 
 if [ -d "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL32}" ]; then
     mv "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL32}" "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}"
-    mv "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/${TARGET_DEVICE_SERIAL32}.json" "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/${TARGET_DEVICE_SERIAL}.json"
 fi
 
 mkdir -p "${LOG_DIRECTORY}"
