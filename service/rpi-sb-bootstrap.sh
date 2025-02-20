@@ -161,6 +161,40 @@ check_command_exists() {
     fi
 }
 
+# TODO: Refactor these two functions to use the same logic, but with different consequences for failure.
+timeout_nonfatal() {
+    command="$*"
+    set +e
+    timeout 10 ${command}
+    command_exit_status=$?
+    if [ ${command_exit_status} -eq 124 ]; then
+        bootstrap_log "\"${command}\" failed, timed out."
+    elif [ ${command_exit_status} -ne 0 ]; then
+        bootstrap_log "\"${command}\" failed, exit status: ${command_exit_status}"
+    else
+        bootstrap_log "\"$command\" succeeded."
+    fi
+    set -e
+    return ${command_exit_status}
+}
+
+timeout_fatal() {
+    command="$*"
+    set +e
+    timeout 120 ${command}
+    command_exit_status=$?
+    if [ ${command_exit_status} -eq 124 ]; then
+        echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+        die "\"${command}\" failed, timed out."
+    elif [ ${command_exit_status} -ne 0 ]; then
+        echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+        die "\"$command\" failed, exit status: ${command_exit_status}"
+    else
+        bootstrap_log "\"$command\" succeeded."
+    fi
+    set -e
+}
+
 cleanup() {
     if [ -n "${CUSTOMER_PUBLIC_KEY_FILE}" ]; then
         announce_start "Deleting public key"
