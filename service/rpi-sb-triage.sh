@@ -10,8 +10,15 @@ export TRIAGE_ABORTED="BOOTSTRAP-ABORTED"
 export TRIAGE_STARTED="BOOTSTRAP-STARTED"
 
 TARGET_DEVICE_SERIAL="${1}"
+TARGET_DEVICE_SERIAL32=$(echo "${TARGET_DEVICE_SERIAL}" | cut -c $((${#TARGET_DEVICE_SERIAL}/2+1))-)
 
 LOG_DIRECTORY="/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}"
+
+if [ -d "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL32}" ]; then
+    mv "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL32}" "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}"
+    mv "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/${TARGET_DEVICE_SERIAL32}.json" "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/${TARGET_DEVICE_SERIAL}.json"
+fi
+
 mkdir -p "${LOG_DIRECTORY}"
 
 die() {
