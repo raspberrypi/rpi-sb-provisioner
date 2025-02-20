@@ -80,11 +80,11 @@ case ${PROVISIONING_STYLE} in
         systemctl start rpi-sb-provisioner@"${TARGET_DEVICE_SERIAL}".service
     ;;
     "fde-only")
-        echo "Selecting Secure Boot Provisioner" >> "${LOG_DIRECTORY}"/triage.log
+        echo "Selecting Full-Disk Encryption Provisioner" >> "${LOG_DIRECTORY}"/triage.log
         systemctl start rpi-fde-provisioner@"${TARGET_DEVICE_SERIAL}".service
     ;;
     "naked")
-        echo "Selecting Secure Boot Provisioner" >> "${LOG_DIRECTORY}"/triage.log
+        echo "Selecting Naked Provisioner" >> "${LOG_DIRECTORY}"/triage.log
         systemctl start rpi-naked-provisioner@"${TARGET_DEVICE_SERIAL}".service
     ;;
     *)
