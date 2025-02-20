@@ -3,6 +3,8 @@
 set -e
 set -x
 
+. /var/lib/rpi-sb-provisioner/manufacturing-data
+
 DEBUG=
 
 OPENSSL=${OPENSSL:-openssl}
@@ -939,6 +941,8 @@ announce_stop "Cleaning up"
 announce_start "Set LED status"
 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem led PWR 0
 announce_stop "Set LED status"
+
+metadata_gather
 
 echo "${PROVISIONER_FINISHED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
 

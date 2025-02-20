@@ -3,6 +3,8 @@
 set -e
 set -x
 
+. /var/lib/rpi-sb-provisioner/manufacturing-data
+
 DEBUG=
 
 OPENSSL=${OPENSSL:-openssl}
@@ -502,6 +504,8 @@ case "${RPI_DEVICE_FAMILY}" in
         ;;
 esac
 announce_stop "Set LED status"
+
+metadata_gather
 
 echo "${PROVISIONER_FINISHED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
 

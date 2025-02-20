@@ -3,6 +3,8 @@
 set -e
 set -x
 
+. /var/lib/rpi-sb-provisioner/manufacturing-data
+
 DEBUG=
 
 export PROVISIONER_FINISHED="PROVISIONER-FINISHED"
@@ -316,6 +318,8 @@ announce_stop "Cleaning up"
 announce_start "Set LED status"
 fastboot oem led PWR 0
 announce_stop "Set LED status"
+
+metadata_gather
 
 echo "${PROVISIONER_FINISHED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
 

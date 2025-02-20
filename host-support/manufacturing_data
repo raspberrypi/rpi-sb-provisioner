@@ -1,0 +1,132 @@
+#!/bin/sh
+
+set -e
+
+metadata_get() {
+    fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar "$1" 2>&1 | grep -oP "${1}"': \K[^\r\n]*'
+}
+
+metadata_gather() {
+    if [ -n "${RPI_DEVICE_FETCH_METADATA}" ]; then
+        announce_start "Metadata extraction"
+
+        ETH_MAC_ADDRESS=$(metadata_get "mac-ethernet")
+        WIFI_MAC_ADDRESS=$(metadata_get "mac-wifi")
+        BT_MAC_ADDRESS=$(metadata_get "mac-bt")
+
+        MMC_SIZE=$(( $(metadata_get "mmc-sector-size") * $(metadata_get "mmc-sector-count") ))
+        MMC_CID=$(metadata_get "mmc-cid")
+
+        RPI_DUID=$(metadata_get "rpi-duid")
+        
+        TYPE=$(metadata_get "revision-type")
+        PROCESSOR=$(metadata_get "revision-processor")
+        MEMORY=$(metadata_get "revision-memory")
+        MANUFACTURER=$(metadata_get "revision-manufacturer")
+        REVISION=$(metadata_get "revision-revision")
+
+        case ${TYPE} in
+            "0x06") BOARD_STR="CM1" ;;
+            "0x08") BOARD_STR="3B" ;;
+            "0x09") BOARD_STR="Zero" ;;
+            "0x0A") BOARD_STR="CM3" ;;
+            "0x0D") BOARD_STR="3B+" ;;
+            "0x0E") BOARD_STR="3A+" ;;
+            "0x10") BOARD_STR="CM3+" ;;
+            "0x11") BOARD_STR="4B" ;;
+            "0x12") BOARD_STR="Zero 2 W" ;;
+            "0x13") BOARD_STR="400" ;;
+            "0x14") BOARD_STR="CM4" ;;
+            "0x15") BOARD_STR="CM4S" ;;
+            "0x17") BOARD_STR="5" ;;
+            *)
+                BOARD_STR="Unsupported Board"
+        esac
+
+        case ${PROCESSOR} in
+            "0x0") PROCESSOR_STR="BCM2835" ;;
+            "0x1") PROCESSOR_STR="BCM2836" ;;
+            "0x2") PROCESSOR_STR="BCM2837" ;;
+            "0x3") PROCESSOR_STR="BCM2711" ;;
+            "0x4") PROCESSOR_STR="BCM2712" ;;
+            *)
+                PROCESSOR_STR="Unknown"
+        esac
+
+        case ${MEMORY} in
+            "0x0") MEMORY_STR="256MB" ;;
+            "0x1") MEMORY_STR="512MB" ;;
+            "0x2") MEMORY_STR="1GB" ;;
+            "0x3") MEMORY_STR="2GB" ;;
+            "0x4") MEMORY_STR="4GB" ;;
+            "0x5") MEMORY_STR="8GB" ;;
+            *)
+                MEMORY_STR="Unknown"
+        esac
+
+        case ${MANUFACTURER} in
+            "0x0") MANUFACTURER_STR="Sony UK" ;;
+            "0x1") MANUFACTURER_STR="Egoman" ;;
+            "0x2") MANUFACTURER_STR="Embest" ;;
+            "0x3") MANUFACTURER_STR="Sony Japan" ;;
+            "0x4") MANUFACTURER_STR="Embest" ;;
+            "0x5") MANUFACTURER_STR="Stadium" ;;
+            *)
+                MANUFACTURER_STR="Unknown"
+        esac
+
+        bootstrap_log "Board is: ${BOARD_STR}, with revision number ${REVISION}. Has Processor ${PROCESSOR_STR} with Memory ${MEMORY_STR}. Was manufactured by ${MANUFACTURER_STR}"
+
+        if [ -f "${RPI_SB_PROVISONER_MANUFACTURING_DB}" ]; then
+            announce_start "Manufacturing Database Insertion"
+            check_command_exists sqlite3
+            sqlite3 "${RPI_SB_PROVISONER_MANUFACTURING_DB}"         \
+                -cmd "PRAGMA journal_mode=WAL;"                     \
+                "CREATE TABLE IF NOT EXISTS rpi_sb_provisioner(     \
+                    id              integer primary key,   \
+                    boardname       varchar(255)        not null,   \
+                    serial          char(8)             not null,   \
+                    eth_mac         char(17)            not null,   \
+                    wifi_mac        char(17)            not null,   \
+                    bt_mac          char(17)            not null,   \
+                    mmc_size        integer             not null,   \
+                    mmc_cid         char(32)            not null,   \
+                    rpi_duid        char(32)            not null,   \
+                    board_revision  varchar(255)        not null,   \
+                    processor       varchar(255)        not null,   \
+                    memory          varchar(255)        not null,   \
+                    manufacturer    varchar(255)        not null    \
+                    );"
+            sqlite3 "${RPI_SB_PROVISONER_MANUFACTURING_DB}" \
+                "INSERT INTO rpi_sb_provisioner(\
+                    boardname,                  \
+                    serial,                     \
+                    eth_mac,                    \
+                    wifi_mac,                   \
+                    bt_mac,                     \
+                    mmc_size,                   \
+                    mmc_cid,                    \
+                    rpi_duid,                   \
+                    board_revision,             \
+                    processor,                  \
+                    memory,                     \
+                    manufacturer                \
+                ) VALUES (                      \
+                    '${BOARD_STR}',               \
+                    '${TARGET_DEVICE_SERIAL}',    \
+                    '${ETH_MAC_ADDRESS}',         \
+                    '${WIFI_MAC_ADDRESS}',        \
+                    '${BT_MAC_ADDRESS}',          \
+                    '${MMC_SIZE}',                \
+                    '${MMC_CID}',                 \
+                    '${RPI_DUID}',                \
+                    '${REVISION}',                \
+                    '${PROCESSOR_STR}',           \
+                    '${MEMORY_STR}',              \
+                    '${MANUFACTURER_STR}'         \
+                );"
+            announce_stop "Manufacturing Database Insertion"
+        fi
+        announce_stop "Metadata extraction"
+    fi
+}
