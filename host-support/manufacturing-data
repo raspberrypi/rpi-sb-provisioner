@@ -39,6 +39,9 @@ metadata_gather() {
             "0x14") BOARD_STR="CM4" ;;
             "0x15") BOARD_STR="CM4S" ;;
             "0x17") BOARD_STR="5" ;;
+            "0x18") BOARD_STR="CM5" ;;
+            "0x19") BOARD_STR="500" ;;
+            "0x20") BOARD_STR="CM5 Lite" ;;
             *)
                 BOARD_STR="Unsupported Board"
         esac
@@ -75,7 +78,7 @@ metadata_gather() {
                 MANUFACTURER_STR="Unknown"
         esac
 
-        bootstrap_log "Board is: ${BOARD_STR}, with revision number ${REVISION}. Has Processor ${PROCESSOR_STR} with Memory ${MEMORY_STR}. Was manufactured by ${MANUFACTURER_STR}"
+        echo "Board is: ${BOARD_STR}, with revision number ${REVISION}. Has Processor ${PROCESSOR_STR} with Memory ${MEMORY_STR}. Was manufactured by ${MANUFACTURER_STR}"
 
         if [ -f "${RPI_SB_PROVISONER_MANUFACTURING_DB}" ]; then
             announce_start "Manufacturing Database Insertion"
