@@ -507,163 +507,29 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ] && [ "${PROVISIONING_STYLE}" = "secure-boot" ]
     ${OPENSSL} dgst -sign $(get_signing_directives) -sha256 "${RPI_SB_WORKDIR}"/boot.img | xxd -c 4096 -p >> "${RPI_SB_WORKDIR}"/boot.sig
     cp "$(get_fastboot_config_file)" "${RPI_SB_WORKDIR}"/config.txt
     announce_stop "Signing fastboot image"
-else # !ALLOW_SIGNED_BOOT || PROVISIONING_STYLE != secure-boot
-    cp "$(get_fastboot_gadget)" "${RPI_SB_WORKDIR}"/boot.img
-    cp "$(get_fastboot_config_file)" "${RPI_SB_WORKDIR}"/config.txt
+else # !secure-boot
+    set -x
+    case ${TARGET_DEVICE_FAMILY} in
+        2712|2711)
+            cp "$(get_fastboot_gadget)" "${RPI_SB_WORKDIR}"/boot.img
+            cp "$(get_fastboot_config_file)" "${RPI_SB_WORKDIR}"/config.txt
+            ;;
+        *)
+            cp "$(get_fastboot_gadget_2710)" "${RPI_SB_WORKDIR}/bootfiles.bin"
+            ;;
+    esac
+    set +x
 fi
-
 announce_stop "Staging fastboot image"
 
-announce_start "Starting fastboot"
+announce_start "fastboot initialisation"
 
+timeout_fatal rpiboot -v -d "${RPI_SB_WORKDIR}" -p "${TARGET_USB_PATH}"
 set +e
-# -j option not supported pre BCM2711/BCM2712
-case "${TARGET_DEVICE_FAMILY}" in
-    2712 | 2711)
-        mkdir -p "${EARLY_LOG_DIRECTORY}/metadata"
-        timeout 120 rpiboot -v -d "${RPI_SB_WORKDIR}" -p "${TARGET_USB_PATH}" -j "${EARLY_LOG_DIRECTORY}/metadata"
-        ;;
-    *)
-        timeout 120 rpiboot -v -d "${RPI_SB_WORKDIR}" -p "${TARGET_USB_PATH}"
-        ;;
-esac
-set -e
-FLASHING_GADGET_EXIT_STATUS=$?
-case $FLASHING_GADGET_EXIT_STATUS in
-    124)
-        bootstrap_log "rpiboot timed out, aborting."
-        return 124
-        ;;
-    0)
-        bootstrap_log "rpiboot complete."
-        ;;
-    *)
-        die "rpiboot returned error: ${FLASHING_GADGET_EXIT_STATUS}"
-        ;;
-esac
-
 if [ -n "${TARGET_DEVICE_SERIAL}" ]; then
     mkdir -p "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}"
     [ -d "${EARLY_LOG_DIRECTORY}/metadata" ] && mv "${EARLY_LOG_DIRECTORY}/metadata" "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata"
     mv "${EARLY_LOG_DIRECTORY}/bootstrap.log" "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/bootstrap.log"
 fi
-
-# If we've been asked to fetch metadata, and we have it, then we should use it.
-if [ -n "${RPI_DEVICE_FETCH_METADATA}" ] && [ -d "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/" ]; then
-        USER_BOARDREV="0x$(jq -r '.USER_BOARDREV' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)"
-        MAC_ADDRESS=$(jq -r '.MAC_ADDR' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
-        CUSTOMER_KEY_HASH=$(jq -r '.CUSTOMER_KEY_HASH' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
-        JTAG_LOCKED=$(jq -r '.JTAG_LOCKED' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
-        ADVANCED_BOOT=$(jq -r '.ADVANCED_BOOT' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
-        BOOT_ROM=$(jq -r '.BOOT_ROM' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
-        BOARD_ATTR=$(jq -r '.BOARD_ATTR' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
-
-        TYPE=$(printf "0x%X\n" $(((USER_BOARDREV & 0xFF0) >> 4)))
-        PROCESSOR=$(printf "0x%X\n" $(((USER_BOARDREV & 0xF000) >> 12)))
-        MEMORY=$(printf "0x%X\n" $(((USER_BOARDREV & 0x700000) >> 20)))
-        MANUFACTURER=$(printf "0x%X\n" $(((USER_BOARDREV & 0xF0000) >> 16)))
-        REVISION=$((USER_BOARDREV & 0xF))
-
-        case ${TYPE} in
-            "0x06") BOARD_STR="CM1" ;;
-            "0x08") BOARD_STR="3B" ;;
-            "0x09") BOARD_STR="Zero" ;;
-            "0x0A") BOARD_STR="CM3" ;;
-            "0x0D") BOARD_STR="3B+" ;;
-            "0x0E") BOARD_STR="3A+" ;;
-            "0x10") BOARD_STR="CM3+" ;;
-            "0x11") BOARD_STR="4B" ;;
-            "0x12") BOARD_STR="Zero 2 W" ;;
-            "0x13") BOARD_STR="400" ;;
-            "0x14") BOARD_STR="CM4" ;;
-            "0x15") BOARD_STR="CM4S" ;;
-            "0x17") BOARD_STR="5" ;;
-            *)
-                BOARD_STR="Unsupported Board"
-        esac
-
-        case ${PROCESSOR} in
-            "0x0") PROCESSOR_STR="BCM2835" ;;
-            "0x1") PROCESSOR_STR="BCM2836" ;;
-            "0x2") PROCESSOR_STR="BCM2837" ;;
-            "0x3") PROCESSOR_STR="BCM2711" ;;
-            "0x4") PROCESSOR_STR="BCM2712" ;;
-            *)
-                PROCESSOR_STR="Unknown"
-        esac
-
-        case ${MEMORY} in
-            "0x0") MEMORY_STR="256MB" ;;
-            "0x1") MEMORY_STR="512MB" ;;
-            "0x2") MEMORY_STR="1GB" ;;
-            "0x3") MEMORY_STR="2GB" ;;
-            "0x4") MEMORY_STR="4GB" ;;
-            "0x5") MEMORY_STR="8GB" ;;
-            *)
-                MEMORY_STR="Unknown"
-        esac
-
-        case ${MANUFACTURER} in
-            "0x0") MANUFACTURER_STR="Sony UK" ;;
-            "0x1") MANUFACTURER_STR="Egoman" ;;
-            "0x2") MANUFACTURER_STR="Embest" ;;
-            "0x3") MANUFACTURER_STR="Sony Japan" ;;
-            "0x4") MANUFACTURER_STR="Embest" ;;
-            "0x5") MANUFACTURER_STR="Stadium" ;;
-            *)
-                MANUFACTURER_STR="Unknown"
-        esac
-
-        bootstrap_log "Board is: ${BOARD_STR}, with revision number ${REVISION}. Has Processor ${PROCESSOR_STR} with Memory ${MEMORY_STR}. Was manufactured by ${MANUFACTURER_STR}"
-
-        if [ -f "${RPI_SB_PROVISONER_MANUFACTURING_DB}" ]; then
-            check_command_exists sqlite3
-            sqlite3 "${RPI_SB_PROVISONER_MANUFACTURING_DB}"         \
-                -cmd "PRAGMA journal_mode=WAL;"                     \
-                "CREATE TABLE IF NOT EXISTS rpi_sb_provisioner(     \
-                    id              integer primary key,   \
-                    boardname       varchar(255)        not null,   \
-                    serial          char(8)             not null,   \
-                    keyhash         char(64)            not null,   \
-                    mac             char(17)            not null,   \
-                    jtag_locked     int2                not null,   \
-                    advanced_boot   char(8)             not null,   \
-                    boot_rom        char(8)             not null,   \
-                    board_attr      char(8)             not null,   \
-                    board_revision  varchar(255)        not null,   \
-                    processor       varchar(255)        not null,   \
-                    memory          varchar(255)        not null,   \
-                    manufacturer    varchar(255)        not null    \
-                    );"
-            sqlite3 "${RPI_SB_PROVISONER_MANUFACTURING_DB}" \
-                "INSERT INTO rpi_sb_provisioner(\
-                    boardname,                  \
-                    serial,                     \
-                    keyhash,                    \
-                    mac,                        \
-                    jtag_locked,                \
-                    advanced_boot,              \
-                    boot_rom,                   \
-                    board_attr,                 \
-                    board_revision,             \
-                    processor,                  \
-                    memory,                     \
-                    manufacturer                \
-                ) VALUES (                      \
-                    '${BOARD_STR}',               \
-                    '${TARGET_DEVICE_SERIAL}',    \
-                    '${CUSTOMER_KEY_HASH}',       \
-                    '${MAC_ADDRESS}',             \
-                    '${JTAG_LOCKED}',             \
-                    '${ADVANCED_BOOT}',           \
-                    '${BOOT_ROM}',                \
-                    '${BOARD_ATTR}',              \
-                    '${REVISION}',                \
-                    '${PROCESSOR_STR}',           \
-                    '${MEMORY_STR}',              \
-                    '${MANUFACTURER_STR}'        \
-                );"
-        fi
-fi
-
-announce_stop "Starting fastboot"
+announce_stop "fastboot initialisation"
+set -e
