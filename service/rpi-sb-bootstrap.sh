@@ -195,25 +195,6 @@ timeout_fatal() {
     set -e
 }
 
-cleanup() {
-    if [ -n "${CUSTOMER_PUBLIC_KEY_FILE}" ]; then
-        announce_start "Deleting public key"
-        # shellcheck disable=SC2086
-        rm -f "${CUSTOMER_PUBLIC_KEY_FILE}" ${DEBUG}
-        CUSTOMER_PUBLIC_KEY_FILE=
-        announce_stop "Deleting public key"
-    fi
-
-    if [ -n "${DELETE_PRIVATE_TMPDIR}" ]; then
-        announce_start "Deleting customised intermediates"
-        # shellcheck disable=SC2086
-        rm -rf "${DELETE_PRIVATE_TMPDIR}" ${DEBUG}
-        DELETE_PRIVATE_TMPDIR=
-        announce_stop "Deleting customised intermediates"
-    fi
-}
-trap cleanup EXIT
-
 get_signing_directives() {
     if [ -n "${CUSTOMER_KEY_PKCS11_NAME}" ]; then
         echo "${CUSTOMER_KEY_PKCS11_NAME} -engine pkcs11 -keyform engine"
