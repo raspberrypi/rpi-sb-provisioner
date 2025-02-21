@@ -99,6 +99,7 @@ metadata_gather() {
                     processor       varchar(255)        not null,   \
                     memory          varchar(255)        not null,   \
                     manufacturer    varchar(255)        not null    \
+                    provision_ts    timestamp           default current_timestamp \
                     );"
             sqlite3 "${RPI_SB_PROVISONER_MANUFACTURING_DB}" \
                 "INSERT INTO rpi_sb_provisioner(\
