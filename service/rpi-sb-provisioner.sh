@@ -15,6 +15,9 @@ export PROVISIONER_FINISHED="PROVISIONER-FINISHED"
 export PROVISIONER_ABORTED="PROVISIONER-ABORTED"
 export PROVISIONER_STARTED="PROVISIONER-STARTED"
 
+datetime() {
+    date "+%Y-%m-%d %H:%M:%S"
+}
 
 ring_bell() {
     tput bel
@@ -81,11 +84,11 @@ simg_expanded_size() {
 }
 
 keywriter_log() {
-    echo "$@" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/keywriter.log
+    echo "$(datetime) $@" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/keywriter.log
 }
 
 provisioner_log() {
-    echo "$@" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/provisioner.log
+    echo "$(datetime) $@" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/provisioner.log
 }
 
 
@@ -173,7 +176,7 @@ identifyBootloaderConfig() {
 update_eeprom() {
     src_image="$1"
     dst_image="$2"
-    pem_file="$3" 
+    pem_file="$3"
     public_pem_file="$4"
     sign_args=""
 
@@ -744,7 +747,7 @@ if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.img" ] ||
     announce_start "OS Image Copying (potentially slow)"
     cp "${GOLD_MASTER_OS_FILE}" "${COPY_OS_COMBINED_FILE}"
     announce_stop "OS Image Copying (potentially slow)"
-    # Mount the 'complete' image as a series of partitions 
+    # Mount the 'complete' image as a series of partitions
     cnt=0
     until ensure_next_loopdev && LOOP_DEV="$(losetup --show --find --partscan "${COPY_OS_COMBINED_FILE}")"; do
         if [ $cnt -lt 5 ]; then
@@ -798,7 +801,7 @@ if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.img" ] ||
         zstd --rm -f -d "${initramfs_compressed_file}" -o "${TMP_DIR}"/initramfs.cpio ${DEBUG}
         # shellcheck disable=SC2155
         rootfs_mount=$(realpath "${TMP_DIR}"/rpi-rootfs-img-mount)
-        cd "${TMP_DIR}"/initramfs 
+        cd "${TMP_DIR}"/initramfs
         # shellcheck disable=SC2086
         cpio -id < ../initramfs.cpio ${DEBUG}
         # shellcheck disable=SC2086
@@ -885,7 +888,7 @@ if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.img" ] ||
             echo 'initramfs initramfs_2712' >> "${TMP_DIR}"/rpi-boot-img-mount/config.txt
             ;;
     esac
-    
+
     announce_stop "config.txt modification"
 
     announce_start "boot.img creation"
