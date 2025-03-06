@@ -59,44 +59,25 @@ triage_log() {
     printf "%s\n" "$@"
 }
 
-cleanup() {
-    if [ -n "${CUSTOMER_PUBLIC_KEY_FILE}" ]; then
-        announce_start "Deleting public key"
-        # shellcheck disable=SC2086
-        rm -f "${CUSTOMER_PUBLIC_KEY_FILE}" ${DEBUG}
-        CUSTOMER_PUBLIC_KEY_FILE=
-        announce_stop "Deleting public key"
-    fi
-
-    if [ -n "${DELETE_PRIVATE_TMPDIR}" ]; then
-        announce_start "Deleting customised intermediates"
-        # shellcheck disable=SC2086
-        rm -rf "${DELETE_PRIVATE_TMPDIR}" ${DEBUG}
-        DELETE_PRIVATE_TMPDIR=
-        announce_stop "Deleting customised intermediates"
-    fi
-}
-trap cleanup EXIT
-
 # Based on the provisioning style, we can determine which systemd unit to trigger.
 # All systemd must be parameterised with the device serial number.
 echo "${TRIAGE_STARTED}" >> "${LOG_DIRECTORY}"/triage.log
 case ${PROVISIONING_STYLE} in
     "secure-boot")
-        echo "Selecting Secure Boot Provisioner" >> "${LOG_DIRECTORY}"/triage.log
+        triage_log "Selecting Secure Boot Provisioner"
         systemctl start rpi-sb-provisioner@"${TARGET_DEVICE_SERIAL}".service
     ;;
     "fde-only")
-        echo "Selecting Full-Disk Encryption Provisioner" >> "${LOG_DIRECTORY}"/triage.log
+        triage_log "Selecting Full-Disk Encryption Provisioner"
         systemctl start rpi-fde-provisioner@"${TARGET_DEVICE_SERIAL}".service
     ;;
     "naked")
-        echo "Selecting Naked Provisioner" >> "${LOG_DIRECTORY}"/triage.log
+        triage_log "Selecting Naked Provisioner"
         systemctl start rpi-naked-provisioner@"${TARGET_DEVICE_SERIAL}".service
     ;;
     *)
-        echo "Fatal: Unknown provisioning style: ${PROVISIONING_STYLE}" >> "${LOG_DIRECTORY}"/triage.log
+        triage_log "Fatal: Unknown provisioning style: ${PROVISIONING_STYLE}"
         exit 1
     ;;
 esac
-echo "${TRIAGE_FINISHED}" >> "${LOG_DIRECTORY}"/triage.log
+triage_log "${TRIAGE_FINISHED}" >> "${LOG_DIRECTORY}"/triage.log
