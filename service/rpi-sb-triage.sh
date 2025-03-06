@@ -15,7 +15,8 @@ TARGET_DEVICE_SERIAL32=$(echo "${TARGET_DEVICE_SERIAL}" | cut -c $((${#TARGET_DE
 LOG_DIRECTORY="/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}"
 
 if [ -d "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL32}" ]; then
-    mv "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL32}" "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}"
+    cp -rf "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL32}/." "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/"
+    rm -rf "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL32}"
 fi
 
 mkdir -p "${LOG_DIRECTORY}"
