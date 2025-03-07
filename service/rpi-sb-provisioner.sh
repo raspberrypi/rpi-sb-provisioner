@@ -90,6 +90,7 @@ provisioner_log() {
 timeout_nonfatal() {
     command="$*"
     set +e
+    # shellcheck disable=SC2086
     timeout 10 ${command}
     command_exit_status=$?
     if [ ${command_exit_status} -eq 124 ]; then
@@ -106,6 +107,7 @@ timeout_nonfatal() {
 timeout_fatal() {
     command="$*"
     set +e
+    # shellcheck disable=SC2086
     timeout 120 ${command}
     command_exit_status=$?
     if [ ${command_exit_status} -eq 124 ]; then
@@ -274,42 +276,6 @@ unmount_image() {
             fi
         done
         losetup -d "$LOOP_DEVICE"
-    fi
-}
-
-# TODO: Refactor these two functions to use the same logic, but with different consequences for failure.
-timeout_nonfatal() {
-    command="$*"
-    set +e
-    timeout 120 "${command}"
-    set -e
-    command_exit_status=$?
-    if [ ${command_exit_status} -eq 124 ]; then
-        provisioner_log "\"${command}\" failed, timed out."
-        echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
-        return 124
-    elif [ ${command_exit_status} -ne 0 ]; then
-        echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
-        provisioner_log "\"$command\" failed: ${command_exit_status}"
-    else
-        provisioner_log "\"$command\" succeeded."
-    fi
-}
-
-timeout_fatal() {
-    command="$*"
-    set +e
-    timeout 120 "${command}"
-    set -e
-    command_exit_status=$?
-    if [ ${command_exit_status} -eq 124 ]; then
-        echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
-        die "\"${command}\" failed, timed out."
-    elif [ ${command_exit_status} -ne 0 ]; then
-        echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
-        die "\"$command\" failed: ${command_exit_status}"
-    else
-        provisioner_log "\"$command\" succeeded."
     fi
 }
 
