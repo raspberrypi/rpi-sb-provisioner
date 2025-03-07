@@ -123,34 +123,6 @@ get_fastboot_config_file() {
     fi
 }
 
-# check_file_is_expected ${path_to_file} ${expected_file_extension}
-# Checks if a file exists, is not a directory, is not zero and has the right extension.
-# If any of those checks fail, exit the script entirely and print a debug message
-# If all checks succeed, supply the filepath via stdout
-check_file_is_expected() {
-    filepath="$1"
-    ext="$2"
-
-    if [ ! -e "${filepath}" ]; then
-        die "Specified file does not exist: ${filepath}"
-    fi
-
-    if [ -d "${filepath}" ]; then
-        die "Expected a file, got a directory for ${filepath}"
-    fi
-
-    if [ -z "${filepath}" ]; then
-        die "Provided file is empty: ${filepath}"
-    fi
-
-    if [ -z "${ext}" ] || echo "${filepath}" | grep -q "${ext}"; then
-        echo "${filepath}"
-        return 0
-    else
-        die "Provided file is of the wrong extension, wanted ${ext}, provided ${filepath}"
-    fi
-}
-
 check_command_exists() {
     command_to_test=$1
     if ! command -v "${command_to_test}" 1> /dev/null; then
@@ -159,23 +131,6 @@ check_command_exists() {
     else
         echo "$command_to_test"
     fi
-}
-
-# TODO: Refactor these two functions to use the same logic, but with different consequences for failure.
-timeout_nonfatal() {
-    command="$*"
-    set +e
-    timeout 10 ${command}
-    command_exit_status=$?
-    if [ ${command_exit_status} -eq 124 ]; then
-        bootstrap_log "\"${command}\" failed, timed out."
-    elif [ ${command_exit_status} -ne 0 ]; then
-        bootstrap_log "\"${command}\" failed, exit status: ${command_exit_status}"
-    else
-        bootstrap_log "\"$command\" succeeded."
-    fi
-    set -e
-    return ${command_exit_status}
 }
 
 timeout_fatal() {
@@ -210,7 +165,6 @@ get_signing_directives() {
         fi
     fi
 }
-
 
 CUSTOMER_PUBLIC_KEY_FILE=
 derivePublicKey() {
@@ -347,10 +301,6 @@ check_command_exists lsblk
 check_command_exists cut
 check_command_exists findmnt
 check_command_exists grep
-
-get_variable() {
-    fastboot getvar "$1" 2>&1 | grep -oP "${1}"': \K[^\r\n]*'
-}
 
 DELETE_PRIVATE_TMPDIR=
 announce_start "Finding the cache directory"
