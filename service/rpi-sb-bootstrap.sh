@@ -60,7 +60,7 @@ cleanup() {
     fi
     exit $returnvalue
 }
-trap cleanup EXIT
+trap cleanup INT TERM
 
 # On pre-Pi4 devices, only TARGET_DEVICE_PATH is likely to be unique.
 TARGET_DEVICE_PATH="$1"
@@ -539,3 +539,5 @@ if [ -n "${TARGET_DEVICE_SERIAL}" ]; then
 fi
 announce_stop "fastboot initialisation"
 set -e
+
+cleanup
