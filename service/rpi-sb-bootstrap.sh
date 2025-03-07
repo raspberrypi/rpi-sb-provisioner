@@ -136,6 +136,7 @@ check_command_exists() {
 timeout_fatal() {
     command="$*"
     set +e
+    # shellcheck disable=SC2086
     timeout 120 ${command}
     command_exit_status=$?
     if [ ${command_exit_status} -eq 124 ]; then
