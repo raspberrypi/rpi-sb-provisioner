@@ -99,6 +99,13 @@ Once you have followed all those steps, `rpi-sb-provisioner` should be correctly
 
 Configure `rpi-sb-provisioner` by using the following fields in `/etc/rpi-sb-provisioner/config`
 
+=== PROVISIONING_STYLE
+*Mandatory, with a default*
+
+Select the provisioning style you wish to use. Supported values are `secure-boot`, `fde-only` and `naked`.
+
+If `PROVISIONING_STYLE` is not specified, it defaults to `secure-boot`.
+
 === CUSTOMER_KEY_FILE_PEM
 *Optional, mandatory if CUSTOMER_KEY_PKCS11_NAME is not set*
 
@@ -230,25 +237,34 @@ image::docs/images/rpi-cm4io-detail.png[]
 
 After connecting your device in RPIBOOT mode, `rpi-sb-provisioner` will perform the following steps:
 
-* A new device connection is recognised over USB, and enters the *triage* phase:
-** If your device has not been recorded as having been provisioned, start the *provisioner*
-** If the device has been recorded as having been provisioned, cease further actions
-* In the *provisioner* phase:
+* A new device connection is recognised over USB, and enters the *bootstrap* phase:
 ** Your device will boot a specialised Raspberry Pi firmware, designed to write a hash of your public signing key (generated from the file pointed to by `CUSTOMER_KEY_FILE_PEM`) into device One Time Programmable (OTP) memory
-** Your device will be updated to Raspberry Pi EEPROM software released on 2024-05-17
+** Your device will be updated to the latest Raspberry Pi EEPROM software released
 ** Your device will perform a silent reboot
-** `rpi-sb-provisioner` will boot your device with a specialised Linux distribution designed to:
-*** create a device unique key
-*** partition and format your device's storage
-*** create a LUKSv2 container
-*** place your OS into the LUKSv2 container
-*** place a customised pre-boot authentication firmware (derived from your gold master OS image) into the 'boot' partition of your device's storage
+** `rpi-sb-provisioner` will boot your device with a specialised Linux distribution, where your device enters the *triage* phase
+** In the *triage* phase, you selected PROVISIONING_STYLE will determine which of the provisioning services is started
+** Your device will enter the *provisioning* phase:
+*** `secure-boot` will:
+**** create a device unique key
+**** partition and format your device's storage
+**** create a LUKSv2 container
+**** place your OS into the LUKSv2 container
+**** place a signed and customised pre-boot authentication firmware (derived from your gold master OS image) into the 'boot' partition of your device's storage
+*** `fde-only` will:
+**** create a device unique key
+**** partition and format your device's storage
+**** create a LUKSv2 container
+**** place your OS into the LUKSv2 container
+**** place a unsigned and customised pre-boot authentication firmware (derived from your gold master OS image) into the 'boot' partition of your device's storage
+*** `naked` will:
+**** partition and format your device's storage
+**** place your OS into your device's storage
 
 After these steps have been completed, your device should display both the `activity` and `power` LEDs as `off`. If you have ethernet connected, you may still see activity from this port. In this state, your device is safe to power off and package into your product.
 
 No further intervention is required in the success case.
 
-WARNING: `rpi-sb-provisioner` will not, by default, block JTAG access. If you wish to make use of this facility, you _must_ specify this in the Raspberry Pi Bootloader configuration pointed to by `RPI_DEVICE_BOOTLOADER_CONFIG_FILE`
+WARNING: `rpi-sb-provisioner` will not, by default, block JTAG access. If you wish to make use of this facility, you _must_ use the `RPI_DEVICE_LOCK_JTAG` configuration option.
 
 === Monitoring via the monitoring application
 
@@ -334,27 +350,28 @@ The second stage is to remove the progress file matching the serial number of th
 $ sudo rm /var/log/rpi-sb-provisioner/<serial>/progress
 ----
 
-=== Temporarily disabling rpi-sb-provisioner
-
-You can disable rpi-sb-provisioner for using `rpiboot` in other scripts or tools by disabling the `udev` rule that activates `rpi-sb-provisioner`:
-
-----
-$ sudo ln -s /dev/null /etc/udev/rules.d/60-rpi-sb-provisioner.rules
-----
-
-To re-enable the trigger, remove the override file:
-
-----
-$ sudo rm /etc/udev/rules.d/60-rpi-sb-provisioner.rules
-----
-
 === Disable Triage / Provision (Bootstrap Only)
 
 rpi-sb-provisioner's udev rules cause all devices to be bootstrapped into
-fastboot mode before they are triaged and provisioned. It is possible to
+`fastboot` mode before they are triaged and provisioned. It is possible to
 temporarily disable the triage service (until next boot) so that detected
-devices are bootstrapped into fastboot mode only:
+devices are bootstrapped into `fastboot` mode only:
 
 ----
 $ sudo systemctl mask --runtime rpi-sb-triage@.service
 ----
+
+=== Handling pre-signed devices
+
+Pre-signed Raspberry Pi 5 devices cannot execute the key writer without a modification to `rpi-sb-provisioner`, but you can bypass the key writer entirely by using a special file and removing the progress file:
+
+----
+$ sudo rm /var/log/rpi-sb-provisioner/<serial>/progress
+$ sudo touch /var/log/rpi-sb-provisioner/<serial>/special-skip-keywriter
+----
+
+WARNING: This will disable metadata fetching and manufacturing database creation as of writing. This may be resolved in a future version of `rpi-sb-provisioner`.
+
+=== Changing config.txt
+
+Modify the config.txt contained within your gold master image as you typically would, and `rpi-sb-provisioner` will include this as part of provisioning.
