@@ -205,7 +205,7 @@ cleanup() {
         announce_stop "Deleting customised intermediates"
     fi
 }
-trap cleanup EXIT
+trap cleanup INT TERM
 
 # Start the provisioner phase
 
@@ -328,12 +328,6 @@ fastboot flash "${RPI_DEVICE_STORAGE_TYPE}"p1 "${RPI_SB_WORKDIR}"/bootfs-tempora
 fastboot flash "${RPI_DEVICE_STORAGE_TYPE}"p2 "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
 announce_stop "Writing OS images"
 
-announce_start "Cleaning up"
-[ -d "${TMP_DIR}/rpi-rootfs-img-mount" ] && umount "${TMP_DIR}"/rpi-rootfs-img-mount
-# shellcheck disable=SC2086
-rm -rf "${TMP_DIR}" ${DEBUG}
-announce_stop "Cleaning up"
-
 announce_start "Set LED status"
 fastboot oem led PWR 0
 announce_stop "Set LED status"
@@ -341,5 +335,9 @@ announce_stop "Set LED status"
 metadata_gather
 
 echo "${PROVISIONER_FINISHED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+
+announce_start "Cleaning up"
+cleanup
+announce_stop "Cleaning up"
 
 provisioner_log "Provisioning completed. Remove the device from this machine."
