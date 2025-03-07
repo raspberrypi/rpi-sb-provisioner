@@ -247,8 +247,9 @@ else
 fi
 
 # Fast path: If we've already generated the assets, just move to flashing.
-if [ ! -e "${RPI_SB_WORKDIR}"/bootfs-temporary.img ] ||
-   [ ! -e "${TMP_DIR}"/rpi-rootfs-img-mount ]; then
+if [ ! -f "${RPI_SB_WORKDIR}/bootfs-temporary.img" ] ||
+   [ ! -s "${RPI_SB_WORKDIR}/bootfs-temporary.img" ] ||
+   [ ! -e "${TMP_DIR}/rpi-rootfs-img-mount" ]; then
 
     announce_start "OS Image Mounting"
     # Mount the 'complete' image as a series of partitions 
