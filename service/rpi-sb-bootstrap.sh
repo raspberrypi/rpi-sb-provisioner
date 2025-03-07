@@ -456,7 +456,13 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
             fi
 
             bootstrap_log "Writing key and EEPROM configuration to the device"
-            [ ! -f "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/special-skip-keywriter" ] && timeout_fatal rpiboot -d "${RPI_SB_WORKDIR}" -p "${TARGET_USB_PATH}" -j "${EARLY_LOG_DIRECTORY}/metadata/"
+            if [ -f "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/special-reprovision-device" ]; then
+                # This only makes sense if you're re-provisioning a device that's already been provisioned.
+                # It's a special case, and should not be used in normal operation.
+                # Additionally, this only works on Raspberry Pi 5-family devices.
+                rpi-sign-bootcode --debug -c 2712 -i "${BOOTCODE_BINARY_IMAGE}" -o "${BOOTCODE_FLASHING_NAME}" -k "${CUSTOMER_KEY_FILE_PEM}" -v 0 -n 16
+            fi
+            [ ! -f "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/special-skip-keywriter" ] && timeout_fatal rpiboot -d "${RPI_SB_WORKDIR}" -p "${TARGET_USB_PATH}"
         else
             bootstrap_log "No key specified, skipping eeprom update"
         fi
