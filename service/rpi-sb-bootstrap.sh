@@ -447,7 +447,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                 echo "recovery_metadata=1" >> "${RPI_SB_WORKDIR}/config.txt"
             fi
 
-            if [ -n "${RPI_DEVICE_JTAG_LOCK}" ]; then
+            if [ -n "${RPI_DEVICE_LOCK_JTAG}" ]; then
                 echo "program_jtag_lock=1" >> "${RPI_SB_WORKDIR}/config.txt"
             fi
 
