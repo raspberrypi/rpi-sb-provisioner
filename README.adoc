@@ -238,9 +238,12 @@ image::docs/images/rpi-cm4io-detail.png[]
 After connecting your device in RPIBOOT mode, `rpi-sb-provisioner` will perform the following steps:
 
 * A new device connection is recognised over USB, and enters the *bootstrap* phase:
-** Your device will boot a specialised Raspberry Pi firmware, designed to write a hash of your public signing key (generated from the file pointed to by `CUSTOMER_KEY_FILE_PEM`) into device One Time Programmable (OTP) memory
-** Your device will be updated to the latest Raspberry Pi EEPROM software released
-** Your device will perform a silent reboot
+** If your selected PROVISIONING_STYLE is `secure-boot`, and your device has an EEPROM:
+*** Your device will boot a specialised Raspberry Pi firmware, designed to write a hash of your public signing key (generated from the file pointed to by `CUSTOMER_KEY_FILE_PEM`) into device One Time Programmable (OTP) memory
+** If your device has an EEPROM:
+*** Your device will be updated to the latest Raspberry Pi EEPROM software released
+*** Your device will perform a silent reboot
+** If your device does not have an EEPROM, `secure-boot` is not supported, and no EEPROM update will be performed
 ** `rpi-sb-provisioner` will boot your device with a specialised Linux distribution, where your device enters the *triage* phase
 ** In the *triage* phase, you selected PROVISIONING_STYLE will determine which of the provisioning services is started
 ** Your device will enter the *provisioning* phase:
