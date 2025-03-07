@@ -210,7 +210,7 @@ cleanup() {
         announce_stop "Deleting customised intermediates"
     fi
 }
-trap cleanup EXIT
+trap cleanup INT TERM
 
 # Start the provisioner phase
 
@@ -473,27 +473,6 @@ fastboot flash "${RPI_DEVICE_STORAGE_TYPE}"p1 "${RPI_SB_WORKDIR}"/bootfs-tempora
 fastboot flash mapper/cryptroot "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
 announce_stop "Writing OS images"
 
-if [ -d "${RPI_DEVICE_RETRIEVE_KEYPAIR}" ]; then
-    announce_start "Capturing device keypair to ${RPI_DEVICE_RETRIEVE_KEYPAIR}"
-    N_ALREADY_PROVISIONED=0
-    get_variable private-key > "${RPI_DEVICE_RETRIEVE_KEYPAIR}/${TARGET_DEVICE_SERIAL}.der" || N_ALREADY_PROVISIONED=$?
-    if [ 0 -ne "$N_ALREADY_PROVISIONED" ]; then
-        provisioner_log "Warning: Unable to retrieve device private key; already provisioned"
-    fi
-    get_variable public-key > "${RPI_DEVICE_RETRIEVE_KEYPAIR}/${TARGET_DEVICE_SERIAL}.pub"
-    announce_stop "Capturing device keypair to ${RPI_DEVICE_RETRIEVE_KEYPAIR}"
-fi
-
-announce_start "Cleaning up"
-[ -d "${TMP_DIR}/rpi-boot-img-mount" ] && umount "${TMP_DIR}"/rpi-boot-img-mount
-[ -d "${TMP_DIR}/rpi-rootfs-img-mount" ] && umount "${TMP_DIR}"/rpi-rootfs-img-mount
-# shellcheck disable=SC2086
-unmount_image "${COPY_OS_COMBINED_FILE}" ${DEBUG}
-# We also delete the temporary directory - preserving the cached generated asset
-# shellcheck disable=SC2086
-rm -rf "${TMP_DIR}" ${DEBUG}
-announce_stop "Cleaning up"
-
 announce_start "Set LED status"
 case "${RPI_DEVICE_FAMILY}" in
     2W)
@@ -508,5 +487,7 @@ announce_stop "Set LED status"
 metadata_gather
 
 echo "${PROVISIONER_FINISHED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
-
+announce_start "Cleaning up"
+cleanup
+announce_stop "Cleaning up"
 provisioner_log "Provisioning completed. Remove the device from this machine."
