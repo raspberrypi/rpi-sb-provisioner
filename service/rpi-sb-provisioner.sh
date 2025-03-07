@@ -314,283 +314,25 @@ timeout_fatal() {
 }
 
 cleanup() {
-    [ -d "${TMP_DIR}/rpi-boot-img-mount" ] && umount "${TMP_DIR}"/rpi-boot-img-mount
-    [ -d "${TMP_DIR}/rpi-rootfs-img-mount" ] && umount "${TMP_DIR}"/rpi-rootfs-img-mount
-    if [ -d "${TMP_DIR}" ]; then
-        rm -rf "${TMP_DIR}"
-    fi
-    rm "${CUSTOMER_PUBLIC_KEY_FILE}"
+    [ -d "${TMP_DIR}/rpi-boot-img-mount" ] && umount "${TMP_DIR}"/rpi-boot-img-mount && sync
+    [ -d "${TMP_DIR}/rpi-rootfs-img-mount" ] && umount "${TMP_DIR}"/rpi-rootfs-img-mount && sync
+    [ -d "${TMP_DIR}" ] && rm -rf "${TMP_DIR}" && sync
+    rm -f "${CUSTOMER_PUBLIC_KEY_FILE}"
 
     unmount_image "${COPY_OS_COMBINED_FILE}"
-    if [ -d "${TMP_DIR}" ]; then
-        rm -rf "${TMP_DIR}"
-    fi
+    [ -d "${TMP_DIR}" ] && rm -rf "${TMP_DIR}" && sync
+    [ -f "${COPY_OS_COMBINED_FILE}" ] && rm -rf "${COPY_OS_COMBINED_FILE}" && sync
 
-    if [ -f "${COPY_OS_COMBINED_FILE}" ]; then
-        rm -rf "${COPY_OS_COMBINED_FILE}"
-    fi
     if [ -n "${DELETE_PRIVATE_TMPDIR}" ]; then
         announce_start "Deleting customised intermediates"
-        # shellcheck disable=SC2086
+        rm -rf "${RPI_SB_WORKDIR}" ${DEBUG}
+        sync
         rm -rf "${RPI_SB_WORKDIR}" ${DEBUG}
         DELETE_PRIVATE_TMPDIR=
         announce_stop "Deleting customised intermediates"
     fi
 }
-trap cleanup EXIT
-
-FIRMWARE_ROOT="/lib/firmware/raspberrypi/bootloader"
-FIRMWARE_RELEASE_STATUS="default"
-
-# Taken from rpi-eeprom-update
-BOOTLOADER_UPDATE_IMAGE=""
-BOOTLOADER_UPDATE_VERSION=0
-getBootloaderUpdateVersion() {
-   BOOTLOADER_UPDATE_VERSION=0
-   match=".*/pieeprom-[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].bin"
-   latest="$(find "${FIRMWARE_IMAGE_DIR}/" -maxdepth 1 -type f -follow -size "${EEPROM_SIZE}c" -regex "${match}" | sort -r | head -n1)"
-   if [ -f "${latest}" ]; then
-      BOOTLOADER_UPDATE_VERSION=$(strings "${latest}" | grep BUILD_TIMESTAMP | sed 's/.*=//g')
-      BOOTLOADER_UPDATE_IMAGE="${latest}"
-   fi
-}
-
-FLASHING_DIR=$(mktemp -d)
-derivePublicKey
-identifyBootloaderConfig
-enforceSecureBootloaderConfig
-
-SOURCE_EEPROM_IMAGE=
-DESTINATION_EEPROM_IMAGE=
-DESTINATION_EEPROM_SIGNATURE=
-BOOTCODE_BINARY_IMAGE=
-BOOTCODE_FLASHING_NAME=
-case ${RPI_DEVICE_FAMILY} in
-    4)
-        BCM_CHIP=2711
-        EEPROM_SIZE=524288
-        FIRMWARE_IMAGE_DIR="${FIRMWARE_ROOT}-${BCM_CHIP}/${FIRMWARE_RELEASE_STATUS}"
-        getBootloaderUpdateVersion
-        SOURCE_EEPROM_IMAGE="${BOOTLOADER_UPDATE_IMAGE}"
-        BOOTCODE_BINARY_IMAGE="${FIRMWARE_IMAGE_DIR}/recovery.bin"
-        BOOTCODE_FLASHING_NAME="${FLASHING_DIR}/bootcode4.bin"
-        ;;
-    5)
-        BCM_CHIP=2712
-        EEPROM_SIZE=2097152
-        FIRMWARE_IMAGE_DIR="${FIRMWARE_ROOT}-${BCM_CHIP}/${FIRMWARE_RELEASE_STATUS}"
-        getBootloaderUpdateVersion
-        SOURCE_EEPROM_IMAGE="${BOOTLOADER_UPDATE_IMAGE}"
-        BOOTCODE_BINARY_IMAGE="${FIRMWARE_IMAGE_DIR}/recovery.bin"
-        BOOTCODE_FLASHING_NAME="${FLASHING_DIR}/bootcode5.bin"
-        ;;
-    *)
-        keywriter_log "Unable to identify Raspberry Pi HW Family. Aborting."
-        exit 1
-esac
-
-DESTINATION_EEPROM_IMAGE="${FLASHING_DIR}/pieeprom.bin"
-DESTINATION_EEPROM_SIGNATURE="${FLASHING_DIR}/pieeprom.sig"
-
-if [ ! -e "${DESTINATION_EEPROM_SIGNATURE}" ]; then
-    if [ ! -e "${SOURCE_EEPROM_IMAGE}" ]; then
-        keywriter_log "No Raspberry Pi EEPROM file to use as key vector"
-        exit 1
-    else
-        update_eeprom "${SOURCE_EEPROM_IMAGE}" "${DESTINATION_EEPROM_IMAGE}" "${CUSTOMER_KEY_FILE_PEM}" "${CUSTOMER_PUBLIC_KEY_FILE}"
-        writeSig "${DESTINATION_EEPROM_IMAGE}" "${DESTINATION_EEPROM_SIGNATURE}"
-    fi
-fi
-
-### NOTE: Use this in only case of a partial signing situation, where you have provisioned the key, but need to re-write the eeprom.
-# case ${RPI_DEVICE_FAMILY} in
-#     4)
-#         cp "${BOOTCODE_BINARY_IMAGE}" "${BOOTCODE_FLASHING_NAME}"
-#         ;;
-#     5)
-#         rpi-sign-bootcode --debug -c 2712 -i "${BOOTCODE_BINARY_IMAGE}" -o "${BOOTCODE_FLASHING_NAME}" -k "${CUSTOMER_KEY_FILE_PEM}" -v 0 -n 16
-#         ;;
-# esac
-### In the completely-unprovisioned state, where you have not yet written a customer OTP key, simply make the copy of the unsigned bootcode
-cp "${BOOTCODE_BINARY_IMAGE}" "${BOOTCODE_FLASHING_NAME}"
-####
-
-# This directive informs the bootloader to write the public key into OTP
-echo "program_pubkey=1" > "${FLASHING_DIR}/config.txt"
-# This directive tells the bootloader to reboot once it's written the OTP
-echo "recovery_reboot=1" >> "${FLASHING_DIR}/config.txt"
-
-if [ -n "${RPI_DEVICE_FETCH_METADATA}" ]; then
-echo "recovery_metadata=1" >> "${FLASHING_DIR}/config.txt"
-fi
-
-if [ -n "${RPI_DEVICE_JTAG_LOCK}" ]; then
-echo "program_jtag_lock=1" >> "${FLASHING_DIR}/config.txt"
-fi
-
-if [ -n "${RPI_DEVICE_EEPROM_WP_SET}" ]; then
-echo "eeprom_write_protect=1" >> "${FLASHING_DIR}/config.txt"
-fi
-
-# With the EEPROMs configured and signed, RPIBoot them.
-mkdir -p "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/"
-keywriter_log "Writing key and EEPROM configuration to the device"
-set +e
-[ -z "${DEMO_MODE_ONLY}" ] && timeout 120 rpiboot -d "${FLASHING_DIR}" -i "${TARGET_DEVICE_SERIAL}" -j "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/"
-set -e
-KEYWRITER_EXIT_STATUS=$?
-if [ ${KEYWRITER_EXIT_STATUS} -eq 124 ]; then
-    keywriter_log "Writing failed, timed out."
-    case "${RPI_DEVICE_FAMILY}" in
-        5)
-            # Raspberry Pi 5-family hardware may already have a key provisioned - so retry with a signed bootcode.
-            rpi-sign-bootcode --debug -c 2712 -i "${BOOTCODE_BINARY_IMAGE}" -o "${BOOTCODE_FLASHING_NAME}" -k "${CUSTOMER_KEY_FILE_PEM}" -v 0 -n 16
-            [ -z "${DEMO_MODE_ONLY}" ] && timeout 120 rpiboot -d "${FLASHING_DIR}" -i "${TARGET_DEVICE_SERIAL}" -j "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/metadata/"
-            KEYWRITER_RETRY_EXIT_STATUS=$?
-            if [ ${KEYWRITER_RETRY_EXIT_STATUS} -eq 124 ]; then
-                # If the retry with a signed recovery image fails, this is likely a hard failure.
-                echo "${KEYWRITER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
-                return 124
-            elif [ ${KEYWRITER_EXIT_STATUS} -ne 0 ]; then
-                keywriter_log "Failed to load keywriter: ${KEYWRITER_EXIT_STATUS}"
-                echo "${KEYWRITER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
-                return ${KEYWRITER_EXIT_STATUS}
-            fi
-        ;;
-        *)
-            # If we're not Raspberry Pi 5-family, then this is the end of the line, no retry will help.
-            echo "${KEYWRITER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
-            return 124
-        ;;
-    esac
-elif [ ${KEYWRITER_EXIT_STATUS} -ne 0 ]; then
-    keywriter_log "Failed to load keywriter: ${KEYWRITER_EXIT_STATUS}"
-    echo "${KEYWRITER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
-    return ${KEYWRITER_EXIT_STATUS}
-fi
-keywriter_log "Keywriting completed."
-
-rm -rf "${FLASHING_DIR}"
-
-if [ -z "${DEMO_MODE_ONLY}" ] && [ -n "${RPI_DEVICE_FETCH_METADATA}" ]; then
-    USER_BOARDREV="0x$(jq -r '.USER_BOARDREV' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)"
-    MAC_ADDRESS=$(jq -r '.MAC_ADDR' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
-    CUSTOMER_KEY_HASH=$(jq -r '.CUSTOMER_KEY_HASH' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
-    JTAG_LOCKED=$(jq -r '.JTAG_LOCKED' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
-    ADVANCED_BOOT=$(jq -r '.ADVANCED_BOOT' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
-    BOOT_ROM=$(jq -r '.BOOT_ROM' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
-    BOARD_ATTR=$(jq -r '.BOARD_ATTR' < /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/metadata/"${TARGET_DEVICE_SERIAL}".json)
-
-    TYPE=$(printf "0x%X\n" $(((USER_BOARDREV & 0xFF0) >> 4)))
-    PROCESSOR=$(printf "0x%X\n" $(((USER_BOARDREV & 0xF000) >> 12)))
-    MEMORY=$(printf "0x%X\n" $(((USER_BOARDREV & 0x700000) >> 20)))
-    MANUFACTURER=$(printf "0x%X\n" $(((USER_BOARDREV & 0xF0000) >> 16)))
-    REVISION=$((USER_BOARDREV & 0xF))
-
-    case ${TYPE} in
-        "0x06") BOARD_STR="CM1" ;;
-        "0x08") BOARD_STR="3B" ;;
-        "0x09") BOARD_STR="Zero" ;;
-        "0x0A") BOARD_STR="CM3" ;;
-        "0x0D") BOARD_STR="3B+" ;;
-        "0x0E") BOARD_STR="3A+" ;;
-        "0x10") BOARD_STR="CM3+" ;;
-        "0x11") BOARD_STR="4B" ;;
-        "0x12") BOARD_STR="Zero 2 W" ;;
-        "0x13") BOARD_STR="400" ;;
-        "0x14") BOARD_STR="CM4" ;;
-        "0x15") BOARD_STR="CM4S" ;;
-        "0x17") BOARD_STR="5" ;;
-        *)
-            BOARD_STR="Unsupported Board"
-    esac
-
-    case ${PROCESSOR} in
-        "0x0") PROCESSOR_STR="BCM2835" ;;
-        "0x1") PROCESSOR_STR="BCM2836" ;;
-        "0x2") PROCESSOR_STR="BCM2837" ;;
-        "0x3") PROCESSOR_STR="BCM2711" ;;
-        "0x4") PROCESSOR_STR="BCM2712" ;;
-        *)
-            PROCESSOR_STR="Unknown"
-    esac
-
-    case ${MEMORY} in
-        "0x0") MEMORY_STR="256MB" ;;
-        "0x1") MEMORY_STR="512MB" ;;
-        "0x2") MEMORY_STR="1GB" ;;
-        "0x3") MEMORY_STR="2GB" ;;
-        "0x4") MEMORY_STR="4GB" ;;
-        "0x5") MEMORY_STR="8GB" ;;
-        *)
-            MEMORY_STR="Unknown"
-    esac
-
-    case ${MANUFACTURER} in
-        "0x0") MANUFACTURER_STR="Sony UK" ;;
-        "0x1") MANUFACTURER_STR="Egoman" ;;
-        "0x2") MANUFACTURER_STR="Embest" ;;
-        "0x3") MANUFACTURER_STR="Sony Japan" ;;
-        "0x4") MANUFACTURER_STR="Embest" ;;
-        "0x5") MANUFACTURER_STR="Stadium" ;;
-        *)
-            MANUFACTURER_STR="Unknown"
-    esac
-
-    keywriter_log "Board is: ${BOARD_STR}, with revision number ${REVISION}. Has Processor ${PROCESSOR_STR} with Memory ${MEMORY_STR}. Was manufactured by ${MANUFACTURER_STR}"
-
-    if [ -f "${RPI_SB_PROVISONER_MANUFACTURING_DB}" ]; then
-        check_command_exists sqlite3
-        sqlite3 "${RPI_SB_PROVISONER_MANUFACTURING_DB}"         \
-            -cmd "PRAGMA journal_mode=WAL;"                     \
-            "CREATE TABLE IF NOT EXISTS rpi_sb_provisioner(     \
-                id              integer primary key,   \
-                boardname       varchar(255)        not null,   \
-                serial          char(8)             not null,   \
-                keyhash         char(64)            not null,   \
-                mac             char(17)            not null,   \
-                jtag_locked     int2                not null,   \
-                advanced_boot   char(8)             not null,   \
-                boot_rom        char(8)             not null,   \
-                board_attr      char(8)             not null,   \
-                board_revision  varchar(255)        not null,   \
-                processor       varchar(255)        not null,   \
-                memory          varchar(255)        not null,   \
-                manufacturer    varchar(255)        not null    \
-                );"
-        sqlite3 "${RPI_SB_PROVISONER_MANUFACTURING_DB}" \
-            "INSERT INTO rpi_sb_provisioner(\
-                boardname,                  \
-                serial,                     \
-                keyhash,                    \
-                mac,                        \
-                jtag_locked,                \
-                advanced_boot,              \
-                boot_rom,                   \
-                board_attr,                 \
-                board_revision,             \
-                processor,                  \
-                memory,                     \
-                manufacturer                \
-            ) VALUES (                      \
-                '${BOARD_STR}',               \
-                '${TARGET_DEVICE_SERIAL}',    \
-                '${CUSTOMER_KEY_HASH}',       \
-                '${MAC_ADDRESS}',             \
-                '${JTAG_LOCKED}',             \
-                '${ADVANCED_BOOT}',           \
-                '${BOOT_ROM}',                \
-                '${BOARD_ATTR}',              \
-                '${REVISION}',                \
-                '${PROCESSOR_STR}',           \
-                '${MEMORY_STR}',              \
-                '${MANUFACTURER_STR}'        \
-            );"
-    fi
-fi
-keywriter_log "Keywriting completed. Rebooting for next phase."
-
-echo "${KEYWRITER_FINISHED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+trap cleanup INT TERM
 
 ### Start the provisioner phase
 
@@ -910,34 +652,6 @@ fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}"p1 
 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash mapper/cryptroot "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
 announce_stop "Writing OS images"
 
-if [ -d "${RPI_DEVICE_RETRIEVE_KEYPAIR}" ]; then
-    announce_start "Capturing device keypair to ${RPI_DEVICE_RETRIEVE_KEYPAIR}"
-    N_ALREADY_PROVISIONED=0
-    get_variable private-key > "${RPI_DEVICE_RETRIEVE_KEYPAIR}/${TARGET_DEVICE_SERIAL}.der" || N_ALREADY_PROVISIONED=$?
-    if [ 0 -ne "$N_ALREADY_PROVISIONED" ]; then
-        provisioner_log "Warning: Unable to retrieve device private key; already provisioned"
-    fi
-    get_variable public-key > "${RPI_DEVICE_RETRIEVE_KEYPAIR}/${TARGET_DEVICE_SERIAL}.pub"
-    announce_stop "Capturing device keypair to ${RPI_DEVICE_RETRIEVE_KEYPAIR}"
-fi
-
-announce_start "Cleaning up"
-[ -d "${TMP_DIR}/rpi-boot-img-mount" ] && umount "${TMP_DIR}"/rpi-boot-img-mount
-[ -d "${TMP_DIR}/rpi-rootfs-img-mount" ] && umount "${TMP_DIR}"/rpi-rootfs-img-mount
-# shellcheck disable=SC2086
-unmount_image "${COPY_OS_COMBINED_FILE}" ${DEBUG}
-# We also delete the temporary directory - preserving the cached generated asset
-# shellcheck disable=SC2086
-rm -rf "${TMP_DIR}" ${DEBUG}
-
-if [ -n "${DELETE_PRIVATE_TMPDIR}" ]; then
-    announce_start "Deleting customised intermediates"
-    # shellcheck disable=SC2086
-    rm -rf "${RPI_SB_WORKDIR}" ${DEBUG}
-    announce_stop "Deleting customised intermediates"
-fi
-announce_stop "Cleaning up"
-
 announce_start "Set LED status"
 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem led PWR 0
 announce_stop "Set LED status"
@@ -945,5 +659,7 @@ announce_stop "Set LED status"
 metadata_gather
 
 echo "${PROVISIONER_FINISHED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
-
+announce_start "Cleaning up"
+cleanup
+announce_stop "Cleaning up"
 provisioner_log "Provisioning completed. Remove the device from this machine."
