@@ -47,24 +47,6 @@ read_config() {
 
 : "${RPI_DEVICE_STORAGE_CIPHER:=aes-xts-plain64}"
 
-get_signing_directives() {
-    if [ -n "${CUSTOMER_KEY_PKCS11_NAME}" ]; then
-        echo "${CUSTOMER_KEY_PKCS11_NAME} -engine pkcs11 -keyform engine"
-    else
-        if [ -n "${CUSTOMER_KEY_FILE_PEM}" ]; then
-            if [ -f "${CUSTOMER_KEY_FILE_PEM}" ]; then
-                echo "${CUSTOMER_KEY_FILE_PEM} -keyform PEM"
-            else
-                echo "RSA private key \"${CUSTOMER_KEY_FILE_PEM}\" not a file. Aborting." >&2
-                exit 1
-            fi
-        else
-            echo "Neither PKCS11 key name, or PEM key file specified. Aborting." >&2
-            exit 1
-        fi
-    fi
-}
-
 echo "${KEYWRITER_STARTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
 
 read_config
@@ -126,7 +108,17 @@ timeout_fatal() {
 CUSTOMER_PUBLIC_KEY_FILE=
 derivePublicKey() {
     CUSTOMER_PUBLIC_KEY_FILE="$(mktemp)"
-    "${OPENSSL}" rsa -in "${CUSTOMER_KEY_FILE_PEM}" -pubout > "${CUSTOMER_PUBLIC_KEY_FILE}"
+    if [ -n "${CUSTOMER_KEY_PKCS11_NAME}" ]; then
+        "${OPENSSL}" rsa -engine pkcs11 -inform engine -in "${CUSTOMER_KEY_PKCS11_NAME}" -pubout > "${CUSTOMER_PUBLIC_KEY_FILE}"
+        if [ $? -ne 0 ]; then
+            echo "Error: Failed to extract public key using PKCS#11 engine."
+            exit 1
+        fi
+    else
+        # Existing method to derive public key
+        "${OPENSSL}" rsa -in "${CUSTOMER_KEY_FILE_PEM}" -pubout > "${CUSTOMER_PUBLIC_KEY_FILE}"
+    fi
+    
 }
 
 TMP_DIR=""
@@ -139,12 +131,15 @@ writeSig() {
 
    # Include the update-timestamp
    echo "ts: $(date -u +%s)" >> "${OUTPUT}"
-
-   if [ -n "$(get_signing_directives)" ]; then
       # shellcheck disable=SC2046
-      "${OPENSSL}" dgst -sign $(get_signing_directives) -sha256 -out "${SIG_TMP}" "${IMAGE}"
+      
+    if [ -n "${CUSTOMER_KEY_PKCS11_NAME}" ]; then
+        "${OPENSSL}" dgst -sign "${CUSTOMER_KEY_PKCS11_NAME}" -engine pkcs11 -keyform engine -sha256 -out "${SIG_TMP}" "${IMAGE}"
+    else
+    
+        "${OPENSSL}" dgst -sign ${CUSTOMER_KEY_FILE_PEM} -keyform PEM -sha256 -out "${SIG_TMP}" "${IMAGE}"
+    fi
       echo "rsa2048: $(xxd -c 4096 -p < "${SIG_TMP}")" >> "${OUTPUT}"
-   fi
    rm "${SIG_TMP}"
 }
 
@@ -179,45 +174,43 @@ update_eeprom() {
 
     keywriter_log "update_eeprom() src_image: \"${src_image}\""
 
-    if [ -n "${pem_file}" ]; then
-        if ! grep -q "SIGNED_BOOT=1" "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"; then
-            # If the OTP bit to require secure boot are set then then
-            # SIGNED_BOOT=1 is implicitly set in the EEPROM config.
-            # For debug in signed-boot mode it's normally useful to set this
-            keywriter_log "Warning: SIGNED_BOOT=1 not found in \"${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}\""
-        fi
-
-        #update_version=$(strings "${src_image}" | grep BUILD_TIMESTAMP | sed 's/.*=//g')
-
-        TMP_CONFIG_SIG="$(mktemp)"
-        keywriter_log "Signing bootloader config"
-        writeSig "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" "${TMP_CONFIG_SIG}"
-
-        # shellcheck disable=SC2086
-        cat "${TMP_CONFIG_SIG}" ${DEBUG}
-
-        # rpi-eeprom-config extracts the public key args from the specified
-        # PEM file.
-        sign_args="-d ${TMP_CONFIG_SIG} -p ${public_pem_file}"
-
-        case ${RPI_DEVICE_FAMILY} in
-            4)
-                # 2711 does _not_ require a signed bootcode binary
-                cp "${src_image}" "${dst_image}.intermediate"
-                ;;
-            5)
-                customer_signed_bootcode_binary_workdir=$(mktemp -d)
-                cd "${customer_signed_bootcode_binary_workdir}" || return
-                rpi-eeprom-config -x "${src_image}"
-                rpi-sign-bootcode --debug -c 2712 -i bootcode.bin -o bootcode.bin.signed -k "${pem_file}" -v 0 -n 16
-                rpi-eeprom-config \
-                    --out "${dst_image}.intermediate" --bootcode "${customer_signed_bootcode_binary_workdir}/bootcode.bin.signed" \
-                    "${src_image}" || die "Failed to update signed bootcode in the EEPROM image"
-                cd - > /dev/null || return
-                rm -rf "${customer_signed_bootcode_binary_workdir}"
-                ;;
-        esac
+    if ! grep -q "SIGNED_BOOT=1" "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"; then
+        # If the OTP bit to require secure boot are set then then
+        # SIGNED_BOOT=1 is implicitly set in the EEPROM config.
+        # For debug in signed-boot mode it's normally useful to set this
+        keywriter_log "Warning: SIGNED_BOOT=1 not found in \"${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}\""
     fi
+
+    #update_version=$(strings "${src_image}" | grep BUILD_TIMESTAMP | sed 's/.*=//g')
+
+    TMP_CONFIG_SIG="$(mktemp)"
+    keywriter_log "Signing bootloader config"
+    writeSig "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" "${TMP_CONFIG_SIG}"
+
+    # shellcheck disable=SC2086
+    cat "${TMP_CONFIG_SIG}" ${DEBUG}
+
+    # rpi-eeprom-config extracts the public key args from the specified
+    # PEM file.
+    sign_args="-d ${TMP_CONFIG_SIG} -p ${public_pem_file}"
+
+    case ${RPI_DEVICE_FAMILY} in
+        4)
+            # 2711 does _not_ require a signed bootcode binary
+            cp "${src_image}" "${dst_image}.intermediate"
+            ;;
+        5)
+            customer_signed_bootcode_binary_workdir=$(mktemp -d)
+            cd "${customer_signed_bootcode_binary_workdir}" || return
+            rpi-eeprom-config -x "${src_image}"
+            rpi-sign-bootcode --debug -c 2712 -i bootcode.bin -o bootcode.bin.signed -k "${pem_file}" -v 0 -n 16
+            rpi-eeprom-config \
+                --out "${dst_image}.intermediate" --bootcode "${customer_signed_bootcode_binary_workdir}/bootcode.bin.signed" \
+                "${src_image}" || die "Failed to update signed bootcode in the EEPROM image"
+            cd - > /dev/null || return
+            rm -rf "${customer_signed_bootcode_binary_workdir}"
+            ;;
+    esac
 
     rm -f "${dst_image}"
     set -x
@@ -694,8 +687,11 @@ sha256sum "${RPI_SB_WORKDIR}"/boot.img | awk '{print $1}' > "${RPI_SB_WORKDIR}"/
 printf 'rsa2048: ' >> "${RPI_SB_WORKDIR}"/boot.sig
 # Prefer PKCS11 over PEM keyfiles, if both are specified.
 # shellcheck disable=SC2046
-${OPENSSL} dgst -sign $(get_signing_directives) -sha256 "${RPI_SB_WORKDIR}"/boot.img | xxd -c 4096 -p >> "${RPI_SB_WORKDIR}"/boot.sig
-
+if [ -n "${CUSTOMER_KEY_PKCS11_NAME}" ]; then
+    "${OPENSSL}" dgst -sign "${CUSTOMER_KEY_PKCS11_NAME}" -engine pkcs11 -keyform engine -sha256 "${RPI_SB_WORKDIR}"/boot.img | xxd -c 4096 -p >> "${RPI_SB_WORKDIR}"/boot.sig
+else
+    "${OPENSSL}" dgst -sign ${CUSTOMER_KEY_FILE_PEM} -keyform PEM -sha256 "${RPI_SB_WORKDIR}"/boot.img | xxd -c 4096 -p >> "${RPI_SB_WORKDIR}"/boot.sig
+fi
 announce_stop "Finding/generating fastboot image"
 
 announce_start "Starting fastboot"
@@ -893,7 +889,11 @@ if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.img" ] ||
     sha256sum "${TMP_DIR}"/boot.img | awk '{print $1}' > "${TMP_DIR}"/boot.sig
     printf 'rsa2048: ' >> "${TMP_DIR}"/boot.sig
     # shellcheck disable=SC2046
-    ${OPENSSL} dgst -sign $(get_signing_directives) -sha256 "${TMP_DIR}"/boot.img | xxd -c 4096 -p >> "${TMP_DIR}"/boot.sig
+    if [ -n "${CUSTOMER_KEY_PKCS11_NAME}" ]; then
+        "${OPENSSL}" dgst -sign "${CUSTOMER_KEY_PKCS11_NAME}" -engine pkcs11 -keyform engine -sha256 "${TMP_DIR}"/boot.img | xxd -c 4096 -p >> "${TMP_DIR}"/boot.sig
+    else
+        "${OPENSSL}" dgst -sign ${CUSTOMER_KEY_FILE_PEM} -keyform PEM -sha256 "${TMP_DIR}"/boot.img | xxd -c 4096 -p >> "${TMP_DIR}"/boot.sig
+   fi
     announce_stop "boot.img signing"
 
     announce_start "Boot Image partition extraction"
