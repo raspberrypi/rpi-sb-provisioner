@@ -4,8 +4,11 @@ rpi-sb-provisioner (2.0.0) unstable; urgency=medium
   * global: Add support for Raspberry Pi Zero 2-family devices
   * architectural: Split pre-and-post-Fastboot phases
   * architectural: Add support for multiple Fastboot devices
+  * architectural: Add support for state tracking database
+  * architectural: Add WebUI for provisioning management
+  * architectural: Remove TUI provisioning interface
 
- -- Tom Dewey <tom.dewey@raspberrypi.com>  Mon, 17 Feb 2025 12:20:00 +0000
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Tue, 02 Apr 2025 11:59:55 +0000
 
 rpi-sb-provisioner (1.3.7) unstable; urgency=medium
 
