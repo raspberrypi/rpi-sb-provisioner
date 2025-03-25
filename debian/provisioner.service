@@ -1,0 +1,12 @@
+[Unit]
+Description=Raspberry Pi Secure Boot Provisioner Web UI Service
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/provisioner
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target 
