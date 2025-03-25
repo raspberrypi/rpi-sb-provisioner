@@ -62,42 +62,20 @@ Now, install the `rpi-sb-provisioner` package:
 $ sudo apt install -y rpi-sb-provisioner
 ----
 
-Next, you will have to configure `rpi-sb-provisioner`. We recommend using the TUI, however you could edit the configuraton file directly. In a terminal, run: 
+Next, you will have to configure `rpi-sb-provisioner`. We recommend using the Web UI, however you could edit the configuraton file directly. In a terminal, run: 
 
 ----
-$ sudo config.sh
+$ xdg-open http://localhost:3142
 ----
 
-WARNING: This will not work if you have not reboot after installing the package! 
-
-Running this command will open up a full screen text UI. The TUI supports mouse input or keyboard navigation! 
-Each of the boxes contains a name, text entry and help button. The steps for editing each parameter are as follows:
-
-[pdfwidth=90%]
-.A parameter entry area
-image::docs/images/rpi-config-textfield.png[]
-
-
-*1 -* Click or use `tab` to click the help button to view the information about the parameter
-
-*2 -* Navigate to the text field and enter the value you wish
-
-*3 -* To stage this value for writing, you must click `return` on your keyboard. If the value is successfully verified, then the field will change color to green and a tick should appear. If validation fails, a warning popup should appear with some help text. A cross will also appear next to the parameter name.
-
-[pdfwidth=90%]
-.A successfully verified parameter
-image::docs/images/rpi-config-successfully-verified.png[]
-
-
-*4 -* Repeat the above steps to complete your required parameters (some are optional).
-
-*5 -* Write to the configuration file by pressing the `Write verified params to config file` button at the bottom of the screen
+At the minimum, you must consult the 'Options' and 'Images' pages, having uploaded your OS image and set the options as guided by the inline
+help text (which is generated from the reference section of this README)
 
 Once you have followed all those steps, `rpi-sb-provisioner` should be correctly configured and ready to run.
 
 == Configuration fields
 
-Configure `rpi-sb-provisioner` by using the following fields in `/etc/rpi-sb-provisioner/config`
+Configure `rpi-sb-provisioner` by using the Web UI, for setting the following fields in `/etc/rpi-sb-provisioner/config`.
 
 === PROVISIONING_STYLE
 *Mandatory, with a default*
@@ -269,24 +247,6 @@ No further intervention is required in the success case.
 
 WARNING: `rpi-sb-provisioner` will not, by default, block JTAG access. If you wish to make use of this facility, you _must_ use the `RPI_DEVICE_LOCK_JTAG` configuration option.
 
-=== Monitoring via the monitoring application
-
-`rpi-sb-provisioner` also contains a monitoring application. This can be used to observe the progress of a device as it is being provisioned. It also allows for easy introspection of the log files and lists all completed and failed devices.
-The monitoring application supports both mouse or keyboard input. Navigation between boxes can be acheived by using the `tab` key or by clicking on the desired area.
-
-To run, type into a terminal window:
-
-----
-$ sudo monitor.sh
-----
-
-The TUI will intialise with 2 rows, the top one showing the progress of a device throughout the process, with each of the columns being for devices in the following stages: triaging and provisoning.
-When a device is connected, you will be able to watch it progress through each of the sections.
-The second row of the TUI also has two boxes at the bottom, the left being successfully completed provisions and the right for failed provisions.
-Clicking on the device name will open up a second window, with buttons to view the log files for each step of the provisioning service.
-To return to the main monitoring screen, just press the key `m`.
-To quit the app use the key combination `CTRL-C` or `q`.
-
 == Tips and Tricks
 
 === Observing active provisioning operations
@@ -355,10 +315,7 @@ $ sudo rm /var/log/rpi-sb-provisioner/<serial>/progress
 
 === Disable Triage / Provision (Bootstrap Only)
 
-rpi-sb-provisioner's udev rules cause all devices to be bootstrapped into
-`fastboot` mode before they are triaged and provisioned. It is possible to
-temporarily disable the triage service (until next boot) so that detected
-devices are bootstrapped into `fastboot` mode only:
+rpi-sb-provisioner's udev rules cause all devices to be bootstrapped into `fastboot` mode before they are triaged and provisioned. It is possible to temporarily disable the triage service (until next boot) so that detected devices are bootstrapped into `fastboot` mode only:
 
 ----
 $ sudo systemctl mask --runtime rpi-sb-triage@.service
@@ -373,8 +330,6 @@ $ sudo rm /var/log/rpi-sb-provisioner/<serial>/progress
 $ sudo touch /var/log/rpi-sb-provisioner/<serial>/special-skip-keywriter
 ----
 
-WARNING: This will disable metadata fetching and manufacturing database creation as of writing. This may be resolved in a future version of `rpi-sb-provisioner`.
+=== Changing `config.txt`
 
-=== Changing config.txt
-
-Modify the config.txt contained within your gold master image as you typically would, and `rpi-sb-provisioner` will include this as part of provisioning.
+Modify the `config.txt` contained within your gold master image as you typically would, and `rpi-sb-provisioner` will include this as part of provisioning.
