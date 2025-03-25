@@ -1,0 +1,93 @@
+#!/bin/sh
+
+# record_state() - Records device provisioning state in SQLite database
+#
+# Parameters:
+#   $1 (serial)   - Device serial number (e.g. "DC:A6:32:12:34:56")
+#   $2 (state)    - Current state of device (e.g. "PROVISIONER-STARTED", "PROVISIONER-FINISHED")
+#   $3 (endpoint) - Name of provisioning endpoint (e.g. "triage", "sb-provisioner", "fde-provisioner")
+#
+# The function creates/updates an SQLite database at /var/log/rpi-sb-provisioner/state.db
+# tracking the provisioning state of devices over time. Each state change creates a new
+# record with a timestamp.
+
+record_state() {
+    touch /srv/rpi-sb-provisioner/state.db
+    sqlite3 "/srv/rpi-sb-provisioner/state.db"      \
+    -cmd "PRAGMA journal_mode=WAL;"                     \
+    "CREATE TABLE IF NOT EXISTS devices(                \
+        id              integer primary key,            \
+        serial          TEXT                not null,   \
+        endpoint        TEXT                not null,   \
+        state           TEXT                not null,   \
+        ts              timestamp           default current_timestamp \
+        );"
+
+    serial=$1
+    state=$2
+    endpoint=$3
+    sqlite3 "/srv/rpi-sb-provisioner/state.db" "INSERT INTO devices (serial, endpoint, state) VALUES ('$serial', '$endpoint', '$state');"
+}
+
+# get_usb_path_for_serial() - Finds the USB path for a device with a specific serial number
+#
+# Parameters:
+#   $1 (serial) - Device serial number to search for (e.g., "DC:A6:32:12:34:56")
+#
+# Returns:
+#   Outputs the USB path in the format "X-Y[.Z]" where:
+#   - X is the USB bus number
+#   - Y is the port number on that bus
+#   - Z is the optional port number for devices behind a hub (can be multiple levels)
+#   Example: "1-1.2" means bus 1, hub port 1, hub downstream port 2
+#
+# Return codes:
+#   0 - Success, USB path was found and output to stdout
+#   1 - Failure, no matching device was found
+#
+# The function first searches in /sys/bus/usb/devices/ and falls back to using
+# udevadm if the first method fails.
+get_usb_path_for_serial() {
+    serial="$1"
+    usb_path=""
+    
+    # Find all USB devices
+    for device_path in /sys/bus/usb/devices/*; do
+        # Skip if not a directory or doesn't match the pattern we're looking for
+        base_name=$(basename "$device_path")
+        case "$base_name" in
+            [0-9]*-[0-9]*|\
+            [0-9]*-[0-9]*.[0-9]*|\
+            [0-9]*-[0-9]*.[0-9]*.[0-9]*)
+                if [ ! -d "$device_path" ]; then
+                    continue
+                fi
+                ;;
+            *)
+                continue
+                ;;
+        esac
+        
+        # Check if this device has the serial number we're looking for
+        if [ -f "$device_path/serial" ] && [ "$(cat "$device_path/serial")" = "$serial" ]; then
+            usb_path="$(basename "$device_path")"
+            echo "$usb_path"
+            return 0
+        fi
+    done
+
+    # Fallback to using udevadm to find the device if available
+    if command -v udevadm >/dev/null 2>&1; then
+        for device in /dev/bus/usb/*/*; do
+            serial=$(udevadm info --name="$device" --query=property --property=ID_SERIAL_SHORT --value 2>/dev/null)
+            if [ "$serial" = "${TARGET_DEVICE_SERIAL}" ]; then
+                TARGET_USB_PATH="$(udevadm info "$device" | grep -oP '^P: \K.*')"
+                provisioner_log "Found USB path ${TARGET_USB_PATH} using udevadm for device ${TARGET_DEVICE_SERIAL}"
+                return 0
+            fi
+        done
+    fi
+    
+    # If we get here, we didn't find a matching device
+    return 1
+}
