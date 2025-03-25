@@ -1,20 +1,13 @@
-#!/bin/bash
+#!/bin/sh
 
 set -e
 
-if [ ! "$(getent group rpi-sb-provisioner)" ]; then
-  groupadd rpi-sb-provisioner
-fi
+# Create necessary directories
+mkdir -p /etc/provisioner
 
-if [ ! -d "/etc/rpi-sb-provisioner/" ]; then
-  mkdir -p /etc/rpi-sb-provisioner/
-fi
-
-if ! [ -f /etc/rpi-sb-provisioner/config ]; then
-  touch /etc/rpi-sb-provisioner/config
-fi
-
-chown :rpi-sb-provisioner /etc/rpi-sb-provisioner/config
-chmod g+w /etc/rpi-sb-provisioner/config
+# Set up systemd service
+systemctl daemon-reload
+systemctl enable provisioner.service
+systemctl start provisioner.service
 
 #DEBHELPER#

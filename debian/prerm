@@ -1,0 +1,10 @@
+#!/bin/sh
+
+set -e
+
+# Stop and disable the service
+systemctl stop provisioner.service
+systemctl disable provisioner.service
+systemctl daemon-reload
+
+#DEBHELPER# 
