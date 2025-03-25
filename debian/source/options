@@ -7,3 +7,4 @@ tar-ignore = docs/_build
 tar-ignore = *.log
 tar-ignore = *.egg-info
 tar-ignore = .git
+tar-ignore = build
