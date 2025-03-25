@@ -1,0 +1,183 @@
+#!/bin/sh
+
+# Common helper functions for Raspberry Pi provisioning scripts
+# This file should be sourced by all provisioning scripts
+
+# Base directories for various operations
+LOCK_BASE="/var/lock/rpi-sb-provisioner"
+STATE_BASE="/var/run/rpi-sb-state"
+LOG_BASE="/var/log/rpi-sb-provisioner"
+TEMP_BASE="/srv/rpi-sb-provisioner"
+
+# Resource limits
+MAX_CONCURRENT_PROVISIONERS=255
+MAX_TEMP_DIR_AGE_HOURS=24
+
+# Creates a directory atomically, ensuring no race conditions
+# Parameters:
+#   $1 - Directory path to create
+# Returns:
+#   0 - Directory created successfully
+#   1 - Directory already exists or creation failed
+atomic_mkdir() {
+    dir="$1"
+    mkdir -p "$(dirname "$dir")"
+    if mkdir "$dir" 2>/dev/null; then
+        return 0
+    fi
+    return 1
+}
+
+# Executes a command with a file lock
+# Parameters:
+#   $1 - Lock file path
+#   $2 - Timeout in seconds (default: 10)
+#   $3 - Command to execute
+# Returns:
+#   0 - Command executed successfully
+#   1 - Failed to acquire lock or command failed
+with_lock() {
+    lock_file="$1"
+    timeout="${2:-10}"
+    fd=200
+    
+    eval "exec $fd>$lock_file"
+    if flock -x -w "$timeout" "$fd"; then
+        "$3"
+        flock -u "$fd"
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Creates log directory and ensures proper permissions
+# Parameters:
+#   $1 - Device serial number
+# Returns:
+#   0 - Success
+#   1 - Failure
+setup_log_directory() {
+    serial="$1"
+    log_dir="${LOG_BASE}/${serial}"
+    
+    if atomic_mkdir "$log_dir"; then
+        chmod 755 "$log_dir"
+        return 0
+    fi
+    return 1
+}
+
+# Checks if maximum concurrent provisioners limit is reached
+# Returns:
+#   0 - Limit not reached
+#   1 - Limit reached
+check_provisioner_limit() {
+    current_provisioners=$(find "$LOCK_BASE" -type d | wc -l)
+    
+    if [ "$current_provisioners" -ge "$MAX_CONCURRENT_PROVISIONERS" ]; then
+        return 1
+    fi
+    return 0
+}
+
+# Cleans up orphaned resources
+cleanup_orphans() {
+    find "$TEMP_BASE" -maxdepth 0 -type d -mtime +"$MAX_TEMP_DIR_AGE_HOURS" -exec rm -rf {} +
+    find "$LOG_BASE" -type d -empty -delete
+    find "$LOCK_BASE" -type f -mtime +1 -delete
+}
+
+announce_start() {
+    log "================================================================================"
+
+    log "Starting $1"
+
+    log "================================================================================"
+}
+
+announce_stop() {
+    log "================================================================================"
+
+    log "Stopping $1"
+
+    log "================================================================================"
+}
+
+read_config() {
+    if [ -f /etc/rpi-sb-provisioner/config ]; then
+        # shellcheck disable=SC1091
+        . /etc/rpi-sb-provisioner/config
+    else
+        printf "%s\n" "Failed to load config. Please use configuration tool." >&2
+        return 1
+    fi
+}
+
+# Initializes fastboot connection and device identification variables
+# Takes a fastboot device specifier (USB serial or network address) and:
+# 1. Verifies fastboot connectivity
+# 2. Gets the device serial number
+# 3. Tests both IPv4 and IPv6 connectivity, preferring IPv6 if available
+# 4. Determines the USB path for the device
+#
+# Arguments:
+#   $1 - Fastboot device specifier (required)
+#
+# Sets the following global variables:
+#   FASTBOOT_DEVICE_SPECIFIER - Final fastboot connection string (USB/IPv4/IPv6)
+#   TARGET_DEVICE_SERIAL - Device serial number
+#   TARGET_USB_PATH - USB device path
+#
+# Exits with error if:
+#   - Cannot establish fastboot connection
+#   - Cannot determine USB path
+setup_fastboot_and_id_vars() {
+    FASTBOOT_DEVICE_SPECIFIER="$1"
+
+    timeout_fatal fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar version
+    TARGET_DEVICE_SERIAL="$(get_variable serialno)"
+
+    announce_start "Testing Fastboot IP connectivity"
+    USE_IPV4=
+    USE_IPV6=
+    set +e
+    IPV6_ADDRESS="$(get_variable ipv6-address_0)"
+    (timeout_nonfatal fastboot -s tcp:"${IPV6_ADDRESS}" getvar version)
+    USE_IPV6=$?
+    IPV4_ADDRESS="$(get_variable ipv4-address_0)"
+    (timeout_nonfatal fastboot -s tcp:"${IPV4_ADDRESS}" getvar version)
+    USE_IPV4=$?
+    set -e
+
+    # Favour using IPv6 if available, and ethernet regardless to get 1024-byte chunks in Fastboot without USB3
+    if [ "${USE_IPV6}" -eq 0 ]; then
+    FASTBOOT_DEVICE_SPECIFIER="tcp:${IPV6_ADDRESS}"
+    elif [ "${USE_IPV4}" -eq 0 ]; then
+    FASTBOOT_DEVICE_SPECIFIER="tcp:${IPV4_ADDRESS}"
+    else
+    FASTBOOT_DEVICE_SPECIFIER="${TARGET_DEVICE_SERIAL}"
+    fi
+
+    # Set TARGET_USB_PATH based on TARGET_DEVICE_SERIAL
+    if [ -n "${TARGET_DEVICE_SERIAL}" ]; then
+        # Try to get the USB path for the device
+        usb_path=$(get_usb_path_for_serial "${TARGET_DEVICE_SERIAL}")
+        
+        if [ -n "$usb_path" ]; then
+            TARGET_USB_PATH="$usb_path"
+            log "Found USB path ${TARGET_USB_PATH} for device ${TARGET_DEVICE_SERIAL}"
+        else
+            log "Warning: Could not find USB path for device ${TARGET_DEVICE_SERIAL}"
+
+        fi
+    fi
+
+    # Ensure TARGET_USB_PATH is set
+    if [ -z "${TARGET_USB_PATH}" ]; then
+        provisioner_log "Error: Could not determine USB path for device ${TARGET_DEVICE_SERIAL}"
+        echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+        record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "unknown-usb-path"
+        exit 1
+    fi
+}
