@@ -3,48 +3,25 @@
 set -e
 set -x
 
+# shellcheck disable=SC1091
 . /var/lib/rpi-sb-provisioner/manufacturing-data
+# shellcheck disable=SC1091
+. /var/lib/rpi-sb-provisioner/state-recording
 
 DEBUG=
 
 OPENSSL=${OPENSSL:-openssl}
 
-export KEYWRITER_FINISHED="KEYWRITER-FINISHED"
-export KEYWRITER_ABORTED="KEYWRITER-ABORTED"
-export KEYWRITER_STARTED="KEYWRITER-STARTED"
-export PROVISIONER_FINISHED="PROVISIONER-FINISHED"
-export PROVISIONER_ABORTED="PROVISIONER-ABORTED"
-export PROVISIONER_STARTED="PROVISIONER-STARTED"
+export PROVISIONER_FINISHED="SB-PROVISIONER-FINISHED"
+export PROVISIONER_ABORTED="SB-PROVISIONER-ABORTED"
+export PROVISIONER_STARTED="SB-PROVISIONER-STARTED"
 
+# shellcheck disable=SC1091
+. "$(dirname "$0")/rpi-sb-common.sh"
 
-ring_bell() {
-    tput bel
-}
+setup_fastboot_and_id_vars "$1"
 
-announce_start() {
-    provisioner_log "================================================================================"
-
-    provisioner_log "Starting $1"
-
-    provisioner_log "================================================================================"
-}
-
-announce_stop() {
-    provisioner_log "================================================================================"
-
-    provisioner_log "Stopping $1"
-
-    provisioner_log "================================================================================"
-}
-
-read_config() {
-    if [ -f /etc/rpi-sb-provisioner/config ]; then
-        . /etc/rpi-sb-provisioner/config
-    else
-        echo "Failed to load config. Please use configuration tool." >&2
-        return 1
-    fi
-}
+read_config
 
 : "${RPI_DEVICE_STORAGE_CIPHER:=aes-xts-plain64}"
 
@@ -68,10 +45,11 @@ get_signing_directives() {
 
 echo "${KEYWRITER_STARTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
 
-read_config
+
 
 die() {
     echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+    record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "${TARGET_USB_PATH}"
     # shellcheck disable=SC2086
     echo "$@" ${DEBUG}
     exit 1
@@ -81,7 +59,7 @@ simg_expanded_size() {
     echo "$(($(simg_dump "$1" | sed -E 's/.*?Total of ([0-9]+) ([0-9]+)-byte .*/\1 * \2/')))"
 }
 
-provisioner_log() {
+log() {
     echo "$@" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/provisioner.log
 }
 
@@ -94,11 +72,11 @@ timeout_nonfatal() {
     timeout 10 ${command}
     command_exit_status=$?
     if [ ${command_exit_status} -eq 124 ]; then
-        provisioner_log "\"${command}\" failed, timed out."
+        log "\"${command}\" failed, timed out."
     elif [ ${command_exit_status} -ne 0 ]; then
-        provisioner_log "\"${command}\" failed, exit status: ${command_exit_status}"
+        log "\"${command}\" failed, exit status: ${command_exit_status}"
     else
-        provisioner_log "\"$command\" succeeded."
+        log "\"$command\" succeeded."
     fi
     set -e
     return ${command_exit_status}
@@ -112,12 +90,14 @@ timeout_fatal() {
     command_exit_status=$?
     if [ ${command_exit_status} -eq 124 ]; then
         echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+        record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "${TARGET_USB_PATH}"
         die "\"${command}\" failed, timed out."
     elif [ ${command_exit_status} -ne 0 ]; then
         echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+        record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "${TARGET_USB_PATH}"
         die "\"$command\" failed, exit status: ${command_exit_status}"
     else
-        provisioner_log "\"$command\" succeeded."
+        log "\"$command\" succeeded."
     fi
     set -e
 }
@@ -196,7 +176,7 @@ check_file_is_expected() {
 check_command_exists() {
     command_to_test=$1
     if ! command -v "${command_to_test}" 1> /dev/null; then
-        provisioner_log "${command_to_test} could not be found"
+        log "${command_to_test} could not be found"
         exit 1
     else
         echo "$command_to_test"
@@ -206,7 +186,7 @@ check_command_exists() {
 check_python_module_exists() {
     module_name=$1
     if ! python -c "import ${module_name}" 1> /dev/null; then
-        provisioner_log "Failed to load Python module '${module_name}'"
+        log "Failed to load Python module '${module_name}'"
         exit 1
     else
         echo "${module_name}"
@@ -338,7 +318,7 @@ get_variable() {
     fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar "$1" 2>&1 | grep -oP "${1}"': \K[^\r\n]*'
 }
 
-TARGET_DEVICE_SERIAL="$(get_variable serialno)"
+record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_STARTED}" "${TARGET_USB_PATH}"
 
 TMP_DIR=$(mktemp -d)
 RPI_DEVICE_STORAGE_TYPE="$(check_pidevice_storage_type "${RPI_DEVICE_STORAGE_TYPE}")"
@@ -371,10 +351,10 @@ if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.simg" ] ||
     until ensure_next_loopdev && LOOP_DEV="$(losetup --show --find --partscan "${COPY_OS_COMBINED_FILE}")"; do
         if [ $cnt -lt 5 ]; then
             cnt=$((cnt + 1))
-            provisioner_log "Error in losetup.  Retrying..."
+            log "Error in losetup.  Retrying..."
             sleep 5
         else
-            provisioner_log "ERROR: losetup failed; exiting"
+            log "ERROR: losetup failed; exiting"
             sleep 5
         fi
     done
@@ -554,10 +534,7 @@ fi # Slow path
 announce_start "Erase / Partition Device Storage"
 
 # Arbitrary sleeps to handle lack of correct synchronisation in fastbootd.
-
-timeout_fatal fastboot getvar version
-
-fastboot erase "${RPI_DEVICE_STORAGE_TYPE}"
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" erase "${RPI_DEVICE_STORAGE_TYPE}"
 sleep 2
 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem partinit "${RPI_DEVICE_STORAGE_TYPE}" DOS
 sleep 2
@@ -589,31 +566,6 @@ else
     announce_stop "Resizing OS images: Resized to $((TARGET_STORAGE_ROOT_EXTENT))"
 fi
 
-announce_start "Testing Fastboot IP connectivity"
-USE_IPV4=
-USE_IPV6=
-set +e
-IPV6_ADDRESS="$(get_variable ipv6-address_0)"
-(timeout_nonfatal fastboot -s tcp:"${IPV6_ADDRESS}" getvar version)
-USE_IPV6=$?
-IPV4_ADDRESS="$(get_variable ipv4-address_0)"
-(timeout_nonfatal fastboot -s tcp:"${IPV4_ADDRESS}" getvar version)
-USE_IPV4=$?
-set -e
-announce_stop "Testing Fastboot IP connectivity"
-
-
-announce_start "Writing OS images"
-# Favour using IPv6 if available, and ethernet regardless to get 1024-byte chunks in Fastboot without USB3
-FASTBOOT_DEVICE_SPECIFIER=
-if [ "${USE_IPV6}" -eq 0 ]; then
-FASTBOOT_DEVICE_SPECIFIER="tcp:${IPV6_ADDRESS}"
-elif [ "${USE_IPV4}" -eq 0 ]; then
-FASTBOOT_DEVICE_SPECIFIER="tcp:${IPV4_ADDRESS}"
-else
-FASTBOOT_DEVICE_SPECIFIER="${TARGET_DEVICE_SERIAL}"
-fi
-
 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}"p1 "${RPI_SB_WORKDIR}"/bootfs-temporary.simg
 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash mapper/cryptroot "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
 announce_stop "Writing OS images"
@@ -625,7 +577,8 @@ announce_stop "Set LED status"
 metadata_gather
 
 echo "${PROVISIONER_FINISHED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_FINISHED}" "${TARGET_USB_PATH}"
 announce_start "Cleaning up"
 cleanup
 announce_stop "Cleaning up"
-provisioner_log "Provisioning completed. Remove the device from this machine."
+log "Provisioning completed. Remove the device from this machine."

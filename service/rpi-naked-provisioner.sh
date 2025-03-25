@@ -3,50 +3,47 @@
 set -e
 set -x
 
+# shellcheck disable=SC1091
 . /var/lib/rpi-sb-provisioner/manufacturing-data
+# shellcheck disable=SC1091
+. /var/lib/rpi-sb-provisioner/state-recording
 
 DEBUG=
 
-export PROVISIONER_FINISHED="PROVISIONER-FINISHED"
-export PROVISIONER_ABORTED="PROVISIONER-ABORTED"
-export PROVISIONER_STARTED="PROVISIONER-STARTED"
+export PROVISIONER_FINISHED="NAKED-PROVISIONER-FINISHED"
+export PROVISIONER_ABORTED="NAKED-PROVISIONER-ABORTED"
+export PROVISIONER_STARTED="NAKED-PROVISIONER-STARTED"
 
-read_config() {
-    if [ -f /etc/rpi-sb-provisioner/config ]; then
-        . /etc/rpi-sb-provisioner/config
-    else
-        die "Failed to load config. Please use configuration tool."
-    fi
-}
+# Source common helper functions
+# shellcheck disable=SC1091
+. "$(dirname "$0")/rpi-sb-common.sh"
+
+setup_fastboot_and_id_vars "$1"
+
+# Initialize required directories
+init_directories
+
+# Check resource limits before proceeding
+if ! check_provisioner_limit; then
+    die "Maximum number of concurrent provisioners ($MAX_CONCURRENT_PROVISIONERS) reached"
+fi
+
+# Setup log directory with proper permissions
+if ! setup_log_directory "${TARGET_DEVICE_SERIAL}"; then
+    die "Failed to setup log directory for ${TARGET_DEVICE_SERIAL}"
+fi
 
 read_config
 
-TARGET_DEVICE_SERIAL="${1}"
-
-announce_start() {
-    provisioner_log "================================================================================"
-
-    provisioner_log "Starting $1"
-
-    provisioner_log "================================================================================"
-}
-
-announce_stop() {
-    provisioner_log "================================================================================"
-
-    provisioner_log "Stopping $1"
-
-    provisioner_log "================================================================================"
-}
-
 die() {
     echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+    record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "${TARGET_USB_PATH}"
     # shellcheck disable=SC2086
     echo "$@" ${DEBUG}
     exit 1
 }
 
-provisioner_log() {
+log() {
     echo "$@" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/provisioner.log
     printf "%s\n" "$@"
 }
@@ -164,11 +161,11 @@ timeout_nonfatal() {
     timeout 10 ${command}
     command_exit_status=$?
     if [ ${command_exit_status} -eq 124 ]; then
-        provisioner_log "\"${command}\" failed, timed out."
+        log "\"${command}\" failed, timed out."
     elif [ ${command_exit_status} -ne 0 ]; then
-        provisioner_log "\"${command}\" failed, exit status: ${command_exit_status}"
+        log "\"${command}\" failed, exit status: ${command_exit_status}"
     else
-        provisioner_log "\"$command\" succeeded."
+        log "\"$command\" succeeded."
     fi
     set -e
     return ${command_exit_status}
@@ -182,12 +179,14 @@ timeout_fatal() {
     command_exit_status=$?
     if [ ${command_exit_status} -eq 124 ]; then
         echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+        record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "${TARGET_USB_PATH}"
         die "\"${command}\" failed, timed out."
     elif [ ${command_exit_status} -ne 0 ]; then
         echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+        record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "${TARGET_USB_PATH}"
         die "\"$command\" failed, exit status: ${command_exit_status}"
     else
-        provisioner_log "\"$command\" succeeded."
+        log "\"$command\" succeeded."
     fi
     set -e
 }
@@ -210,7 +209,7 @@ trap cleanup INT TERM
 # Start the provisioner phase
 
 [ -n "${TARGET_DEVICE_SERIAL}" ] && echo "${PROVISIONER_STARTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
-
+record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_STARTED}" "${TARGET_USB_PATH}"
 # These tools are used to modify the supplied images, and deal with mounting and unmounting the images.
 check_command_exists losetup
 check_command_exists mknod
@@ -257,10 +256,10 @@ if [ ! -f "${RPI_SB_WORKDIR}/bootfs-temporary.img" ] ||
     until ensure_next_loopdev && LOOP_DEV="$(losetup --show --find --partscan "${GOLD_MASTER_OS_FILE}")"; do
         if [ $cnt -lt 5 ]; then
             cnt=$((cnt + 1))
-            provisioner_log "Error in losetup.  Retrying..."
+            log "Error in losetup.  Retrying..."
             sleep 5
         else
-            provisioner_log "ERROR: losetup failed; exiting"
+            log "ERROR: losetup failed; exiting"
             sleep 5
         fi
     done
@@ -291,16 +290,15 @@ fi
 
 announce_start "Erase / Partition Device Storage"
 
-# Arbitrary sleeps to handle lack of correct synchronisation in fastbootd.
-timeout_fatal fastboot getvar version
+announce_start "Writing OS images"
 
-fastboot erase "${RPI_DEVICE_STORAGE_TYPE}"
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" erase "${RPI_DEVICE_STORAGE_TYPE}"
 sleep 2
-fastboot oem partinit "${RPI_DEVICE_STORAGE_TYPE}" DOS
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem partinit "${RPI_DEVICE_STORAGE_TYPE}" DOS
 sleep 2
-fastboot oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 0c "$(stat -c%s "${RPI_SB_WORKDIR}/bootfs-temporary.img")"
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 0c "$(stat -c%s "${RPI_SB_WORKDIR}/bootfs-temporary.img")"
 sleep 2
-fastboot oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 11 # Grow to fill storage
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 11 # Grow to fill storage
 sleep 2
 announce_stop "Erase / Partition Device Storage"
 
@@ -325,20 +323,23 @@ else
 fi
 
 announce_start "Writing OS images"
-fastboot flash "${RPI_DEVICE_STORAGE_TYPE}"p1 "${RPI_SB_WORKDIR}"/bootfs-temporary.img
-fastboot flash "${RPI_DEVICE_STORAGE_TYPE}"p2 "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}"p1 "${RPI_SB_WORKDIR}"/bootfs-temporary.img
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}"p2 "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
 announce_stop "Writing OS images"
 
 announce_start "Set LED status"
-fastboot oem led PWR 0
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem led PWR 0
 announce_stop "Set LED status"
 
 metadata_gather
 
 echo "${PROVISIONER_FINISHED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_FINISHED}" "${TARGET_USB_PATH}"
 
 announce_start "Cleaning up"
 cleanup
 announce_stop "Cleaning up"
 
-provisioner_log "Provisioning completed. Remove the device from this machine."
+record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_FINISHED}" "${TARGET_USB_PATH}"
+
+log "Provisioning completed. Remove the device from this machine."
