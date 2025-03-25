@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Device Details - [[device.serial]]</title>
+    <link rel="stylesheet" href="/css/common.css">
+</head>
+<body>
+    <!-- Navigation Bar -->
+    <div class="navbar">
+        <a href="/devices" class="active">Devices</a>
+        <a href="/get-images">Images</a>
+        <a href="/options/get">Options</a>
+        <a href="/customisation/list-scripts">Customisation</a>
+        <a href="/services">Services</a>
+    </div>
+
+    <h1>Device Details</h1>
+    
+    <div id="success-message" class="success-message"></div>
+    <div id="error-message" class="error-message"></div>
+    
+    <div class="device-info">
+        <div class="info-row">
+            <span class="info-label">Serial Number:</span>
+            <span>[[device.serial]]</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">Port:</span>
+            <span>[[device.port]]</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">IP Address:</span>
+            <span>[[device.ip_address]]</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">State:</span>
+            <span>[[device.state]]</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">Image:</span>
+            <span>[[device.image]]</span>
+        </div>
+    </div>
+
+    <div class="log-section">
+        <h2>Provisioner Log</h2>
+        <div class="log-content">[[provisioner_log]]</div>
+    </div>
+
+    <div class="log-section">
+        <h2>Bootstrap Log</h2>
+        <div class="log-content">[[bootstrap_log]]</div>
+    </div>
+
+    <div class="log-section">
+        <h2>Triage Log</h2>
+        <div class="log-content">[[triage_log]]</div>
+    </div>
+</body>
+</html> 

@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Service Log</title>
+    <link rel="stylesheet" href="/css/common.css">
+    <style>
+        .log-container {
+            background-color: #f8f8f8;
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin-top: 20px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            max-height: 800px;
+            overflow-y: auto;
+        }
+        .log-entry {
+            margin: 0;
+            padding: 3px 0;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        .log-entry:last-child {
+            border-bottom: none;
+        }
+        .back-link {
+            margin-top: 20px;
+            display: inline-block;
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation Bar -->
+    <div class="navbar">
+        <a href="/devices">Devices</a>
+        <a href="/get-images">Images</a>
+        <a href="/options/get">Options</a>
+        <a href="/customisation/list-scripts">Customisation</a>
+        <a href="/services" class="active">Services</a>
+    </div>
+
+    <h1>Service Log: <%c++ $$ << @@.get<std::string>("service_name"); %></h1>
+    
+    <a href="/services" class="back-link">← Back to Services</a>
+    
+    <div class="log-container">
+    <%c++ 
+    auto logEntries = @@.get<std::vector<std::string>>("log_entries");
+    if(logEntries.size() > 0) {
+        for(const auto& entry : logEntries) {
+    %>
+        <div class="log-entry"><%c++ $$ << entry; %></div>
+    <%c++ 
+        }
+    } else {
+    %>
+        <div class="log-entry">No log entries found for this service.</div>
+    <%c++ } %>
+    </div>
+    
+    <a href="/services" class="back-link">← Back to Services</a>
+</body>
+</html> 

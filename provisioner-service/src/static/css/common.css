@@ -1,0 +1,355 @@
+/* Common Styles for RPI-SB-Provisioner */
+
+body {
+    font-family: Arial, sans-serif;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+/* Table Styles */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 20px;
+}
+
+th, td {
+    border: 1px solid #ddd;
+    padding: 12px;
+    text-align: left;
+}
+
+th {
+    background-color: #f2f2f2;
+    font-weight: bold;
+}
+
+tr:nth-child(even) {
+    background-color: #f9f9f9;
+}
+
+tr:hover {
+    background-color: #f5f5f5;
+}
+
+/* Link Styles */
+.log-link, .action-link {
+    color: #0066cc;
+    text-decoration: none;
+    margin-right: 10px;
+}
+
+.log-link:hover, .action-link:hover {
+    text-decoration: underline;
+}
+
+.action-link.delete {
+    color: #cc0000;
+}
+
+.back-link {
+    color: #0066cc;
+    text-decoration: none;
+    display: inline-block;
+    margin-bottom: 20px;
+}
+
+.back-link:hover {
+    text-decoration: underline;
+}
+
+/* Status Indicators */
+.status {
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.9em;
+}
+
+.status.enabled {
+    background-color: #e6ffe6;
+    color: #006600;
+}
+
+.status.disabled {
+    background-color: #ffe6e6;
+    color: #cc0000;
+}
+
+/* Navigation Elements */
+.nav-links {
+    margin-bottom: 20px;
+}
+
+.nav-links a {
+    color: #0066cc;
+    text-decoration: none;
+    margin-right: 15px;
+}
+
+.nav-links a:hover {
+    text-decoration: underline;
+}
+
+/* Navigation Bar Styles */
+.navbar {
+    background-color: #333;
+    overflow: hidden;
+    margin-bottom: 20px;
+    border-radius: 4px;
+}
+
+.navbar a {
+    float: left;
+    color: white;
+    text-align: center;
+    padding: 14px 16px;
+    text-decoration: none;
+    font-size: 16px;
+    transition: background-color 0.3s;
+}
+
+.navbar a:hover {
+    background-color: #0066cc;
+    color: white;
+}
+
+.navbar a.active {
+    background-color: #0066cc;
+    color: white;
+}
+
+/* Button Styles */
+button, .upload-button, .submit-button {
+    background-color: #0066cc;
+    color: white;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    text-decoration: none;
+}
+
+button:hover, .upload-button:hover, .submit-button:hover {
+    background-color: #0052a3;
+}
+
+.upload-button {
+    display: inline-block;
+    margin-bottom: 20px;
+}
+
+/* Form Styles */
+.form-group {
+    margin-bottom: 15px;
+}
+
+label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: bold;
+}
+
+input[type="text"], input[type="file"] {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    box-sizing: border-box;
+}
+
+/* Container Styles */
+.options-form, .form-container, .device-info {
+    background: #f5f5f5;
+    padding: 20px;
+    border-radius: 5px;
+    margin-bottom: 30px;
+}
+
+.confirm-container {
+    max-width: 500px;
+    margin: 20px auto;
+    padding: 20px;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    background-color: #f5f5f5;
+    text-align: center;
+}
+
+/* Message Styles */
+.warning-block {
+    background-color: #fff3cd;
+    color: #856404;
+    border: 2px solid #ffeeba;
+    border-radius: 4px;
+    padding: 15px;
+    margin: 20px 0;
+    font-weight: bold;
+    text-align: center;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0% { background-color: #fff3cd; }
+    50% { background-color: #ffe5e5; }
+    100% { background-color: #fff3cd; }
+}
+
+.success-message {
+    background: #d4edda;
+    color: #155724;
+    padding: 10px;
+    border-radius: 4px;
+    margin-bottom: 20px;
+    display: none;
+}
+
+.error-message {
+    background: #f8d7da;
+    color: #721c24;
+    padding: 10px;
+    border-radius: 4px;
+    margin-bottom: 20px;
+    display: none;
+}
+
+/* No Items Messages */
+.no-devices, .no-scripts {
+    text-align: center;
+    padding: 20px;
+    color: #666;
+    font-style: italic;
+}
+
+/* Code and SHA Display */
+.sha256 {
+    font-family: monospace;
+    font-size: 0.9em;
+    color: #666;
+}
+
+pre {
+    background-color: #f5f5f5;
+    border: 1px solid #ddd;
+    padding: 15px;
+    border-radius: 4px;
+    overflow-x: auto;
+    font-family: monospace;
+    line-height: 1.4;
+}
+
+.log-content {
+    background: #f5f5f5;
+    border: 1px solid #ddd;
+    padding: 15px;
+    margin-top: 10px;
+    border-radius: 4px;
+    white-space: pre-wrap;
+    font-family: monospace;
+    overflow-x: auto;
+}
+
+/* Confirm Action Styles */
+.icon {
+    width: 48px;
+    height: 48px;
+    margin: 0 auto 20px;
+}
+
+.icon.delete {
+    color: #cc0000;
+}
+
+.icon.enable {
+    color: #006600;
+}
+
+.icon.disable {
+    color: #cc6600;
+}
+
+.button-group {
+    margin-top: 20px;
+}
+
+.button {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-block;
+    margin: 0 5px;
+}
+
+.button.cancel {
+    background-color: #666;
+    color: white;
+}
+
+.button.cancel:hover {
+    background-color: #555;
+}
+
+.button.confirm {
+    color: white;
+}
+
+.button.confirm.delete {
+    background-color: #cc0000;
+}
+
+.button.confirm.delete:hover {
+    background-color: #b30000;
+}
+
+.button.confirm.enable {
+    background-color: #006600;
+}
+
+.button.confirm.enable:hover {
+    background-color: #005200;
+}
+
+.button.confirm.disable {
+    background-color: #cc6600;
+}
+
+.button.confirm.disable:hover {
+    background-color: #b35900;
+}
+
+/* Helper Classes */
+.help-text {
+    font-size: 0.9em;
+    color: #666;
+    margin-top: 5px;
+}
+
+.message {
+    margin: 20px 0;
+    color: #333;
+}
+
+.info-row {
+    display: flex;
+    margin-bottom: 10px;
+}
+
+.info-label {
+    font-weight: bold;
+    width: 150px;
+}
+
+/* Preview Section */
+#preview {
+    margin-top: 15px;
+    padding: 15px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background-color: #f5f5f5;
+    font-family: monospace;
+    white-space: pre;
+    overflow-x: auto;
+    display: none;
+} 

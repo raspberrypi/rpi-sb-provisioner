@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Upload Script</title>
+    <link rel="stylesheet" href="/css/common.css">
+</head>
+<body>
+    <!-- Navigation Bar -->
+    <div class="navbar">
+        <a href="/devices">Devices</a>
+        <a href="/get-images">Images</a>
+        <a href="/options/get">Options</a>
+        <a href="/customisation/list-scripts" class="active">Customisation</a>
+        <a href="/services">Services</a>
+    </div>
+
+    <a href="/customisation/list-scripts" class="back-link">← Back to Scripts</a>
+    <h1>Upload New Script</h1>
+    
+    <div id="success-message" class="success-message"></div>
+    <div id="error-message" class="error-message"></div>
+    
+    <div class="form-container">
+        <form action="/customisation/upload-script" method="post" enctype="multipart/form-data">
+            <div class="form-group">
+                <label for="script">Script File</label>
+                <input type="file" name="script" id="script" accept=".sh,.bash" required>
+                <p class="help-text">Only .sh and .bash files are allowed</p>
+            </div>
+            <div class="form-group">
+                <label for="preview">Preview</label>
+                <pre id="preview"></pre>
+            </div>
+            <button type="submit" class="submit-button">Upload Script</button>
+        </form>
+    </div>
+
+    <script>
+        document.getElementById('script').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const preview = document.getElementById('preview');
+                    preview.textContent = e.target.result;
+                    preview.style.display = 'block';
+                };
+                reader.readAsText(file);
+            }
+        });
+    </script>
+</body>
+</html> 

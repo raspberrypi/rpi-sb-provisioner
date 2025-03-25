@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Device List</title>
+    <link rel="stylesheet" href="/css/common.css">
+</head>
+<body>
+    <!-- Navigation Bar -->
+    <div class="navbar">
+        <a href="/devices" class="active">Devices</a>
+        <a href="/get-images">Images</a>
+        <a href="/options/get">Options</a>
+        <a href="/customisation/list-scripts">Customisation</a>
+        <a href="/services">Services</a>
+    </div>
+
+    <%c++ 
+    bool hasWarning = false;
+    std::string warningMessage;
+    try {
+        warningMessage = @@.get<std::string>("warning");
+        hasWarning = !warningMessage.empty();
+    } catch(...) {
+        // No warning message found, ignore
+    }
+    
+    if (hasWarning) { 
+    %>
+    <div class="warning-block">
+        [[warning]]
+    </div>
+    <%c++ } %>
+    <h1>Device List</h1>
+    <table>
+        <thead>
+            <tr>
+                <th>Serial Number</th>
+                <th>Port</th>
+                <th>IP Address</th>
+                <th>State</th>
+                <th>Image</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+        <%c++ 
+        auto devicesList = @@.get<std::vector<std::map<std::string, std::string>>>("devices");
+        if(devicesList.size() > 0) {
+        %>
+            <%c++ for(const auto& device : devicesList) { %>
+                <tr>
+                    <td><%c++ $$ << device.at("serial"); %></td>
+                    <td><%c++ $$ << device.at("port"); %></td>
+                    <td><%c++ $$ << device.at("ip_address"); %></td>
+                    <td><%c++ $$ << device.at("state"); %></td>
+                    <td><%c++ $$ << device.at("image"); %></td>
+                    <td>
+                        <a href="/devices/<%c++ $$ << device.at("serial"); %>/log/provisioner" class="log-link">Provisioner Log</a><br>
+                        <a href="/devices/<%c++ $$ << device.at("serial"); %>/log/bootstrap" class="log-link">Bootstrap Log</a><br>
+                        <a href="/devices/<%c++ $$ << device.at("serial"); %>/log/triage" class="log-link">Triage Log</a>
+                    </td>
+                </tr>
+            <%c++ } %>
+        <%c++ } else { %>
+                <tr>
+                    <td colspan="6" class="no-devices">No devices available</td>
+                </tr>
+        <%c++ } %>
+        </tbody>
+    </table>
+</body>
+</html> 

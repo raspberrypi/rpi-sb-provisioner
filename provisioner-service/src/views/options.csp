@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Configuration Options</title>
+    <link rel="stylesheet" href="/css/common.css">
+    <style>
+        .collapsible {
+            background-color: #f1f1f1;
+            color: #444;
+            cursor: pointer;
+            padding: 5px 10px;
+            border: none;
+            text-align: left;
+            outline: none;
+            font-size: 12px;
+            margin-left: 10px;
+            border-radius: 4px;
+            display: inline-block;
+            vertical-align: middle;
+        }
+        
+        .active, .collapsible:hover {
+            background-color: #ddd;
+        }
+        
+        .help-content {
+            padding: 0 18px;
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.2s ease-out;
+            background-color: #f9f9f9;
+            margin-top: 5px;
+            border-radius: 4px;
+            clear: both;
+        }
+        
+        .help-content p {
+            margin: 10px 0;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+        
+        .warning {
+            color: #cc0000;
+            font-weight: bold;
+        }
+        
+        .note {
+            color: #0066cc;
+            font-weight: bold;
+        }
+        
+        .option-header {
+            margin-bottom: 5px;
+        }
+        
+        label {
+            display: inline-block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        
+        .help-button {
+            background-color: #f1f1f1;
+            color: #444;
+            cursor: pointer;
+            padding: 5px 10px;
+            border: none;
+            text-align: left;
+            outline: none;
+            font-size: 12px;
+            margin-left: 10px;
+            border-radius: 4px;
+            display: inline-block;
+            vertical-align: middle;
+        }
+        
+        .help-button:hover {
+            background-color: #ddd;
+        }
+        
+        /* The Modal Background */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.4);
+            overflow: auto;
+        }
+        
+        /* Modal Content */
+        .modal-content {
+            background-color: #fefefe;
+            margin: 10% auto;
+            padding: 20px;
+            border: 1px solid #888;
+            width: 70%;
+            max-width: 700px;
+            border-radius: 5px;
+            box-shadow: 0 4px 8px 0 rgba(0,0,0,0.2);
+            position: relative;
+        }
+        
+        /* Close Button */
+        .close-modal {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        
+        .close-modal:hover,
+        .close-modal:focus {
+            color: black;
+            text-decoration: none;
+            cursor: pointer;
+        }
+        
+        .modal-title {
+            margin-top: 0;
+            color: #333;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 10px;
+        }
+        
+        .modal-body {
+            max-height: 60vh;
+            overflow-y: auto;
+            padding-right: 5px;
+        }
+        
+        .modal-body p {
+            margin: 10px 0;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+    </style>
+    <script>
+        function showSuccess() {
+            document.getElementById('success-message').style.display = 'block';
+            setTimeout(() => {
+                document.getElementById('success-message').style.display = 'none';
+            }, 3000);
+        }
+    </script>
+</head>
+<body>
+    <!-- Navigation Bar -->
+    <div class="navbar">
+        <a href="/devices">Devices</a>
+        <a href="/get-images">Images</a>
+        <a href="/options/get" class="active">Options</a>
+        <a href="/customisation/list-scripts">Customisation</a>
+        <a href="/services">Services</a>
+    </div>
+
+    <h1>Configuration Options</h1>
+    
+    <div id="success-message" class="success-message">
+        Options saved successfully!
+    </div>
+    
+    <div id="error-message" class="error-message"></div>
+
+    <div class="options-form">
+        <form id="optionsForm" onsubmit="event.preventDefault(); saveOptions();">
+            <%c++ 
+            auto options = @@.get<std::map<std::string, std::string>>("options");
+            for(const auto& option : options) {
+                const auto& key = option.first;
+                const auto& value = option.second;
+            %>
+                <div class="form-group">
+                    <div class="option-header">
+                        <label for="<%c++ $$ << key; %>"><%c++ $$ << key; %></label>
+                        <button type="button" class="help-button" data-target="modal-<%c++ $$ << key; %>">Help</button>
+                    </div>
+                    <input type="text" id="<%c++ $$ << key; %>" name="<%c++ $$ << key; %>" value="<%c++ $$ << value; %>">
+                </div>
+            <%c++ } %>
+            <button type="submit">Save Options</button>
+        </form>
+    </div>
+
+    <!-- Modal Help Windows -->
+    <%c++ 
+    for(const auto& option : options) {
+        const auto& key = option.first;
+    %>
+    <div id="modal-<%c++ $$ << key; %>" class="modal">
+        <div class="modal-content">
+            <span class="close-modal">&times;</span>
+            <h3 class="modal-title"><%c++ $$ << key; %></h3>
+            <div class="modal-body">
+            <%c++ if(key == "PROVISIONING_STYLE") { %>
+                <p><strong>Mandatory, with a default</strong></p>
+                <p>Select the provisioning style you wish to use. Supported values are <code>secure-boot</code>, <code>fde-only</code> and <code>naked</code>.</p>
+                <p>If <code>PROVISIONING_STYLE</code> is not specified, it defaults to <code>secure-boot</code>.</p>
+            <%c++ } else if(key == "CUSTOMER_KEY_FILE_PEM") { %>
+                <p><strong>Optional, mandatory if CUSTOMER_KEY_PKCS11_NAME is not set</strong></p>
+                <p>The fully qualified path to your signing key, encoded in PEM format. This file is expected to contain an RSA 2048-bit Private Key.</p>
+                <p class="warning">This file should be considered key material, and should be protected while at rest and in use according to your threat model.</p>
+            <%c++ } else if(key == "CUSTOMER_KEY_PKCS11_NAME") { %>
+                <p><strong>Optional, mandatory if CUSTOMER_KEY_FILE_PEM is not set</strong></p>
+                <p>The keypair alias for a PKCS11 keypair, typically stored on a Hardware Security Module (HSM) and provided through a helper tool. This is expected to act in place of the RSA 2048-bit Private key specified with CUSTOMER_KEY_FILE_PEM, and will be used as the signing device for all future pre-boot authentication images.</p>
+                <p>The value should take the format:</p>
+                <p><code>"pkcs11:object=&lt;keypair-alias&gt;;type=private"</code></p>
+                <p class="warning">You must use double quotes to enclose the value.</p>
+                <p class="warning">The PKCS11 provider, and it's associated HSM, should be considered key material and should be protected while at rest and in use according to your threat model.</p>
+            <%c++ } else if(key == "GOLD_MASTER_OS_FILE") { %>
+                <p><strong>Mandatory</strong></p>
+                <p>This should be your 'gold master' OS image. No customisation should be present in this image that you would not expect to be deployed to your entire fleet. <code>rpi-sb-provisioner</code> assumes this image has been created using <code>pi-gen</code>, and using a non-<code>pi-gen</code> image may produce undefined behaviour.</p>
+                <p class="warning">This file <strong>must</strong> be the uncompressed image.</p>
+            <%c++ } else if(key == "RPI_DEVICE_STORAGE_TYPE") { %>
+                <p><strong>Mandatory</strong></p>
+                <p>Specify the kind of storage your target will use. Supported values are <code>sd</code>, <code>emmc</code>, <code>nvme</code>.</p>
+            <%c++ } else if(key == "RPI_DEVICE_STORAGE_CIPHER") { %>
+                <p><strong>Optional</strong></p>
+                <p>Specify the full-disk-encryption cipher. Supported values are <code>aes-xts-plain64</code>, <code>xchacha12,aes-adiantum-plain64</code>. If <code>RPI_DEVICE_STORAGE_CIPHER</code> is not specified, it defaults to <code>aes-xts-plain64</code>. <code>aes-xts-plain64</code> is recommended for Raspberry Pi 5 family devices (including Compute Module 5); all other Raspberry Pi devices are recommended to use <code>xchacha12,aes-adiantum-plain64</code> for performance reasons.</p>
+            <%c++ } else if(key == "RPI_DEVICE_FAMILY") { %>
+                <p><strong>Mandatory</strong></p>
+                <p>Specify the family of Raspberry Pi device you are provisioning. Supported values are <code>4</code>, <code>5</code>, <code>2W</code>. For example,</p>
+                <p>A Raspberry Pi Compute Module 4 would be family <code>4</code><br>
+                A Raspberry Pi 5 would be family <code>5</code><br>
+                A Raspberry Pi Compute Module 5 would be family <code>5</code><br>
+                A Raspberry Pi Zero 2 W would be family <code>2W</code></p>
+            <%c++ } else if(key == "RPI_DEVICE_BOOTLOADER_CONFIG_FILE") { %>
+                <p><strong>Mandatory, with a default</strong></p>
+                <p class="warning"><code>rpi-sb-provisioner</code> will ignore the Raspberry Pi Bootloader configuration built by <code>pi-gen</code>, and use the one provided in this variable.</p>
+                <p>Specify the Raspberry Pi Bootloader configuration you want your provisioned devices to use. A default is provided.</p>
+                <p>Further information on the format of this configuration file can be found in the Raspberry Pi Documentation, at <a href="https://www.raspberrypi.com/documentation/computers/config_txt.html" target="_blank">https://www.raspberrypi.com/documentation/computers/config_txt.html</a></p>
+            <%c++ } else if(key == "RPI_DEVICE_LOCK_JTAG") { %>
+                <p><strong>Optional</strong></p>
+                <p>Raspberry Pi devices have a mechanism to restrict JTAG access to the device.</p>
+                <p>Note that using this function will prevent Raspberry Pi engineers from being able to assist in debugging your device, should you request assitance.</p>
+                <p>Set to any value to enable the JTAG restrictions.</p>
+            <%c++ } else if(key == "RPI_DEVICE_EEPROM_WP_SET") { %>
+                <p><strong>Optional</strong></p>
+                <p>Raspberry Pi devices that use an EEPROM as part of their boot flow can configure that EEPROM to enable write protection - preventing modification.</p>
+                <p>Set to any value to enable EEPROM write protection.</p>
+            <%c++ } else if(key == "RPI_DEVICE_FETCH_METADATA") { %>
+                <p><strong>Optional</strong></p>
+                <p>Collect manufacturing data from each device that is provisioned. This will include the board type, board revision number, the processor name, the memory configuration, and the factory where the board was made.</p>
+                <p>The metadata is inserted into the log for the device, and also as a serial-number named JSON file under the <code>metadata</code> subdirectory of the device provisioning logs.</p>
+                <p>Set to any value to enable metadata collection.</p>
+            <%c++ } else if(key == "RPI_DEVICE_RETRIEVE_KEYPAIR") { %>
+                <p><strong>Optional</strong></p>
+                <p>Specify a directory to copy the device unique keypair to. The keys will be named &lt;serial&gt;.der and &lt;serial&gt;.pub</p>
+                <p>Set to the path of a directory to use, leave blank to disable.</p>
+                <p class="note">These keys are sensitive key material, and you must ensure they are handled appropriately.</p>
+            <%c++ } else if(key == "RPI_SB_WORKDIR") { %>
+                <p><strong>Optional</strong></p>
+                <p class="warning">If you do not set this variable, your modified OS intermediates will not be stored, and will be unavailable for inspection.</p>
+                <p>Set to a location to cache OS assets between provisioning sessions. Recommended for use in production. For example:</p>
+                <p><code>RPI_SB_WORKDIR=/srv/rpi-sb-provisioner/</code></p>
+            <%c++ } else if(key == "RPI_SB_PROVISONER_MANUFACTURING_DB") { %>
+                <p><strong>Optional</strong></p>
+                <p class="note">This option only has effect when you also use RPI_DEVICE_FETCH_METADATA. If that flag is not set, no manufacturing data will be collected.</p>
+                <p>Store manufacturing data in a sqlite3 database. This will include the board serial, board revision, the boot ROM version, the MAC address of the ethernet port, any set hash of the customer signing key, the JTAG lock state, the board attributes and the advanced boot flags.</p>
+                <p>You must not specify the path of a database stored on a network drive or similar storage, as this mechanism is only safe to use on a single provisioning system. For merging the output with multiple provisioning systems, consider "Processing the manufacturing database" later in this document.</p>
+                <p>Create this file before execution, for example using <code>touch</code>:</p>
+                <p><code>$ touch ${RPI_SB_PROVISONER_MANUFACTURING_DB}</code></p>
+                <p>Set to the path of a file to contain a SQLite database stored on local storage.</p>
+            <%c++ } else { %>
+                <p>No specific documentation available for this option.</p>
+            <%c++ } %>
+            </div>
+        </div>
+    </div>
+    <%c++ } %>
+
+    <script>
+        // Set up modal help sections
+        const helpButtons = document.querySelectorAll('.help-button');
+        const modals = document.querySelectorAll('.modal');
+        const closeButtons = document.querySelectorAll('.close-modal');
+        
+        helpButtons.forEach(button => {
+            button.addEventListener('click', function() {
+                const targetModalId = this.getAttribute('data-target');
+                document.getElementById(targetModalId).style.display = 'block';
+            });
+        });
+        
+        closeButtons.forEach(button => {
+            button.addEventListener('click', function() {
+                const modal = this.closest('.modal');
+                modal.style.display = 'none';
+            });
+        });
+        
+        // Close modal when clicking outside of modal content
+        window.addEventListener('click', function(event) {
+            modals.forEach(modal => {
+                if (event.target == modal) {
+                    modal.style.display = 'none';
+                }
+            });
+        });
+        
+        async function saveOptions() {
+            const form = document.getElementById('optionsForm');
+            const formData = new FormData(form);
+            const options = {};
+            formData.forEach((value, key) => {
+                options[key] = value;
+            });
+
+            try {
+                const response = await fetch('/options/set', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(options)
+                });
+
+                if (response.ok) {
+                    showSuccess();
+                } else {
+                    alert('Failed to save options');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Failed to save options');
+            }
+        }
+    </script>
+</body>
+</html> 

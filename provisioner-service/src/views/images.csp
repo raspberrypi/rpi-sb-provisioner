@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>System Images</title>
+    <link rel="stylesheet" href="/css/common.css">
+    <script>
+        function showMessage(message, isError = false) {
+            const messageDiv = document.getElementById(isError ? 'error-message' : 'success-message');
+            messageDiv.textContent = message;
+            messageDiv.style.display = 'block';
+            setTimeout(() => {
+                messageDiv.style.display = 'none';
+            }, 3000);
+        }
+
+        async function useImage(name) {
+            if (!confirm('Are you sure you want to use this image as the gold master?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/options/set', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        "GOLD_MASTER_OS_FILE": "/srv/rpi-sb-provisioner/images/" + name
+                    })
+                });
+
+                if (response.ok) {
+                    showMessage('Gold master image updated successfully');
+                    location.reload();
+                } else {
+                    showMessage('Failed to update gold master image', true);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                showMessage('Failed to update gold master image', true);
+            }
+        }
+
+        async function deleteImage(name) {
+            if (!confirm('Are you sure you want to delete this image?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/delete-image?name=${encodeURIComponent(name)}`, {
+                    method: 'POST'
+                });
+
+                if (response.ok) {
+                    showMessage('Image deleted successfully');
+                    location.reload();
+                } else {
+                    showMessage('Failed to delete image', true);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                showMessage('Failed to delete image', true);
+            }
+        }
+
+        async function updateImageSha256(imageName, sha256Cell) {
+            try {
+                const controller = new AbortController();
+                // Store the controller for cleanup
+                sha256Cell.dataset.controller = controller;
+                
+                const response = await fetch(`/get-image-sha256?name=${encodeURIComponent(imageName)}`, {
+                    signal: controller.signal
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    sha256Cell.textContent = data.sha256;
+                } else {
+                    sha256Cell.textContent = 'Error calculating SHA256';
+                }
+            } catch (error) {
+                if (error.name === 'AbortError') {
+                    console.log('SHA256 request cancelled');
+                    return;
+                }
+                console.error('Error:', error);
+                sha256Cell.textContent = 'Error calculating SHA256';
+            }
+        }
+
+        // Function to start polling for SHA256 values
+        function startSha256Polling() {
+            const rows = document.querySelectorAll('.image-list tbody tr');
+            rows.forEach(row => {
+                const nameCell = row.cells[0];
+                const sha256Cell = row.cells[1];
+                const imageName = nameCell.textContent;
+                
+                // Only poll if SHA256 is still "Calculating..."
+                if (sha256Cell.textContent === 'Calculating...') {
+                    updateImageSha256(imageName, sha256Cell);
+                }
+            });
+        }
+
+        // Function to cancel all pending SHA256 requests
+        function cancelAllSha256Requests() {
+            const cells = document.querySelectorAll('.image-list tbody td[data-controller]');
+            cells.forEach(cell => {
+                const controller = cell.dataset.controller;
+                if (controller) {
+                    controller.abort();
+                    delete cell.dataset.controller;
+                }
+            });
+        }
+
+        // Start polling when the page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            startSha256Polling();
+        });
+
+        // Cancel requests when navigating away
+        window.addEventListener('beforeunload', () => {
+            cancelAllSha256Requests();
+        });
+
+        // Cancel requests when clicking navigation links
+        document.querySelectorAll('.navbar a').forEach(link => {
+            link.addEventListener('click', () => {
+                cancelAllSha256Requests();
+            });
+        });
+    </script>
+</head>
+<body>
+    <!-- Navigation Bar -->
+    <div class="navbar">
+        <a href="/devices">Devices</a>
+        <a href="/get-images" class="active">Images</a>
+        <a href="/options/get">Options</a>
+        <a href="/customisation/list-scripts">Customisation</a>
+        <a href="/services">Services</a>
+    </div>
+
+    <h1>System Images</h1>
+
+    <div id="success-message" class="success-message"></div>
+    <div id="error-message" class="error-message"></div>
+
+    <div class="upload-section">
+        <h2>Upload New Image</h2>
+        <form class="upload-form" id="uploadForm" enctype="multipart/form-data">
+            <div class="upload-row">
+                <input type="file" name="image" required>
+                <div class="progress-container" style="display: none;">
+                    <div class="progress-bar">
+                        <div class="progress-fill"></div>
+                    </div>
+                    <div class="progress-text">0%</div>
+                </div>
+                <button type="submit" id="uploadButton">Upload</button>
+                <button type="button" id="cancelButton" style="display: none;">Cancel</button>
+            </div>
+        </form>
+    </div>
+
+    <table class="image-list">
+        <thead>
+            <tr>
+                <th>Image Name</th>
+                <th>SHA256</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            <%c++
+            auto images = @@.get<std::vector<std::map<std::string, std::string>>>("images");
+            for(const auto& image : images) {
+            %>
+                <tr class="<%c++ $$ << (image.at("is_gold_master") == "true" ? "gold-master" : ""); %>">
+                    <td><%c++ $$ << image.at("name"); %></td>
+                    <td><%c++ $$ << image.at("sha256"); %></td>
+                    <td><%c++ $$ << (image.at("is_gold_master") == "true" ? "Current Gold Master" : ""); %></td>
+                    <td>
+                        <button class="use-btn" onclick="useImage('<%c++ $$ << image.at("name"); %>')">Use</button>
+                        <button class="delete-btn" onclick="deleteImage('<%c++ $$ << image.at("name"); %>')">Delete</button>
+                    </td>
+                </tr>
+            <%c++ } %>
+        </tbody>
+    </table>
+
+    <style>
+        .gold-master {
+            background-color: #e6ffe6;
+        }
+        .use-btn, .delete-btn {
+            min-width: 80px;
+            padding: 8px 16px;
+            margin-right: 5px;
+            cursor: pointer;
+            border-radius: 3px;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        .use-btn {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+        }
+        .use-btn:hover {
+            background-color: #45a049;
+        }
+        .delete-btn {
+            background-color: #f44336;
+            color: white;
+            border: none;
+        }
+        .delete-btn:hover {
+            background-color: #da190b;
+        }
+        .upload-form {
+            width: 100%;
+        }
+        .upload-row {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        .progress-container {
+            flex: 1;
+            min-width: 200px;
+            max-width: 300px;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background-color: #f0f0f0;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        .progress-fill {
+            width: 0%;
+            height: 100%;
+            background-color: #4CAF50;
+            transition: width 0.3s ease-in-out;
+        }
+        .progress-text {
+            text-align: center;
+            margin-top: 5px;
+            font-size: 14px;
+            color: #666;
+        }
+        #uploadButton, #cancelButton {
+            min-width: 80px;
+            padding: 8px 16px;
+            cursor: pointer;
+            border-radius: 3px;
+            font-size: 14px;
+            font-weight: 500;
+            border: none;
+        }
+        #uploadButton {
+            background-color: #4CAF50;
+            color: white;
+        }
+        #uploadButton:hover {
+            background-color: #45a049;
+        }
+        #cancelButton {
+            background-color: #f44336;
+            color: white;
+        }
+        #cancelButton:hover {
+            background-color: #da190b;
+        }
+    </style>
+
+    <script>
+        let currentXHR = null;
+
+        document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const form = e.target;
+            const formData = new FormData(form);
+            const fileInput = form.querySelector('input[type="file"]');
+            const file = fileInput.files[0];
+            
+            // Show progress bar and switch to cancel button
+            const progressContainer = form.querySelector('.progress-container');
+            const progressFill = form.querySelector('.progress-fill');
+            const progressText = form.querySelector('.progress-text');
+            const uploadButton = form.querySelector('#uploadButton');
+            const cancelButton = form.querySelector('#cancelButton');
+            
+            progressContainer.style.display = 'block';
+            uploadButton.style.display = 'none';
+            cancelButton.style.display = 'block';
+            
+            try {
+                currentXHR = new XMLHttpRequest();
+                currentXHR.open('POST', '/upload-image', true);
+                
+                currentXHR.upload.onprogress = (event) => {
+                    if (event.lengthComputable) {
+                        const percentComplete = (event.loaded / event.total) * 100;
+                        progressFill.style.width = percentComplete + '%';
+                        progressText.textContent = Math.round(percentComplete) + '%';
+                    }
+                };
+                
+                currentXHR.onload = () => {
+                    if (currentXHR.status === 200) {
+                        showMessage('Image uploaded successfully');
+                        location.reload();
+                    } else {
+                        showMessage('Failed to upload image', true);
+                    }
+                    resetUploadUI();
+                };
+                
+                currentXHR.onerror = () => {
+                    showMessage('Failed to upload image', true);
+                    resetUploadUI();
+                };
+                
+                currentXHR.send(formData);
+            } catch (error) {
+                console.error('Error:', error);
+                showMessage('Failed to upload image', true);
+                resetUploadUI();
+            }
+        });
+
+        document.getElementById('cancelButton').addEventListener('click', () => {
+            if (currentXHR) {
+                currentXHR.abort();
+                showMessage('Upload cancelled', true);
+                resetUploadUI();
+            }
+        });
+
+        function resetUploadUI() {
+            const progressContainer = document.querySelector('.progress-container');
+            const progressFill = document.querySelector('.progress-fill');
+            const progressText = document.querySelector('.progress-text');
+            const uploadButton = document.querySelector('#uploadButton');
+            const cancelButton = document.querySelector('#cancelButton');
+            
+            progressContainer.style.display = 'none';
+            progressFill.style.width = '0%';
+            progressText.textContent = '0%';
+            uploadButton.style.display = 'block';
+            cancelButton.style.display = 'none';
+            currentXHR = null;
+        }
+    </script>
+</body>
+</html> 

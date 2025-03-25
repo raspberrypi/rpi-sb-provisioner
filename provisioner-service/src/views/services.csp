@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Services</title>
+    <link rel="stylesheet" href="/css/common.css">
+    <script>
+        // Function to fetch service data and update the table
+        function updateServicesTable() {
+            fetch('/services', {
+                headers: {
+                    'Accept': 'application/json'
+                }
+            })
+                .then(response => response.json())
+                .then(data => {
+                    const tableBody = document.querySelector('table tbody');
+                    
+                    // Clear existing rows
+                    tableBody.innerHTML = '';
+                    
+                    if(data.services && data.services.length > 0) {
+                        // Add service rows
+                        data.services.forEach(service => {
+                            const row = document.createElement('tr');
+                            
+                            // Name cell
+                            const nameCell = document.createElement('td');
+                            nameCell.textContent = service.name;
+                            row.appendChild(nameCell);
+                            
+                            // Status cell
+                            const statusCell = document.createElement('td');
+                            statusCell.textContent = service.status;
+                            row.appendChild(statusCell);
+                            
+                            // Active cell
+                            const activeCell = document.createElement('td');
+                            activeCell.textContent = service.active;
+                            row.appendChild(activeCell);
+                            
+                            // Actions cell
+                            const actionsCell = document.createElement('td');
+                            const link = document.createElement('a');
+                            link.href = '/service-log/' + service.name;
+                            link.className = 'log-link';
+                            link.textContent = 'View Logs';
+                            actionsCell.appendChild(link);
+                            row.appendChild(actionsCell);
+                            
+                            tableBody.appendChild(row);
+                        });
+                    } else {
+                        // No services found
+                        const row = document.createElement('tr');
+                        const cell = document.createElement('td');
+                        cell.setAttribute('colspan', '4');
+                        cell.className = 'no-devices';
+                        cell.textContent = 'No services available';
+                        row.appendChild(cell);
+                        tableBody.appendChild(row);
+                    }
+                })
+                .catch(error => console.error('Error updating services:', error));
+        }
+        
+        // Set interval to update every second
+        document.addEventListener('DOMContentLoaded', function() {
+            // Initial update
+            updateServicesTable();
+            
+            // Set interval for updates
+            setInterval(updateServicesTable, 1000);
+        });
+    </script>
+</head>
+<body>
+    <!-- Navigation Bar -->
+    <div class="navbar">
+        <a href="/devices">Devices</a>
+        <a href="/get-images">Images</a>
+        <a href="/options/get">Options</a>
+        <a href="/customisation/list-scripts">Customisation</a>
+        <a href="/services" class="active">Services</a>
+    </div>
+
+    <%c++ 
+    bool hasWarning = false;
+    std::string warningMessage;
+    try {
+        warningMessage = @@.get<std::string>("warning");
+        hasWarning = !warningMessage.empty();
+    } catch(...) {
+        // No warning message found, ignore
+    }
+    
+    if (hasWarning) { 
+    %>
+    <div class="warning-block">
+        [[warning]]
+    </div>
+    <%c++ } %>
+    <h1>System Services</h1>
+    <table>
+        <thead>
+            <tr>
+                <th>Service Name</th>
+                <th>Status</th>
+                <th>Active</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+        <%c++ 
+        auto servicesList = @@.get<std::vector<std::map<std::string, std::string>>>("services");
+        if(servicesList.size() > 0) {
+        %>
+            <%c++ for(const auto& service : servicesList) { %>
+                <tr>
+                    <td><%c++ $$ << service.at("name"); %></td>
+                    <td><%c++ $$ << service.at("status"); %></td>
+                    <td><%c++ $$ << service.at("active"); %></td>
+                    <td>
+                        <a href="/service-log/<%c++ $$ << service.at("name"); %>" class="log-link">View Logs</a>
+                    </td>
+                </tr>
+            <%c++ } %>
+        <%c++ } else { %>
+                <tr>
+                    <td colspan="4" class="no-devices">No services available</td>
+                </tr>
+        <%c++ } %>
+        </tbody>
+    </table>
+</body>
+</html> 

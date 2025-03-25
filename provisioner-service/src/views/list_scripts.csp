@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Customisation Scripts</title>
+    <link rel="stylesheet" href="/css/common.css">
+</head>
+<body>
+    <!-- Navigation Bar -->
+    <div class="navbar">
+        <a href="/devices">Devices</a>
+        <a href="/get-images">Images</a>
+        <a href="/options/get">Options</a>
+        <a href="/customisation/list-scripts" class="active">Customisation</a>
+        <a href="/services">Services</a>
+    </div>
+
+    <h1>Customisation Scripts</h1>
+    
+    <div id="success-message" class="success-message"></div>
+    <div id="error-message" class="error-message"></div>
+    
+    <a href="/customisation/upload-script" class="upload-button">Upload New Script</a>
+    <table>
+        <thead>
+            <tr>
+                <th>Filename</th>
+                <th>Status</th>
+                <th>SHA256</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            <%c++ 
+            auto scripts = @@.get<std::vector<std::map<std::string, std::string>>>("scripts");
+            if (scripts.size() > 0) {
+                for(const auto& script : scripts) { 
+            %>
+                <tr>
+                    <td><%c++ $$ << script.at("filename"); %></td>
+                    <td>
+                        <%c++ if(script.at("executable") == "true") { %>
+                            <span class="status enabled">Enabled</span>
+                        <%c++ } else { %>
+                            <span class="status disabled">Disabled</span>
+                        <%c++ } %>
+                    </td>
+                    <td class="sha256"><%c++ $$ << script.at("sha256"); %></td>
+                    <td>
+                        <a href="/customisation/get-script?script=<%c++ $$ << script.at("filename"); %>" class="action-link">View</a>
+                        <%c++ if(script.at("executable") == "true") { %>
+                            <a href="/customisation/disable-script?script=<%c++ $$ << script.at("filename"); %>" class="action-link">Disable</a>
+                        <%c++ } else { %>
+                            <a href="/customisation/enable-script?script=<%c++ $$ << script.at("filename"); %>" class="action-link">Enable</a>
+                        <%c++ } %>
+                        <a href="/customisation/delete-script?script=<%c++ $$ << script.at("filename"); %>" class="action-link delete">Delete</a>
+                    </td>
+                </tr>
+            <%c++ 
+                }
+            } else { 
+            %>
+                <tr>
+                    <td colspan="4" class="no-scripts">No scripts registered</td>
+                </tr>
+            <%c++ } %>
+        </tbody>
+    </table>
+</body>
+</html> 
