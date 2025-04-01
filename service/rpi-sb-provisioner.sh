@@ -126,7 +126,11 @@ timeout_fatal() {
 CUSTOMER_PUBLIC_KEY_FILE=
 derivePublicKey() {
     CUSTOMER_PUBLIC_KEY_FILE="$(mktemp)"
-    "${OPENSSL}" rsa -in "${CUSTOMER_KEY_FILE_PEM}" -pubout > "${CUSTOMER_PUBLIC_KEY_FILE}"
+    if [ -n "${CUSTOMER_KEY_PKCS11_NAME}" ]; then
+        "${OPENSSL}" pkey -engine pkcs11 -inform engine -in "${CUSTOMER_KEY_PKCS11_NAME}" -pubout -out "${CUSTOMER_PUBLIC_KEY_FILE}"
+    else
+        "${OPENSSL}" rsa -in "${CUSTOMER_KEY_FILE_PEM}" -pubout > "${CUSTOMER_PUBLIC_KEY_FILE}"
+    fi
 }
 
 TMP_DIR=""
@@ -179,7 +183,7 @@ update_eeprom() {
 
     keywriter_log "update_eeprom() src_image: \"${src_image}\""
 
-    if [ -n "${pem_file}" ]; then
+    if [ -n "${pem_file}" ] || [ -n "${CUSTOMER_KEY_PKCS11_NAME}" ]; then
         if ! grep -q "SIGNED_BOOT=1" "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"; then
             # If the OTP bit to require secure boot are set then then
             # SIGNED_BOOT=1 is implicitly set in the EEPROM config.
@@ -206,6 +210,9 @@ update_eeprom() {
                 cp "${src_image}" "${dst_image}.intermediate"
                 ;;
             5)
+                if [ -n "${CUSTOMER_KEY_PKCS11_NAME}" ]; then
+                    die "PKCS11 keys are not supported for Raspberry Pi 5-class devices"
+                fi
                 customer_signed_bootcode_binary_workdir=$(mktemp -d)
                 cd "${customer_signed_bootcode_binary_workdir}" || return
                 rpi-eeprom-config -x "${src_image}"
@@ -678,6 +685,9 @@ case "${RPI_DEVICE_FAMILY}" in
         FASTBOOT_SIGN_DIR=$(mktemp -d)
         cd "${FASTBOOT_SIGN_DIR}"
         tar -vxf /usr/share/rpiboot/mass-storage-gadget64/bootfiles.bin
+        if [ -n "${CUSTOMER_KEY_PKCS11_NAME}" ]; then
+            die "PKCS11 keys are not supported for Raspberry Pi 5-class devices"
+        fi
         rpi-sign-bootcode --debug -c 2712 -i 2712/bootcode5.bin -o 2712/bootcode5.bin.signed -k "${CUSTOMER_KEY_FILE_PEM}" -v 0 -n 16
         mv -f "2712/bootcode5.bin.signed" "2712/bootcode5.bin"
         tar -vcf "${RPI_SB_WORKDIR}/bootfiles.bin" -- *
