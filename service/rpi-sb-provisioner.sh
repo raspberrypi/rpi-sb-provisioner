@@ -126,7 +126,11 @@ timeout_fatal() {
 CUSTOMER_PUBLIC_KEY_FILE=
 derivePublicKey() {
     CUSTOMER_PUBLIC_KEY_FILE="$(mktemp)"
-    "${OPENSSL}" rsa -in "${CUSTOMER_KEY_FILE_PEM}" -pubout > "${CUSTOMER_PUBLIC_KEY_FILE}"
+    if [ -n "${CUSTOMER_KEY_PKCS11_NAME}" ]; then
+        "${OPENSSL}" pkey -engine pkcs11 -inform engine -in "${CUSTOMER_KEY_PKCS11_NAME}" -pubout -out "${CUSTOMER_PUBLIC_KEY_FILE}"
+    else
+        "${OPENSSL}" rsa -in "${CUSTOMER_KEY_FILE_PEM}" -pubout > "${CUSTOMER_PUBLIC_KEY_FILE}"
+    fi
 }
 
 TMP_DIR=""
@@ -179,7 +183,7 @@ update_eeprom() {
 
     keywriter_log "update_eeprom() src_image: \"${src_image}\""
 
-    if [ -n "${pem_file}" ]; then
+    if [ -n "${pem_file}" ] || [ -n "${CUSTOMER_KEY_PKCS11_NAME}" ]; then
         if ! grep -q "SIGNED_BOOT=1" "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"; then
             # If the OTP bit to require secure boot are set then then
             # SIGNED_BOOT=1 is implicitly set in the EEPROM config.
