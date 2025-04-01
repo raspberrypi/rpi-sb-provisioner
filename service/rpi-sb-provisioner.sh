@@ -210,6 +210,9 @@ update_eeprom() {
                 cp "${src_image}" "${dst_image}.intermediate"
                 ;;
             5)
+                if [ -n "${CUSTOMER_KEY_PKCS11_NAME}" ]; then
+                    die "PKCS11 keys are not supported for Raspberry Pi 5-class devices"
+                fi
                 customer_signed_bootcode_binary_workdir=$(mktemp -d)
                 cd "${customer_signed_bootcode_binary_workdir}" || return
                 rpi-eeprom-config -x "${src_image}"
@@ -682,6 +685,9 @@ case "${RPI_DEVICE_FAMILY}" in
         FASTBOOT_SIGN_DIR=$(mktemp -d)
         cd "${FASTBOOT_SIGN_DIR}"
         tar -vxf /usr/share/rpiboot/mass-storage-gadget64/bootfiles.bin
+        if [ -n "${CUSTOMER_KEY_PKCS11_NAME}" ]; then
+            die "PKCS11 keys are not supported for Raspberry Pi 5-class devices"
+        fi
         rpi-sign-bootcode --debug -c 2712 -i 2712/bootcode5.bin -o 2712/bootcode5.bin.signed -k "${CUSTOMER_KEY_FILE_PEM}" -v 0 -n 16
         mv -f "2712/bootcode5.bin.signed" "2712/bootcode5.bin"
         tar -vcf "${RPI_SB_WORKDIR}/bootfiles.bin" -- *
