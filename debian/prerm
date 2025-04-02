@@ -3,8 +3,14 @@
 set -e
 
 # Stop and disable the service
-systemctl stop provisioner.service
-systemctl disable provisioner.service
-systemctl daemon-reload
+if [ -d /run/systemd/system ] && [ "$1" = remove ]; then
+	deb-systemd-invoke stop 'provisioner.service' >/dev/null || true
+fi
+
+if [ "$1" = "remove" ]; then
+	deb-systemd-helper disable 'provisioner.service' >/dev/null || true
+	deb-systemd-helper unmask 'provisioner.service' >/dev/null || true
+	deb-systemd-helper daemon-reload >/dev/null || true
+fi
 
 #DEBHELPER# 
