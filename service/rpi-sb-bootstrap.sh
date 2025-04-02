@@ -25,20 +25,6 @@ TEMP_BASE="/srv/rpi-sb-bootstrap"
 # shellcheck disable=SC1091
 . "$(dirname "$0")/rpi-sb-common.sh"
 
-check_resource_limits() {
-    current_bootstraps=$(find "$LOCK_BASE" -type d | wc -l)
-    
-    if [ "$current_bootstraps" -ge "$MAX_CONCURRENT_BOOTSTRAPS" ]; then
-        die "Maximum number of concurrent bootstraps ($MAX_CONCURRENT_BOOTSTRAPS) reached"
-    fi
-}
-
-# Initialize required directories with proper permissions
-init_directories() {
-    mkdir -p "$LOCK_BASE" "$STATE_BASE" "$LOG_BASE" "$TEMP_BASE"
-    chmod 755 "$LOCK_BASE" "$STATE_BASE" "$LOG_BASE" "$TEMP_BASE"
-}
-
 HOLDING_LOCKFILE=0
 
 log() {
