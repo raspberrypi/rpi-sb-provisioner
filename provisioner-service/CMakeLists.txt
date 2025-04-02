@@ -1,28 +1,7 @@
-cmake_minimum_required(VERSION 3.18)
+cmake_minimum_required(VERSION 3.25)
 
-# Use dpkg-buildflags for Debian packaging
-find_program(DPKG_BUILDFLAGS_EXECUTABLE dpkg-buildflags)
-if(DPKG_BUILDFLAGS_EXECUTABLE)
-    execute_process(
-        COMMAND ${DPKG_BUILDFLAGS_EXECUTABLE} --get CPPFLAGS
-        OUTPUT_VARIABLE DPKG_CPPFLAGS
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-    execute_process(
-        COMMAND ${DPKG_BUILDFLAGS_EXECUTABLE} --get CXXFLAGS
-        OUTPUT_VARIABLE DPKG_CXXFLAGS
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-    execute_process(
-        COMMAND ${DPKG_BUILDFLAGS_EXECUTABLE} --get LDFLAGS
-        OUTPUT_VARIABLE DPKG_LDFLAGS
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-    
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${DPKG_CXXFLAGS}")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${DPKG_CPPFLAGS}")
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${DPKG_LDFLAGS}")
-endif()
+include(cmake/DebianHardening.cmake)
+include(cmake/RaspberryPiHardening.cmake)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -42,7 +21,15 @@ set(BUILD_CTL ON)
 set(BUILD_ORM OFF)
 set(BUILD_BROTLI OFF)
 set(BUILD_YAML_CONFIG OFF)
+
+# Store original flags
+set(ORIGINAL_CXX_FLAGS ${CMAKE_CXX_FLAGS})
+# Disable format-nonliteral warning only for Drogon, which is a third party library
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=format-nonliteral")
 FetchContent_MakeAvailable(drogon)
+# Restore original flags
+set(CMAKE_CXX_FLAGS ${ORIGINAL_CXX_FLAGS})
+
 unset(BUILD_YAML_CONFIG)
 unset(BUILD_BROTLI)
 unset(BUILD_ORM)
