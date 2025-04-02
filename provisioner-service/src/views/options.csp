@@ -251,13 +251,13 @@
                 <p class="warning">If you do not set this variable, your modified OS intermediates will not be stored, and will be unavailable for inspection.</p>
                 <p>Set to a location to cache OS assets between provisioning sessions. Recommended for use in production. For example:</p>
                 <p><code>RPI_SB_WORKDIR=/srv/rpi-sb-provisioner/</code></p>
-            <%c++ } else if(key == "RPI_SB_PROVISONER_MANUFACTURING_DB") { %>
+            <%c++ } else if(key == "RPI_SB_PROVISIONER_MANUFACTURING_DB") { %>
                 <p><strong>Optional</strong></p>
                 <p class="note">This option only has effect when you also use RPI_DEVICE_FETCH_METADATA. If that flag is not set, no manufacturing data will be collected.</p>
                 <p>Store manufacturing data in a sqlite3 database. This will include the board serial, board revision, the boot ROM version, the MAC address of the ethernet port, any set hash of the customer signing key, the JTAG lock state, the board attributes and the advanced boot flags.</p>
                 <p>You must not specify the path of a database stored on a network drive or similar storage, as this mechanism is only safe to use on a single provisioning system. For merging the output with multiple provisioning systems, consider "Processing the manufacturing database" later in this document.</p>
                 <p>Create this file before execution, for example using <code>touch</code>:</p>
-                <p><code>$ touch ${RPI_SB_PROVISONER_MANUFACTURING_DB}</code></p>
+                <p><code>$ touch ${RPI_SB_PROVISIONER_MANUFACTURING_DB}</code></p>
                 <p>Set to the path of a file to contain a SQLite database stored on local storage.</p>
             <%c++ } else { %>
                 <p>No specific documentation available for this option.</p>

@@ -7,6 +7,23 @@
 <body>
     <%view navbar %>
 
+    <%c++ 
+    bool hasWarning = false;
+    std::string warningMessage;
+    try {
+        warningMessage = @@.get<std::string>("warning");
+        hasWarning = !warningMessage.empty();
+    } catch(...) {
+        // No warning message found, ignore
+    }
+    
+    if (hasWarning) { 
+    %>
+    <div class="warning-block">
+        <%c++ $$ << warningMessage; %>
+    </div>
+    <%c++ } %>
+
     <h1>Manufacturing Database</h1>
     <table>
         <thead>

@@ -80,10 +80,10 @@ metadata_gather() {
 
         echo "Board is: ${BOARD_STR}, with revision number ${REVISION}. Has Processor ${PROCESSOR_STR} with Memory ${MEMORY_STR}. Was manufactured by ${MANUFACTURER_STR}"
 
-        if [ -f "${RPI_SB_PROVISONER_MANUFACTURING_DB}" ]; then
+        if [ -f "${RPI_SB_PROVISIONER_MANUFACTURING_DB}" ]; then
             announce_start "Manufacturing Database Insertion"
             check_command_exists sqlite3
-            sqlite3 "${RPI_SB_PROVISONER_MANUFACTURING_DB}"         \
+            sqlite3 "${RPI_SB_PROVISIONER_MANUFACTURING_DB}"         \
                 -cmd "PRAGMA journal_mode=WAL;"                     \
                 "CREATE TABLE IF NOT EXISTS devices(                \
                     id              integer primary key,            \
@@ -101,7 +101,7 @@ metadata_gather() {
                     manufacturer    varchar(255)        not null,    \
                     provision_ts    timestamp           default current_timestamp \
                     );"
-            sqlite3 "${RPI_SB_PROVISONER_MANUFACTURING_DB}" \
+            sqlite3 "${RPI_SB_PROVISIONER_MANUFACTURING_DB}" \
                 "INSERT INTO devices(           \
                     boardname,                  \
                     serial,                     \

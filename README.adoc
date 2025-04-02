@@ -158,7 +158,7 @@ Raspberry Pi devices that use an EEPROM as part of their boot flow can configure
 
 Set to any value to enable EEPROM write protection.
 
-=== RPI_SB_PROVISONER_MANUFACTURING_DB
+=== RPI_SB_PROVISIONER_MANUFACTURING_DB
 *Optional*
 
 NOTE: This option only has effect when you also use RPI_DEVICE_FETCH_METADATA. If that flag is not set, no manufacturing data will be collected.
@@ -170,7 +170,7 @@ You must not specify the path of a database stored on a network drive or similar
 Create this file before execution, for example using `touch`:
 
 ----
-$ touch ${RPI_SB_PROVISONER_MANUFACTURING_DB}
+$ touch ${RPI_SB_PROVISIONER_MANUFACTURING_DB}
 ----
 
 Set to the path of a file to contain a SQLite database stored on local storage.
