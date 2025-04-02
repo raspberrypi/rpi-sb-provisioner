@@ -5,6 +5,7 @@
     overflow: hidden;
     margin-bottom: 20px;
     border-radius: 4px;
+    position: relative;
 }
 
 .navbar a {
@@ -26,6 +27,37 @@
     background-color: #0066cc;
     color: white;
 }
+
+.version-info {
+    float: right;
+    color: #ddd;
+    padding: 14px 16px;
+    font-size: 14px;
+}
+
+.version-warning {
+    color: #ffcc00;
+    margin-left: 5px;
+}
+
+.version-link {
+    text-decoration: none;
+    color: inherit;
+}
+
+.github-link {
+    float: right !important;
+    margin-left: 10px;
+}
+
+.github-link:hover {
+    background-color: #c51d4a !important;
+    color: white;
+}
+
+.right-items {
+    float: right;
+}
 </style>
 
 <!-- Navigation Bar -->
@@ -36,5 +68,23 @@
     <a href="/customisation/list-scripts" <%c++ if(@@.get<std::string>("currentPage") == "customisation") { %>class="active"<%c++ } %>>Customisation</a>
     <a href="/services" <%c++ if(@@.get<std::string>("currentPage") == "services") { %>class="active"<%c++ } %>>Services</a>
     <a href="/manu-db" <%c++ if(@@.get<std::string>("currentPage") == "manufacturing") { %>class="active"<%c++ } %>>Manufacturing Database</a>
+    
+    <div class="right-items">
+        <a href="https://github.com/raspberrypi/rpi-sb-provisioner" target="_blank" class="github-link">GitHub</a>
+        <span class="version-info">
+            <%c++ extern std::string g_packageVersion; %>
+            <%c++ extern bool g_hasNewerVersion; %>
+            <%c++ extern std::string g_releaseUrl; %>
+            
+            <%c++ if(g_hasNewerVersion && !g_releaseUrl.empty()) { %>
+                <a href="<%c++ $$ << g_releaseUrl; %>" target="_blank" class="version-link">
+                    v<%c++ $$ << g_packageVersion; %>
+                    <span class="version-warning">⚠</span>
+                </a>
+            <%c++ } else { %>
+                v<%c++ $$ << g_packageVersion; %>
+            <%c++ } %>
+        </span>
+    </div>
 </div>
 <%view-end%> 
