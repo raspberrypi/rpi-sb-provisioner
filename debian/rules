@@ -2,14 +2,29 @@
 
 export DH_VERBOSE = 1
 
-%:
+# Enable all hardening options available in Debian
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+
+# Target to generate the man page
+debian/rpi-sb-provisioner.1:
+	# First create the content from the README
 	asciidoctor -b docbook --attribute leveloffset=+1 --out-file - README.adoc |\
-	  pandoc -f docbook -s -t man --shift-heading-level-by=-1 > debian/rpi-sb-provisioner.1
+	  pandoc -f docbook -s -t man --shift-heading-level-by=-1 > debian/rpi-sb-provisioner.1.tmp
+	  
+	# Now add proper NAME section with awk and create final man page
+	awk 'BEGIN { print ".TH \"rpi-sb-provisioner\" \"1\" \"\" \"\" \"User Commands\""; \
+	             print ".SH NAME"; \
+	             print "rpi-sb-provisioner \\- Raspberry Pi Secure Boot Provisioner"; \
+	             first_section = 1; } \
+	     /^\.SH / { if (first_section) { first_section = 0; } else { print; } next; } \
+	     /^\.TH / { next; } \
+	     /^\.hy/ { next; } \
+	     { if (!first_section) print; }' debian/rpi-sb-provisioner.1.tmp > debian/rpi-sb-provisioner.1
+	     
+	# Clean up temporary file
+	rm -f debian/rpi-sb-provisioner.1.tmp
+
+%:
+	# Generate the man page before running dh
+	$(MAKE) -f debian/rules debian/rpi-sb-provisioner.1
 	dh $@
-
-override_dh_auto_configure:
-	dh_auto_configure -- \
-		-DCMAKE_BUILD_TYPE=Release \
-		-DCMAKE_INSTALL_PREFIX=/usr
-
-override_dh_usrlocal:
