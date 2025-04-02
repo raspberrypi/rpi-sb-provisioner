@@ -1,0 +1,40 @@
+<style>
+/* Navigation Bar Styles */
+.navbar {
+    background-color: #333;
+    overflow: hidden;
+    margin-bottom: 20px;
+    border-radius: 4px;
+}
+
+.navbar a {
+    float: left;
+    color: white;
+    text-align: center;
+    padding: 14px 16px;
+    text-decoration: none;
+    font-size: 16px;
+    transition: background-color 0.3s;
+}
+
+.navbar a:hover {
+    background-color: #0066cc;
+    color: white;
+}
+
+.navbar a.active {
+    background-color: #0066cc;
+    color: white;
+}
+</style>
+
+<!-- Navigation Bar -->
+<div class="navbar">
+    <a href="/devices" <%c++ if(@@.get<std::string>("currentPage") == "devices") { %>class="active"<%c++ } %>>Devices</a>
+    <a href="/get-images" <%c++ if(@@.get<std::string>("currentPage") == "images") { %>class="active"<%c++ } %>>Images</a>
+    <a href="/options/get" <%c++ if(@@.get<std::string>("currentPage") == "options") { %>class="active"<%c++ } %>>Options</a>
+    <a href="/customisation/list-scripts" <%c++ if(@@.get<std::string>("currentPage") == "customisation") { %>class="active"<%c++ } %>>Customisation</a>
+    <a href="/services" <%c++ if(@@.get<std::string>("currentPage") == "services") { %>class="active"<%c++ } %>>Services</a>
+    <a href="/manu-db" <%c++ if(@@.get<std::string>("currentPage") == "manufacturing") { %>class="active"<%c++ } %>>Manufacturing Database</a>
+</div>
+<%view-end%> 

@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Manufacturing Database</title>
+    <link rel="stylesheet" href="/css/common.css">
+</head>
+<body>
+    <%view navbar %>
+
+    <h1>Manufacturing Database</h1>
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Board</th>
+                <th>Serial</th>
+                <th>Ethernet MAC</th>
+                <th>WiFi MAC</th>
+                <th>Bluetooth MAC</th>
+                <th>eMMC Size</th>
+                <th>eMMC CID</th>
+                <th>RPi DUID</th>
+                <th>Revision</th>
+                <th>Processor</th>
+                <th>Memory</th>
+                <th>Manufacturer</th>
+                <th>Provision Time</th>
+            </tr>
+        </thead>
+        <tbody>
+        <%c++ 
+        auto devicesList = @@.get<std::vector<std::map<std::string, std::string>>>("devices");
+        if(devicesList.size() > 0) {
+        %>
+            <%c++ for(const auto& device : devicesList) { %>
+                <tr>
+                    <td><%c++ $$ << device.at("id"); %></td>
+                    <td><%c++ $$ << device.at("boardname"); %></td>
+                    <td><%c++ $$ << device.at("serial"); %></td>
+                    <td><%c++ $$ << device.at("eth_mac"); %></td>
+                    <td><%c++ $$ << device.at("wifi_mac"); %></td>
+                    <td><%c++ $$ << device.at("bt_mac"); %></td>
+                    <td><%c++ $$ << device.at("mmc_size"); %></td>
+                    <td><%c++ $$ << device.at("mmc_cid"); %></td>
+                    <td><%c++ $$ << device.at("rpi_duid"); %></td>
+                    <td><%c++ $$ << device.at("board_revision"); %></td>
+                    <td><%c++ $$ << device.at("processor"); %></td>
+                    <td><%c++ $$ << device.at("memory"); %></td>
+                    <td><%c++ $$ << device.at("manufacturer"); %></td>
+                    <td><%c++ $$ << device.at("provision_ts"); %></td>
+                </tr>
+            <%c++ } %>
+        <%c++ } else { %>
+                <tr>
+                    <td colspan="14" class="no-devices">No manufacturing data available</td>
+                </tr>
+        <%c++ } %>
+        </tbody>
+    </table>
+</body>
+</html> 

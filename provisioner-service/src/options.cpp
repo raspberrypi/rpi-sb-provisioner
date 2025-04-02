@@ -53,6 +53,7 @@ namespace provisioner {
                     optionsMap[key] = options[key].asString();
                 }
                 viewData.insert("options", optionsMap);
+                viewData.insert("currentPage", std::string("options"));
                 resp = HttpResponse::newHttpViewResponse("options.csp", viewData);
             } else {
                 resp->setStatusCode(k200OK);

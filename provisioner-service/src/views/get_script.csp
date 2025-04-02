@@ -5,14 +5,7 @@
     <link rel="stylesheet" href="/css/common.css">
 </head>
 <body>
-    <!-- Navigation Bar -->
-    <div class="navbar">
-        <a href="/devices">Devices</a>
-        <a href="/get-images">Images</a>
-        <a href="/options/get">Options</a>
-        <a href="/customisation/list-scripts" class="active">Customisation</a>
-        <a href="/services">Services</a>
-    </div>
+    <%view navbar %>
     
     <a href="/customisation/list-scripts" class="back-link">← Back to Scripts</a>
     <h1>View Script: @script_name</h1>

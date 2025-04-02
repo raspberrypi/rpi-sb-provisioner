@@ -134,14 +134,7 @@
     </script>
 </head>
 <body>
-    <!-- Navigation Bar -->
-    <div class="navbar">
-        <a href="/devices">Devices</a>
-        <a href="/get-images" class="active">Images</a>
-        <a href="/options/get">Options</a>
-        <a href="/customisation/list-scripts">Customisation</a>
-        <a href="/services">Services</a>
-    </div>
+    <%view navbar %>
 
     <h1>System Images</h1>
 

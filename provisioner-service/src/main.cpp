@@ -7,6 +7,7 @@
 #include "customisation.h"
 #include "options.h"
 #include "services.h"
+#include "manufacturing.h"
 
 using namespace drogon;
 
@@ -20,6 +21,7 @@ int main()
     provisioner::Customisation customisationHandlers = {};
     provisioner::Options optionHandlers = {};
     provisioner::Services serviceHandlers = {};
+    provisioner::Manufacturing manufacturingHandlers = {};
 
     auto& app = HttpAppFramework::instance();
 
@@ -28,6 +30,7 @@ int main()
     customisationHandlers.registerHandlers(app);
     optionHandlers.registerHandlers(app);
     serviceHandlers.registerHandlers(app);
+    manufacturingHandlers.registerHandlers(app);
 
     // Register root path handler to redirect to devices
     app.registerHandler("/", [](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
@@ -40,6 +43,11 @@ int main()
     // Get the current executable path and use it to calculate the static files path
     std::filesystem::path execPath = std::filesystem::current_path();
     std::string staticPath = (execPath / "provisioner-service/src/static").string();
+    constexpr const char *uploadPath = "/srv/rpi-sb-provisioner/uploads";
+
+    if (!std::filesystem::exists(uploadPath)) {
+        std::filesystem::create_directories(uploadPath);
+    }
     
     app
     .setBeforeListenSockOptCallback([](int fd) {
@@ -58,6 +66,7 @@ int main()
     .setClientMaxBodySize(std::numeric_limits<size_t>::max())
     .setThreadNum(nthreads)
     .setDocumentRoot(staticPath)
+    .setUploadPath(uploadPath)
     .setStaticFilesCacheTime(0) // Disable caching during development
     //.enableRunAsDaemon()
     .run();

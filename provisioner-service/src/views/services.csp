@@ -74,14 +74,7 @@
     </script>
 </head>
 <body>
-    <!-- Navigation Bar -->
-    <div class="navbar">
-        <a href="/devices">Devices</a>
-        <a href="/get-images">Images</a>
-        <a href="/options/get">Options</a>
-        <a href="/customisation/list-scripts">Customisation</a>
-        <a href="/services" class="active">Services</a>
-    </div>
+    <%view navbar %>
 
     <%c++ 
     bool hasWarning = false;

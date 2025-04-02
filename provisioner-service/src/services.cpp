@@ -150,6 +150,7 @@ namespace provisioner {
                     serviceMaps.push_back(serviceMap);
                 }
                 viewData.insert("services", serviceMaps);
+                viewData.insert("currentPage", std::string("services"));
                 LOG_INFO << "View data populated with " << serviceMaps.size() << " services";
                 resp = drogon::HttpResponse::newHttpViewResponse("services.csp", viewData);
             }
@@ -269,6 +270,7 @@ namespace provisioner {
             drogon::HttpViewData viewData;
             viewData.insert("service_name", serviceName);
             viewData.insert("log_entries", logEntries);
+            viewData.insert("currentPage", std::string("services"));
             resp = drogon::HttpResponse::newHttpViewResponse("service_log.csp", viewData);
             
             callback(resp);

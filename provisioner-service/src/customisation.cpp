@@ -88,6 +88,7 @@ namespace provisioner {
                 for (const auto& script : scripts["scripts"]) {
                     data.insert(script["filename"].asString(), script.toStyledString());
                 }
+                data.insert("currentPage", std::string("customisation"));
                 auto resp = drogon::HttpResponse::newHttpViewResponse("list_scripts.csp", data);
                 resp->setStatusCode(k200OK);
                 callback(resp);
@@ -154,6 +155,7 @@ namespace provisioner {
                 drogon::HttpViewData data;
                 data.insert("script_content", buffer.str());
                 data.insert("script_name", filename);
+                data.insert("currentPage", std::string("customisation"));
                 callback(HttpResponse::newHttpViewResponse("get-scripts.csp", data));
             } else {
                 resp->setContentTypeCode(CT_TEXT_PLAIN);
@@ -413,6 +415,7 @@ namespace provisioner {
                 drogon::HttpViewData data;
                 data.insert("filename", fileInfo.getFileName());
                 data.insert("success", true);
+                data.insert("currentPage", std::string("customisation"));
                 callback(HttpResponse::newHttpViewResponse("upload_script.csp", data));
             } else {
                 resp->setStatusCode(k200OK);

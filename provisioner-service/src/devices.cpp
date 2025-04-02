@@ -52,6 +52,7 @@ namespace provisioner {
                 auto acceptHeader = req->getHeader("Accept");
                 if (!acceptHeader.empty() && (acceptHeader.find("text/html") != std::string::npos)) {
                     HttpViewData viewData;
+                    viewData.insert("currentPage", std::string("devices"));
                     viewData.insert("warning", errorMsg);
                     resp = HttpResponse::newHttpViewResponse("devices.csp", viewData);
                 } else {
@@ -76,6 +77,7 @@ namespace provisioner {
                 auto acceptHeader = req->getHeader("Accept");
                 if (!acceptHeader.empty() && (acceptHeader.find("text/html") != std::string::npos)) {
                     HttpViewData viewData;
+                    viewData.insert("currentPage", std::string("devices"));
                     viewData.insert("warning", errorMsg);
                     resp = HttpResponse::newHttpViewResponse("devices.csp", viewData);
                 } else {
@@ -104,6 +106,7 @@ namespace provisioner {
 
                 HttpViewData viewData;
                 viewData.insert("devices", devices->devices);
+                viewData.insert("currentPage", std::string("devices"));
                 resp = HttpResponse::newHttpViewResponse("devices.csp", viewData);
             } else {
                 // JSON response for API clients
@@ -221,6 +224,7 @@ namespace provisioner {
                 viewData.insert("provisioner_log", provisioner_log);
                 viewData.insert("bootstrap_log", bootstrap_log);
                 viewData.insert("triage_log", triage_log);
+                viewData.insert("currentPage", std::string("devices"));
                 resp = HttpResponse::newHttpViewResponse("device_detail.csp", viewData);
             } else {
                 Json::Value root;

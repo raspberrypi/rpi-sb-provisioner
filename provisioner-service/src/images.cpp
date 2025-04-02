@@ -113,6 +113,7 @@ namespace provisioner {
                     imageMaps.push_back(imageMap);
                 }
                 viewData.insert("images", imageMaps);
+                viewData.insert("currentPage", std::string("images"));
                 LOG_INFO << "View data populated with " << imageMaps.size() << " images";
                 resp = HttpResponse::newHttpViewResponse("images.csp", viewData);
             } else {
