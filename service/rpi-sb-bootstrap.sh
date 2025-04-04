@@ -37,8 +37,8 @@ log() {
     touch "$log_file"
     chmod 644 "$log_file"
     
-    # Use atomic write for logging
-    with_lock "${LOCK_BASE}/log.lock" 5 "echo \"$message\" >> \"$log_file\""
+    # Write log message directly without locking
+    echo "$message" >> "$log_file"
     printf "%s\n" "$message"
 }
 
