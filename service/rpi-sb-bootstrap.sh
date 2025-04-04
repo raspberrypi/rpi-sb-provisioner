@@ -366,16 +366,17 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                     ;;
             esac
             log "Secure bootloader directory already exists, skipping setup"
-            if [ -f "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/special-reprovision-device" ]; then
+            if [ -f "/etc/rpi-sb-provisioner/special-reprovision-device/${TARGET_DEVICE_SERIAL}" ]; then
                 # This only makes sense if you're re-provisioning a device that's already been provisioned.
                 # It's a special case, and should not be used in normal operation.
                 # Additionally, this only works on Raspberry Pi 5-family devices.
                 if [ ! -f "${CUSTOMER_KEY_FILE_PEM}" ]; then
                     die "No customer key file to use for re-provisioning. Aborting."
                 fi
+                log "Re-signing bootcode for special re-provisioning case"
                 rpi-sign-bootcode --debug -c 2712 -i "${BOOTCODE_BINARY_IMAGE}" -o "${BOOTCODE_FLASHING_NAME}" -k "${CUSTOMER_KEY_FILE_PEM}" -v 0 -n 16
             fi
-            [ ! -f "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/special-skip-keywriter" ] && timeout_fatal rpiboot -d "${SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
+            [ ! -f "/etc/rpi-sb-provisioner/special-skip-eeprom/${TARGET_DEVICE_SERIAL}" ] && timeout_fatal rpiboot -d "${SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
         else
             log "Creating secure bootloader for future reuse"
             touch "${SECURE_BOOTLOADER_DIRECTORY}/config.txt"
@@ -452,13 +453,14 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                 fi
 
                 log "Writing key and EEPROM configuration to the device"
-                if [ -f "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/special-reprovision-device" ]; then
+                if [ -f "/etc/rpi-sb-provisioner/special-reprovision-device/${TARGET_DEVICE_SERIAL}" ]; then
                     # This only makes sense if you're re-provisioning a device that's already been provisioned.
                     # It's a special case, and should not be used in normal operation.
                     # Additionally, this only works on Raspberry Pi 5-family devices.
+                    log "Re-signing bootcode for special re-provisioning case"
                     rpi-sign-bootcode --debug -c 2712 -i "${BOOTCODE_BINARY_IMAGE}" -o "${BOOTCODE_FLASHING_NAME}" -k "${CUSTOMER_KEY_FILE_PEM}" -v 0 -n 16
                 fi
-                [ ! -f "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/special-skip-keywriter" ] && timeout_fatal rpiboot -d "${SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
+                [ ! -f "/etc/rpi-sb-provisioner/special-skip-eeprom/${TARGET_DEVICE_SERIAL}" ] && timeout_fatal rpiboot -d "${SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
             else
                 log "No key specified, skipping eeprom update"
             fi
@@ -565,7 +567,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                 --config "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" \
                 --out "${DESTINATION_EEPROM_IMAGE}" \
                 "${SOURCE_EEPROM_IMAGE}" || die "Failed to update EEPROM image"
-            [ ! -f "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/special-skip-keywriter" ] && timeout_fatal rpiboot -d "${NONSECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
+            [ ! -f "/etc/rpi-sb-provisioner/special-skip-eeprom/${TARGET_DEVICE_SERIAL}" ] && timeout_fatal rpiboot -d "${NONSECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
         fi
         case ${TARGET_DEVICE_FAMILY} in
             2712|2711)

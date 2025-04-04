@@ -307,10 +307,16 @@ The first stage of debugging unexpected results is to delete the contents of the
 $ sudo rm ${RPI_SB_WORKDIR}/*
 ----
 
-The second stage is to remove the progress file matching the serial number of the device you are debugging:
+The second stage is to remove the lock directory matching the serial number of the device you are debugging:
 
 ----
-$ sudo rm /var/log/rpi-sb-provisioner/<serial>/progress
+$ sudo rm -rf /var/lock/rpi-sb-provisioner/<serial>
+----
+
+Finally, check if you have issued either of the special-* flags for your device serial, and delete as you require:
+
+----
+$ find /etc/rpi-sb-provisioner -name <serial>
 ----
 
 === Disable Triage / Provision (Bootstrap Only)
@@ -323,11 +329,16 @@ $ sudo systemctl mask --runtime rpi-sb-triage@.service
 
 === Handling pre-signed devices
 
-Pre-signed Raspberry Pi 5 devices cannot execute the key writer without a modification to `rpi-sb-provisioner`, but you can bypass the key writer entirely by using a special file and removing the progress file:
+Pre-signed Raspberry Pi 5-family devices cannot follow the standard provisioning path. You must ensure you use the same signing key, and decide if you want to re-provision the EEPROM or skip EEPROM writing entirely:
 
+To skip EEPROM writing entirely, use the following command:
 ----
-$ sudo rm /var/log/rpi-sb-provisioner/<serial>/progress
-$ sudo touch /var/log/rpi-sb-provisioner/<serial>/special-skip-keywriter
+$ sudo touch /etc/rpi-sb-provisioner/special-skip-eeprom/<serial>
+----
+
+To fully re-provision the device using the same signing key, use the following command:
+----
+$ sudo touch /etc/rpi-sb-provisioner/special-reprovision-device/<serial>
 ----
 
 === Changing `config.txt`
