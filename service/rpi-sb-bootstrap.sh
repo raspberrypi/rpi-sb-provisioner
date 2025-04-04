@@ -47,26 +47,26 @@ cleanup() {
     if [ ${HOLDING_LOCKFILE} -eq 1 ]; then
         rm -rf "$DEVICE_LOCK"
         
-        if [ -n "${CUSTOMER_PUBLIC_KEY_FILE}" ]; then
-            announce_start "Deleting public key"
-            # shellcheck disable=SC2086
-            rm -f "${CUSTOMER_PUBLIC_KEY_FILE}" ${DEBUG}
-            CUSTOMER_PUBLIC_KEY_FILE=
-            announce_stop "Deleting public key"
-        fi
-
-        if [ -n "${DELETE_PRIVATE_TMPDIR}" ]; then
-            announce_start "Deleting customised intermediates"
-            # shellcheck disable=SC2086
-            rm -rf "${DELETE_PRIVATE_TMPDIR}" ${DEBUG}
-            DELETE_PRIVATE_TMPDIR=
-            announce_stop "Deleting customised intermediates"
-        fi
-
-        announce_start "Deleting bootstrap lock"
+        announce_start "Deleting udev lock"
         rm -f "/etc/udev/rules.d/99-rpi-sb-bootstrap-${TARGET_DEVICE_SERIAL}.rules"
         udevadm control --reload-rules
-        announce_stop "Deleting bootstrap lock"
+        announce_stop "Deleting udev lock"
+    fi
+
+    if [ -n "${CUSTOMER_PUBLIC_KEY_FILE}" ]; then
+        announce_start "Deleting public key"
+        # shellcheck disable=SC2086
+        rm -f "${CUSTOMER_PUBLIC_KEY_FILE}" ${DEBUG}
+        CUSTOMER_PUBLIC_KEY_FILE=
+        announce_stop "Deleting public key"
+    fi
+
+    if [ -n "${DELETE_PRIVATE_TMPDIR}" ]; then
+        announce_start "Deleting customised intermediates"
+        # shellcheck disable=SC2086
+        rm -rf "${DELETE_PRIVATE_TMPDIR}" ${DEBUG}
+        DELETE_PRIVATE_TMPDIR=
+        announce_stop "Deleting customised intermediates"
     fi
     
     # Clean up orphaned resources
