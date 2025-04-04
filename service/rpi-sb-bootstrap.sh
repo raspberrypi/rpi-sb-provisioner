@@ -353,6 +353,7 @@ record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_STARTED}" "${TARGET_USB_PATH
 if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then 
     if [ "${PROVISIONING_STYLE}" = "secure-boot" ]; then
         SECURE_BOOTLOADER_DIRECTORY="${RPI_SB_WORKDIR}/secure-bootloader/"
+        mkdir -p "${SECURE_BOOTLOADER_DIRECTORY}"
         if [ -f "${SECURE_BOOTLOADER_DIRECTORY}/config.txt" ]; then
             case ${TARGET_DEVICE_FAMILY} in
                 2712)
@@ -482,6 +483,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
         fi
     else # !PROVISIONING_STYLE=secure-boot
         NONSECURE_BOOTLOADER_DIRECTORY="${RPI_SB_WORKDIR}/non-secure-bootloader/"
+        mkdir -p "${NONSECURE_BOOTLOADER_DIRECTORY}"
         if [ -f "${NONSECURE_BOOTLOADER_DIRECTORY}/config.txt" ]; then
             log "Nonsecure bootloader directory already exists, skipping setup"
         else
