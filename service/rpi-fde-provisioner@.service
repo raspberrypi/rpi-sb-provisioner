@@ -3,5 +3,5 @@ Description=Provision a Raspberry Pi Device an OS that you supply inside of a LU
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/rpi-fde-provisioner.sh %I
+ExecStart=/usr/bin/rpi-fde-provisioner.sh %I
 EnvironmentFile=/etc/rpi-sb-provisioner/config

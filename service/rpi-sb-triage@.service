@@ -3,5 +3,5 @@ Description=Triage a Raspberry Pi Fastboot device
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/rpi-sb-triage.sh %I
+ExecStart=/usr/bin/rpi-sb-triage.sh %I
 EnvironmentFile=/etc/rpi-sb-provisioner/config

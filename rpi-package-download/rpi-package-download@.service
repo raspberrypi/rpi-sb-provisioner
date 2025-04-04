@@ -6,7 +6,7 @@ After=fetch-repo-package-list@https:--archive.raspberrypi.org-debian.service
 Type=oneshot
 Environment=REPOSITORY="https://archive.raspberrypi.org/debian"
 EnvironmentFile=/etc/rpi-sb-provisioner/config
-ExecStart=/usr/local/bin/rpi-package-download "%I"
+ExecStart=/usr/bin/rpi-package-download "%I"
 CacheDirectory=%n
 RuntimeDirectory=%n
 RuntimeDirectoryPreserve=true

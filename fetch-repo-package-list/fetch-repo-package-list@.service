@@ -5,7 +5,7 @@ Wants=fetch-repo-package-list@%i.timer
 [Service]
 Type=oneshot
 EnvironmentFile=/etc/rpi-sb-provisioner/config
-ExecStart=/usr/local/bin/fetch-repo-package-list "%I"
+ExecStart=/usr/bin/fetch-repo-package-list "%I"
 #ConfigurationDirectory=rpi-sb-provisioner
 CacheDirectory=%n
 RuntimeDirectory=%n

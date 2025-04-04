@@ -4,6 +4,6 @@ After=%i.device
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/rpi-sb-bootstrap.sh /%I
+ExecStart=/usr/bin/rpi-sb-bootstrap.sh /%I
 # '/' is needed - otherwise triage does not use correct address of device
 EnvironmentFile=/etc/rpi-sb-provisioner/config
