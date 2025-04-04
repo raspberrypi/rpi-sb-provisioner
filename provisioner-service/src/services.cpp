@@ -53,31 +53,34 @@ namespace provisioner {
             // Use D-Bus API as our method of service detection
             LOG_INFO << "Using D-Bus API to find services...";
             
-            // Use a simple ListUnits call to get all units without filtering
-            LOG_INFO << "Querying ALL systemd units with ListUnits...";
+            // Use a targeted approach with specific patterns instead of all units
+            LOG_INFO << "Querying systemd using ListUnitsByPatterns for specific service patterns...";
             sd_bus_message *m = nullptr;
             
-            // Make a simple call to ListUnits with no parameters
+            // Use ListUnitsByPatterns to only get the units we're interested in
             r = sd_bus_call_method(bus,
                                "org.freedesktop.systemd1",
                                "/org/freedesktop/systemd1",
                                "org.freedesktop.systemd1.Manager",
-                               "ListUnits",
+                               "ListUnitsByPatterns",
                                &error,
                                &m,
-                               "");
+                               "asas",
+                               0, NULL,   // Match all states - empty array means all
+                               3, "rpi-sb-*.service", "rpi-naked-*.service", "rpi-fde-*.service");
+            
             if (r < 0) {
-                LOG_ERROR << "Failed to call ListUnits: " << error.message;
+                LOG_ERROR << "Failed to call ListUnitsByPatterns: " << error.message;
                 sd_bus_error_free(&error);
                 sd_bus_unref(bus);
                 auto resp = drogon::HttpResponse::newHttpResponse();
                 resp->setStatusCode(drogon::k500InternalServerError);
-                resp->setBody("Failed to list systemd units");
+                resp->setBody("Failed to list systemd units: " + std::string(error.message));
                 callback(resp);
                 return;
             }
             
-            LOG_INFO << "ListUnits call succeeded, now reading response...";
+            LOG_INFO << "ListUnitsByPatterns call succeeded, now reading response...";
             
             // Parse the response
             r = sd_bus_message_enter_container(m, SD_BUS_TYPE_ARRAY, "(ssssssouso)");
@@ -98,7 +101,6 @@ namespace provisioner {
             LOG_INFO << "Processing units...";
             
             int totalUnits = 0;
-
             std::vector<std::string> matchingUnitNames;
             
             while ((r = sd_bus_message_enter_container(m, SD_BUS_TYPE_STRUCT, "ssssssouso")) == 1) {
@@ -120,7 +122,7 @@ namespace provisioner {
                 totalUnits++;
                 std::string serviceName(name);
                 
-                // Check for any of our service prefixes - be as loose as possible
+                // Check for any rpi service
                 if (serviceName.find("rpi-sb-") != std::string::npos ||
                     serviceName.find("rpi-naked-") != std::string::npos ||
                     serviceName.find("rpi-fde-") != std::string::npos) {
@@ -130,8 +132,7 @@ namespace provisioner {
                            << ", sub=" << sub_state;
                     matchingUnitNames.push_back(serviceName);
                     
-                    
-                    // Add ANY matching unit to our service info list - don't overthink it
+                    // Add matching unit to our service info list
                     ServiceInfo info;
                     
                     // Check if it's an instance unit (has @ symbol)
@@ -168,12 +169,18 @@ namespace provisioner {
                         continue;
                     }
                 }
+                
+                // Exit the struct container for this unit
                 sd_bus_message_exit_container(m);
             }
             
-            LOG_INFO << "ListUnits processing complete:";
-            LOG_INFO << "- Total units found: " << totalUnits;
-            LOG_INFO << "- Matching units (rpi-*): " << matchingUnitNames.size();
+            // Always exit the array container when done
+            sd_bus_message_exit_container(m);
+            sd_bus_message_unref(m);
+            
+            LOG_INFO << "Service processing complete:";
+            LOG_INFO << "- Total units processed: " << totalUnits;
+            LOG_INFO << "- Matching units: " << matchingUnitNames.size();
             LOG_INFO << "- Units added to service list: " << serviceInfos.size();
             
             // Print out all discovered services in the final list
