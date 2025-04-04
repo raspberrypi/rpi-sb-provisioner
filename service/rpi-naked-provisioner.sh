@@ -229,8 +229,8 @@ else
 fi
 
 # Fast path: If we've already generated the assets, just move to flashing.
-if [ ! -f "${RPI_SB_WORKDIR}/bootfs-temporary.img" ] ||
-   [ ! -s "${RPI_SB_WORKDIR}/bootfs-temporary.img" ] ||
+if [ ! -f "${RPI_SB_WORKDIR}/bootfs-temporary.simg" ] ||
+   [ ! -s "${RPI_SB_WORKDIR}/bootfs-temporary.simg" ] ||
    [ ! -e "${TMP_DIR}/rpi-rootfs-img-mount" ]; then
 
     announce_start "OS Image Mounting"
@@ -264,6 +264,8 @@ if [ ! -f "${RPI_SB_WORKDIR}/bootfs-temporary.img" ] ||
 
     # Immediately copy the boot files to the boot partition
     dd if="${BOOT_DEV}" of="${RPI_SB_WORKDIR}"/bootfs-temporary.img
+    img2simg -s "${RPI_SB_WORKDIR}"/bootfs-temporary.img "${RPI_SB_WORKDIR}"/bootfs-temporary.simg
+    rm -f "${RPI_SB_WORKDIR}"/bootfs-temporary.img
 
     # shellcheck disable=SC2086
     mount -t ext4 "${ROOT_DEV}" "${TMP_DIR}"/rpi-rootfs-img-mount ${DEBUG}
@@ -279,7 +281,7 @@ fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" erase "${RPI_DEVICE_STORAGE_TYPE}"
 sleep 2
 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem partinit "${RPI_DEVICE_STORAGE_TYPE}" DOS
 sleep 2
-fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 0c "$(stat -c%s "${RPI_SB_WORKDIR}/bootfs-temporary.img")"
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 0c "$(simg_expanded_size "${RPI_SB_WORKDIR}/bootfs-temporary.simg")"
 sleep 2
 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 11 # Grow to fill storage
 sleep 2
@@ -294,7 +296,7 @@ announce_start "Resizing OS images"
 # https://dl.google.com/android/repository/platform-tools-latest-darwin.zip
 # https://dl.google.com/android/repository/platform-tools-latest-windows.zip
 TARGET_STORAGE_ROOT_EXTENT="$(get_variable partition-size:"${RPI_DEVICE_STORAGE_TYPE}"p2)"
-if [ -f "${RPI_SB_WORKDIR}/rootfs-temporary.simg" ] && [ "$((TARGET_STORAGE_ROOT_EXTENT))" -eq "$(stat -c%b*%B "${RPI_SB_WORKDIR}"/rootfs-temporary.simg)" ]; then
+if [ -f "${RPI_SB_WORKDIR}/rootfs-temporary.simg" ] && [ "$((TARGET_STORAGE_ROOT_EXTENT))" -eq "$(simg_expanded_size "${RPI_SB_WORKDIR}"/rootfs-temporary.simg)" ]; then
     announce_stop "Resizing OS images: Not required, already the correct size"
 else
     mke2fs -t ext4 -b 4096 -d "${TMP_DIR}"/rpi-rootfs-img-mount "${RPI_SB_WORKDIR}"/rootfs-temporary.img $((TARGET_STORAGE_ROOT_EXTENT / 4096))
@@ -306,7 +308,7 @@ else
 fi
 
 announce_start "Writing OS images"
-fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}"p1 "${RPI_SB_WORKDIR}"/bootfs-temporary.img
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}"p1 "${RPI_SB_WORKDIR}"/bootfs-temporary.simg
 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}"p2 "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
 announce_stop "Writing OS images"
 
