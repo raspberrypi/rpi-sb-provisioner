@@ -440,10 +440,6 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                 # This directive tells the bootloader to reboot once it's written the OTP
                 echo "recovery_reboot=1" >> "${SECURE_BOOTLOADER_DIRECTORY}/config.txt"
 
-                if [ -n "${RPI_DEVICE_FETCH_METADATA}" ]; then
-                    echo "recovery_metadata=1" >> "${SECURE_BOOTLOADER_DIRECTORY}/config.txt"
-                fi
-
                 if [ -n "${RPI_DEVICE_LOCK_JTAG}" ]; then
                     echo "program_jtag_lock=1" >> "${SECURE_BOOTLOADER_DIRECTORY}/config.txt"
                 fi
@@ -548,10 +544,6 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
 
             # This directive tells the bootloader to reboot once it's written the OTP
             echo "recovery_reboot=1" >> "${NONSECURE_BOOTLOADER_DIRECTORY}/config.txt"
-
-            if [ -n "${RPI_DEVICE_FETCH_METADATA}" ]; then
-                echo "recovery_metadata=1" >> "${NONSECURE_BOOTLOADER_DIRECTORY}/config.txt"
-            fi
 
             if [ -n "${RPI_DEVICE_LOCK_JTAG}" ]; then
                 log "JTAG lock requested, but not supported on non-secure-boot devices"
