@@ -97,7 +97,8 @@ die() {
     record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
     # shellcheck disable=SC2086
     echo "$@" ${DEBUG}
-    exit 1
+    false
+    cleanup
 }
 
 read_config
