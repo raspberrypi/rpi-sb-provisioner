@@ -19,7 +19,6 @@ export PROVISIONER_STARTED="NAKED-PROVISIONER-STARTED"
 . "$(dirname "$0")/rpi-sb-common.sh"
 
 die() {
-    echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
     record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "${TARGET_USB_PATH}"
     # shellcheck disable=SC2086
     echo "$@" ${DEBUG}
@@ -165,11 +164,9 @@ timeout_fatal() {
     timeout 120 ${command}
     command_exit_status=$?
     if [ ${command_exit_status} -eq 124 ]; then
-        echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
         record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "${TARGET_USB_PATH}"
         die "\"${command}\" failed, timed out."
     elif [ ${command_exit_status} -ne 0 ]; then
-        echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
         record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "${TARGET_USB_PATH}"
         die "\"$command\" failed, exit status: ${command_exit_status}"
     else
@@ -195,7 +192,6 @@ trap cleanup INT TERM
 
 # Start the provisioner phase
 
-[ -n "${TARGET_DEVICE_SERIAL}" ] && echo "${PROVISIONER_STARTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
 record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_STARTED}" "${TARGET_USB_PATH}"
 # These tools are used to modify the supplied images, and deal with mounting and unmounting the images.
 check_command_exists losetup
@@ -319,9 +315,6 @@ fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem led PWR 0
 announce_stop "Set LED status"
 
 metadata_gather
-
-echo "${PROVISIONER_FINISHED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
-record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_FINISHED}" "${TARGET_USB_PATH}"
 
 announce_start "Cleaning up"
 cleanup
