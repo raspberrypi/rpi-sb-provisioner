@@ -19,8 +19,6 @@ export PROVISIONER_STARTED="SB-PROVISIONER-STARTED"
 # shellcheck disable=SC1091
 . "$(dirname "$0")/rpi-sb-common.sh"
 
-setup_fastboot_and_id_vars "$1"
-
 read_config
 
 : "${RPI_DEVICE_STORAGE_CIPHER:=aes-xts-plain64}"
@@ -42,13 +40,7 @@ get_signing_directives() {
         fi
     fi
 }
-
-echo "${KEYWRITER_STARTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
-
-
-
 die() {
-    echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
     record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "${TARGET_USB_PATH}"
     # shellcheck disable=SC2086
     echo "$@" ${DEBUG}
@@ -63,8 +55,6 @@ log() {
     echo "$@" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/provisioner.log
 }
 
-
-# TODO: Refactor these two functions to use the same logic, but with different consequences for failure.
 timeout_nonfatal() {
     command="$*"
     set +e
@@ -89,11 +79,9 @@ timeout_fatal() {
     timeout 120 ${command}
     command_exit_status=$?
     if [ ${command_exit_status} -eq 124 ]; then
-        echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
         record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "${TARGET_USB_PATH}"
         die "\"${command}\" failed, timed out."
     elif [ ${command_exit_status} -ne 0 ]; then
-        echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
         record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "${TARGET_USB_PATH}"
         die "\"$command\" failed, exit status: ${command_exit_status}"
     else
@@ -101,7 +89,6 @@ timeout_fatal() {
     fi
     set -e
 }
-
 TMP_DIR=""
 
 writeSig() {
@@ -282,8 +269,6 @@ trap cleanup INT TERM
 
 ### Start the provisioner phase
 
-echo "${PROVISIONER_STARTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
-
 # These tools are used to modify the supplied images, and deal with mounting and unmounting the images.
 check_command_exists losetup
 check_command_exists mknod
@@ -317,6 +302,8 @@ check_command_exists grep
 get_variable() {
     fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar "$1" 2>&1 | grep -oP "${1}"': \K[^\r\n]*'
 }
+
+setup_fastboot_and_id_vars "$1"
 
 record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_STARTED}" "${TARGET_USB_PATH}"
 
@@ -576,7 +563,6 @@ announce_stop "Set LED status"
 
 metadata_gather
 
-echo "${PROVISIONER_FINISHED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
 record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_FINISHED}" "${TARGET_USB_PATH}"
 announce_start "Cleaning up"
 cleanup
