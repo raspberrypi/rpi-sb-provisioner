@@ -18,23 +18,6 @@ export PROVISIONER_STARTED="NAKED-PROVISIONER-STARTED"
 # shellcheck disable=SC1091
 . "$(dirname "$0")/rpi-sb-common.sh"
 
-setup_fastboot_and_id_vars "$1"
-
-# Initialize required directories
-init_directories
-
-# Check resource limits before proceeding
-if ! check_provisioner_limit; then
-    die "Maximum number of concurrent provisioners ($MAX_CONCURRENT_PROVISIONERS) reached"
-fi
-
-# Setup log directory with proper permissions
-if ! setup_log_directory "${TARGET_DEVICE_SERIAL}"; then
-    die "Failed to setup log directory for ${TARGET_DEVICE_SERIAL}"
-fi
-
-read_config
-
 die() {
     echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
     record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "${TARGET_USB_PATH}"
@@ -47,6 +30,10 @@ log() {
     echo "$@" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/provisioner.log
     printf "%s\n" "$@"
 }
+
+setup_fastboot_and_id_vars "$1"
+
+read_config
 
 TMP_DIR=""
 
