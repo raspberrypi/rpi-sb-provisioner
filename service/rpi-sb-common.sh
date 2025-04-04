@@ -5,12 +5,10 @@
 
 # Base directories for various operations
 LOCK_BASE="/var/lock/rpi-sb-provisioner"
-STATE_BASE="/var/run/rpi-sb-state"
 LOG_BASE="/var/log/rpi-sb-provisioner"
 TEMP_BASE="/srv/rpi-sb-provisioner"
 
 # Resource limits
-MAX_CONCURRENT_PROVISIONERS=255
 MAX_TEMP_DIR_AGE_HOURS=24
 
 # Creates a directory atomically, ensuring no race conditions
@@ -39,46 +37,41 @@ atomic_mkdir() {
 with_lock() {
     lock_file="$1"
     timeout="${2:-10}"
-    fd=200
+    shift 2
     
-    eval "exec $fd>$lock_file"
-    if flock -x -w "$timeout" "$fd"; then
-        "$3"
-        flock -u "$fd"
-        return 0
-    else
-        return 1
-    fi
-}
-
-# Creates log directory and ensures proper permissions
-# Parameters:
-#   $1 - Device serial number
-# Returns:
-#   0 - Success
-#   1 - Failure
-setup_log_directory() {
-    serial="$1"
-    log_dir="${LOG_BASE}/${serial}"
+    # Create lock file if it doesn't exist
+    touch "$lock_file"
     
-    if atomic_mkdir "$log_dir"; then
-        chmod 755 "$log_dir"
-        return 0
-    fi
-    return 1
-}
-
-# Checks if maximum concurrent provisioners limit is reached
-# Returns:
-#   0 - Limit not reached
-#   1 - Limit reached
-check_provisioner_limit() {
-    current_provisioners=$(find "$LOCK_BASE" -type d | wc -l)
+    # Use file descriptor 9 for locking
+    # Redirecting within a subshell to ensure cleanup
+    (
+        # Try to acquire lock with timeout
+        start_time=$(date +%s)
+        end_time=$((start_time + timeout))
+        
+        while true; do
+            if flock -n -x 9; then
+                # Lock acquired, run the command
+                "$@"
+                ret=$?
+                # Lock is released when fd 9 is closed upon subshell exit
+                exit $ret
+            fi
+            
+            # Check if timeout has been reached
+            current_time=$(date +%s)
+            if [ "$current_time" -ge "$end_time" ]; then
+                # Timeout reached
+                exit 1
+            fi
+            
+            # Wait a bit before trying again
+            sleep 0.1 2>/dev/null || sleep 1
+        done
+    ) 9>"$lock_file"
     
-    if [ "$current_provisioners" -ge "$MAX_CONCURRENT_PROVISIONERS" ]; then
-        return 1
-    fi
-    return 0
+    # Return the exit status of the subshell
+    return $?
 }
 
 # Cleans up orphaned resources
@@ -175,8 +168,7 @@ setup_fastboot_and_id_vars() {
 
     # Ensure TARGET_USB_PATH is set
     if [ -z "${TARGET_USB_PATH}" ]; then
-        provisioner_log "Error: Could not determine USB path for device ${TARGET_DEVICE_SERIAL}"
-        echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
+        log "Error: Could not determine USB path for device ${TARGET_DEVICE_SERIAL}"
         record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "unknown-usb-path"
         exit 1
     fi
