@@ -8,3 +8,4 @@
 build
 *.egg-info
 debian/rpi-sb-provisioner.1
+obj-*-gnu/
