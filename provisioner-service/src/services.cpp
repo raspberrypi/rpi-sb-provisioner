@@ -21,8 +21,10 @@ using namespace trantor;
 #include <memory>
 #include <unordered_set>
 #include <sstream>
+#include <algorithm>
+#include <time.h>
 
-#include "services.h"
+#include <services.h>
 
 namespace provisioner {
 
@@ -159,10 +161,71 @@ namespace provisioner {
                         }
                         info.status = sub_state;
                         info.active = active_state;
+                        
+                        // Get the last active timestamp for the service
+                        info.timestamp = 0; // Default value
+                        
+                        // Try using journal to get timestamp (more reliable than D-Bus properties)
+                        sd_journal *j;
+                        int j_r = sd_journal_open(&j, SD_JOURNAL_LOCAL_ONLY);
+                        if (j_r >= 0) {
+                            // Add filter for the specific unit
+                            std::string match = "_SYSTEMD_UNIT=" + serviceName;
+                            j_r = sd_journal_add_match(j, match.c_str(), 0);
+                            
+                            if (j_r >= 0) {
+                                // Seek to the latest entry
+                                j_r = sd_journal_seek_tail(j);
+                                if (j_r >= 0) {
+                                    // Get the first (latest) entry
+                                    j_r = sd_journal_previous(j);
+                                    if (j_r > 0) {
+                                        // Get the timestamp
+                                        uint64_t usec;
+                                        j_r = sd_journal_get_realtime_usec(j, &usec);
+                                        if (j_r >= 0) {
+                                            info.timestamp = usec;
+                                            LOG_INFO << "Got journal timestamp for " << serviceName << ": " << usec;
+                                        } else {
+                                            LOG_WARN << "Failed to get journal timestamp for " << serviceName << ": " << strerror(-j_r);
+                                        }
+                                    } else {
+                                        LOG_WARN << "No journal entries found for " << serviceName;
+                                    }
+                                } else {
+                                    LOG_WARN << "Failed to seek journal tail for " << serviceName << ": " << strerror(-j_r);
+                                }
+                            } else {
+                                LOG_WARN << "Failed to add journal match for " << serviceName << ": " << strerror(-j_r);
+                            }
+                            sd_journal_close(j);
+                        } else {
+                            LOG_WARN << "Failed to open journal for " << serviceName << ": " << strerror(-j_r);
+                        }
+                        
+                        // If we couldn't get a timestamp, use current time for active services and a lower value for failed
+                        if (info.timestamp == 0) {
+                            if (info.active == "active") {
+                                // For active services, use current time (prioritize them)
+                                struct timespec ts;
+                                clock_gettime(CLOCK_REALTIME, &ts);
+                                info.timestamp = (uint64_t)ts.tv_sec * 1000000 + (uint64_t)ts.tv_nsec / 1000;
+                                LOG_INFO << "Using current time for active service " << serviceName << ": " << info.timestamp;
+                            } else {
+                                // For failed/inactive services, use a lower timestamp (older)
+                                struct timespec ts;
+                                clock_gettime(CLOCK_REALTIME, &ts);
+                                // Subtract 1 hour to make them appear below active services
+                                info.timestamp = ((uint64_t)ts.tv_sec - 3600) * 1000000 + (uint64_t)ts.tv_nsec / 1000;
+                                LOG_INFO << "Using fallback time for inactive service " << serviceName << ": " << info.timestamp;
+                            }
+                        }
+                        
                         serviceInfos.push_back(info);
                         LOG_INFO << "Added instance unit: base=" << info.base_name 
                                 << ", param=" << info.instance
-                                << ", name=" << info.name;
+                                << ", name=" << info.name 
+                                << ", timestamp=" << info.timestamp;
                     } else {
                         // Regular service
                         LOG_INFO << "Skipping regular service: " << serviceName;
@@ -183,7 +246,13 @@ namespace provisioner {
             LOG_INFO << "- Matching units: " << matchingUnitNames.size();
             LOG_INFO << "- Units added to service list: " << serviceInfos.size();
             
-            // Print out all discovered services in the final list
+            // Sort services by timestamp (most recent first)
+            std::sort(serviceInfos.begin(), serviceInfos.end(), 
+                [](const ServiceInfo& a, const ServiceInfo& b) {
+                    return a.timestamp > b.timestamp; // Descending order
+                });
+            
+            LOG_INFO << "Services sorted by timestamp (newest first)";
             LOG_INFO << "FINAL SERVICES LIST:";
             for (size_t i = 0; i < serviceInfos.size(); i++) {
                 const auto& info = serviceInfos[i];
@@ -198,7 +267,8 @@ namespace provisioner {
                       << ", name=" << info.name
                       << ", instance=" << info.instance
                       << ", active=" << info.active 
-                      << ", status=" << info.status << ")";
+                      << ", status=" << info.status
+                      << ", timestamp=" << info.timestamp << ")";
             }
             
             sd_bus_unref(bus);

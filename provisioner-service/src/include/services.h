@@ -11,6 +11,7 @@ namespace provisioner {
         std::string active;      // Active state
         std::string instance;    // For template instance services (after @)
         std::string base_name;   // Base name without @ for grouping
+        uint64_t timestamp;      // Last active timestamp in microseconds
     };
 
     class Services {
