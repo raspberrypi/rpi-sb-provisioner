@@ -53,10 +53,9 @@ namespace provisioner {
             }
 
             // Use D-Bus API as our method of service detection
-            LOG_INFO << "Using D-Bus API to find services...";
             
             // Use a targeted approach with specific patterns instead of all units
-            LOG_INFO << "Querying systemd using ListUnitsByPatterns for specific service patterns...";
+            LOG_INFO << "Querying systemd for service patterns...";
             sd_bus_message *m = nullptr;
             
             // Use ListUnitsByPatterns to only get the units we're interested in
@@ -82,8 +81,6 @@ namespace provisioner {
                 return;
             }
             
-            LOG_INFO << "ListUnitsByPatterns call succeeded, now reading response...";
-            
             // Parse the response
             r = sd_bus_message_enter_container(m, SD_BUS_TYPE_ARRAY, "(ssssssouso)");
             if (r < 0) {
@@ -95,13 +92,9 @@ namespace provisioner {
                 resp->setBody("Failed to parse systemd response");
                 callback(resp);
                 return;
-            } else {
-                LOG_INFO << "Successfully entered array container";
             }
             
             // Process all units returned
-            LOG_INFO << "Processing units...";
-            
             int totalUnits = 0;
             std::vector<std::string> matchingUnitNames;
             
@@ -128,10 +121,6 @@ namespace provisioner {
                 if (serviceName.find("rpi-sb-") != std::string::npos ||
                     serviceName.find("rpi-naked-") != std::string::npos ||
                     serviceName.find("rpi-fde-") != std::string::npos) {
-                    LOG_INFO << "*** Found provisioner service: " << serviceName 
-                           << ", load=" << load_state 
-                           << ", active=" << active_state 
-                           << ", sub=" << sub_state;
                     matchingUnitNames.push_back(serviceName);
                     
                     // Add matching unit to our service info list
@@ -185,12 +174,12 @@ namespace provisioner {
                                         j_r = sd_journal_get_realtime_usec(j, &usec);
                                         if (j_r >= 0) {
                                             info.timestamp = usec;
-                                            LOG_INFO << "Got journal timestamp for " << serviceName << ": " << usec;
+                                            // Don't log success case to reduce noise
                                         } else {
                                             LOG_WARN << "Failed to get journal timestamp for " << serviceName << ": " << strerror(-j_r);
                                         }
                                     } else {
-                                        LOG_WARN << "No journal entries found for " << serviceName;
+                                        // Don't log empty journal - normal for new services
                                     }
                                 } else {
                                     LOG_WARN << "Failed to seek journal tail for " << serviceName << ": " << strerror(-j_r);
@@ -210,25 +199,21 @@ namespace provisioner {
                                 struct timespec ts;
                                 clock_gettime(CLOCK_REALTIME, &ts);
                                 info.timestamp = (uint64_t)ts.tv_sec * 1000000 + (uint64_t)ts.tv_nsec / 1000;
-                                LOG_INFO << "Using current time for active service " << serviceName << ": " << info.timestamp;
+                                // Reduced logging - no need to log fallback for active services
                             } else {
                                 // For failed/inactive services, use a lower timestamp (older)
                                 struct timespec ts;
                                 clock_gettime(CLOCK_REALTIME, &ts);
                                 // Subtract 1 hour to make them appear below active services
                                 info.timestamp = ((uint64_t)ts.tv_sec - 3600) * 1000000 + (uint64_t)ts.tv_nsec / 1000;
-                                LOG_INFO << "Using fallback time for inactive service " << serviceName << ": " << info.timestamp;
+                                // Reduced logging - no need to log fallback for inactive services
                             }
                         }
                         
                         serviceInfos.push_back(info);
-                        LOG_INFO << "Added instance unit: base=" << info.base_name 
-                                << ", param=" << info.instance
-                                << ", name=" << info.name 
-                                << ", timestamp=" << info.timestamp;
+                        // Removed detailed service addition logging
                     } else {
-                        // Regular service
-                        LOG_INFO << "Skipping regular service: " << serviceName;
+                        // Regular service - no need to log skipping
                         continue;
                     }
                 }
@@ -241,10 +226,7 @@ namespace provisioner {
             sd_bus_message_exit_container(m);
             sd_bus_message_unref(m);
             
-            LOG_INFO << "Service processing complete:";
-            LOG_INFO << "- Total units processed: " << totalUnits;
-            LOG_INFO << "- Matching units: " << matchingUnitNames.size();
-            LOG_INFO << "- Units added to service list: " << serviceInfos.size();
+            LOG_INFO << "Processed " << totalUnits << " units, found " << serviceInfos.size() << " matching services";
             
             // Sort services by timestamp (most recent first)
             std::sort(serviceInfos.begin(), serviceInfos.end(), 
@@ -252,24 +234,7 @@ namespace provisioner {
                     return a.timestamp > b.timestamp; // Descending order
                 });
             
-            LOG_INFO << "Services sorted by timestamp (newest first)";
-            LOG_INFO << "FINAL SERVICES LIST:";
-            for (size_t i = 0; i < serviceInfos.size(); i++) {
-                const auto& info = serviceInfos[i];
-                std::string displayName;
-                if (!info.instance.empty()) {
-                    displayName = info.base_name + "@" + info.instance;
-                } else {
-                    displayName = info.base_name;
-                }
-                LOG_INFO << "[" << i << "] " << displayName 
-                      << " (base=" << info.base_name 
-                      << ", name=" << info.name
-                      << ", instance=" << info.instance
-                      << ", active=" << info.active 
-                      << ", status=" << info.status
-                      << ", timestamp=" << info.timestamp << ")";
-            }
+            // Removed detailed sorted services logging
             
             sd_bus_unref(bus);
             
@@ -280,8 +245,6 @@ namespace provisioner {
             if (!acceptHeader.empty() && acceptHeader.find("application/json") != std::string::npos) {
                 // Return JSON response
                 Json::Value serviceArray(Json::arrayValue);
-                
-                LOG_INFO << "Creating JSON response with " << serviceInfos.size() << " services";
                 
                 for (const auto& info : serviceInfos) {
                     Json::Value serviceObj;
@@ -300,17 +263,12 @@ namespace provisioner {
                     }
                     serviceObj["full_name"] = fullName;
                     
-                    LOG_INFO << "JSON: Adding service: base_name='" << info.base_name 
-                            << "', name='" << info.name
-                            << "', instance='" << info.instance
-                            << "', full_name='" << fullName
-                            << "', active='" << info.active 
-                            << "', status='" << info.status << "'";
+                    // Removed per-service JSON logging
                     
                     serviceArray.append(serviceObj);
                 }
                 
-                LOG_INFO << "Created JSON array with " << serviceArray.size() << " services";
+                // Minimal logging for JSON response
                 
                 Json::Value rootObj;
                 rootObj["services"] = serviceArray;
@@ -318,16 +276,15 @@ namespace provisioner {
                 resp->setStatusCode(drogon::k200OK);
                 resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
                 std::string jsonOutput = rootObj.toStyledString();
-                LOG_INFO << "JSON response: " << jsonOutput;
+                // Removed JSON output logging
                 resp->setBody(jsonOutput);
                 
-                LOG_INFO << "JSON response ready with " << serviceArray.size() << " services";
+                LOG_INFO << "JSON response prepared with " << serviceArray.size() << " services";
             } else {
                 // Return HTML view
                 drogon::HttpViewData viewData;
                 std::vector<std::map<std::string, std::string>> serviceMaps;
                 
-                LOG_INFO << "Converting " << serviceInfos.size() << " services to UI data:";
                 for (auto && info : serviceInfos) {
                     std::map<std::string, std::string> serviceMap;
                     
@@ -346,23 +303,16 @@ namespace provisioner {
                     }
                     serviceMap["full_name"] = fullName;
                     
-                    // Debug output for each service being added to the view
-                    LOG_INFO << "UI Service: base_name='" << serviceMap["base_name"] 
-                           << "', name='" << serviceMap["name"]
-                           << "', instance='" << serviceMap["instance"]
-                           << "', full_name='" << serviceMap["full_name"]
-                           << "', status='" << serviceMap["status"]
-                           << "', active='" << serviceMap["active"] << "'";
+                    // Removed per-service UI logging
                     
                     serviceMaps.push_back(serviceMap);
                 }
                 viewData.insert("services", serviceMaps);
                 viewData.insert("currentPage", std::string("services"));
-                LOG_INFO << "View data populated with " << serviceMaps.size() << " services";
+                // Minimal view data logging
                 resp = drogon::HttpResponse::newHttpViewResponse("services.csp", viewData);
                 
-                // Debug the viewData
-                LOG_INFO << "ViewData ready for rendering with " << serviceMaps.size() << " services";
+                LOG_INFO << "HTML view prepared with " << serviceMaps.size() << " services";
             }
             
             callback(resp);
