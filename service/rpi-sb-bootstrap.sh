@@ -11,9 +11,6 @@ export BOOTSTRAP_FINISHED="BOOTSTRAP-FINISHED"
 export BOOTSTRAP_ABORTED="BOOTSTRAP-ABORTED"
 export BOOTSTRAP_STARTED="BOOTSTRAP-STARTED"
 
-# Resource limits
-MAX_CONCURRENT_BOOTSTRAPS=64
-MAX_TEMP_DIR_AGE_HOURS=24
 
 # Lock directories
 LOCK_BASE="/var/lock/rpi-sb-bootstrap"
@@ -24,6 +21,10 @@ TEMP_BASE="/srv/rpi-sb-bootstrap"
 # Source common helper functions
 # shellcheck disable=SC1091
 . "$(dirname "$0")/rpi-sb-common.sh"
+# shellcheck disable=SC1091
+. /var/lib/rpi-sb-provisioner/manufacturing-data
+# shellcheck disable=SC1091
+. /var/lib/rpi-sb-provisioner/state-recording
 
 HOLDING_LOCKFILE=0
 
@@ -154,10 +155,8 @@ timeout_fatal() {
     timeout 120 ${command}
     command_exit_status=$?
     if [ ${command_exit_status} -eq 124 ]; then
-        echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
         die "\"${command}\" failed, timed out."
     elif [ ${command_exit_status} -ne 0 ]; then
-        echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
         die "\"$command\" failed, exit status: ${command_exit_status}"
     else
         log "\"$command\" succeeded."
@@ -378,10 +377,6 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
         else
             log "Creating secure bootloader for future reuse"
             touch "${SECURE_BOOTLOADER_DIRECTORY}/config.txt"
-            touch "${SECURE_BOOTLOADER_DIRECTORY}/pieeprom.bin"
-            touch "${SECURE_BOOTLOADER_DIRECTORY}/pieeprom.sig"
-            touch "${SECURE_BOOTLOADER_DIRECTORY}/bootcode4.bin"
-            touch "${SECURE_BOOTLOADER_DIRECTORY}/bootcode5.bin"
 
             announce_start "Setting up the environment for a signed-boot capable device"
             if [ -z "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" ]; then
@@ -606,7 +601,6 @@ record_state "${TARGET_DEVICE_SERIAL}" "bootstrap-fastboot-initialisation-starte
 timeout_fatal rpiboot -v -d "${RPI_SB_WORKDIR}" -p "${TARGET_USB_PATH}"
 set +e
 
-# Atomic log file movement
 if [ -n "${TARGET_DEVICE_SERIAL}" ]; then
     target_log_dir="/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}"
     early_log_dir="${EARLY_LOG_DIRECTORY}"
