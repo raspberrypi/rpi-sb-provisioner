@@ -26,7 +26,7 @@ record_state() {
     serial=$1
     state=$2
     endpoint=$3
-    sqlite3 "/srv/rpi-sb-provisioner/state.db" "INSERT INTO devices (serial, endpoint, state) VALUES ('$serial', '$endpoint', '$state');"
+    sqlite3 "/srv/rpi-sb-provisioner/state.db" "INSERT INTO devices(serial, endpoint, state) VALUES ('$serial', '$endpoint', '$state');"
 }
 
 # get_usb_path_for_serial() - Finds the USB path for a device with a specific serial number
@@ -82,7 +82,7 @@ get_usb_path_for_serial() {
             serial=$(udevadm info --name="$device" --query=property --property=ID_SERIAL_SHORT --value 2>/dev/null)
             if [ "$serial" = "${TARGET_DEVICE_SERIAL}" ]; then
                 TARGET_USB_PATH="$(udevadm info "$device" | grep -oP '^P: \K.*')"
-                provisioner_log "Found USB path ${TARGET_USB_PATH} using udevadm for device ${TARGET_DEVICE_SERIAL}"
+                log "Found USB path ${TARGET_USB_PATH} using udevadm for device ${TARGET_DEVICE_SERIAL}"
                 return 0
             fi
         done
