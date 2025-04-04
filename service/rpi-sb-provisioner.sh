@@ -525,7 +525,7 @@ fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" erase "${RPI_DEVICE_STORAGE_TYPE}"
 sleep 2
 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem partinit "${RPI_DEVICE_STORAGE_TYPE}" DOS
 sleep 2
-fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 0c "$(stat -c%s "${RPI_SB_WORKDIR}"/bootfs-temporary.img)"
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 0c "$(simg_expanded_size "${RPI_SB_WORKDIR}"/bootfs-temporary.simg)"
 sleep 2
 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 83 # Grow to fill storage
 sleep 2
