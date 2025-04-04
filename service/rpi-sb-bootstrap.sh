@@ -462,7 +462,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
             fi
             log "Keywriting completed. Silently rebooting for next phase."
 
-            case "${TARGET_DEVICE_FAMILY}" in
+            case $TARGET_DEVICE_FAMILY in
                 2712)
                     FASTBOOT_SIGN_DIR=$(mktemp -d)
                     cd "${FASTBOOT_SIGN_DIR}"
