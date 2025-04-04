@@ -84,7 +84,7 @@ TARGET_DEVICE_PATH="$1"
 # - Y is the port number on that bus  
 # - Z is the optional port number for devices behind a hub
 # Example: "1-1.2" means bus 1, hub port 1, hub downstream port 2
-TARGET_USB_PATH="$(udevadm info "${TARGET_DEVICE_PATH}" | grep -oP '^M: bus/usb/\K.*')"
+TARGET_USB_PATH="$(udevadm info "${TARGET_DEVICE_PATH}" | grep -oP '^M: \K.*')"
 TARGET_DEVICE_FAMILY="$(udevadm info --name="$TARGET_DEVICE_PATH" --query=property --property=ID_MODEL_ID --value)"
 # TARGET_DEVICE_SERIAL is best-effort, not all rpiboot devices have it set (some only show 32-bits)
 TARGET_DEVICE_SERIAL="$(udevadm info --name="$TARGET_DEVICE_PATH" --query=property --property=ID_SERIAL_SHORT --value)"
