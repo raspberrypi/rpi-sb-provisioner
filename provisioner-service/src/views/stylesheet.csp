@@ -1,4 +1,5 @@
-/* Common Styles for RPI-SB-Provisioner */
+<style>
+/* Common Styles for rpi-sb-provisioner */
 
 body {
     font-family: Arial, sans-serif;
@@ -89,34 +90,6 @@ tr:hover {
 
 .nav-links a:hover {
     text-decoration: underline;
-}
-
-/* Navigation Bar Styles */
-.navbar {
-    background-color: #333;
-    overflow: hidden;
-    margin-bottom: 20px;
-    border-radius: 4px;
-}
-
-.navbar a {
-    float: left;
-    color: white;
-    text-align: center;
-    padding: 14px 16px;
-    text-decoration: none;
-    font-size: 16px;
-    transition: background-color 0.3s;
-}
-
-.navbar a:hover {
-    background-color: #0066cc;
-    color: white;
-}
-
-.navbar a.active {
-    background-color: #0066cc;
-    color: white;
 }
 
 /* Button Styles */
@@ -352,4 +325,6 @@ pre {
     white-space: pre;
     overflow-x: auto;
     display: none;
-} 
+}
+</style>
+<%view-end%> 

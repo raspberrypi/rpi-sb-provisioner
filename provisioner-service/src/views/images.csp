@@ -2,7 +2,7 @@
 <html>
 <head>
     <title>System Images</title>
-    <link rel="stylesheet" href="/css/common.css">
+    <%view stylesheet %>
     <script>
         function showMessage(message, isError = false) {
             const messageDiv = document.getElementById(isError ? 'error-message' : 'success-message');

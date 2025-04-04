@@ -2,7 +2,7 @@
 <html>
 <head>
     <title>Manufacturing Database</title>
-    <link rel="stylesheet" href="/css/common.css">
+    <%view stylesheet %>
 </head>
 <body>
     <%view navbar %>

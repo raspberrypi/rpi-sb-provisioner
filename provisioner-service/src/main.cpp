@@ -131,9 +131,7 @@ int main()
         callback(resp);
     });
 
-    // Get the current executable path and use it to calculate the static files path
-    std::filesystem::path execPath = std::filesystem::current_path();
-    std::string staticPath = (execPath / "provisioner-service/src/static").string();
+    // Configure upload path
     constexpr const char *uploadPath = "/srv/rpi-sb-provisioner/uploads";
 
     if (!std::filesystem::exists(uploadPath)) {
@@ -156,9 +154,7 @@ int main()
     .addListener("0.0.0.0", 3142)
     .setClientMaxBodySize(std::numeric_limits<size_t>::max())
     .setThreadNum(nthreads)
-    .setDocumentRoot(staticPath)
     .setUploadPath(uploadPath)
-    .setStaticFilesCacheTime(0) // Disable caching during development
     //.enableRunAsDaemon()
     .run();
 }

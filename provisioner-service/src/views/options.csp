@@ -2,7 +2,7 @@
 <html>
 <head>
     <title>Configuration Options</title>
-    <link rel="stylesheet" href="/css/common.css">
+    <%view stylesheet %>
     <style>
         .collapsible {
             background-color: #f1f1f1;
