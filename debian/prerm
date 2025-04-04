@@ -2,14 +2,34 @@
 
 set -e
 
-# Stop and disable the service
+# Stop and disable the services
 if [ -d /run/systemd/system ] && [ "$1" = remove ]; then
-	deb-systemd-invoke stop 'provisioner.service' >/dev/null || true
+	# Stop all services
+	deb-systemd-invoke stop 'provisioner-ui.service' >/dev/null || true
 fi
 
 if [ "$1" = "remove" ]; then
-	deb-systemd-helper disable 'provisioner.service' >/dev/null || true
-	deb-systemd-helper unmask 'provisioner.service' >/dev/null || true
+	# Disable and clean up all services
+	deb-systemd-helper disable 'provisioner-ui.service' >/dev/null || true
+	deb-systemd-helper disable 'rpi-sb-provisioner@.service' >/dev/null || true
+	deb-systemd-helper disable 'rpi-fde-provisioner@.service' >/dev/null || true
+	deb-systemd-helper disable 'rpi-naked-provisioner@.service' >/dev/null || true
+	deb-systemd-helper disable 'rpi-sb-bootstrap@.service' >/dev/null || true
+	deb-systemd-helper disable 'rpi-sb-triage@.service' >/dev/null || true
+	deb-systemd-helper disable 'fetch-repo-package-list@.service' >/dev/null || true
+	deb-systemd-helper disable 'fetch-repo-package-list@.timer' >/dev/null || true
+	deb-systemd-helper disable 'rpi-package-download@.service' >/dev/null || true
+	
+	deb-systemd-helper unmask 'provisioner-ui.service' >/dev/null || true
+	deb-systemd-helper unmask 'rpi-sb-provisioner@.service' >/dev/null || true
+	deb-systemd-helper unmask 'rpi-fde-provisioner@.service' >/dev/null || true
+	deb-systemd-helper unmask 'rpi-naked-provisioner@.service' >/dev/null || true
+	deb-systemd-helper unmask 'rpi-sb-bootstrap@.service' >/dev/null || true
+	deb-systemd-helper unmask 'rpi-sb-triage@.service' >/dev/null || true
+	deb-systemd-helper unmask 'fetch-repo-package-list@.service' >/dev/null || true
+	deb-systemd-helper unmask 'fetch-repo-package-list@.timer' >/dev/null || true
+	deb-systemd-helper unmask 'rpi-package-download@.service' >/dev/null || true
+	
 	deb-systemd-helper daemon-reload >/dev/null || true
 fi
 
