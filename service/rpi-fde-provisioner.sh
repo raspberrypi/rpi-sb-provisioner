@@ -17,7 +17,6 @@ export PROVISIONER_STARTED="FDE-PROVISIONER-STARTED"
 . "$(dirname "$0")/rpi-sb-common.sh"
 
 die() {
-    echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
     record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "${TARGET_USB_PATH}"
     # shellcheck disable=SC2086
     printf "%s\n" "$@"
@@ -240,15 +239,12 @@ fi
 # Ensure TARGET_USB_PATH is set
 if [ -z "${TARGET_USB_PATH}" ]; then
     log "Error: Could not determine USB path for device ${TARGET_DEVICE_SERIAL}"
-    echo "${PROVISIONER_ABORTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
     record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "unknown-usb-path"
     exit 1
 fi
 
 record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_STARTED}" "${TARGET_USB_PATH}"
 
-echo "${PROVISIONER_STARTED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
-record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_STARTED}" "${TARGET_USB_PATH}"
 TMP_DIR=$(mktemp -d)
 RPI_DEVICE_STORAGE_TYPE="$(check_pidevice_storage_type "${RPI_DEVICE_STORAGE_TYPE}")"
 DELETE_PRIVATE_TMPDIR=
@@ -473,9 +469,8 @@ announce_stop "Set LED status"
 
 metadata_gather
 
-echo "${PROVISIONER_FINISHED}" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/progress
 announce_start "Cleaning up"
 cleanup
 announce_stop "Cleaning up"
-log "Provisioning completed. Remove the device from this machine."
 record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_FINISHED}" "${TARGET_USB_PATH}"
+log "Provisioning completed. Remove the device from this machine."
