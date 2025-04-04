@@ -596,13 +596,11 @@ if [ -n "${TARGET_DEVICE_SERIAL}" ]; then
     target_log_dir="/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}"
     early_log_dir="${EARLY_LOG_DIRECTORY}"
     
-    with_lock "${LOCK_BASE}/log_move.lock" 10 "
-        mkdir -p \"${target_log_dir}\"
-        if [ -d \"${early_log_dir}/metadata\" ]; then
-            mv \"${early_log_dir}/metadata\" \"${target_log_dir}/metadata\"
-        fi
-        mv \"${early_log_dir}/bootstrap.log\" \"${target_log_dir}/bootstrap.log\"
-    "
+    mkdir -p "${target_log_dir}"
+    if [ -d "${early_log_dir}/metadata" ]; then
+        mv "${early_log_dir}/metadata" "${target_log_dir}/metadata"
+    fi
+    mv "${early_log_dir}/bootstrap.log" "${target_log_dir}/bootstrap.log"
 fi
 
 announce_stop "fastboot initialisation"
