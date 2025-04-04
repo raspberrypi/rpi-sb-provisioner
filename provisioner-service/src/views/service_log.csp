@@ -2,7 +2,7 @@
 <html>
 <head>
     <title>Service Log</title>
-    <link rel="stylesheet" href="/css/common.css">
+    <%view stylesheet %>
     <style>
         .log-container {
             background-color: #f8f8f8;

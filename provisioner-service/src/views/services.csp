@@ -2,7 +2,7 @@
 <html>
 <head>
     <title>Services</title>
-    <link rel="stylesheet" href="/css/common.css">
+    <%view stylesheet %>
     <script>
         // Function to fetch service data and update the table
         function updateServicesTable() {
@@ -25,7 +25,12 @@
                             
                             // Name cell
                             const nameCell = document.createElement('td');
-                            nameCell.textContent = service.name;
+                            // Display base_name and instance if available
+                            if (service.instance && service.instance.length > 0) {
+                                nameCell.textContent = service.base_name + '@' + service.instance;
+                            } else {
+                                nameCell.textContent = service.name;
+                            }
                             row.appendChild(nameCell);
                             
                             // Status cell
@@ -41,7 +46,7 @@
                             // Actions cell
                             const actionsCell = document.createElement('td');
                             const link = document.createElement('a');
-                            link.href = '/service-log/' + service.name;
+                            link.href = '/service-log/' + service.full_name;
                             link.className = 'log-link';
                             link.textContent = 'View Logs';
                             actionsCell.appendChild(link);
@@ -109,11 +114,20 @@
         %>
             <%c++ for(const auto& service : servicesList) { %>
                 <tr>
-                    <td><%c++ $$ << service.at("name"); %></td>
+                    <td>
+                        <%c++ 
+                        // Display base_name and instance if available
+                        if (!service.at("instance").empty()) {
+                            $$ << service.at("base_name") << "@" << service.at("instance");
+                        } else {
+                            $$ << service.at("name");
+                        }
+                        %>
+                    </td>
                     <td><%c++ $$ << service.at("status"); %></td>
                     <td><%c++ $$ << service.at("active"); %></td>
                     <td>
-                        <a href="/service-log/<%c++ $$ << service.at("name"); %>" class="log-link">View Logs</a>
+                        <a href="/service-log/<%c++ $$ << service.at("full_name"); %>" class="log-link">View Logs</a>
                     </td>
                 </tr>
             <%c++ } %>
