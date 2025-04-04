@@ -66,11 +66,13 @@ namespace provisioner {
 
             std::vector<std::string> serials;
             sqlite3_stmt* stmt;
-            const char* sql = "SELECT (serial, endpoint, state) FROM devices";
+            const char* sql = "SELECT serial, endpoint, state, image, ip_address FROM devices ORDER BY ts DESC";
+            LOG_INFO << "Executing SQL: " << sql;
             rc = sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr);
 
             if (rc != SQLITE_OK) {
                 auto errorMsg = "Failed to prepare SQL statement: " + std::string(sqlite3_errmsg(db));
+                LOG_ERROR << errorMsg;
                 sqlite3_close(db);
                 
                 // Check if the client accepts HTML
@@ -93,7 +95,18 @@ namespace provisioner {
                 const unsigned char* serial = sqlite3_column_text(stmt, 0);
                 const unsigned char* endpoint = sqlite3_column_text(stmt, 1);
                 const unsigned char* state = sqlite3_column_text(stmt, 2);
-                devices->devices.push_back({(const char*)serial, (const char*)endpoint, (const char*)state});
+                const unsigned char* image = sqlite3_column_text(stmt, 3);
+                const unsigned char* ip_address = sqlite3_column_text(stmt, 4);
+                
+                LOG_INFO << "Found device: " << (const char*)serial << ", " << (const char*)endpoint << ", " << (const char*)state;
+                
+                devices->devices.push_back({
+                    (const char*)serial, 
+                    (const char*)endpoint, 
+                    (const char*)ip_address,
+                    (const char*)state,
+                    (const char*)image
+                });
             }
 
             sqlite3_finalize(stmt);
@@ -105,7 +118,17 @@ namespace provisioner {
                 LOG_INFO << "HTML response requested";
 
                 HttpViewData viewData;
-                viewData.insert("devices", devices->devices);
+                std::vector<std::map<std::string, std::string>> devicesList;
+                for (const auto& device : devices->devices) {
+                    std::map<std::string, std::string> deviceMap;
+                    deviceMap["serial"] = device.serial;
+                    deviceMap["port"] = device.port;
+                    deviceMap["ip_address"] = device.ip_address;
+                    deviceMap["state"] = device.state;
+                    deviceMap["image"] = device.image;
+                    devicesList.push_back(deviceMap);
+                }
+                viewData.insert("devices", devicesList);
                 viewData.insert("currentPage", std::string("devices"));
                 resp = HttpResponse::newHttpViewResponse("devices.csp", viewData);
             } else {
@@ -155,7 +178,7 @@ namespace provisioner {
             }
 
             sqlite3_stmt* stmt;
-            const char* sql = "SELECT (serial, endpoint, state) FROM devices WHERE serial = ?";
+            const char* sql = "SELECT serial, endpoint, state, image, ip_address FROM devices WHERE serial = ?";
             rc = sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr);
 
             if (rc != SQLITE_OK) {
@@ -180,11 +203,15 @@ namespace provisioner {
             const unsigned char* serial = sqlite3_column_text(stmt, 0);
             const unsigned char* endpoint = sqlite3_column_text(stmt, 1);
             const unsigned char* state = sqlite3_column_text(stmt, 2);
+            const unsigned char* image = sqlite3_column_text(stmt, 3);
+            const unsigned char* ip_address = sqlite3_column_text(stmt, 4);
 
             Device device;
             device.serial = (const char*)serial;
             device.port = (const char*)endpoint;
+            device.ip_address = (const char*)ip_address;
             device.state = (const char*)state;
+            device.image = (const char*)image;
 
             sqlite3_finalize(stmt);
             sqlite3_close(db);
