@@ -68,5 +68,3 @@ case ${PROVISIONING_STYLE} in
 esac
 log "${TRIAGE_FINISHED}" >> "${LOG_DIRECTORY}"/triage.log
 record_state "${TARGET_DEVICE_SERIAL}" "${TRIAGE_FINISHED}" "${TARGET_USB_PATH}"
-
-cleanup
