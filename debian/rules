@@ -5,6 +5,9 @@ export DH_VERBOSE = 1
 # Enable all hardening options available in Debian
 export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 
+# Allow network access during the build
+export DEB_BUILD_NETWORK = yes
+
 # Target to generate the man page
 debian/rpi-sb-provisioner.1:
 	# First create the content from the README
@@ -28,3 +31,31 @@ debian/rpi-sb-provisioner.1:
 	# Generate the man page before running dh
 	$(MAKE) -f debian/rules debian/rpi-sb-provisioner.1
 	dh $@
+
+# Configure the CMake project with network fetch enabled
+override_dh_auto_configure:
+	dh_auto_configure --sourcedirectory=provisioner-service -- \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DFETCHCONTENT_FULLY_DISCONNECTED=OFF \
+		-DFETCHCONTENT_QUIET=OFF
+
+# Build the CMake project
+override_dh_auto_build:
+	dh_auto_build --sourcedirectory=provisioner-service
+
+# Install the CMake project but exclude drogon tools
+override_dh_auto_install:
+	dh_auto_install --sourcedirectory=provisioner-service
+	# Completely remove the unwanted binaries
+	rm -f debian/usr/bin/drogon_ctl
+	rm -f debian/usr/bin/dg_ctl
+
+# Explicitly control what gets installed
+override_dh_install:
+	dh_install --exclude=drogon_ctl --exclude=dg_ctl
+
+# Final check to ensure these files don't get included
+override_dh_builddeb:
+	find debian/rpi-sb-provisioner -name drogon_ctl -delete
+	find debian/rpi-sb-provisioner -name dg_ctl -delete
+	dh_builddeb
