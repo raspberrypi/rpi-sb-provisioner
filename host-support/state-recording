@@ -87,7 +87,7 @@ get_usb_path_for_serial() {
             serial=$(udevadm info --name="$device" --query=property --property=ID_SERIAL_SHORT --value 2>/dev/null)
             if [ "$serial" = "${TARGET_DEVICE_SERIAL}" ]; then
                 # Separate assignment from export to avoid masking return values
-                usb_path="$(udevadm info "$device" | grep -oP '^P: \K.*')"
+                usb_path="$(udevadm info "$device" | grep -oP '^P: \K.*' | grep -oE '[0-9]+-[0-9]+(\.[0-9]+)*$')"
                 echo "$usb_path"
                 return 0
             fi
