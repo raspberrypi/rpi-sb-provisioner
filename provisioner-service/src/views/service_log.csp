@@ -26,6 +26,15 @@
             margin-top: 20px;
             display: inline-block;
         }
+        .auto-refresh-controls {
+            margin-top: 10px;
+            margin-bottom: 10px;
+        }
+        .auto-refresh-status {
+            margin-left: 10px;
+            font-size: 0.9em;
+            color: #666;
+        }
     </style>
 </head>
 <body>
@@ -35,7 +44,12 @@
     
     <a href="/services" class="back-link">← Back to Services</a>
     
-    <div class="log-container">
+    <div class="auto-refresh-controls">
+        <button id="toggleRefresh" class="btn btn-primary btn-sm">Pause Auto-Refresh</button>
+        <span id="refreshStatus" class="auto-refresh-status">Auto-refreshing every 1s</span>
+    </div>
+    
+    <div class="log-container" id="logContainer">
     <%c++ 
     auto logEntries = @@.get<std::vector<std::string>>("log_entries");
     if(logEntries.size() > 0) {
@@ -51,5 +65,121 @@
     </div>
     
     <a href="/services" class="back-link">← Back to Services</a>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Get the service name from the URL
+            const path = window.location.pathname;
+            const serviceName = path.substring(path.lastIndexOf('/') + 1);
+            
+            // Variables for auto-refresh
+            let autoRefreshEnabled = true;
+            let refreshInterval = 1000; // 1 second
+            let refreshTimer = null;
+            
+            // UI elements
+            const logContainer = document.getElementById('logContainer');
+            const toggleButton = document.getElementById('toggleRefresh');
+            const statusText = document.getElementById('refreshStatus');
+            
+            // Toggle auto-refresh functionality
+            toggleButton.addEventListener('click', function() {
+                autoRefreshEnabled = !autoRefreshEnabled;
+                if (autoRefreshEnabled) {
+                    toggleButton.textContent = 'Pause Auto-Refresh';
+                    statusText.textContent = 'Auto-refreshing every 1s';
+                    startAutoRefresh();
+                } else {
+                    toggleButton.textContent = 'Resume Auto-Refresh';
+                    statusText.textContent = 'Auto-refresh paused';
+                    stopAutoRefresh();
+                }
+            });
+            
+            // Function to fetch logs via API
+            function fetchLogs() {
+                fetch('/api/service-log/' + serviceName, {
+                    headers: {
+                        'Accept': 'application/json'
+                    }
+                })
+                .then(response => response.json())
+                .then(data => {
+                    updateLogContainer(data.logs);
+                })
+                .catch(error => {
+                    console.error('Error fetching logs:', error);
+                });
+            }
+            
+            // Function to update the log container
+            function updateLogContainer(logs) {
+                // Store scroll position
+                const wasAtBottom = isScrolledToBottom();
+                const previousScrollTop = logContainer.scrollTop;
+                
+                // Update content
+                logContainer.innerHTML = '';
+                if (logs.length > 0) {
+                    logs.forEach(entry => {
+                        const div = document.createElement('div');
+                        div.className = 'log-entry';
+                        div.textContent = entry;
+                        logContainer.appendChild(div);
+                    });
+                } else {
+                    const div = document.createElement('div');
+                    div.className = 'log-entry';
+                    div.textContent = 'No log entries found for this service.';
+                    logContainer.appendChild(div);
+                }
+                
+                // Restore scroll position - keep at the same position
+                // unless user had manually scrolled to bottom
+                if (wasAtBottom) {
+                    scrollToBottom();
+                } else {
+                    // Try to maintain the same scroll position
+                    logContainer.scrollTop = previousScrollTop;
+                }
+            }
+            
+            // Helper to check if scrolled to bottom
+            function isScrolledToBottom() {
+                return logContainer.scrollHeight - logContainer.clientHeight <= logContainer.scrollTop + 1;
+            }
+            
+            // Helper to scroll to bottom
+            function scrollToBottom() {
+                logContainer.scrollTop = logContainer.scrollHeight;
+            }
+            
+            // Start auto-refresh
+            function startAutoRefresh() {
+                if (refreshTimer === null) {
+                    refreshTimer = setInterval(fetchLogs, refreshInterval);
+                }
+            }
+            
+            // Stop auto-refresh
+            function stopAutoRefresh() {
+                if (refreshTimer !== null) {
+                    clearInterval(refreshTimer);
+                    refreshTimer = null;
+                }
+            }
+            
+            // Initial scroll to bottom - REMOVED since logs are in newest-first order
+            // scrollToBottom();
+            
+            // Instead, scroll to top
+            logContainer.scrollTop = 0;
+            
+            // Start auto-refresh on page load
+            if (autoRefreshEnabled) {
+                startAutoRefresh();
+            }
+        });
+    </script>
 </body>
 </html> 

@@ -35,6 +35,7 @@ namespace provisioner {
     void Services::registerHandlers(drogon::HttpAppFramework &app)
     {
         app.registerHandler("/services", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
+            using namespace trantor;
             LOG_INFO << "Services::services";
 
             std::vector<ServiceInfo> serviceInfos;
@@ -148,74 +149,84 @@ namespace provisioner {
                             baseServiceName.pop_back();
                             info.base_name = baseServiceName;
                         }
-                        info.status = sub_state;
-                        info.active = active_state;
+                    } else {
+                        // Regular service without instance parameter
+                        // Remove .service suffix if present
+                        std::string baseName = serviceName;
+                        size_t servicePos = baseName.find(".service");
+                        if (servicePos != std::string::npos) {
+                            baseName = baseName.substr(0, servicePos);
+                        }
                         
-                        // Get the last active timestamp for the service
-                        info.timestamp = 0; // Default value
+                        info.name = baseName;
+                        info.instance = "";
+                        info.base_name = baseName;
+                    }
+                    
+                    info.status = sub_state;
+                    info.active = active_state;
+                    
+                    // Get the last active timestamp for the service
+                    info.timestamp = 0; // Default value
+                    
+                    // Try using journal to get timestamp (more reliable than D-Bus properties)
+                    sd_journal *j;
+                    int j_r = sd_journal_open(&j, SD_JOURNAL_LOCAL_ONLY);
+                    if (j_r >= 0) {
+                        // Add filter for the specific unit
+                        std::string match = "_SYSTEMD_UNIT=" + serviceName;
+                        j_r = sd_journal_add_match(j, match.c_str(), 0);
                         
-                        // Try using journal to get timestamp (more reliable than D-Bus properties)
-                        sd_journal *j;
-                        int j_r = sd_journal_open(&j, SD_JOURNAL_LOCAL_ONLY);
                         if (j_r >= 0) {
-                            // Add filter for the specific unit
-                            std::string match = "_SYSTEMD_UNIT=" + serviceName;
-                            j_r = sd_journal_add_match(j, match.c_str(), 0);
-                            
+                            // Seek to the latest entry
+                            j_r = sd_journal_seek_tail(j);
                             if (j_r >= 0) {
-                                // Seek to the latest entry
-                                j_r = sd_journal_seek_tail(j);
-                                if (j_r >= 0) {
-                                    // Get the first (latest) entry
-                                    j_r = sd_journal_previous(j);
-                                    if (j_r > 0) {
-                                        // Get the timestamp
-                                        uint64_t usec;
-                                        j_r = sd_journal_get_realtime_usec(j, &usec);
-                                        if (j_r >= 0) {
-                                            info.timestamp = usec;
-                                            // Don't log success case to reduce noise
-                                        } else {
-                                            LOG_WARN << "Failed to get journal timestamp for " << serviceName << ": " << strerror(-j_r);
-                                        }
+                                // Get the first (latest) entry
+                                j_r = sd_journal_previous(j);
+                                if (j_r > 0) {
+                                    // Get the timestamp
+                                    uint64_t usec;
+                                    j_r = sd_journal_get_realtime_usec(j, &usec);
+                                    if (j_r >= 0) {
+                                        info.timestamp = usec;
+                                        // Don't log success case to reduce noise
                                     } else {
-                                        // Don't log empty journal - normal for new services
+                                        LOG_WARN << "Failed to get journal timestamp for " << serviceName << ": " << strerror(-j_r);
                                     }
                                 } else {
-                                    LOG_WARN << "Failed to seek journal tail for " << serviceName << ": " << strerror(-j_r);
+                                    // Don't log empty journal - normal for new services
                                 }
                             } else {
-                                LOG_WARN << "Failed to add journal match for " << serviceName << ": " << strerror(-j_r);
+                                LOG_WARN << "Failed to seek journal tail for " << serviceName << ": " << strerror(-j_r);
                             }
-                            sd_journal_close(j);
                         } else {
-                            LOG_WARN << "Failed to open journal for " << serviceName << ": " << strerror(-j_r);
+                            LOG_WARN << "Failed to add journal match for " << serviceName << ": " << strerror(-j_r);
                         }
-                        
-                        // If we couldn't get a timestamp, use current time for active services and a lower value for failed
-                        if (info.timestamp == 0) {
-                            if (info.active == "active") {
-                                // For active services, use current time (prioritize them)
-                                struct timespec ts;
-                                clock_gettime(CLOCK_REALTIME, &ts);
-                                info.timestamp = (uint64_t)ts.tv_sec * 1000000 + (uint64_t)ts.tv_nsec / 1000;
-                                // Reduced logging - no need to log fallback for active services
-                            } else {
-                                // For failed/inactive services, use a lower timestamp (older)
-                                struct timespec ts;
-                                clock_gettime(CLOCK_REALTIME, &ts);
-                                // Subtract 1 hour to make them appear below active services
-                                info.timestamp = ((uint64_t)ts.tv_sec - 3600) * 1000000 + (uint64_t)ts.tv_nsec / 1000;
-                                // Reduced logging - no need to log fallback for inactive services
-                            }
-                        }
-                        
-                        serviceInfos.push_back(info);
-                        // Removed detailed service addition logging
+                        sd_journal_close(j);
                     } else {
-                        // Regular service - no need to log skipping
-                        continue;
+                        LOG_WARN << "Failed to open journal for " << serviceName << ": " << strerror(-j_r);
                     }
+                    
+                    // If we couldn't get a timestamp, use current time for active services and a lower value for failed
+                    if (info.timestamp == 0) {
+                        if (info.active == "active") {
+                            // For active services, use current time (prioritize them)
+                            struct timespec ts;
+                            clock_gettime(CLOCK_REALTIME, &ts);
+                            info.timestamp = (uint64_t)ts.tv_sec * 1000000 + (uint64_t)ts.tv_nsec / 1000;
+                            // Reduced logging - no need to log fallback for active services
+                        } else {
+                            // For failed/inactive services, use a lower timestamp (older)
+                            struct timespec ts;
+                            clock_gettime(CLOCK_REALTIME, &ts);
+                            // Subtract 1 hour to make them appear below active services
+                            info.timestamp = ((uint64_t)ts.tv_sec - 3600) * 1000000 + (uint64_t)ts.tv_nsec / 1000;
+                            // Reduced logging - no need to log fallback for inactive services
+                        }
+                    }
+                    
+                    serviceInfos.push_back(info);
+                    // Removed detailed service addition logging
                 }
                 
                 // Exit the struct container for this unit
@@ -319,9 +330,22 @@ namespace provisioner {
         });
 
         app.registerHandler("/service-log/{name}", [](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback, const std::string &name) {
+            using namespace trantor;
             LOG_INFO << "Services::service-log for " << name;
             
             std::string serviceName = name;
+
+            // Validate that the service name starts with one of the allowed prefixes
+            if (serviceName.find("rpi-sb-") != 0 && 
+                serviceName.find("rpi-naked-") != 0 && 
+                serviceName.find("rpi-fde-") != 0) {
+                LOG_INFO << "Rejected access to logs for unauthorized service: " << serviceName;
+                auto resp = drogon::HttpResponse::newHttpResponse();
+                resp->setStatusCode(drogon::k403Forbidden);
+                resp->setBody("Access denied: Only logs for rpi-sb, rpi-naked, and rpi-fde services are available");
+                callback(resp);
+                return;
+            }
 
             // Open the journal
             sd_journal *j;
@@ -411,18 +435,161 @@ namespace provisioner {
                 logEntries.push_back(entry);
             }
             
+            // Reverse the log entries to get reverse-chronological order (newest first)
+            std::reverse(logEntries.begin(), logEntries.end());
+            
             sd_journal_close(j);
             
             // Create the response
             auto resp = drogon::HttpResponse::newHttpResponse();
             
-            // Create view data and return HTML
-            drogon::HttpViewData viewData;
-            viewData.insert("service_name", serviceName);
-            viewData.insert("log_entries", logEntries);
-            viewData.insert("currentPage", std::string("services"));
-            resp = drogon::HttpResponse::newHttpViewResponse("service_log.csp", viewData);
+            // Check if JSON format is requested
+            auto acceptHeader = req->getHeader("Accept");
+            if (!acceptHeader.empty() && acceptHeader.find("application/json") != std::string::npos) {
+                // Return JSON response for polling updates
+                Json::Value root;
+                Json::Value logArray(Json::arrayValue);
+                
+                for (const auto& entry : logEntries) {
+                    logArray.append(entry);
+                }
+                
+                root["logs"] = logArray;
+                root["service_name"] = serviceName;
+                
+                resp->setStatusCode(drogon::k200OK);
+                resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+                resp->setBody(root.toStyledString());
+            } else {
+                // Create view data and return HTML
+                drogon::HttpViewData viewData;
+                viewData.insert("service_name", serviceName);
+                viewData.insert("log_entries", logEntries);
+                viewData.insert("currentPage", std::string("services"));
+                viewData.insert("auto_refresh", true); // Flag to enable auto-refresh in template
+                resp = drogon::HttpResponse::newHttpViewResponse("service_log.csp", viewData);
+            }
             
+            callback(resp);
+        });
+
+        // Add JSON-only endpoint for polling service logs
+        app.registerHandler("/api/service-log/{name}", [](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback, const std::string &name) {
+            using namespace trantor;
+            LOG_INFO << "Services::api-service-log for " << name;
+            
+            std::string serviceName = name;
+
+            // Validate that the service name starts with one of the allowed prefixes
+            if (serviceName.find("rpi-sb-") != 0 && 
+                serviceName.find("rpi-naked-") != 0 && 
+                serviceName.find("rpi-fde-") != 0) {
+                LOG_INFO << "Rejected access to logs for unauthorized service: " << serviceName;
+                auto resp = drogon::HttpResponse::newHttpJsonResponse({{"error", "Access denied: Only logs for rpi-sb, rpi-naked, and rpi-fde services are available"}});
+                resp->setStatusCode(drogon::k403Forbidden);
+                callback(resp);
+                return;
+            }
+
+            // Open the journal
+            sd_journal *j;
+            int r = sd_journal_open(&j, SD_JOURNAL_LOCAL_ONLY);
+            if (r < 0) {
+                LOG_ERROR << "Failed to open journal: " << strerror(-r);
+                auto resp = drogon::HttpResponse::newHttpJsonResponse({{"error", "Failed to open journal"}});
+                resp->setStatusCode(drogon::k500InternalServerError);
+                callback(resp);
+                return;
+            }
+            
+            // Add filter for the specific unit
+            std::string match = "_SYSTEMD_UNIT=" + serviceName;
+            r = sd_journal_add_match(j, match.c_str(), 0);
+            if (r < 0) {
+                LOG_ERROR << "Failed to add journal match: " << strerror(-r);
+                sd_journal_close(j);
+                auto resp = drogon::HttpResponse::newHttpJsonResponse({{"error", "Failed to filter journal"}});
+                resp->setStatusCode(drogon::k500InternalServerError);
+                callback(resp);
+                return;
+            }
+            
+            // Seek to the end
+            r = sd_journal_seek_tail(j);
+            if (r < 0) {
+                LOG_ERROR << "Failed to seek to end of journal: " << strerror(-r);
+                sd_journal_close(j);
+                auto resp = drogon::HttpResponse::newHttpJsonResponse({{"error", "Failed to seek in journal"}});
+                resp->setStatusCode(drogon::k500InternalServerError);
+                callback(resp);
+                return;
+            }
+            
+            // Move back 100 log entries for the API (lighter than the full view)
+            r = sd_journal_previous_skip(j, 100);
+            if (r < 0) {
+                LOG_ERROR << "Failed to skip backwards in journal: " << strerror(-r);
+                sd_journal_close(j);
+                auto resp = drogon::HttpResponse::newHttpJsonResponse({{"error", "Failed to navigate journal"}});
+                resp->setStatusCode(drogon::k500InternalServerError);
+                callback(resp);
+                return;
+            }
+            
+            // Collect log entries
+            std::vector<std::string> logEntries;
+            while (sd_journal_next(j) > 0) {
+                const void *data;
+                size_t length;
+                
+                // Get the log message
+                r = sd_journal_get_data(j, "MESSAGE", &data, &length);
+                if (r < 0) {
+                    continue;
+                }
+                
+                // Extract the actual message
+                std::string message(static_cast<const char*>(data), length);
+                if (message.substr(0, 8) == "MESSAGE=") {
+                    message = message.substr(8);
+                }
+                
+                // Get the timestamp
+                uint64_t time;
+                r = sd_journal_get_realtime_usec(j, &time);
+                if (r < 0) {
+                    continue;
+                }
+                
+                // Convert timestamp to readable format
+                time_t secs = time / 1000000;
+                struct tm tm;
+                localtime_r(&secs, &tm);
+                char timestr[64];
+                strftime(timestr, sizeof(timestr), "%Y-%m-%d %H:%M:%S", &tm);
+                
+                // Add the formatted log entry
+                std::string entry = std::string(timestr) + " " + message;
+                logEntries.push_back(entry);
+            }
+            
+            // Reverse the entries to get newest first
+            std::reverse(logEntries.begin(), logEntries.end());
+            
+            sd_journal_close(j);
+            
+            // Return JSON response
+            Json::Value root;
+            Json::Value logArray(Json::arrayValue);
+            
+            for (const auto& entry : logEntries) {
+                logArray.append(entry);
+            }
+            
+            root["logs"] = logArray;
+            root["service_name"] = serviceName;
+            
+            auto resp = drogon::HttpResponse::newHttpJsonResponse(root);
             callback(resp);
         });
     }
