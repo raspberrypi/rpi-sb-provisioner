@@ -90,55 +90,6 @@ check_pidevice_storage_type() {
     esac
 }
 
-# Lifted from pi-gen/scripts/common, unsure under what circumstances this would be necessary
-ensure_next_loopdev() {
-    loopdev="$(losetup -f)"
-    loopmaj="$(echo "$loopdev" | sed -E 's/.*[0-9]*?([0-9]+)$/\1/')"
-    [ -b "$loopdev" ] || mknod "$loopdev" b 7 "$loopmaj"
-}
-
-# Lifted from pi-gen/scripts/common, unsure under what circumstances this would be necessary
-ensure_loopdev_partitions() {
-    lsblk -r -n -o "NAME,MAJ:MIN" "$1" | grep -v "^${1#/dev/}" | while read -r line; do
-        partition="${line%% *}"
-        majmin="${line#* }"
-        if [ ! -b "/dev/$partition" ]; then
-            mknod "/dev/$partition" b "${majmin%:*}" "${majmin#*:}"
-        fi
-    done
-}
-
-# Lifted from pi-gen/scripts/common
-unmount() {
-    if [ -z "$1" ]; then
-        DIR=$PWD
-    else
-        DIR=$1
-    fi
-
-    while mount | grep -q "$DIR"; do
-        locs=$(mount | grep "$DIR" | cut -f 3 -d ' ' | sort -r)
-        for loc in $locs; do
-            umount "$loc"
-        done
-    done
-}
-
-# Lifted from pi-gen/scripts/common
-unmount_image() {
-    sync
-    sleep 1
-    LOOP_DEVICE=$(losetup --list | grep "$1" | cut -f1 -d' ')
-    if [ -n "$LOOP_DEVICE" ]; then
-        for part in "$LOOP_DEVICE"p*; do
-            if DIR=$(findmnt -n -o target -S "$part"); then
-                unmount "$DIR"
-            fi
-        done
-        losetup -d "$LOOP_DEVICE"
-    fi
-}
-
 # TODO: Refactor these two functions to use the same logic, but with different consequences for failure.
 timeout_nonfatal() {
     command="$*"
@@ -228,88 +179,25 @@ else
     announce_stop "Finding the cache directory: Using specified name"
 fi
 
-# Fast path: If we've already generated the assets, just move to flashing.
-if [ ! -f "${RPI_SB_WORKDIR}/bootfs-temporary.simg" ] ||
-   [ ! -s "${RPI_SB_WORKDIR}/bootfs-temporary.simg" ] ||
-   [ ! -e "${TMP_DIR}/rpi-rootfs-img-mount" ]; then
+prepare_image_file() {
+    if [ ! -f "${RPI_SB_WORKDIR}/image-temporary.simg" ] ||
+       [ ! -s "${RPI_SB_WORKDIR}/image-temporary.simg" ]; then
+        announce_start "Sparsing the OS image"
+        img2simg -s "${GOLD_MASTER_OS_FILE}" "${RPI_SB_WORKDIR}"/image-temporary.simg
+        announce_stop "Sparsing the OS image"
+    fi
+}
 
-    announce_start "OS Image Mounting"
-    # Mount the 'complete' image as a series of partitions 
-    cnt=0
-    until ensure_next_loopdev && LOOP_DEV="$(losetup --show --find --partscan "${GOLD_MASTER_OS_FILE}")"; do
-        if [ $cnt -lt 5 ]; then
-            cnt=$((cnt + 1))
-            log "Error in losetup.  Retrying..."
-            sleep 5
-        else
-            log "ERROR: losetup failed; exiting"
-            sleep 5
-        fi
-    done
-
-    ensure_loopdev_partitions "$LOOP_DEV"
-    BOOT_DEV="${LOOP_DEV}"p1
-    ROOT_DEV="${LOOP_DEV}"p2
-
-    # shellcheck disable=SC2086
-    mkdir -p "${TMP_DIR}"/rpi-rootfs-img-mount ${DEBUG}
-
-    # OS Images are, by convention, packed as a MBR whole-disk file,
-    # containing two partitions: A FAT boot partition, which contains the kernel, command line,
-    # and supporting boot infrastructure for the Raspberry Pi Device.
-    # And in partition 2, the OS rootfs itself.
-    # Note that this mechanism is _assuming_ Linux. We may revise that in the future, but
-    # to do so would require a concrete support commitment from the vendor - and Raspberry Pi only
-    # support Linux.
-
-    # Immediately copy the boot files to the boot partition
-    dd if="${BOOT_DEV}" of="${RPI_SB_WORKDIR}"/bootfs-temporary.img
-    img2simg -s "${RPI_SB_WORKDIR}"/bootfs-temporary.img "${RPI_SB_WORKDIR}"/bootfs-temporary.simg
-    rm -f "${RPI_SB_WORKDIR}"/bootfs-temporary.img
-
-    # shellcheck disable=SC2086
-    mount -t ext4 "${ROOT_DEV}" "${TMP_DIR}"/rpi-rootfs-img-mount ${DEBUG}
-
-    announce_stop "OS Image Mounting"
-fi
-
-announce_start "Erase / Partition Device Storage"
+with_lock "${LOCK_BASE}/sparse-image-generation.lock" 120 prepare_image_file
 
 announce_start "Writing OS images"
 
+announce_start "Erase Device Storage"
 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" erase "${RPI_DEVICE_STORAGE_TYPE}"
 sleep 2
-fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem partinit "${RPI_DEVICE_STORAGE_TYPE}" DOS
-sleep 2
-fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 0c "$(simg_expanded_size "${RPI_SB_WORKDIR}/bootfs-temporary.simg")"
-sleep 2
-fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 11 # Grow to fill storage
-sleep 2
-announce_stop "Erase / Partition Device Storage"
+announce_stop "Erase Device Storage"
 
-announce_start "Resizing OS images"
-# Need mke2fs with '-E android_sparse' support
-# Debian's 'android-sdk-platform-tools' provides the option but is not correctly
-# built against libsparse: https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=1008107
-#
-# https://dl.google.com/android/repository/platform-tools-latest-linux.zip
-# https://dl.google.com/android/repository/platform-tools-latest-darwin.zip
-# https://dl.google.com/android/repository/platform-tools-latest-windows.zip
-TARGET_STORAGE_ROOT_EXTENT="$(get_variable partition-size:"${RPI_DEVICE_STORAGE_TYPE}"p2)"
-if [ -f "${RPI_SB_WORKDIR}/rootfs-temporary.simg" ] && [ "$((TARGET_STORAGE_ROOT_EXTENT))" -eq "$(simg_expanded_size "${RPI_SB_WORKDIR}"/rootfs-temporary.simg)" ]; then
-    announce_stop "Resizing OS images: Not required, already the correct size"
-else
-    mke2fs -t ext4 -b 4096 -d "${TMP_DIR}"/rpi-rootfs-img-mount "${RPI_SB_WORKDIR}"/rootfs-temporary.img $((TARGET_STORAGE_ROOT_EXTENT / 4096))
-    img2simg -s "${RPI_SB_WORKDIR}"/rootfs-temporary.img "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
-    rm -f "${RPI_SB_WORKDIR}"/rootfs-temporary.img
-    #TODO: Re-enable android_sparse
-    #mke2fs -t ext4 -b 4096 -d ${TMP_DIR}/rpi-rootfs-img-mount -E android_sparse ${RPI_SB_WORKDIR}/rootfs-temporary.simg $((TARGET_STORAGE_ROOT_EXTENT / 4096))
-    announce_stop "Resizing OS images: Resized to $((TARGET_STORAGE_ROOT_EXTENT))"
-fi
-
-announce_start "Writing OS images"
-fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}"p1 "${RPI_SB_WORKDIR}"/bootfs-temporary.simg
-fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}"p2 "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}" "${RPI_SB_WORKDIR}"/image-temporary.simg
 announce_stop "Writing OS images"
 
 announce_start "Set LED status"
@@ -317,11 +205,21 @@ fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem led PWR 0
 announce_stop "Set LED status"
 
 metadata_gather
+record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_FINISHED}" "${TARGET_USB_PATH}"
 
 announce_start "Cleaning up"
 cleanup
 announce_stop "Cleaning up"
 
-record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_FINISHED}" "${TARGET_USB_PATH}"
-
 log "Provisioning completed. Remove the device from this machine."
+
+# Indicate successful completion to systemd
+# This is used when the script is run as a systemd service
+# The special exit code 0 indicates success to systemd
+# Additionally, we can use systemd-notify if available to indicate completion
+if command -v systemd-notify >/dev/null 2>&1; then
+    systemd-notify --ready --status="Provisioning completed successfully"
+fi
+
+# Exit with success code for systemd
+exit 0
