@@ -15,6 +15,7 @@ record_state() {
     touch /srv/rpi-sb-provisioner/state.db
     sqlite3 "/srv/rpi-sb-provisioner/state.db"      \
     -cmd "PRAGMA journal_mode=WAL;"                     \
+    -cmd "PRAGMA busy_timeout=5000;"                    \
     "CREATE TABLE IF NOT EXISTS devices(                \
         id              integer primary key,            \
         serial          TEXT                not null,   \
@@ -30,7 +31,7 @@ record_state() {
     endpoint=$3
     image=${4:-""}
     ip_address=${5:-""}
-    sqlite3 "/srv/rpi-sb-provisioner/state.db" "INSERT INTO devices(serial, endpoint, state, image, ip_address) VALUES ('$serial', '$endpoint', '$state', '$image', '$ip_address');"
+    sqlite3 "/srv/rpi-sb-provisioner/state.db" "BEGIN IMMEDIATE TRANSACTION;INSERT INTO devices(serial, endpoint, state, image, ip_address) VALUES ('$serial', '$endpoint', '$state', '$image', '$ip_address');COMMIT;"
 }
 
 # get_usb_path_for_serial() - Finds the USB path for a device with a specific serial number
@@ -85,8 +86,9 @@ get_usb_path_for_serial() {
         for device in /dev/bus/usb/*/*; do
             serial=$(udevadm info --name="$device" --query=property --property=ID_SERIAL_SHORT --value 2>/dev/null)
             if [ "$serial" = "${TARGET_DEVICE_SERIAL}" ]; then
-                TARGET_USB_PATH="$(udevadm info "$device" | grep -oP '^P: \K.*')"
-                log "Found USB path ${TARGET_USB_PATH} using udevadm for device ${TARGET_DEVICE_SERIAL}"
+                # Separate assignment from export to avoid masking return values
+                usb_path="$(udevadm info "$device" | grep -oP '^P: \K.*')"
+                echo "$usb_path"
                 return 0
             fi
         done
