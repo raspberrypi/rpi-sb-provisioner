@@ -151,7 +151,7 @@ int main()
         }
     })
     .setLogLevel(trantor::Logger::kTrace)
-    .addListener("0.0.0.0", 3142)
+    .addListener("127.0.0.1", 3142)
     .setClientMaxBodySize(std::numeric_limits<size_t>::max())
     .setThreadNum(nthreads)
     .setUploadPath(uploadPath)
