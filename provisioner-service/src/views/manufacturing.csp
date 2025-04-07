@@ -3,6 +3,77 @@
 <head>
     <title>Manufacturing Database</title>
     <%view stylesheet %>
+    <style>
+        .table-container {
+            overflow-x: auto;
+            max-height: 80vh;
+            margin-top: 20px;
+            /* Make scrollbars always visible */
+            scrollbar-width: thin;  /* For Firefox */
+            scrollbar-color: rgba(0, 0, 0, 0.5) rgba(0, 0, 0, 0.1);  /* For Firefox */
+            /* Additional visual cues for Safari */
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background-color: #fafafa;
+            padding: 2px;
+            position: relative;
+        }
+        
+        /* For Webkit browsers (Chrome, Safari, etc.) */
+        .table-container::-webkit-scrollbar {
+            width: 10px;
+            height: 10px;
+            display: block;
+            -webkit-appearance: scrollbar;
+        }
+        
+        .table-container::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.1);
+            border-radius: 4px;
+        }
+        
+        .table-container::-webkit-scrollbar-thumb {
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 4px;
+        }
+        
+        /* Scroll indicator for Safari */
+        .scroll-indicator {
+            position: absolute;
+            right: 10px;
+            bottom: 10px;
+            background-color: rgba(0,0,0,0.6);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            z-index: 100;
+            opacity: 0.8;
+        }
+        
+        .page-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .export-btn {
+            background-color: #4CAF50;
+            color: white;
+            padding: 8px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .export-btn:hover {
+            background-color: #45a049;
+        }
+        
+        /* Tooltip styles */
+        .emmc-size {
+            cursor: help;
+            text-decoration: underline dotted #666;
+        }
+    </style>
 </head>
 <body>
     <%view navbar %>
@@ -24,55 +95,151 @@
     </div>
     <%c++ } %>
 
-    <h1>Manufacturing Database</h1>
-    <table>
-        <thead>
-            <tr>
-                <th>ID</th>
-                <th>Board</th>
-                <th>Serial</th>
-                <th>Ethernet MAC</th>
-                <th>WiFi MAC</th>
-                <th>Bluetooth MAC</th>
-                <th>eMMC Size</th>
-                <th>eMMC CID</th>
-                <th>RPi DUID</th>
-                <th>Revision</th>
-                <th>Processor</th>
-                <th>Memory</th>
-                <th>Manufacturer</th>
-                <th>Provision Time</th>
-            </tr>
-        </thead>
-        <tbody>
-        <%c++ 
-        auto devicesList = @@.get<std::vector<std::map<std::string, std::string>>>("devices");
-        if(devicesList.size() > 0) {
-        %>
-            <%c++ for(const auto& device : devicesList) { %>
+    <div class="page-header">
+        <h1>Manufacturing Database</h1>
+        <button id="exportCsv" class="export-btn">Export to CSV</button>
+    </div>
+    
+    <div class="table-container">
+        <div class="scroll-indicator">Scroll to see more</div>
+        <table id="manufacturingTable">
+            <thead>
                 <tr>
-                    <td><%c++ $$ << device.at("id"); %></td>
-                    <td><%c++ $$ << device.at("boardname"); %></td>
-                    <td><%c++ $$ << device.at("serial"); %></td>
-                    <td><%c++ $$ << device.at("eth_mac"); %></td>
-                    <td><%c++ $$ << device.at("wifi_mac"); %></td>
-                    <td><%c++ $$ << device.at("bt_mac"); %></td>
-                    <td><%c++ $$ << device.at("mmc_size"); %></td>
-                    <td><%c++ $$ << device.at("mmc_cid"); %></td>
-                    <td><%c++ $$ << device.at("rpi_duid"); %></td>
-                    <td><%c++ $$ << device.at("board_revision"); %></td>
-                    <td><%c++ $$ << device.at("processor"); %></td>
-                    <td><%c++ $$ << device.at("memory"); %></td>
-                    <td><%c++ $$ << device.at("manufacturer"); %></td>
-                    <td><%c++ $$ << device.at("provision_ts"); %></td>
+                    <th>Provision Time</th>
+                    <th>ID</th>
+                    <th>Board</th>
+                    <th>Serial</th>
+                    <th>Ethernet MAC</th>
+                    <th>WiFi MAC</th>
+                    <th>Bluetooth MAC</th>
+                    <th>eMMC Size</th>
+                    <th>eMMC CID</th>
+                    <th>RPi DUID</th>
+                    <th>Revision</th>
+                    <th>Processor</th>
+                    <th>Memory</th>
+                    <th>Manufacturer</th>
                 </tr>
+            </thead>
+            <tbody>
+            <%c++ 
+            auto devicesList = @@.get<std::vector<std::map<std::string, std::string>>>("devices");
+            if(devicesList.size() > 0) {
+            %>
+                <%c++ for(const auto& device : devicesList) { %>
+                    <tr>
+                        <td><%c++ $$ << device.at("provision_ts"); %></td>
+                        <td><%c++ $$ << device.at("id"); %></td>
+                        <td><%c++ $$ << device.at("boardname"); %></td>
+                        <td><%c++ $$ << device.at("serial"); %></td>
+                        <td><%c++ $$ << device.at("eth_mac"); %></td>
+                        <td><%c++ $$ << device.at("wifi_mac"); %></td>
+                        <td><%c++ $$ << device.at("bt_mac"); %></td>
+                        <td class="emmc-size" data-size="<%c++ $$ << device.at("mmc_size"); %>"><%c++ $$ << device.at("mmc_size"); %></td>
+                        <td><%c++ $$ << device.at("mmc_cid"); %></td>
+                        <td><%c++ $$ << device.at("rpi_duid"); %></td>
+                        <td><%c++ $$ << device.at("board_revision"); %></td>
+                        <td><%c++ $$ << device.at("processor"); %></td>
+                        <td><%c++ $$ << device.at("memory"); %></td>
+                        <td><%c++ $$ << device.at("manufacturer"); %></td>
+                    </tr>
+                <%c++ } %>
+            <%c++ } else { %>
+                    <tr>
+                        <td colspan="14" class="no-devices">No manufacturing data available</td>
+                    </tr>
             <%c++ } %>
-        <%c++ } else { %>
-                <tr>
-                    <td colspan="14" class="no-devices">No manufacturing data available</td>
-                </tr>
-        <%c++ } %>
-        </tbody>
-    </table>
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        // Handle scroll indicator visibility
+        function updateScrollIndicator() {
+            const container = document.querySelector('.table-container');
+            const indicator = document.querySelector('.scroll-indicator');
+            
+            // Show indicator only if horizontal scrolling is possible
+            if (container.scrollWidth > container.clientWidth) {
+                indicator.style.display = 'block';
+                
+                // Hide after scrolling or after 5 seconds
+                container.addEventListener('scroll', function() {
+                    indicator.style.display = 'none';
+                }, {once: true});
+                
+                setTimeout(function() {
+                    indicator.style.display = 'none';
+                }, 5000);
+            } else {
+                indicator.style.display = 'none';
+            }
+        }
+        
+        // Format bytes to human-readable size
+        function formatBytes(bytes, decimals = 2) {
+            if (bytes === 0 || isNaN(parseInt(bytes))) return '0 Bytes';
+            
+            const k = 1024;
+            const sizes = ['Bytes', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(decimals)) + ' ' + sizes[i];
+        }
+        
+        // Apply human-readable sizes to eMMC size cells
+        function applyEmmcSizeTooltips() {
+            const emmcCells = document.querySelectorAll('.emmc-size');
+            emmcCells.forEach(cell => {
+                const sizeInBytes = cell.getAttribute('data-size');
+                const humanSize = formatBytes(parseInt(sizeInBytes));
+                cell.setAttribute('title', humanSize);
+            });
+        }
+        
+        // Run on page load
+        window.addEventListener('load', function() {
+            updateScrollIndicator();
+            applyEmmcSizeTooltips();
+        });
+        window.addEventListener('resize', updateScrollIndicator);
+        
+        document.getElementById('exportCsv').addEventListener('click', function() {
+            // Get the table
+            const table = document.getElementById('manufacturingTable');
+            let csvContent = "data:text/csv;charset=utf-8,";
+            
+            // Get header row
+            const headerRow = table.querySelector('thead tr');
+            const headers = [];
+            headerRow.querySelectorAll('th').forEach(th => {
+                headers.push('"' + th.innerText + '"');
+            });
+            csvContent += headers.join(',') + '\r\n';
+            
+            // Get data rows
+            const rows = table.querySelectorAll('tbody tr');
+            rows.forEach(row => {
+                const rowData = [];
+                row.querySelectorAll('td').forEach(cell => {
+                    rowData.push('"' + (cell.innerText || '') + '"');
+                });
+                if (rowData.length > 1) { // Skip empty rows
+                    csvContent += rowData.join(',') + '\r\n';
+                }
+            });
+            
+            // Create download link
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement('a');
+            link.setAttribute('href', encodedUri);
+            link.setAttribute('download', 'manufacturing_data_' + new Date().toISOString().split('T')[0] + '.csv');
+            document.body.appendChild(link);
+            
+            // Download the CSV file
+            link.click();
+            document.body.removeChild(link);
+        });
+    </script>
 </body>
 </html> 
