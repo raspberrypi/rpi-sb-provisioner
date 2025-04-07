@@ -336,7 +336,7 @@ To skip EEPROM writing entirely, use the following command:
 $ sudo touch /etc/rpi-sb-provisioner/special-skip-eeprom/<serial>
 ----
 
-To fully re-provision the device using the same signing key, use the following command:
+To fully re-provision the device, including any EEPROM contents, using the same signing key, use the following command:
 ----
 $ sudo touch /etc/rpi-sb-provisioner/special-reprovision-device/<serial>
 ----
