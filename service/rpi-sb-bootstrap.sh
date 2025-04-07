@@ -599,4 +599,14 @@ announce_stop "fastboot initialisation"
 record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_FINISHED}" "${TARGET_USB_PATH}"
 set -e
 
+# Indicate successful completion to systemd
+# This is used when the script is run as a systemd service
+# The special exit code 0 indicates success to systemd
+# Additionally, we can use systemd-notify if available to indicate completion
+if command -v systemd-notify >/dev/null 2>&1; then
+    systemd-notify --ready --status="Provisioning completed successfully"
+fi
+
+# Exit with success code for systemd
+true
 cleanup
