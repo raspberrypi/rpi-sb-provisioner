@@ -47,8 +47,8 @@ override_dh_auto_build:
 override_dh_auto_install:
 	dh_auto_install --sourcedirectory=provisioner-service
 	# Completely remove the unwanted binaries
-	rm -f debian/usr/bin/drogon_ctl
-	rm -f debian/usr/bin/dg_ctl
+	rm -f debian/rpi-sb-provisioner/usr/bin/drogon_ctl
+	rm -f debian/rpi-sb-provisioner/usr/bin/dg_ctl
 
 # Explicitly control what gets installed
 override_dh_install:
