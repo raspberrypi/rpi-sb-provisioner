@@ -3,41 +3,75 @@
 set -e
 set -x
 
-export PROVISIONER_FINISHED="FDE-PROVISIONER-FINISHED"
-export PROVISIONER_ABORTED="FDE-PROVISIONER-ABORTED"
-export PROVISIONER_STARTED="FDE-PROVISIONER-STARTED"
-
 # shellcheck disable=SC1091
 . /var/lib/rpi-sb-provisioner/manufacturing-data
 # shellcheck disable=SC1091
 . /var/lib/rpi-sb-provisioner/state-recording
 
-# Source common helper functions
-# shellcheck disable=SC1091
-. "$(dirname "$0")/rpi-sb-common.sh"
-
-die() {
-    record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "${TARGET_USB_PATH}"
-    # shellcheck disable=SC2086
-    printf "%s\n" "$@"
-    exit 1
-}
-
-log() {
-    echo "$@" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/provisioner.log
-    printf "%s\n" "$@"
-}
-
-setup_fastboot_and_id_vars "$1"
-
 DEBUG=
 
 OPENSSL=${OPENSSL:-openssl}
 
+export PROVISIONER_FINISHED="FDE-PROVISIONER-FINISHED"
+export PROVISIONER_ABORTED="FDE-PROVISIONER-ABORTED"
+export PROVISIONER_STARTED="FDE-PROVISIONER-STARTED"
+
+# shellcheck disable=SC1091
+. "$(dirname "$0")/rpi-sb-common.sh"
+
 read_config
 
-: "${RPI_DEVICE_STORAGE_CIPHER:=xchacha12,aes-adiantum-plain64}"
+: "${RPI_DEVICE_STORAGE_CIPHER:=aes-xts-plain64}"
 
+die() {
+    record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "${TARGET_USB_PATH}"
+    # shellcheck disable=SC2086
+    echo "$@" ${DEBUG}
+    exit 1
+}
+
+simg_expanded_size() {
+    echo "$(($(simg_dump "$1" | sed -E 's/.*?Total of ([0-9]+) ([0-9]+)-byte .*/\1 * \2/')))"
+}
+
+log() {
+    echo "$@" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/provisioner.log
+}
+
+timeout_nonfatal() {
+    command="$*"
+    set +e
+    # shellcheck disable=SC2086
+    timeout 10 ${command}
+    command_exit_status=$?
+    if [ ${command_exit_status} -eq 124 ]; then
+        log "\"${command}\" failed, timed out."
+    elif [ ${command_exit_status} -ne 0 ]; then
+        log "\"${command}\" failed, exit status: ${command_exit_status}"
+    else
+        log "\"$command\" succeeded."
+    fi
+    set -e
+    return ${command_exit_status}
+}
+
+timeout_fatal() {
+    command="$*"
+    set +e
+    # shellcheck disable=SC2086
+    timeout 30 ${command}
+    command_exit_status=$?
+    if [ ${command_exit_status} -eq 124 ]; then
+        record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "${TARGET_USB_PATH}"
+        die "\"${command}\" failed, timed out."
+    elif [ ${command_exit_status} -ne 0 ]; then
+        record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "${TARGET_USB_PATH}"
+        die "\"$command\" failed, exit status: ${command_exit_status}"
+    else
+        log "\"$command\" succeeded."
+    fi
+    set -e
+}
 TMP_DIR=""
 
 get_cryptroot() {
@@ -45,6 +79,14 @@ get_cryptroot() {
         echo "/etc/rpi-sb-provisioner/cryptroot_initramfs"
     else
         echo "/var/lib/rpi-sb-provisioner/cryptroot_initramfs"
+    fi
+}
+
+get_fastboot_gadget() {
+    if [ -f /etc/rpi-sb-provisioner/fastboot-gadget.img ]; then
+        echo "/etc/rpi-sb-provisioner/fastboot-gadget.img"
+    else
+        echo "/var/lib/rpi-sb-provisioner/fastboot-gadget.img"
     fi
 }
 
@@ -112,25 +154,27 @@ check_pidevice_storage_type() {
         "emmc")
             echo "mmcblk0"
             ;;
+        "nvme")
+            echo "nvme0n1"
+            ;;
         ?)
             die "Unexpected storage device type. Wanted sd, nvme or emmc, got $1"
             ;;
     esac
 }
 
-simg_expanded_size() {
-    echo "$(($(simg_dump "$1" | sed -E 's/.*?Total of ([0-9]+) ([0-9]+)-byte .*/\1 * \2/')))"
-}
-
 # Lifted from pi-gen/scripts/common, unsure under what circumstances this would be necessary
 ensure_next_loopdev() {
+    set +e
     loopdev="$(losetup -f)"
     loopmaj="$(echo "$loopdev" | sed -E 's/.*[0-9]*?([0-9]+)$/\1/')"
     [ -b "$loopdev" ] || mknod "$loopdev" b 7 "$loopmaj"
+    set -e
 }
 
 # Lifted from pi-gen/scripts/common, unsure under what circumstances this would be necessary
 ensure_loopdev_partitions() {
+    set +e
     lsblk -r -n -o "NAME,MAJ:MIN" "$1" | grep -v "^${1#/dev/}" | while read -r line; do
         partition="${line%% *}"
         majmin="${line#* }"
@@ -138,6 +182,7 @@ ensure_loopdev_partitions() {
             mknod "/dev/$partition" b "${majmin%:*}" "${majmin#*:}"
         fi
     done
+    set -e
 }
 
 # Lifted from pi-gen/scripts/common
@@ -172,25 +217,28 @@ unmount_image() {
 }
 
 cleanup() {
-    unmount_image "${COPY_OS_COMBINED_FILE}"
-    if [ -d "${TMP_DIR}" ]; then
-        rm -rf "${TMP_DIR}"
-    fi
+    returnvalue=$?
+    [ -d "${TMP_DIR}/rpi-boot-img-mount" ] && umount "${TMP_DIR}"/rpi-boot-img-mount && sync
+    [ -d "${TMP_DIR}/rpi-rootfs-img-mount" ] && umount "${TMP_DIR}"/rpi-rootfs-img-mount && sync
+    [ -d "${TMP_DIR}" ] && rm -rf "${TMP_DIR}" && sync
+    rm -f "${CUSTOMER_PUBLIC_KEY_FILE}"
 
-    if [ -f "${COPY_OS_COMBINED_FILE}" ]; then
-        rm -rf "${COPY_OS_COMBINED_FILE}"
-    fi
+    unmount_image "${GOLD_MASTER_OS_FILE}"
+    [ -d "${TMP_DIR}" ] && rm -rf "${TMP_DIR}" && sync
+
     if [ -n "${DELETE_PRIVATE_TMPDIR}" ]; then
         announce_start "Deleting customised intermediates"
-        # shellcheck disable=SC2086
-        rm -rf "${DELETE_PRIVATE_TMPDIR}" ${DEBUG}
+        rm -rf "${RPI_SB_WORKDIR}" ${DEBUG}
+        sync
         DELETE_PRIVATE_TMPDIR=
         announce_stop "Deleting customised intermediates"
     fi
+
+    exit ${returnvalue}
 }
 trap cleanup INT TERM
 
-# Start the provisioner phase
+### Start the provisioner phase
 
 # These tools are used to modify the supplied images, and deal with mounting and unmounting the images.
 check_command_exists losetup
@@ -198,6 +246,9 @@ check_command_exists mknod
 check_command_exists lsblk
 check_command_exists cut
 check_command_exists findmnt
+
+# openssl is used to verify and transform the supplied key
+check_command_exists openssl
 
 # python is used by the Raspberry Pi usbboot scripts, and used as part of transforming the supplied key.
 check_command_exists python
@@ -213,35 +264,17 @@ check_command_exists mount
 
 # Fastboot is used as a transfer mechanism to get images and metadata to and from the Raspberry Pi device
 check_command_exists fastboot
+check_command_exists simg_dump
 
 check_command_exists blockdev
 
 check_command_exists grep
 
 get_variable() {
-    fastboot -s "${TARGET_DEVICE_SERIAL}" getvar "$1" 2>&1 | grep -oP "${1}"': \K[^\r\n]*'
+    fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar "$1" 2>&1 | grep -oP "${1}"': \K[^\r\n]*'
 }
 
-# Set TARGET_USB_PATH based on TARGET_DEVICE_SERIAL
-if [ -n "${TARGET_DEVICE_SERIAL}" ]; then
-    # Try to get the USB path for the device
-    usb_path=$(get_usb_path_for_serial "${TARGET_DEVICE_SERIAL}")
-    
-    if [ -n "$usb_path" ]; then
-        TARGET_USB_PATH="$usb_path"
-        log "Found USB path ${TARGET_USB_PATH} for device ${TARGET_DEVICE_SERIAL}"
-    else
-        log "Warning: Could not find USB path for device ${TARGET_DEVICE_SERIAL}"
-
-    fi
-fi
-
-# Ensure TARGET_USB_PATH is set
-if [ -z "${TARGET_USB_PATH}" ]; then
-    log "Error: Could not determine USB path for device ${TARGET_DEVICE_SERIAL}"
-    record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "unknown-usb-path"
-    exit 1
-fi
+setup_fastboot_and_id_vars "$1"
 
 record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_STARTED}" "${TARGET_USB_PATH}"
 
@@ -250,11 +283,11 @@ RPI_DEVICE_STORAGE_TYPE="$(check_pidevice_storage_type "${RPI_DEVICE_STORAGE_TYP
 DELETE_PRIVATE_TMPDIR=
 announce_start "Finding the cache directory"
 if [ -z "${RPI_SB_WORKDIR}" ]; then
-    RPI_SB_WORKDIR=$(mktemp -d "rpi-fde-provisioner.XXX" --tmpdir="/srv/")
+    RPI_SB_WORKDIR=$(mktemp -d "rpi-sb-provisioner.XXX" --tmpdir="/srv/")
     announce_stop "Finding the cache directory: Created a new one as unspecified"
     DELETE_PRIVATE_TMPDIR="true"
 elif [ ! -d "${RPI_SB_WORKDIR}" ]; then
-    RPI_SB_WORKDIR=$(mktemp -d "rpi-fde-provisioner.XXX" --tmpdir="/srv/")
+    RPI_SB_WORKDIR=$(mktemp -d "rpi-sb-provisioner.XXX" --tmpdir="/srv/")
     announce_stop "Finding the cache directory: Created a new one in /srv, as supplied path isn't a directory"
     DELETE_PRIVATE_TMPDIR="true"
 else
@@ -262,163 +295,187 @@ else
     announce_stop "Finding the cache directory: Using specified name"
 fi
 
-# Prior to this point, we cannot know the device serial. From here, log can do the Right Thing.
-mkdir -p /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/
+augment_initramfs() {
+    # shellcheck disable=SC2155
+    initramfs_compressed_file=$(check_file_is_expected "$1" "")
+    # shellcheck disable=SC2086
+    mkdir -p "${TMP_DIR}"/initramfs ${DEBUG}
+    # shellcheck disable=SC2086
+    zstd --rm -f -d "${initramfs_compressed_file}" -o "${TMP_DIR}"/initramfs.cpio ${DEBUG}
+    # shellcheck disable=SC2155
+    rootfs_mount=$(realpath "${TMP_DIR}"/rpi-rootfs-img-mount)
+    cd "${TMP_DIR}"/initramfs 
+    # shellcheck disable=SC2086
+    cpio -id < ../initramfs.cpio ${DEBUG}
+    # shellcheck disable=SC2086
+    rm ../initramfs.cpio ${DEBUG}
 
-# Fast path: If we've already generated the assets, just move to flashing.
-if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.img" ] ||
-   [ ! -e "${RPI_SB_WORKDIR}/rootfs-temporary.simg" ]; then
+    initramfs_dir="$PWD"/ # trailing '/' is meaningful
 
-    announce_start "OS Image Mounting"
-    COPY_OS_COMBINED_FILE=$(mktemp "working-os-image.XXX" --tmpdir="/srv/")
-    announce_start "OS Image Copying (potentially slow)"
-    cp "${GOLD_MASTER_OS_FILE}" "${COPY_OS_COMBINED_FILE}"
-    announce_stop "OS Image Copying (potentially slow)"
-    # Mount the 'complete' image as a series of partitions 
-    cnt=0
-    until ensure_next_loopdev && LOOP_DEV="$(losetup --show --find --partscan "${COPY_OS_COMBINED_FILE}")"; do
-        if [ $cnt -lt 5 ]; then
-            cnt=$((cnt + 1))
-            log "Error in losetup.  Retrying..."
-            sleep 5
-        else
-            log "ERROR: losetup failed; exiting"
-            sleep 5
-        fi
+    # Remove any pre-existing kernel modules in initramfs
+    rm -rf "${initramfs_dir}usr/lib/modules"
+    mkdir -p "${initramfs_dir}usr/lib/modules"
+
+    # Insert required kernel modules
+    cd "${rootfs_mount}"
+    find usr/lib/modules \
+        \( \
+            -name 'dm-mod.*' \
+            -o \
+            -name 'dm-crypt.*' \
+            -o \
+            -name 'af_alg.*' \
+            -o \
+            -name 'algif_skcipher.*' \
+            -o \
+            -name 'libaes.*' \
+            -o \
+            -name 'aes_generic.*' \
+            -o \
+            -name 'aes-arm64.*' \
+            -o \
+            -name 'libpoly1305.*' \
+            -o \
+            -name 'nhpoly1305.*' \
+            -o \
+            -name 'adiantum.*' \
+            -o \
+            -name 'libchacha.*' \
+            -o \
+            -name 'chacha-neon.*' \
+            -o \
+            -name 'chacha_generic.*' \
+        \) \
+        -exec cp -r --parents "{}" "${initramfs_dir}" \;
+    cd -
+
+    # Generate depmod information
+    for kernel in $(find "${initramfs_dir}usr/lib/modules" -mindepth 1 -maxdepth 1 -type d -printf '%f\n'); do
+        depmod --basedir "${initramfs_dir}" "${kernel}"
     done
 
-    ensure_loopdev_partitions "$LOOP_DEV"
-    BOOT_DEV="${LOOP_DEV}"p1
-    ROOT_DEV="${LOOP_DEV}"p2
+    # Configure the cryptroot script to use the correct storage device
+    sed -i "s/mmcblk0/${RPI_DEVICE_STORAGE_TYPE}/g" "${initramfs_dir}usr/bin/init_cryptroot.sh"
 
-    # shellcheck disable=SC2086
-    mkdir -p "${TMP_DIR}"/rpi-boot-img-mount ${DEBUG}
-    # shellcheck disable=SC2086
-    mkdir -p "${TMP_DIR}"/rpi-rootfs-img-mount ${DEBUG}
+    find . -print0 | cpio --null -ov --format=newc > ../initramfs.cpio
+    cd "${TMP_DIR}"
+    rm -rf "${TMP_DIR}"/initramfs
+    zstd --no-progress --rm -f -6 "${TMP_DIR}"/initramfs.cpio -o "${initramfs_compressed_file}"
+}
 
-    # OS Images are, by convention, packed as a MBR whole-disk file,
-    # containing two partitions: A FAT boot partition, which contains the kernel, command line,
-    # and supporting boot infrastructure for the Raspberry Pi Device.
-    # And in partition 2, the OS rootfs itself.
-    # Note that this mechanism is _assuming_ Linux. We may revise that in the future, but
-    # to do so would require a concrete support commitment from the vendor - and Raspberry Pi only
-    # support Linux.
-    # shellcheck disable=SC2086
-    mount -t vfat "${BOOT_DEV}" "${TMP_DIR}"/rpi-boot-img-mount ${DEBUG}
-    # shellcheck disable=SC2086
-    mount -t ext4 "${ROOT_DEV}" "${TMP_DIR}"/rpi-rootfs-img-mount ${DEBUG}
+prepare_pre_boot_auth_images() {
+    # If the bootfs-temporary hasn't been generated, we are the first to run,
+    # and need to generate the bootfs-temporary.simg file, which will also create the
+    # mount points for the boot and root partitions.
+    if [ ! -f "${RPI_SB_WORKDIR}/rootfs-temporary.simg" ] || [ ! -f "${RPI_SB_WORKDIR}/bootfs-temporary.simg" ]; then
+        announce_start "OS Image Mounting"
 
-    announce_stop "OS Image Mounting"
-
-    # We supply a pre-baked Raspberry Pi Pre-boot-authentication initramfs, which we insert here.
-    # This image is maintained by Raspberry Pi, with sources available on our GitHub pages.
-    announce_start "Insert pre-boot authentication initramfs"
-    cp "$(get_cryptroot)" "${TMP_DIR}"/rpi-boot-img-mount/initramfs8
-    announce_stop "Insert pre-boot authentication initramfs"
-
-    announce_start "Initramfs modification"
-
-    augment_initramfs() {
-        # shellcheck disable=SC2155
-        initramfs_compressed_file=$(check_file_is_expected "$1" "")
-        # shellcheck disable=SC2086
-        mkdir -p "${TMP_DIR}"/initramfs ${DEBUG}
-        # shellcheck disable=SC2086
-        zstd --rm -f -d "${initramfs_compressed_file}" -o "${TMP_DIR}"/initramfs.cpio ${DEBUG}
-        # shellcheck disable=SC2155
-        rootfs_mount=$(realpath "${TMP_DIR}"/rpi-rootfs-img-mount)
-        cd "${TMP_DIR}"/initramfs 
-        # shellcheck disable=SC2086
-        cpio -id < ../initramfs.cpio ${DEBUG}
-        # shellcheck disable=SC2086
-        rm ../initramfs.cpio ${DEBUG}
-
-        initramfs_dir="$PWD"/ # trailing '/' is meaningful
-
-        # Remove any pre-existing kernel modules in initramfs
-        rm -rf "${initramfs_dir}usr/lib/modules"
-        mkdir -p "${initramfs_dir}usr/lib/modules"
-
-        # Insert required kernel modules
-        cd "${rootfs_mount}"
-        find usr/lib/modules \
-            \( \
-                -name 'dm-mod.*' \
-                -o \
-                -name 'dm-crypt.*' \
-                -o \
-                -name 'af_alg.*' \
-                -o \
-                -name 'algif_skcipher.*' \
-                -o \
-                -name 'libaes.*' \
-                -o \
-                -name 'aes_generic.*' \
-                -o \
-                -name 'aes-arm64.*' \
-                -o \
-                -name 'libpoly1305.*' \
-                -o \
-                -name 'nhpoly1305.*' \
-                -o \
-                -name 'adiantum.*' \
-                -o \
-                -name 'libchacha.*' \
-                -o \
-                -name 'chacha-neon.*' \
-                -o \
-                -name 'chacha_generic.*' \
-            \) \
-            -exec cp -r --parents "{}" "${initramfs_dir}" \;
-        cd -
-
-        # Generate depmod information
-        for kernel in $(find "${initramfs_dir}usr/lib/modules" -mindepth 1 -maxdepth 1 -type d -printf '%f\n'); do
-            depmod --basedir "${initramfs_dir}" "${kernel}"
+        # Mount the 'complete' image as a series of partitions 
+        cnt=0
+        until ensure_next_loopdev && LOOP_DEV="$(losetup --show --find --partscan "${GOLD_MASTER_OS_FILE}")"; do
+            if [ $cnt -lt 5 ]; then
+                cnt=$((cnt + 1))
+                log "Error in losetup.  Retrying..."
+                sleep 5
+            else
+                log "ERROR: losetup failed; exiting"
+                sleep 5
+            fi
         done
 
-        find . -print0 | cpio --null -ov --format=newc > ../initramfs.cpio
-        cd "${TMP_DIR}"
-        rm -rf "${TMP_DIR}"/initramfs
-        zstd --no-progress --rm -f -6 "${TMP_DIR}"/initramfs.cpio -o "${initramfs_compressed_file}"
-    }
+        ensure_loopdev_partitions "$LOOP_DEV"
+        BOOT_DEV="${LOOP_DEV}"p1
+        ROOT_DEV="${LOOP_DEV}"p2
 
-    # Use subshells to avoid polluting our CWD.
-    if check_file_is_expected "${TMP_DIR}"/rpi-boot-img-mount/initramfs8 ""; then
-        ( augment_initramfs "${TMP_DIR}"/rpi-boot-img-mount/initramfs8 )
-    fi
-    announce_stop "Initramfs modification"
+        # shellcheck disable=SC2086
+        mkdir -p "${TMP_DIR}"/rpi-boot-img-mount ${DEBUG}
+        # shellcheck disable=SC2086
+        mkdir -p "${TMP_DIR}"/rpi-rootfs-img-mount ${DEBUG}
 
-    announce_start "cmdline.txt modification"
-    sed --in-place 's%\b\(root=\)\S*%\1/dev/ram0%' "${TMP_DIR}"/rpi-boot-img-mount/cmdline.txt
-    sed --in-place 's%\binit=\S*%%' "${TMP_DIR}"/rpi-boot-img-mount/cmdline.txt
-    sed --in-place 's%\brootfstype=\S*%%' "${TMP_DIR}"/rpi-boot-img-mount/cmdline.txt
-    # TODO: Consider deleting quiet
-    sed --in-place 's%\bquiet\b%%' "${TMP_DIR}"/rpi-boot-img-mount/cmdline.txt
-    announce_stop "cmdline.txt modification"
+        announce_start "OS Image Copying (potentially slow)"
+        dd if="${BOOT_DEV}" of="${TMP_DIR}"/bootfs-original.img bs=1M status=progress
+        dd if="${ROOT_DEV}" of="${TMP_DIR}"/rootfs-original.img bs=1M status=progress
+        announce_stop "OS Image Copying (potentially slow)"
 
-    announce_start "config.txt modification"
-    sed --in-place 's%^\(auto_initramfs=\S*\)%#\1%' "${TMP_DIR}"/rpi-boot-img-mount/config.txt
+        unmount_image "${GOLD_MASTER_OS_FILE}"
 
-    echo 'initramfs initramfs8' >> "${TMP_DIR}"/rpi-boot-img-mount/config.txt
-    
-    announce_stop "config.txt modification"
+        # OS Images are, by convention, packed as a MBR whole-disk file,
+        # containing two partitions: A FAT boot partition, which contains the kernel, command line,
+        # and supporting boot infrastructure for the Raspberry Pi Device.
+        # And in partition 2, the OS rootfs itself.
+        # Note that this mechanism is _assuming_ Linux. We may revise that in the future, but
+        # to do so would require a concrete support commitment from the vendor - and Raspberry Pi only
+        # support Linux.
+        # shellcheck disable=SC2086
+        mount -t vfat "${TMP_DIR}"/bootfs-original.img "${TMP_DIR}"/rpi-boot-img-mount ${DEBUG}
+        # shellcheck disable=SC2086
+        mount -t ext4 "${TMP_DIR}"/rootfs-original.img "${TMP_DIR}"/rpi-rootfs-img-mount ${DEBUG}
 
-    # Move the fastboot rpiboot configuration file into the flashing directory
-    cp "$(get_fastboot_config_file)" "${TMP_DIR}"/config.txt
+        announce_stop "OS Image Mounting"
 
-    announce_start "Copying boot image to working directory"
-    umount "${BOOT_DEV}"
-    sync; sync; sync;
-    rm -rf "${TMP_DIR}"/rpi-boot-img-mount
-    cp "${BOOT_DEV}" "${RPI_SB_WORKDIR}"/bootfs-temporary.img
-    img2simg -s "${RPI_SB_WORKDIR}"/bootfs-temporary.img "${RPI_SB_WORKDIR}"/bootfs-temporary.simg
-    rm -f "${RPI_SB_WORKDIR}"/bootfs-temporary.img
-    announce_stop "Copying boot image to working directory"
-fi # Slow path
+        # We supply a pre-baked Raspberry Pi Pre-boot-authentication initramfs, which we insert here.
+        # This image is maintained by Raspberry Pi, with sources available on our GitHub pages.
+        announce_start "Insert pre-boot authentication initramfs"
+        cp "$(get_cryptroot)" "${TMP_DIR}"/rpi-boot-img-mount/initramfs8
+        announce_stop "Insert pre-boot authentication initramfs"
+
+        announce_start "Initramfs modification"
+
+        # Use subshells to avoid polluting our CWD.
+        if check_file_is_expected "${TMP_DIR}"/rpi-boot-img-mount/initramfs8 ""; then
+            ( augment_initramfs "${TMP_DIR}"/rpi-boot-img-mount/initramfs8 )
+        fi
+        announce_stop "Initramfs modification"
+
+        announce_start "cmdline.txt modification"
+        sed --in-place 's%\b\(root=\)\S*%\1/dev/ram0%' "${TMP_DIR}"/rpi-boot-img-mount/cmdline.txt
+        sed --in-place 's%\binit=\S*%%' "${TMP_DIR}"/rpi-boot-img-mount/cmdline.txt
+        sed --in-place 's%\brootfstype=\S*%%' "${TMP_DIR}"/rpi-boot-img-mount/cmdline.txt
+        # TODO: Consider deleting quiet
+        sed --in-place 's%\bquiet\b%%' "${TMP_DIR}"/rpi-boot-img-mount/cmdline.txt
+        announce_stop "cmdline.txt modification"
+
+        announce_start "config.txt modification"
+        sed --in-place 's%^\(auto_initramfs=\S*\)%#\1%' "${TMP_DIR}"/rpi-boot-img-mount/config.txt
+
+        echo 'initramfs initramfs8' >> "${TMP_DIR}"/rpi-boot-img-mount/config.txt
+
+        announce_stop "config.txt modification"
+
+        announce_start "boot.img creation"
+        cp "$(get_fastboot_config_file)" "${TMP_DIR}"/config.txt
+
+        rpi-make-boot-image -b "pi${RPI_DEVICE_FAMILY}" -d "${TMP_DIR}"/rpi-boot-img-mount -o "${TMP_DIR}"/boot.img
+        announce_stop "boot.img creation"
+
+        announce_start "Boot Image partition extraction"
+
+        # Get the size of the original boot image in MiB (rounded up)
+        BOOTFS_SIZE_MB=$(( ($(stat -c%s "${TMP_DIR}"/bootfs-original.img) + 1048575) / 1048576 ))
+        # Using 1M which is 1 MiB (1048576 bytes) as the block size
+        dd if=/dev/zero of="${TMP_DIR}"/bootfs-temporary.img bs=1M count="${BOOTFS_SIZE_MB}" status=progress
+        mkfs.fat -n "BOOT" "${TMP_DIR}"/bootfs-temporary.img
+
+        META_BOOTIMG_MOUNT_PATH=$(mktemp -d)
+        mount -o loop "${TMP_DIR}"/bootfs-temporary.img "${META_BOOTIMG_MOUNT_PATH}"
+        cp "${TMP_DIR}"/boot.img "${META_BOOTIMG_MOUNT_PATH}"/boot.img
+        cp "${TMP_DIR}"/config.txt "${META_BOOTIMG_MOUNT_PATH}"/config.txt
+
+        sync; sync; sync;
+
+        umount "${META_BOOTIMG_MOUNT_PATH}"
+        rm -rf "${META_BOOTIMG_MOUNT_PATH}"
+        img2simg -s "${TMP_DIR}"/bootfs-temporary.img "${RPI_SB_WORKDIR}"/bootfs-temporary.simg
+        rm -f "${TMP_DIR}"/bootfs-temporary.img
+        announce_stop "Boot Image partition extraction"
+    fi # Slow path
+} # prepare_pre_boot_auth_images
+
+with_lock "${LOCK_BASE}/pre-boot-auth-images.lock" 600 prepare_pre_boot_auth_images
 
 announce_start "Erase / Partition Device Storage"
 
+# Arbitrary sleeps to handle lack of correct synchronisation in fastbootd.
 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" erase "${RPI_DEVICE_STORAGE_TYPE}"
 sleep 2
 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem partinit "${RPI_DEVICE_STORAGE_TYPE}" DOS
@@ -433,7 +490,18 @@ fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem cryptopen "${RPI_DEVICE_STORAGE_T
 sleep 2
 announce_stop "Erase / Partition Device Storage"
 
-announce_start "Resizing OS images"
+prepare_rootfs_image() {
+    if [ -f "${RPI_SB_WORKDIR}/rootfs-temporary.simg" ] && [ "$((TARGET_STORAGE_ROOT_EXTENT))" -eq "$(simg_expanded_size "${RPI_SB_WORKDIR}"/rootfs-temporary.simg)" ]; then
+        announce_stop "Resizing OS images: Not required, already the correct size"
+    else
+        mke2fs -t ext4 -b 4096 -d "${TMP_DIR}"/rpi-rootfs-img-mount "${RPI_SB_WORKDIR}"/rootfs-temporary.img $((TARGET_STORAGE_ROOT_EXTENT / 4096))
+        img2simg -s "${RPI_SB_WORKDIR}"/rootfs-temporary.img "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
+        rm -f "${RPI_SB_WORKDIR}"/rootfs-temporary.img
+        announce_stop "Resizing OS images: Resized to $((TARGET_STORAGE_ROOT_EXTENT))"
+    fi
+}
+
+announce_start "Resizing rootfs image"
 # Need mke2fs with '-E android_sparse' support
 # Debian's 'android-sdk-platform-tools' provides the option but is not correctly
 # built against libsparse: https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=1008107
@@ -442,16 +510,8 @@ announce_start "Resizing OS images"
 # https://dl.google.com/android/repository/platform-tools-latest-darwin.zip
 # https://dl.google.com/android/repository/platform-tools-latest-windows.zip
 TARGET_STORAGE_ROOT_EXTENT="$(get_variable partition-size:mapper/cryptroot)"
-if [ -f "${RPI_SB_WORKDIR}/rootfs-temporary.simg" ] && [ "$((TARGET_STORAGE_ROOT_EXTENT))" -eq "$(simg_expanded_size "${RPI_SB_WORKDIR}"/rootfs-temporary.simg)" ]; then
-    announce_stop "Resizing OS images: Not required, already the correct size"
-else
-    mke2fs -t ext4 -b 4096 -d "${TMP_DIR}"/rpi-rootfs-img-mount "${RPI_SB_WORKDIR}"/rootfs-temporary.img $((TARGET_STORAGE_ROOT_EXTENT / 4096))
-    img2simg -s "${RPI_SB_WORKDIR}"/rootfs-temporary.img "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
-    rm -f "${RPI_SB_WORKDIR}"/rootfs-temporary.img
-    #TODO: Re-enable android_sparse
-    #mke2fs -t ext4 -b 4096 -d ${TMP_DIR}/rpi-rootfs-img-mount -E android_sparse ${RPI_SB_WORKDIR}/rootfs-temporary.simg $((TARGET_STORAGE_ROOT_EXTENT / 4096))
-    announce_stop "Resizing OS images: Resized to $((TARGET_STORAGE_ROOT_EXTENT))"
-fi
+with_lock "${LOCK_BASE}/rootfs-image.lock" 600 prepare_rootfs_image
+announce_stop "Resizing rootfs image"
 
 announce_start "Writing OS images"
 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}"p1 "${RPI_SB_WORKDIR}"/bootfs-temporary.simg
@@ -459,20 +519,22 @@ fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash mapper/cryptroot "${RPI_SB_WORK
 announce_stop "Writing OS images"
 
 announce_start "Set LED status"
-case "${RPI_DEVICE_FAMILY}" in
-    2W)
-        fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem led ACT 0
-        ;;
-    *)
-        fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem led PWR 0
-        ;;
-esac
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem led PWR 0
 announce_stop "Set LED status"
 
 metadata_gather
 
-announce_start "Cleaning up"
-cleanup
-announce_stop "Cleaning up"
 record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_FINISHED}" "${TARGET_USB_PATH}"
 log "Provisioning completed. Remove the device from this machine."
+
+# Indicate successful completion to systemd
+# This is used when the script is run as a systemd service
+# The special exit code 0 indicates success to systemd
+# Additionally, we can use systemd-notify if available to indicate completion
+if command -v systemd-notify >/dev/null 2>&1; then
+    systemd-notify --ready --status="Provisioning completed successfully"
+fi
+
+# Exit with success code for systemd
+true
+cleanup
