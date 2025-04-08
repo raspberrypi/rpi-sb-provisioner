@@ -173,7 +173,32 @@
                         <label for="<%c++ $$ << key; %>"><%c++ $$ << key; %></label>
                         <button type="button" class="help-button" data-target="modal-<%c++ $$ << key; %>">Help</button>
                     </div>
+                    <%c++ if(key == "PROVISIONING_STYLE") { %>
+                    <select id="<%c++ $$ << key; %>" name="<%c++ $$ << key; %>">
+                        <option value="secure-boot" <%c++ if(value == "secure-boot") $$ << "selected"; %>>secure-boot</option>
+                        <option value="fde-only" <%c++ if(value == "fde-only") $$ << "selected"; %>>fde-only</option>
+                        <option value="naked" <%c++ if(value == "naked") $$ << "selected"; %>>naked</option>
+                    </select>
+                    <%c++ } else if(key == "RPI_DEVICE_STORAGE_TYPE") { %>
+                    <select id="<%c++ $$ << key; %>" name="<%c++ $$ << key; %>">
+                        <option value="sd" <%c++ if(value == "sd") $$ << "selected"; %>>sd</option>
+                        <option value="emmc" <%c++ if(value == "emmc") $$ << "selected"; %>>emmc</option>
+                        <option value="nvme" <%c++ if(value == "nvme") $$ << "selected"; %>>nvme</option>
+                    </select>
+                    <%c++ } else if(key == "RPI_DEVICE_STORAGE_CIPHER") { %>
+                    <select id="<%c++ $$ << key; %>" name="<%c++ $$ << key; %>">
+                        <option value="aes-xts-plain64" <%c++ if(value == "aes-xts-plain64") $$ << "selected"; %>>aes-xts-plain64</option>
+                        <option value="xchacha12,aes-adiantum-plain64" <%c++ if(value == "xchacha12,aes-adiantum-plain64") $$ << "selected"; %>>xchacha12,aes-adiantum-plain64</option>
+                    </select>
+                    <%c++ } else if(key == "RPI_DEVICE_FAMILY") { %>
+                    <select id="<%c++ $$ << key; %>" name="<%c++ $$ << key; %>">
+                        <option value="4" <%c++ if(value == "4") $$ << "selected"; %>>4</option>
+                        <option value="5" <%c++ if(value == "5") $$ << "selected"; %>>5</option>
+                        <option value="2W" <%c++ if(value == "2W") $$ << "selected"; %>>2W</option>
+                    </select>
+                    <%c++ } else { %>
                     <input type="text" id="<%c++ $$ << key; %>" name="<%c++ $$ << key; %>" value="<%c++ $$ << value; %>">
+                    <%c++ } %>
                 </div>
             <%c++ } %>
             <button type="submit">Save Options</button>
@@ -237,10 +262,10 @@
                 <p>Raspberry Pi devices that use an EEPROM as part of their boot flow can configure that EEPROM to enable write protection - preventing modification.</p>
                 <p>Set to any value to enable EEPROM write protection.</p>
             <%c++ } else if(key == "RPI_DEVICE_FETCH_METADATA") { %>
-                <p><strong>Optional</strong></p>
-                <p>Collect manufacturing data from each device that is provisioned. This will include the board type, board revision number, the processor name, the memory configuration, and the factory where the board was made.</p>
-                <p>The metadata is inserted into the log for the device, and also as a serial-number named JSON file under the <code>metadata</code> subdirectory of the device provisioning logs.</p>
-                <p>Set to any value to enable metadata collection.</p>
+                <p><strong>Deprecated</strong></p>
+                <p>This configuration option is no longer available. rpi-sb-provisioner will always collect metadata from each device that is provisioned.</p>
+                <p>Collected metadata includes board type, revision number, processor name, memory configuration, manufacturer information, and other device-specific details.</p>
+                <p>This data is automatically inserted into device logs and stored in the manufacturing database when configured with RPI_SB_PROVISIONER_MANUFACTURING_DB.</p>
             <%c++ } else if(key == "RPI_DEVICE_RETRIEVE_KEYPAIR") { %>
                 <p><strong>Optional</strong></p>
                 <p>Specify a directory to copy the device unique keypair to. The keys will be named &lt;serial&gt;.der and &lt;serial&gt;.pub</p>
@@ -253,7 +278,6 @@
                 <p><code>RPI_SB_WORKDIR=/srv/rpi-sb-provisioner/</code></p>
             <%c++ } else if(key == "RPI_SB_PROVISIONER_MANUFACTURING_DB") { %>
                 <p><strong>Optional</strong></p>
-                <p class="note">This option only has effect when you also use RPI_DEVICE_FETCH_METADATA. If that flag is not set, no manufacturing data will be collected.</p>
                 <p>Store manufacturing data in a sqlite3 database. This will include the board serial, board revision, the boot ROM version, the MAC address of the ethernet port, any set hash of the customer signing key, the JTAG lock state, the board attributes and the advanced boot flags.</p>
                 <p>You must not specify the path of a database stored on a network drive or similar storage, as this mechanism is only safe to use on a single provisioning system. For merging the output with multiple provisioning systems, consider "Processing the manufacturing database" later in this document.</p>
                 <p>Create this file before execution, for example using <code>touch</code>:</p>
