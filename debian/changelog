@@ -21,6 +21,7 @@ rpi-sb-provisioner (2.0.0) unstable; urgency=medium
   * packaging: Fix lintian warnings and implement proper systemd service handling
   * security: Add branch protection and other hardening measures
   * ui: Add version check and GitHub link in WebUI
+  * config: Removed RPI_DEVICE_FETCH_METADATA, we now always fetch metadata
 
  -- Tom Dewey <tom.dewey@raspberrypi.com>  Tue, 07 Apr 2025 11:59:55 +0000
 
