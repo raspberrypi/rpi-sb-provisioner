@@ -270,6 +270,12 @@ check_command_exists blockdev
 
 check_command_exists grep
 
+check_command_exists mke2fs
+check_command_exists img2simg
+check_command_exists mkfs.fat
+
+check_command_exists systemd-notify
+
 get_variable() {
     fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar "$1" 2>&1 | grep -oP "${1}"': \K[^\r\n]*'
 }
@@ -277,6 +283,8 @@ get_variable() {
 setup_fastboot_and_id_vars "$1"
 
 record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_STARTED}" "${TARGET_USB_PATH}"
+
+systemd-notify --ready --status="Provisioning started"
 
 TMP_DIR=$(mktemp -d)
 RPI_DEVICE_STORAGE_TYPE="$(check_pidevice_storage_type "${RPI_DEVICE_STORAGE_TYPE}")"
@@ -531,9 +539,7 @@ log "Provisioning completed. Remove the device from this machine."
 # This is used when the script is run as a systemd service
 # The special exit code 0 indicates success to systemd
 # Additionally, we can use systemd-notify if available to indicate completion
-if command -v systemd-notify >/dev/null 2>&1; then
-    systemd-notify --ready --status="Provisioning completed successfully"
-fi
+systemd-notify --stopping --status="Provisioning completed successfully"
 
 # Exit with success code for systemd
 true

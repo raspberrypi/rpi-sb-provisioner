@@ -127,6 +127,7 @@ timeout_fatal() {
 }
 
 cleanup() {
+    return_value=$?
     if [ -d "${TMP_DIR}" ]; then
         rm -rf "${TMP_DIR}"
     fi
@@ -138,6 +139,8 @@ cleanup() {
         DELETE_PRIVATE_TMPDIR=
         announce_stop "Deleting customised intermediates"
     fi
+
+    exit ${return_value}
 }
 trap cleanup INT TERM
 
@@ -157,6 +160,10 @@ check_command_exists fastboot
 check_command_exists blockdev
 
 check_command_exists grep
+
+check_command_exists img2simg
+
+check_command_exists systemd-notify
 
 get_variable() {
     fastboot getvar "$1" 2>&1 | grep -oP "${1}"': \K[^\r\n]*'
@@ -188,6 +195,8 @@ prepare_image_file() {
     fi
 }
 
+systemd-notify --ready --status="Provisioning started"
+
 with_lock "${LOCK_BASE}/sparse-image-generation.lock" 120 prepare_image_file
 
 announce_start "Writing OS images"
@@ -207,19 +216,13 @@ announce_stop "Set LED status"
 metadata_gather
 record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_FINISHED}" "${TARGET_USB_PATH}"
 
-announce_start "Cleaning up"
-cleanup
-announce_stop "Cleaning up"
-
 log "Provisioning completed. Remove the device from this machine."
 
 # Indicate successful completion to systemd
 # This is used when the script is run as a systemd service
 # The special exit code 0 indicates success to systemd
 # Additionally, we can use systemd-notify if available to indicate completion
-if command -v systemd-notify >/dev/null 2>&1; then
-    systemd-notify --ready --status="Provisioning completed successfully"
-fi
+systemd-notify --stopping --status="Provisioning completed successfully"
 
-# Exit with success code for systemd
-exit 0
+true
+cleanup
