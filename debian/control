@@ -2,7 +2,7 @@ Source: rpi-sb-provisioner
 Section: admin
 Priority: optional
 Maintainer: Tom Dewey <tom.dewey@raspberrypi.com>
-Build-Depends: debhelper (>= 11), dh-sequence-systemd, cmake (>= 3.25), g++ (>= 10), libsqlite3-dev, libjsoncpp-dev, libsystemd-dev, pandoc, asciidoctor
+Build-Depends: debhelper (>= 11), dh-sequence-systemd, cmake (>= 3.25), g++ (>= 10), libsqlite3-dev, libjsoncpp-dev, libsystemd-dev, pandoc, asciidoctor, uuid-dev, libssl-dev
 Standards-Version: 4.6.2
 Homepage: https://www.raspberrypi.com/software
 
