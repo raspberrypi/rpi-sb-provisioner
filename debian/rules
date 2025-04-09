@@ -46,16 +46,3 @@ override_dh_auto_build:
 # Install the CMake project but exclude drogon tools
 override_dh_auto_install:
 	dh_auto_install --sourcedirectory=provisioner-service
-	# Completely remove the unwanted binaries
-	rm -f debian/rpi-sb-provisioner/usr/bin/drogon_ctl
-	rm -f debian/rpi-sb-provisioner/usr/bin/dg_ctl
-
-# Explicitly control what gets installed
-override_dh_install:
-	dh_install --exclude=drogon_ctl --exclude=dg_ctl
-
-# Final check to ensure these files don't get included
-override_dh_builddeb:
-	find debian/rpi-sb-provisioner -name drogon_ctl -delete
-	find debian/rpi-sb-provisioner -name dg_ctl -delete
-	dh_builddeb
