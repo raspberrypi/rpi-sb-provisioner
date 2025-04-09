@@ -113,8 +113,8 @@ install(TARGETS rpi-provisioner-ui
 )
 
 # Install systemd service file if it exists
-if(EXISTS "${CMAKE_SOURCE_DIR}/debian/rpi-provisioner-ui.service")
-    install(FILES "${CMAKE_SOURCE_DIR}/debian/rpi-provisioner-ui.service"
+if(EXISTS "${CMAKE_SOURCE_DIR}/rpi-provisioner-ui.service")
+    install(FILES "${CMAKE_SOURCE_DIR}/rpi-provisioner-ui.service"
             DESTINATION /usr/lib/systemd/system
             PERMISSIONS OWNER_READ GROUP_READ WORLD_READ)
 endif()
