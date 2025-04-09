@@ -12,7 +12,7 @@ service/rpi-fde-provisioner@.service                        /usr/lib/systemd/sys
 service/rpi-naked-provisioner@.service                      /usr/lib/systemd/system
 service/rpi-sb-bootstrap@.service                           /usr/lib/systemd/system
 service/rpi-sb-triage@.service                              /usr/lib/systemd/system
-debian/provisioner-ui.service                               /usr/lib/systemd/system
+debian/rpi-provisioner-ui.service                           /usr/lib/systemd/system
 
 fetch-repo-package-list/fetch-repo-package-list@.timer      /usr/lib/systemd/system
 fetch-repo-package-list/fetch-repo-package-list@.service    /usr/lib/systemd/system

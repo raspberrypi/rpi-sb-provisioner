@@ -1,5 +1,5 @@
 rpi-sb-provisioner: no-manual-page [usr/bin/fetch-repo-package-list]
-rpi-sb-provisioner: no-manual-page [usr/bin/provisioner]
+rpi-sb-provisioner: no-manual-page [usr/bin/rpi-provisioner-ui]
 rpi-sb-provisioner: no-manual-page [usr/bin/rpi-fde-provisioner.sh]
 rpi-sb-provisioner: no-manual-page [usr/bin/rpi-naked-provisioner.sh]
 rpi-sb-provisioner: no-manual-page [usr/bin/rpi-package-download]

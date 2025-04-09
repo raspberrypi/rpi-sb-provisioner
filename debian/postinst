@@ -11,7 +11,7 @@ if [ "$1" = "configure" ] || [ "$1" = "abort-upgrade" ] || [ "$1" = "abort-decon
 	deb-systemd-helper daemon-reload >/dev/null || true
 	
 	# Enable all services
-	deb-systemd-helper enable 'provisioner-ui.service' >/dev/null || true
+	deb-systemd-helper enable 'rpi-provisioner-ui.service' >/dev/null || true
 	deb-systemd-helper enable 'rpi-sb-provisioner@.service' >/dev/null || true
 	deb-systemd-helper enable 'rpi-fde-provisioner@.service' >/dev/null || true
 	deb-systemd-helper enable 'rpi-naked-provisioner@.service' >/dev/null || true
@@ -23,7 +23,7 @@ if [ "$1" = "configure" ] || [ "$1" = "abort-upgrade" ] || [ "$1" = "abort-decon
 	
 	# Start the services that should be running by default
 	if [ -d /run/systemd/system ]; then
-		deb-systemd-invoke start 'provisioner-ui.service' >/dev/null || true
+		deb-systemd-invoke start 'rpi-provisioner-ui.service' >/dev/null || true
 		deb-systemd-invoke start 'fetch-repo-package-list@.timer' >/dev/null || true
 	fi
 fi

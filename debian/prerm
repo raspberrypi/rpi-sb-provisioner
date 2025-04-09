@@ -5,12 +5,12 @@ set -e
 # Stop and disable the services
 if [ -d /run/systemd/system ] && [ "$1" = remove ]; then
 	# Stop all services
-	deb-systemd-invoke stop 'provisioner-ui.service' >/dev/null || true
+	deb-systemd-invoke stop 'rpi-provisioner-ui.service' >/dev/null || true
 fi
 
 if [ "$1" = "remove" ]; then
 	# Disable and clean up all services
-	deb-systemd-helper disable 'provisioner-ui.service' >/dev/null || true
+	deb-systemd-helper disable 'rpi-provisioner-ui.service' >/dev/null || true
 	deb-systemd-helper disable 'rpi-sb-provisioner@.service' >/dev/null || true
 	deb-systemd-helper disable 'rpi-fde-provisioner@.service' >/dev/null || true
 	deb-systemd-helper disable 'rpi-naked-provisioner@.service' >/dev/null || true
@@ -20,7 +20,7 @@ if [ "$1" = "remove" ]; then
 	deb-systemd-helper disable 'fetch-repo-package-list@.timer' >/dev/null || true
 	deb-systemd-helper disable 'rpi-package-download@.service' >/dev/null || true
 	
-	deb-systemd-helper unmask 'provisioner-ui.service' >/dev/null || true
+	deb-systemd-helper unmask 'rpi-provisioner-ui.service' >/dev/null || true
 	deb-systemd-helper unmask 'rpi-sb-provisioner@.service' >/dev/null || true
 	deb-systemd-helper unmask 'rpi-fde-provisioner@.service' >/dev/null || true
 	deb-systemd-helper unmask 'rpi-naked-provisioner@.service' >/dev/null || true

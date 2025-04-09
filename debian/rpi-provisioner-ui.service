@@ -4,7 +4,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/provisioner
+ExecStart=/usr/bin/rpi-provisioner-ui
 Restart=always
 RestartSec=10
 
