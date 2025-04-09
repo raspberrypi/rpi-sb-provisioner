@@ -12,10 +12,12 @@ include(FetchContent)
 FetchContent_Declare(drogon
  GIT_REPOSITORY https://github.com/drogonframework/drogon.git
  GIT_TAG        v1.9.10
+ EXCLUDE_FROM_ALL
 )
 FetchContent_Declare(fmt
  GIT_REPOSITORY https://github.com/fmtlib/fmt.git
  GIT_TAG        11.1.4
+ EXCLUDE_FROM_ALL
 )
 FetchContent_MakeAvailable(fmt)
 set(BUILD_EXAMPLES OFF)
@@ -38,7 +40,7 @@ unset(BUILD_ORM)
 unset(BUILD_CTL)
 unset(BUILD_EXAMPLES)
 
-project(provisioner)
+project(rpi-provisioner-ui)
 
 find_package(SQLite3 REQUIRED)
 find_package(jsoncpp REQUIRED)
@@ -72,12 +74,12 @@ endforeach()
 # Create a custom target for CSP compilation
 add_custom_target(compile_views DEPENDS ${VIEW_SOURCES})
 
-add_executable(provisioner)
+add_executable(rpi-provisioner-ui)
 
 # Add dependency on the compile_views target
-add_dependencies(provisioner compile_views)
+add_dependencies(rpi-provisioner-ui compile_views)
 
-target_sources(provisioner
+target_sources(rpi-provisioner-ui
     PRIVATE
     src/main.cpp
     src/images.cpp
@@ -89,14 +91,14 @@ target_sources(provisioner
     ${VIEW_SOURCES}
 )
 
-target_include_directories(provisioner
+target_include_directories(rpi-provisioner-ui
     PRIVATE
     src/include
     ${SQLite3_INCLUDE_DIR}
     ${CSP_OUTPUT_DIR}  # Include the compiled templates
 )
 
-target_link_libraries(provisioner
+target_link_libraries(rpi-provisioner-ui
     PRIVATE
     fmt
     ${jsoncpp_LIBRARY}
@@ -106,13 +108,13 @@ target_link_libraries(provisioner
 )
 
 # Install directives
-install(TARGETS provisioner
+install(TARGETS rpi-provisioner-ui
     RUNTIME DESTINATION /usr/bin
 )
 
 # Install systemd service file if it exists
-if(EXISTS "${CMAKE_SOURCE_DIR}/debian/provisioner.service")
-    install(FILES "${CMAKE_SOURCE_DIR}/debian/provisioner.service"
+if(EXISTS "${CMAKE_SOURCE_DIR}/debian/rpi-provisioner-ui.service")
+    install(FILES "${CMAKE_SOURCE_DIR}/debian/rpi-provisioner-ui.service"
             DESTINATION /usr/lib/systemd/system
             PERMISSIONS OWNER_READ GROUP_READ WORLD_READ)
 endif()
