@@ -22,6 +22,7 @@ rpi-sb-provisioner (2.0.0) unstable; urgency=medium
   * security: Add branch protection and other hardening measures
   * ui: Add version check and GitHub link in WebUI
   * config: Removed RPI_DEVICE_FETCH_METADATA, we now always fetch metadata
+  * ui: Add customisation scripts to the WebUI
 
  -- Tom Dewey <tom.dewey@raspberrypi.com>  Tue, 07 Apr 2025 11:59:55 +0000
 
