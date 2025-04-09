@@ -26,4 +26,4 @@ host-support/bootloader.config                      /var/lib/rpi-sb-provisioner
 host-support/manufacturing-data                     /var/lib/rpi-sb-provisioner
 host-support/state-recording                        /var/lib/rpi-sb-provisioner
 
-host-support/rpi-sb-provisioner         /etc/default
+host-support/config                                 /etc/rpi-sb-provisioner
