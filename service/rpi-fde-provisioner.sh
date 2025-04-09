@@ -450,6 +450,12 @@ prepare_pre_boot_auth_images() {
 
         announce_stop "config.txt modification"
 
+        # Run customisation script for bootfs-mounted stage
+        run_customisation_script "fde-provisioner" "bootfs-mounted" "${TMP_DIR}/rpi-boot-img-mount" "${TMP_DIR}/rpi-rootfs-img-mount"
+
+        # Run customisation script for rootfs-mounted stage
+        run_customisation_script "fde-provisioner" "rootfs-mounted" "${TMP_DIR}/rpi-boot-img-mount" "${TMP_DIR}/rpi-rootfs-img-mount"
+
         announce_start "boot.img creation"
         cp "$(get_fastboot_config_file)" "${TMP_DIR}"/config.txt
 
@@ -525,6 +531,9 @@ announce_start "Writing OS images"
 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}"p1 "${RPI_SB_WORKDIR}"/bootfs-temporary.simg
 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash mapper/cryptroot "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
 announce_stop "Writing OS images"
+
+# Run customisation script for post-flash stage
+run_customisation_script "fde-provisioner" "post-flash"
 
 announce_start "Set LED status"
 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem led PWR 0

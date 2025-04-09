@@ -173,3 +173,40 @@ setup_fastboot_and_id_vars() {
         exit 1
     fi
 }
+
+run_customisation_script() {
+    PROVISIONER_NAME="$1"
+    STAGE_NAME="$2"
+    
+    SCRIPT_NAME="${PROVISIONER_NAME}-${STAGE_NAME}.sh"
+    SCRIPT_PATH="/etc/rpi-sb-provisioner/scripts/${SCRIPT_NAME}"
+    
+    if [ -f "${SCRIPT_PATH}" ]; then
+        announce_start "Running customisation script for ${PROVISIONER_NAME} at stage ${STAGE_NAME}"
+        
+        # Ensure script is executable
+        chmod +x "${SCRIPT_PATH}"
+        
+        # Handle different stages with appropriate parameters
+        if [ "${STAGE_NAME}" = "post-flash" ]; then
+            # For post-flash stage, pass device info that can be used with fastboot
+            "${SCRIPT_PATH}" "${FASTBOOT_DEVICE_SPECIFIER}" "${TARGET_DEVICE_SERIAL}" "${RPI_DEVICE_STORAGE_TYPE}"
+        else
+            # For filesystem mount stages, pass mount points
+            BOOT_MOUNT="$3"
+            ROOTFS_MOUNT="$4"
+            "${SCRIPT_PATH}" "${BOOT_MOUNT}" "${ROOTFS_MOUNT}"
+        fi
+        
+        SCRIPT_EXIT_CODE=$?
+        
+        if [ $SCRIPT_EXIT_CODE -eq 0 ]; then
+            announce_stop "Customisation script ${SCRIPT_NAME} completed successfully"
+        else
+            announce_stop "Customisation script ${SCRIPT_NAME} failed with exit code ${SCRIPT_EXIT_CODE}"
+            log "WARNING: Customisation script ${SCRIPT_NAME} failed with exit code ${SCRIPT_EXIT_CODE}"
+        fi
+    else
+        log "No customisation script found for ${PROVISIONER_NAME} at stage ${STAGE_NAME}"
+    fi
+}
