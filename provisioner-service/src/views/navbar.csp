@@ -1,6 +1,6 @@
 <style>
 /* Navigation Bar Styles */
-.navbar {
+.rpi-navbar {
     background-color: #333;
     overflow: hidden;
     margin-bottom: 20px;
@@ -8,7 +8,7 @@
     position: relative;
 }
 
-.navbar a {
+.rpi-navbar a {
     float: left;
     color: white;
     text-align: center;
@@ -18,50 +18,50 @@
     transition: background-color 0.3s;
 }
 
-.navbar a:hover {
+.rpi-navbar a:hover {
     background-color: #0066cc;
     color: white;
 }
 
-.navbar a.active {
+.rpi-navbar a.active {
     background-color: #0066cc;
     color: white;
 }
 
-.version-info {
+.rpi-version-info {
     float: right;
     color: #ddd;
     padding: 14px 16px;
     font-size: 14px;
 }
 
-.version-warning {
+.rpi-version-warning {
     color: #ffcc00;
     margin-left: 5px;
 }
 
-.version-link {
+.rpi-version-link {
     text-decoration: none;
     color: inherit;
 }
 
-.github-link {
+.rpi-github-link {
     float: right !important;
     margin-left: 10px;
 }
 
-.github-link:hover {
+.rpi-github-link:hover {
     background-color: #c51d4a !important;
     color: white;
 }
 
-.right-items {
+.rpi-right-items {
     float: right;
 }
 </style>
 
 <!-- Navigation Bar -->
-<div class="navbar">
+<div class="rpi-navbar">
     <a href="/devices" <%c++ if(@@.get<std::string>("currentPage") == "devices") { %>class="active"<%c++ } %>>Devices</a>
     <a href="/get-images" <%c++ if(@@.get<std::string>("currentPage") == "images") { %>class="active"<%c++ } %>>Images</a>
     <a href="/options/get" <%c++ if(@@.get<std::string>("currentPage") == "options") { %>class="active"<%c++ } %>>Options</a>
@@ -69,17 +69,17 @@
     <a href="/services" <%c++ if(@@.get<std::string>("currentPage") == "services") { %>class="active"<%c++ } %>>Services</a>
     <a href="/manu-db" <%c++ if(@@.get<std::string>("currentPage") == "manufacturing") { %>class="active"<%c++ } %>>Manufacturing Database</a>
     
-    <div class="right-items">
-        <a href="https://github.com/raspberrypi/rpi-sb-provisioner" target="_blank" class="github-link">GitHub</a>
-        <span class="version-info">
+    <div class="rpi-right-items">
+        <a href="https://github.com/raspberrypi/rpi-sb-provisioner" target="_blank" class="rpi-github-link">GitHub</a>
+        <span class="rpi-version-info">
             <%c++ extern std::string g_packageVersion; %>
             <%c++ extern bool g_hasNewerVersion; %>
             <%c++ extern std::string g_releaseUrl; %>
             
             <%c++ if(g_hasNewerVersion && !g_releaseUrl.empty()) { %>
-                <a href="<%c++ $$ << g_releaseUrl; %>" target="_blank" class="version-link">
+                <a href="<%c++ $$ << g_releaseUrl; %>" target="_blank" class="rpi-version-link">
                     v<%c++ $$ << g_packageVersion; %>
-                    <span class="version-warning">⚠</span>
+                    <span class="rpi-version-warning">⚠</span>
                 </a>
             <%c++ } else { %>
                 v<%c++ $$ << g_packageVersion; %>

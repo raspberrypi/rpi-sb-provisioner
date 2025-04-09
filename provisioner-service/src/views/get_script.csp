@@ -1,14 +1,427 @@
+<%inc
+#include <string>
+#include <vector>
+%>
+
+<%c++ 
+// Initialize with defaults
+std::string script_name = "";
+bool script_exists = false;
+bool script_enabled = false;
+std::string script_content = "";
+std::string currentPage = "customisation";
+
+// Use try/catch to handle missing values
+try {
+    script_name = @@.get<std::string>("script_name");
+} catch (...) {}
+
+try {
+    script_exists = @@.get<bool>("script_exists");
+} catch (...) {}
+
+try {
+    script_enabled = @@.get<bool>("script_enabled");
+} catch (...) {}
+
+try {
+    script_content = @@.get<std::string>("script_content");
+} catch (...) {}
+%>
+
 <!DOCTYPE html>
 <html>
 <head>
-    <title>View Script - @script_name</title>
+    <title>Edit Customisation Script</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <%view stylesheet %>
+    <style>
+        .container {
+            max-width: 1200px;
+            margin: 20px auto;
+            padding: 0 15px;
+        }
+        
+        .mt-4 {
+            margin-top: 1.5rem;
+        }
+
+        /* Script editor styles */
+        .script-editor-container {
+            max-width: 1200px;
+        }
+        .custom-switch {
+            padding-top: 7px;
+        }
+        pre {
+            background-color: #f8f9fa;
+            padding: 10px;
+            border-radius: 5px;
+        }
+
+        /* Basic Bootstrap replacements needed for this page */
+        .row {
+            display: flex;
+            flex-wrap: wrap;
+            margin-right: -15px;
+            margin-left: -15px;
+        }
+        
+        .col-md-auto {
+            position: relative;
+            width: auto;
+            padding-right: 15px;
+            padding-left: 15px;
+        }
+        
+        .mb-3 {
+            margin-bottom: 1rem;
+        }
+        
+        .d-flex {
+            display: flex;
+        }
+        
+        .justify-content-between {
+            justify-content: space-between;
+        }
+        
+        .btn {
+            display: inline-block;
+            font-weight: 400;
+            text-align: center;
+            white-space: nowrap;
+            vertical-align: middle;
+            user-select: none;
+            border: 1px solid transparent;
+            padding: 0.375rem 0.75rem;
+            font-size: 1rem;
+            line-height: 1.5;
+            border-radius: 0.25rem;
+            transition: color 0.15s ease-in-out, background-color 0.15s ease-in-out, border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+            cursor: pointer;
+        }
+        
+        .btn-sm {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.875rem;
+            line-height: 1.5;
+            border-radius: 0.2rem;
+        }
+        
+        .btn-primary {
+            color: #fff;
+            background-color: #007bff;
+            border-color: #007bff;
+        }
+        
+        .btn-success {
+            color: #fff;
+            background-color: #28a745;
+            border-color: #28a745;
+        }
+        
+        .btn-secondary {
+            color: #fff;
+            background-color: #6c757d;
+            border-color: #6c757d;
+        }
+        
+        .btn-info {
+            color: #fff;
+            background-color: #17a2b8;
+            border-color: #17a2b8;
+        }
+
+        /* Modal styling */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1050;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0,0,0,0.4);
+        }
+        
+        .modal-dialog {
+            position: relative;
+            width: auto;
+            margin: 0.5rem;
+            pointer-events: none;
+            max-width: 800px;
+            margin: 1.75rem auto;
+        }
+        
+        .modal-content {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+            pointer-events: auto;
+            background-color: #fff;
+            background-clip: padding-box;
+            border: 1px solid rgba(0,0,0,0.2);
+            border-radius: 0.3rem;
+            outline: 0;
+        }
+        
+        .modal-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            padding: 1rem;
+            border-bottom: 1px solid #e9ecef;
+            border-top-left-radius: 0.3rem;
+            border-top-right-radius: 0.3rem;
+        }
+        
+        .modal-title {
+            margin-bottom: 0;
+            line-height: 1.5;
+            font-size: 1.25rem;
+        }
+        
+        .close {
+            float: right;
+            font-size: 1.5rem;
+            font-weight: 700;
+            line-height: 1;
+            color: #000;
+            text-shadow: 0 1px 0 #fff;
+            opacity: .5;
+            padding: 0;
+            background-color: transparent;
+            border: 0;
+            appearance: none;
+        }
+        
+        .modal-body {
+            position: relative;
+            flex: 1 1 auto;
+            padding: 1rem;
+        }
+        
+        .modal-footer {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            padding: 1rem;
+            border-top: 1px solid #e9ecef;
+        }
+        
+        .fade {
+            opacity: 0;
+            transition: opacity 0.15s linear;
+        }
+        
+        .fade.show {
+            opacity: 1;
+        }
+
+        .custom-control {
+            position: relative;
+            display: block;
+            min-height: 1.5rem;
+        }
+        
+        .toggle-btn {
+            padding: 8px 16px;
+            border-radius: 4px;
+            font-weight: 500;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .toggle-btn.enabled {
+            background-color: #28a745;
+            color: white;
+            border: 1px solid #28a745;
+        }
+        
+        .toggle-btn.disabled {
+            background-color: #f8f9fa;
+            color: #6c757d;
+            border: 1px solid #ced4da;
+        }
+    </style>
 </head>
 <body>
     <%view navbar %>
     
-    <a href="/customisation/list-scripts" class="back-link">← Back to Scripts</a>
-    <h1>View Script: @script_name</h1>
-    <pre>@script_content</pre>
+    <div class="container mt-4">
+        <div class="container script-editor-container">
+            <a href="/customisation/list-scripts" class="mb-3 d-inline-block"><i class="fas fa-arrow-left"></i> Back to Scripts</a>
+            <h2>Script Editor - <span id="script-filename"><%c++ $$ << script_name; %></span></h2>
+            
+            <div class="row mb-3">
+                <div class="col-md-auto">
+                    <button id="enableScriptToggle" class="toggle-btn <%c++ if(script_enabled) $$ << "enabled"; else $$ << "disabled"; %>" <%c++ if(!script_exists) $$ << "disabled"; %>>
+                        <i class="fas <%c++ if(script_enabled) $$ << "fa-toggle-on"; else $$ << "fa-toggle-off"; %>"></i>
+                        Script <%c++ if(script_enabled) $$ << "Enabled"; else $$ << "Disabled"; %>
+                    </button>
+                </div>
+            </div>
+
+            <div id="editor" style="height: 500px; width: 100%; border: 1px solid #ddd;"><%c++ $$ << script_content; %></div>
+
+            <div class="mt-3 d-flex justify-content-between">
+                <button id="save-btn" class="btn btn-success">Save</button>
+                <button id="script-help-btn" class="btn btn-info">
+                    <i class="fas fa-question-circle"></i> Help
+                </button>
+            </div>
+
+            <!-- Help Modal -->
+            <div class="modal fade" id="helpModal" tabindex="-1" role="dialog" aria-labelledby="helpModalTitle" aria-hidden="true">
+                <div class="modal-dialog modal-lg" role="document">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title" id="helpModalTitle">Script Helper</h5>
+                            <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                                <span aria-hidden="true">&times;</span>
+                            </button>
+                        </div>
+                        <div class="modal-body">
+                            <h6>About Customization Scripts</h6>
+                            <p>
+                                Customization scripts allow you to add custom operations at specific points in the provisioning process. 
+                                These scripts run at predetermined stages in each provisioner's workflow.
+                            </p>
+                            
+                            <h6>Script Arguments</h6>
+                            <p>Different stages receive different arguments, appropriate to their position in the provisioning process:</p>
+                            <ul>
+                                <li><code>bootfs, rootfs</code></li>
+                                <ul>
+                                    <li><code>$1</code>: The fastboot device specifier. You must always use this when you use fastboot: <code>fastboot -s ${1}</code></li>
+                                    <li><code>$2</code>: The device serial number, also obtainable via <code>fastboot getvar serialno</code></li>
+                                    <li><code>$2</code>: Selected storage device</li>
+                                </ul>
+                                <li><code>post-flash</code></li>
+                                <ul>
+                                    <li><code>$1</code>: Bootfs mount point.</li>
+                                    <li><code>$2</code>: Root filesystem mount point.</li>
+                                </ul>
+                            </ul>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.4.12/ace.js"></script>
+<script>
+    $(document).ready(function() {
+        // Initialize Ace editor
+        var editor = ace.edit("editor");
+        editor.setTheme("ace/theme/monokai");
+        editor.session.setMode("ace/mode/sh");
+        editor.setFontSize(14);
+        
+        // Get script data from the page
+        var scriptName = $("#script-filename").text();
+        var scriptExists = <%c++ $$ << (script_exists ? "true" : "false"); %>;
+        
+        // Help modal
+        $("#script-help-btn").click(function() {
+            $("#helpModal").css("display", "block").addClass("show");
+        });
+        
+        // Modal functionality
+        $(".close, .btn[data-dismiss='modal']").click(function() {
+            $("#helpModal").css("display", "none").removeClass("show");
+        });
+        
+        // Show modal function
+        $.fn.modal = function(action) {
+            if (action === 'show') {
+                $(this).css("display", "block").addClass("show");
+            } else if (action === 'hide') {
+                $(this).css("display", "none").removeClass("show");
+            }
+        };
+        
+        // Save button
+        $("#save-btn").click(function() {
+            var content = editor.getValue();
+            if (!scriptExists && content.trim() === '') {
+                content = '#!/bin/bash\n\n# Script arguments:\n# $1 - The provisioner ID (e.g., "raspios_lite_arm64")\n# $2 - The stage name (e.g., "post-flash", "rootfs-mounted")\n# $3 - The log file path (append output here with >> "$3")\n\n# Example: Modify a file in the rootfs\necho "[$1] Adding custom configuration to /etc/hosts during $2 stage" >> "$3"\n\n# Append a custom host entry to /etc/hosts in the rootfs\necho "10.0.0.100 custom-host" >> /mnt/rootfs/etc/hosts\n\n# Return success\nexit 0';
+                editor.setValue(content, -1);
+            }
+            saveScript(content, !scriptExists);
+        });
+        
+        // Enable/disable toggle
+        $("#enableScriptToggle").click(function() {
+            if ($(this).prop('disabled')) return;
+            
+            var wasEnabled = $(this).hasClass('enabled');
+            var willBeEnabled = !wasEnabled;
+            
+            var url = willBeEnabled ? '/customisation/enable-script' : '/customisation/disable-script';
+            
+            $.ajax({
+                url: url + '?script=' + encodeURIComponent(scriptName),
+                type: 'POST',
+                success: function(response) {
+                    console.log("Script " + (willBeEnabled ? "enabled" : "disabled"));
+                    
+                    // Update button UI
+                    var $btn = $("#enableScriptToggle");
+                    if (willBeEnabled) {
+                        $btn.removeClass('disabled').addClass('enabled');
+                        $btn.html('<i class="fas fa-toggle-on"></i> Script Enabled');
+                    } else {
+                        $btn.removeClass('enabled').addClass('disabled');
+                        $btn.html('<i class="fas fa-toggle-off"></i> Script Disabled');
+                    }
+                },
+                error: function(xhr) {
+                    console.error("Error toggling script", xhr);
+                    alert("Failed to " + (willBeEnabled ? "enable" : "disable") + " script. Please try again.");
+                }
+            });
+        });
+        
+        function saveScript(content, isNewScript) {
+            $.ajax({
+                url: '/customisation/save-script',
+                type: 'POST',
+                data: JSON.stringify({ 
+                    filename: scriptName,
+                    content: content,
+                    enabled: $("#enableScriptToggle").hasClass('enabled')
+                }),
+                contentType: 'application/json',
+                success: function(response) {
+                    console.log("Script saved successfully");
+                    if (isNewScript) {
+                        // Update UI for an existing script
+                        $("#save-btn").prop('disabled', false);
+                        $("#enableScriptToggle").prop('disabled', false);
+                        scriptExists = true;
+                    }
+                    // Redirect back to the list
+                    window.location.href = '/customisation/list-scripts';
+                },
+                error: function(xhr) {
+                    console.error("Error saving script", xhr);
+                    alert("Failed to save script. Please try again.");
+                }
+            });
+        }
+    });
+</script>
 </body>
 </html> 
