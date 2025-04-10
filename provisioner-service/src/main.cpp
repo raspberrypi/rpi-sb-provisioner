@@ -4,6 +4,10 @@
 #include <cstdio>
 #include <memory>
 #include <regex>
+#include <iostream>
+#include <getopt.h>
+#include <map>
+#include <algorithm>
 
 #include "images.h"
 #include "devices.h"
@@ -94,8 +98,100 @@ std::string g_packageVersion;
 bool g_hasNewerVersion = false;
 std::string g_releaseUrl;
 
-int main()
+// Print help message
+void printHelp(const char* programName) {
+    std::cout << "Usage: " << programName << " [OPTIONS]\n\n"
+              << "Options:\n"
+              << "  -h, --help                 Display this help message and exit\n"
+              << "  -v, --version              Display version information and exit\n"
+              << "  -a, --address <address>    Set listener address (default: 127.0.0.1)\n"
+              << "  -p, --port <port>          Set listener port (default: 3142)\n"
+              << "  -l, --log-level <level>    Set log level (trace, debug, info, warn, error, fatal)\n"
+              << "                             Default: trace\n"
+              << std::endl;
+}
+
+// Map string to trantor::Logger::LogLevel
+trantor::Logger::LogLevel parseLogLevel(const std::string& level) {
+    static const std::map<std::string, trantor::Logger::LogLevel> levelMap = {
+        {"trace", trantor::Logger::kTrace},
+        {"debug", trantor::Logger::kDebug},
+        {"info", trantor::Logger::kInfo},
+        {"warn", trantor::Logger::kWarn},
+        {"error", trantor::Logger::kError},
+        {"fatal", trantor::Logger::kFatal}
+    };
+
+    std::string levelLower = level;
+    std::transform(levelLower.begin(), levelLower.end(), levelLower.begin(), 
+                   [](unsigned char c) { return std::tolower(c); });
+
+    auto it = levelMap.find(levelLower);
+    if (it != levelMap.end()) {
+        return it->second;
+    }
+    
+    std::cerr << "Invalid log level: " << level << std::endl;
+    std::cerr << "Valid options are: trace, debug, info, warn, error, fatal" << std::endl;
+    return trantor::Logger::kTrace; // Default to trace if invalid
+}
+
+// Print version information
+void printVersion() {
+    std::string version = getPackageVersion();
+    std::cout << "Raspberry Pi Secure Boot Provisioner v" << version << std::endl;
+}
+
+int main(int argc, char* argv[])
 {
+    // Default values for listener
+    std::string listenerAddress = "127.0.0.1";
+    int listenerPort = 3142;
+    trantor::Logger::LogLevel logLevel = trantor::Logger::kTrace;
+
+    // Parse command line options
+    static struct option long_options[] = {
+        {"help", no_argument, 0, 'h'},
+        {"version", no_argument, 0, 'v'},
+        {"address", required_argument, 0, 'a'},
+        {"port", required_argument, 0, 'p'},
+        {"log-level", required_argument, 0, 'l'},
+        {0, 0, 0, 0}
+    };
+
+    int opt;
+    while ((opt = getopt_long(argc, argv, "hva:p:l:", long_options, nullptr)) != -1) {
+        switch (opt) {
+            case 'h':
+                printHelp(argv[0]);
+                return 0;
+            case 'v':
+                printVersion();
+                return 0;
+            case 'a':
+                listenerAddress = optarg;
+                break;
+            case 'p':
+                try {
+                    listenerPort = std::stoi(optarg);
+                    if (listenerPort <= 0 || listenerPort > 65535) {
+                        std::cerr << "Port must be between 1 and 65535" << std::endl;
+                        return 1;
+                    }
+                } catch (const std::exception& e) {
+                    std::cerr << "Invalid port number: " << optarg << std::endl;
+                    return 1;
+                }
+                break;
+            case 'l':
+                logLevel = parseLogLevel(optarg);
+                break;
+            default:
+                printHelp(argv[0]);
+                return 1;
+        }
+    }
+
     auto nthreads = std::thread::hardware_concurrency();
     if (nthreads == 0) nthreads = 1;
 
@@ -150,8 +246,8 @@ int main()
             LOG_INFO << "setsockopt TCP_FASTOPEN failed";
         }
     })
-    .setLogLevel(trantor::Logger::kTrace)
-    .addListener("127.0.0.1", 3142)
+    .setLogLevel(logLevel)
+    .addListener(listenerAddress, listenerPort)
     .setClientMaxBodySize(std::numeric_limits<size_t>::max())
     .setThreadNum(nthreads)
     .setUploadPath(uploadPath)
