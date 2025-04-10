@@ -3,6 +3,59 @@
 <head>
     <title>Device List</title>
     <%view stylesheet %>
+    <style>
+        /* Toggle switch styles */
+        .toggle-container {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 50px;
+            height: 24px;
+            margin-right: 10px;
+        }
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 24px;
+        }
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        input:checked + .toggle-slider {
+            background-color: #0066cc;
+        }
+        input:checked + .toggle-slider:before {
+            transform: translateX(26px);
+        }
+        #refresh-status {
+            margin-left: 10px;
+            font-size: 0.9em;
+            color: #666;
+        }
+    </style>
 </head>
 <body>
     <%view navbar %>
@@ -24,42 +77,157 @@
     </div>
     <%c++ } %>
     <h1>Device List</h1>
-    <table>
-        <thead>
-            <tr>
-                <th>Serial Number</th>
-                <th>Port</th>
-                <th>IP Address</th>
-                <th>State</th>
-                <th>Image</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-        <%c++ 
-        auto devicesList = @@.get<std::vector<std::map<std::string, std::string>>>("devices");
-        if(devicesList.size() > 0) {
-        %>
-            <%c++ for(const auto& device : devicesList) { %>
+    
+    <div class="toggle-container">
+        <label class="toggle-switch">
+            <input type="checkbox" id="auto-refresh" checked>
+            <span class="toggle-slider"></span>
+        </label>
+        <span>Auto Refresh</span>
+        <span id="refresh-status">(Enabled - refreshing every 1s)</span>
+    </div>
+    
+    <div id="device-table-container">
+        <table>
+            <thead>
                 <tr>
-                    <td><%c++ $$ << device.at("serial"); %></td>
-                    <td><%c++ $$ << device.at("port"); %></td>
-                    <td><%c++ $$ << device.at("ip_address"); %></td>
-                    <td><%c++ $$ << device.at("state"); %></td>
-                    <td><%c++ $$ << device.at("image"); %></td>
-                    <td>
-                        <a href="/devices/<%c++ $$ << device.at("serial"); %>/log/provisioner" class="log-link">Provisioner Log</a><br>
-                        <a href="/devices/<%c++ $$ << device.at("serial"); %>/log/bootstrap" class="log-link">Bootstrap Log</a><br>
-                        <a href="/devices/<%c++ $$ << device.at("serial"); %>/log/triage" class="log-link">Triage Log</a>
-                    </td>
+                    <th>Serial Number</th>
+                    <th>Port</th>
+                    <th>IP Address</th>
+                    <th>State</th>
+                    <th>Image</th>
+                    <th>Actions</th>
                 </tr>
+            </thead>
+            <tbody>
+            <%c++ 
+            auto devicesList = @@.get<std::vector<std::map<std::string, std::string>>>("devices");
+            if(devicesList.size() > 0) {
+            %>
+                <%c++ for(const auto& device : devicesList) { %>
+                    <tr>
+                        <td><%c++ $$ << device.at("serial"); %></td>
+                        <td><%c++ $$ << device.at("port"); %></td>
+                        <td><%c++ $$ << device.at("ip_address"); %></td>
+                        <td><%c++ $$ << device.at("state"); %></td>
+                        <td><%c++ $$ << device.at("image"); %></td>
+                        <td>
+                            <a href="/devices/<%c++ $$ << device.at("serial"); %>/log/provisioner" class="log-link">Provisioner Log</a><br>
+                            <a href="/devices/<%c++ $$ << device.at("serial"); %>/log/bootstrap" class="log-link">Bootstrap Log</a><br>
+                            <a href="/devices/<%c++ $$ << device.at("serial"); %>/log/triage" class="log-link">Triage Log</a>
+                        </td>
+                    </tr>
+                <%c++ } %>
+            <%c++ } else { %>
+                    <tr>
+                        <td colspan="6" class="no-devices">No devices available</td>
+                    </tr>
             <%c++ } %>
-        <%c++ } else { %>
-                <tr>
-                    <td colspan="6" class="no-devices">No devices available</td>
-                </tr>
-        <%c++ } %>
-        </tbody>
-    </table>
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        // Auto-refresh functionality
+        let refreshInterval;
+        const refreshToggle = document.getElementById('auto-refresh');
+        const refreshStatus = document.getElementById('refresh-status');
+        const tableContainer = document.getElementById('device-table-container');
+        
+        // Function to fetch and update the device table
+        async function refreshDeviceTable() {
+            try {
+                const response = await fetch('/devices', {
+                    headers: {
+                        'Accept': 'application/json'
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to fetch devices');
+                }
+                
+                const data = await response.json();
+                
+                // Create a new table with the updated data
+                let tableHtml = `
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Serial Number</th>
+                                <th>Port</th>
+                                <th>IP Address</th>
+                                <th>State</th>
+                                <th>Image</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+                
+                if (data.devices && data.devices.length > 0) {
+                    data.devices.forEach(device => {
+                        tableHtml += `
+                            <tr>
+                                <td>${device.serial}</td>
+                                <td>${device.port}</td>
+                                <td>${device.ip_address || ''}</td>
+                                <td>${device.state}</td>
+                                <td>${device.image}</td>
+                                <td>
+                                    <a href="/devices/${device.serial}/log/provisioner" class="log-link">Provisioner Log</a><br>
+                                    <a href="/devices/${device.serial}/log/bootstrap" class="log-link">Bootstrap Log</a><br>
+                                    <a href="/devices/${device.serial}/log/triage" class="log-link">Triage Log</a>
+                                </td>
+                            </tr>
+                        `;
+                    });
+                } else {
+                    tableHtml += `
+                        <tr>
+                            <td colspan="6" class="no-devices">No devices available</td>
+                        </tr>
+                    `;
+                }
+                
+                tableHtml += `
+                        </tbody>
+                    </table>
+                `;
+                
+                tableContainer.innerHTML = tableHtml;
+            } catch (error) {
+                console.error('Error refreshing device table:', error);
+            }
+        }
+        
+        // Function to start the refresh interval
+        function startRefresh() {
+            refreshInterval = setInterval(refreshDeviceTable, 1000);
+            refreshStatus.textContent = '(Enabled - refreshing every 1s)';
+        }
+        
+        // Function to stop the refresh interval
+        function stopRefresh() {
+            clearInterval(refreshInterval);
+            refreshStatus.textContent = '(Disabled)';
+        }
+        
+        // Initialize auto-refresh based on toggle state
+        if (refreshToggle.checked) {
+            startRefresh();
+        } else {
+            stopRefresh();
+        }
+        
+        // Toggle auto-refresh when the checkbox is changed
+        refreshToggle.addEventListener('change', function() {
+            if (this.checked) {
+                startRefresh();
+            } else {
+                stopRefresh();
+            }
+        });
+    </script>
 </body>
 </html> 
