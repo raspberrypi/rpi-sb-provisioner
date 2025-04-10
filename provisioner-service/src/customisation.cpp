@@ -410,7 +410,7 @@ namespace provisioner {
          * @return void
          *
          * @throws k400BadRequest if script parameter is missing
-         * @throws k404NotFound if script file does not exist
+         * @throws drogon::k400BadRequest if script file does not exist
          */
         app.registerHandler(CUSTOMISATION_PATH + "/delete-script", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
             LOG_INFO << "Customisation::delete-script";
