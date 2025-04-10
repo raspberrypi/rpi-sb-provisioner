@@ -234,7 +234,15 @@ namespace provisioner {
             try {
                 // Move uploaded file to target location
                 file.saveAs(targetPath);
+                
+                // Set success response with JSON payload
                 resp->setStatusCode(k200OK);
+                resp->setContentTypeCode(CT_APPLICATION_JSON);
+                Json::Value result;
+                result["success"] = true;
+                result["message"] = "File uploaded successfully";
+                result["filename"] = filename;
+                resp->setBody(result.toStyledString());
             } catch (const std::exception& e) {
                 LOG_ERROR << "Failed to save uploaded file: " << e.what();
                 auto resp = provisioner::utils::createErrorResponse(

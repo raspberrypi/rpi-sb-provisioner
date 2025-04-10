@@ -246,6 +246,7 @@
             margin-top: 5px;
             font-size: 14px;
             color: #666;
+            min-height: 1.2em; /* Prevent layout shift when text changes */
         }
         #uploadButton, #cancelButton {
             min-width: 80px;
@@ -302,7 +303,19 @@
                         const percentComplete = (event.loaded / event.total) * 100;
                         progressFill.style.width = percentComplete + '%';
                         progressText.textContent = Math.round(percentComplete) + '%';
+                        
+                        // When upload reaches 100%, change text to indicate processing
+                        if (percentComplete >= 100) {
+                            progressText.textContent = 'Processing...';
+                        }
                     }
+                };
+                
+                // Add load end event to handle upload completion
+                currentXHR.upload.onloadend = () => {
+                    progressText.textContent = 'Processing...';
+                    // Keep progress bar but change color to indicate processing state
+                    progressFill.style.backgroundColor = '#FFA500'; // Orange
                 };
                 
                 currentXHR.onload = () => {
@@ -342,12 +355,14 @@
             const progressText = document.querySelector('.progress-text');
             const uploadButton = document.querySelector('#uploadButton');
             const cancelButton = document.querySelector('#cancelButton');
+            const fileInput = document.querySelector('input[type="file"]');
             
             progressContainer.style.display = 'none';
             progressFill.style.width = '0%';
             progressText.textContent = '0%';
             uploadButton.style.display = 'block';
             cancelButton.style.display = 'none';
+            fileInput.value = '';
             currentXHR = null;
         }
     </script>
