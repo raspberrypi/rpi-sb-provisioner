@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Error</title>
+    <%view stylesheet %>
+</head>
+<body>
+    <%view navbar %>
+
+    <a href="javascript:history.back()" class="back-link">← Back</a>
+
+    <div class="error-container">
+        <h1>Error</h1>
+        <div class="error-box">
+            <%c++ if(@@.has("error_title")) { %>
+                <h2><%c++ $$ << @@.get<std::string>("error_title"); %></h2>
+            <%c++ } %>
+            <p class="error-message-text">
+                <%c++ $$ << @@.get<std::string>("error_message"); %>
+            </p>
+            <%c++ if(@@.has("error_code")) { %>
+                <p class="error-code">Error code: <%c++ $$ << @@.get<std::string>("error_code"); %></p>
+            <%c++ } %>
+            <%c++ if(@@.has("error_details")) { %>
+                <div class="error-details">
+                    <h3>Technical Details</h3>
+                    <pre><%c++ $$ << @@.get<std::string>("error_details"); %></pre>
+                </div>
+            <%c++ } %>
+        </div>
+    </div>
+
+    <style>
+        .error-container {
+            margin: 20px 0;
+            text-align: center;
+        }
+        
+        .error-box {
+            background-color: #f8d7da;
+            border: 2px solid #f5c6cb;
+            color: #721c24;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px auto;
+            max-width: 800px;
+            text-align: left;
+        }
+        
+        .error-message-text {
+            font-size: 18px;
+            margin: 15px 0;
+        }
+        
+        .error-code {
+            font-size: 14px;
+            color: #555;
+            margin-top: 15px;
+        }
+        
+        .error-details {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+            border: 1px solid #dee2e6;
+        }
+        
+        .error-details pre {
+            white-space: pre-wrap;
+            font-family: monospace;
+            font-size: 14px;
+            overflow-x: auto;
+            margin: 0;
+            padding: 10px;
+            background-color: #f1f1f1;
+            border-radius: 4px;
+        }
+        
+        h3 {
+            margin-top: 0;
+            font-size: 16px;
+        }
+    </style>
+</body>
+</html> 
