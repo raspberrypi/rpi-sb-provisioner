@@ -1,4 +1,5 @@
 #include "customisation.h"
+#include "utils.h"
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -38,7 +39,8 @@ namespace provisioner {
         Json::Value getScriptMetadata(const std::string& filename, bool includeContent = false) {
             namespace fs = std::filesystem;
             Json::Value script;
-            std::string filepath = SCRIPTS_DIR + filename;
+            std::string sanitized_filename = utils::sanitize_path_component(filename);
+            std::string filepath = SCRIPTS_DIR + sanitized_filename;
             
             script["filename"] = filename;
 
@@ -236,13 +238,19 @@ namespace provisioner {
             auto resp = HttpResponse::newHttpResponse();
             auto filename = req->getParameter("script");
             if (filename.empty()) {
-                resp->setStatusCode(k400BadRequest);
-                resp->setBody("Script name is required");
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Script name is required",
+                    drogon::k400BadRequest,
+                    "Missing Parameter",
+                    "MISSING_SCRIPT_NAME"
+                );
                 callback(resp);
                 return;
             }
 
-            std::string scriptPath = SCRIPTS_DIR + filename;
+            std::string sanitized_filename = utils::sanitize_path_component(filename);
+            std::string scriptPath = SCRIPTS_DIR + sanitized_filename;
             
             if (!std::filesystem::exists(scriptPath)) {
                 // Check if this is a known hook point
@@ -333,8 +341,14 @@ namespace provisioner {
                         return;
                     }
                 } else {
-                    resp->setStatusCode(k404NotFound);
-                    resp->setBody("Script file not found");
+                    auto resp = provisioner::utils::createErrorResponse(
+                        req,
+                        "The requested script file could not be found",
+                        drogon::k400BadRequest,
+                        "Script Not Found", 
+                        "SCRIPT_NOT_FOUND",
+                        "Script path: " + scriptPath
+                    );
                     callback(resp);
                     return;
                 }
@@ -342,8 +356,14 @@ namespace provisioner {
             
             std::ifstream scriptFile(scriptPath);
             if (!scriptFile.is_open()) {
-                resp->setStatusCode(k404NotFound);
-                resp->setBody("Script file not found");
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "The requested script file could not be opened",
+                    drogon::k400BadRequest,
+                    "Script Not Found",
+                    "SCRIPT_NOT_FOUND",
+                    "Script path: " + scriptPath
+                );
                 callback(resp);
                 return;
             }
@@ -352,7 +372,7 @@ namespace provisioner {
             buffer << scriptFile.rdbuf();
             
             // Get script metadata
-            Json::Value scriptMetadata = getScriptMetadata(filename, true);
+            Json::Value scriptMetadata = getScriptMetadata(sanitized_filename, true);
 
             auto acceptHeader = req->getHeader("accept");
             if (acceptHeader.find("text/html") != std::string::npos) {
@@ -397,8 +417,13 @@ namespace provisioner {
             auto resp = HttpResponse::newHttpResponse();
             auto filename = req->getParameter("script");
             if (filename.empty()) {
-                resp->setStatusCode(k400BadRequest);
-                resp->setBody("Script name is required");
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Script name is required",
+                    drogon::k400BadRequest,
+                    "Missing Parameter",
+                    "MISSING_SCRIPT_NAME"
+                );
                 callback(resp);
                 return;
             }
@@ -408,12 +433,20 @@ namespace provisioner {
             namespace fs = std::filesystem;
             std::error_code ec;
             if (!fs::remove(scriptPath, ec)) {
-                resp->setStatusCode(k500InternalServerError);
-                resp->setBody("Failed to delete script: " + ec.message());
-            } else {
-                resp->setStatusCode(k200OK);
-                resp->setBody("Script deleted successfully");
-            }
+                auto errorResp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Failed to delete script file",
+                    drogon::k500InternalServerError,
+                    "Deletion Error",
+                    "SCRIPT_DELETE_ERROR",
+                    ec.message()
+                );
+                callback(errorResp);
+                return;
+            } 
+            
+            resp->setStatusCode(k200OK);
+            resp->setBody("Script deleted successfully");
             callback(resp);
         });
 
@@ -437,8 +470,13 @@ namespace provisioner {
             auto resp = HttpResponse::newHttpResponse();
             auto filename = req->getParameter("script");
             if (filename.empty()) {
-                resp->setStatusCode(k400BadRequest);
-                resp->setBody("Script name is required");
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Script name is required",
+                    drogon::k400BadRequest,
+                    "Missing Parameter",
+                    "MISSING_SCRIPT_NAME"
+                );
                 callback(resp);
                 return;
             }
@@ -447,8 +485,14 @@ namespace provisioner {
             
             namespace fs = std::filesystem;
             if (!fs::exists(scriptPath)) {
-                resp->setStatusCode(k404NotFound);
-                resp->setBody("Script file not found");
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "The requested script file could not be found",
+                    drogon::k400BadRequest,
+                    "Script Not Found",
+                    "SCRIPT_NOT_FOUND",
+                    "Script path: " + scriptPath
+                );
                 callback(resp);
                 return;
             }
@@ -459,12 +503,20 @@ namespace provisioner {
                           fs::perms::owner_read | fs::perms::owner_write | fs::perms::group_read | fs::perms::others_read,
                           fs::perm_options::replace, ec);
             if (ec) {
-                resp->setStatusCode(k500InternalServerError);
-                resp->setBody("Failed to disable script");
-            } else {
-                resp->setStatusCode(k200OK);
-                resp->setBody("Script disabled successfully");
+                auto errorResp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Failed to disable script file",
+                    drogon::k500InternalServerError,
+                    "Permission Error",
+                    "SCRIPT_PERMISSION_ERROR",
+                    ec.message()
+                );
+                callback(errorResp);
+                return;
             }
+            
+            resp->setStatusCode(k200OK);
+            resp->setBody("Script disabled successfully");
             callback(resp);
         });
 
@@ -488,18 +540,30 @@ namespace provisioner {
             auto resp = HttpResponse::newHttpResponse();
             auto filename = req->getParameter("script");
             if (filename.empty()) {
-                resp->setStatusCode(k400BadRequest);
-                resp->setBody("Script name is required");
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Script name is required",
+                    drogon::k400BadRequest,
+                    "Missing Parameter",
+                    "MISSING_SCRIPT_NAME"
+                );
                 callback(resp);
                 return;
             }
 
-            std::string scriptPath = SCRIPTS_DIR + filename;
+            std::string sanitized_filename = utils::sanitize_path_component(filename);
+            std::string scriptPath = SCRIPTS_DIR + sanitized_filename;
             
             namespace fs = std::filesystem;
             if (!fs::exists(scriptPath)) {
-                resp->setStatusCode(k404NotFound);
-                resp->setBody("Script file not found");
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "The requested script file could not be found",
+                    drogon::k400BadRequest,
+                    "Script Not Found",
+                    "SCRIPT_NOT_FOUND",
+                    "Script path: " + scriptPath
+                );
                 callback(resp);
                 return;
             }
@@ -511,9 +575,15 @@ namespace provisioner {
                           fs::perm_options::replace, ec);
             if (ec) {
                 LOG_ERROR << "Failed to set script file permissions";
-                resp->setStatusCode(k500InternalServerError);
-                resp->setBody("Failed to set script file permissions");
-                callback(resp);
+                auto errorResp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Failed to enable script file",
+                    drogon::k500InternalServerError,
+                    "Permission Error",
+                    "SCRIPT_PERMISSION_ERROR",
+                    ec.message()
+                );
+                callback(errorResp);
                 return;
             }
             
@@ -538,24 +608,39 @@ namespace provisioner {
             auto resp = HttpResponse::newHttpResponse();
             
             if (req->getMethod() != HttpMethod::Post) {
-                resp->setStatusCode(k405MethodNotAllowed);
-                resp->setBody("Method not allowed");
-                callback(resp);
+                auto errorResp = provisioner::utils::createErrorResponse(
+                    req,
+                    "This endpoint only accepts POST requests",
+                    drogon::k405MethodNotAllowed,
+                    "Method Not Allowed",
+                    "METHOD_NOT_ALLOWED"
+                );
+                callback(errorResp);
                 return;
             }
             
             auto json = req->getJsonObject();
             if (!json) {
-                resp->setStatusCode(k400BadRequest);
-                resp->setBody("Invalid JSON");
-                callback(resp);
+                auto errorResp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Invalid JSON request body",
+                    drogon::k400BadRequest,
+                    "Invalid Request",
+                    "INVALID_JSON"
+                );
+                callback(errorResp);
                 return;
             }
             
             if (!json->isMember("filename") || !json->isMember("content")) {
-                resp->setStatusCode(k400BadRequest);
-                resp->setBody("Filename and content are required");
-                callback(resp);
+                auto errorResp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Filename and content are required fields",
+                    drogon::k400BadRequest,
+                    "Missing Fields",
+                    "MISSING_REQUIRED_FIELDS"
+                );
+                callback(errorResp);
                 return;
             }
             
@@ -573,20 +658,33 @@ namespace provisioner {
                 std::error_code ec;
                 fs::create_directories(SCRIPTS_DIR, ec);
                 if (ec) {
-                    resp->setStatusCode(k500InternalServerError);
-                    resp->setBody("Failed to create scripts directory: " + ec.message());
-                    callback(resp);
+                    auto errorResp = provisioner::utils::createErrorResponse(
+                        req,
+                        "Failed to create scripts directory",
+                        drogon::k500InternalServerError,
+                        "Directory Error",
+                        "DIR_CREATE_ERROR",
+                        ec.message()
+                    );
+                    callback(errorResp);
                     return;
                 }
             }
             
             // Write the script content
-            std::string scriptPath = SCRIPTS_DIR + filename;
+            std::string sanitized_filename = utils::sanitize_path_component(filename);
+            std::string scriptPath = SCRIPTS_DIR + sanitized_filename;
             std::ofstream file(scriptPath, std::ios::binary);
             if (!file.is_open()) {
-                resp->setStatusCode(k500InternalServerError);
-                resp->setBody("Failed to write script file");
-                callback(resp);
+                auto errorResp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Failed to write script file",
+                    drogon::k500InternalServerError,
+                    "File Error",
+                    "FILE_WRITE_ERROR",
+                    "Could not open file for writing: " + scriptPath
+                );
+                callback(errorResp);
                 return;
             }
             
@@ -609,14 +707,20 @@ namespace provisioner {
             
             if (ec) {
                 LOG_ERROR << "Failed to set script file permissions";
-                resp->setStatusCode(k500InternalServerError);
-                resp->setBody("Failed to set script file permissions");
-                callback(resp);
+                auto errorResp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Failed to set script file permissions",
+                    drogon::k500InternalServerError,
+                    "File Error",
+                    "FILE_PERMISSION_ERROR",
+                    "Could not set execute permissions on script file: " + scriptPath
+                );
+                callback(errorResp);
                 return;
             }
             
             // Get updated script metadata
-            Json::Value scriptMetadata = getScriptMetadata(filename);
+            Json::Value scriptMetadata = getScriptMetadata(sanitized_filename);
             
             resp->setStatusCode(k200OK);
             resp->setContentTypeCode(CT_APPLICATION_JSON);
@@ -652,35 +756,55 @@ namespace provisioner {
                 case HttpMethod::Put:
                 case HttpMethod::Patch:
                 default:
-                    resp->setStatusCode(k405MethodNotAllowed);
-                    resp->setBody("Method not allowed");
-                    callback(resp);
+                    auto errorResp = provisioner::utils::createErrorResponse(
+                        req,
+                        "This endpoint only accepts POST and GET requests",
+                        drogon::k405MethodNotAllowed,
+                        "Method Not Allowed",
+                        "METHOD_NOT_ALLOWED"
+                    );
+                    callback(errorResp);
                     return;
             }
             
             // Check if the request is multipart/form-data
             if (req->getContentType() != CT_MULTIPART_FORM_DATA) {
-                resp->setStatusCode(k400BadRequest);
-                resp->setBody("Invalid content type");
-                callback(resp);
+                auto errorResp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Content type must be multipart/form-data",
+                    drogon::k400BadRequest,
+                    "Invalid Content Type",
+                    "INVALID_CONTENT_TYPE"
+                );
+                callback(errorResp);
                 return;
             }
 
             // Parse the multipart/form-data request
             MultiPartParser fileUpload;
             if (fileUpload.parse(req) != 0 || !fileUpload.getFiles().size()) {
-                resp->setStatusCode(k400BadRequest);
-                resp->setBody("Failed to parse form data or no file uploaded");
-                callback(resp);
+                auto errorResp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Failed to parse form data or no file uploaded",
+                    drogon::k400BadRequest,
+                    "Upload Error",
+                    "FORM_PARSE_ERROR"
+                );
+                callback(errorResp);
                 return;
             }
             
             auto files = fileUpload.getFilesMap();
             auto it = files.find("script");
             if (it == files.end()) {
-                resp->setStatusCode(k400BadRequest);
-                resp->setBody("Script file is required");
-                callback(resp);
+                auto errorResp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Script file is required in the form data with field name 'script'",
+                    drogon::k400BadRequest,
+                    "Missing File",
+                    "MISSING_SCRIPT_FILE"
+                );
+                callback(errorResp);
                 return;
             }
             
@@ -692,20 +816,33 @@ namespace provisioner {
                 std::error_code ec;
                 fs::create_directories(SCRIPTS_DIR, ec);
                 if (ec) {
-                    resp->setStatusCode(k500InternalServerError);
-                    resp->setBody("Failed to create scripts directory: " + ec.message());
-                    callback(resp);
+                    auto errorResp = provisioner::utils::createErrorResponse(
+                        req,
+                        "Failed to create scripts directory",
+                        drogon::k500InternalServerError,
+                        "Directory Error",
+                        "DIR_CREATE_ERROR",
+                        ec.message()
+                    );
+                    callback(errorResp);
                     return;
                 }
             }
             
             // Write the file content to the customisation directory
-            std::string scriptPath = SCRIPTS_DIR + fileInfo.getFileName();
+            std::string sanitized_filename = utils::sanitize_path_component(fileInfo.getFileName());
+            std::string scriptPath = SCRIPTS_DIR + sanitized_filename;
             std::ofstream file(scriptPath, std::ios::binary);
             if (!file.is_open()) {
-                resp->setStatusCode(k500InternalServerError);
-                resp->setBody("Failed to write script file");
-                callback(resp);
+                auto errorResp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Failed to write script file",
+                    drogon::k500InternalServerError,
+                    "File Error",
+                    "FILE_WRITE_ERROR",
+                    "Could not open file for writing: " + scriptPath
+                );
+                callback(errorResp);
                 return;
             }
 

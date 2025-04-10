@@ -25,6 +25,7 @@ using namespace trantor;
 #include <time.h>
 
 #include <services.h>
+#include "utils.h"
 
 namespace provisioner {
 
@@ -46,9 +47,14 @@ namespace provisioner {
             int r = sd_bus_open_system(&bus);
             if (r < 0) {
                 LOG_ERROR << "Failed to connect to system bus: " << strerror(-r);
-                auto resp = HttpResponse::newHttpResponse();
-                resp->setStatusCode(k500InternalServerError);
-                resp->setBody("Failed to connect to system bus");
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Failed to connect to system bus",
+                    drogon::k500InternalServerError,
+                    "System Bus Error",
+                    "BUS_CONNECT_ERROR",
+                    std::string("Error: ") + strerror(-r)
+                );
                 callback(resp);
                 return;
             }
@@ -75,9 +81,14 @@ namespace provisioner {
                 LOG_ERROR << "Failed to call ListUnitsByPatterns: " << error.message;
                 sd_bus_error_free(&error);
                 sd_bus_unref(bus);
-                auto resp = drogon::HttpResponse::newHttpResponse();
-                resp->setStatusCode(drogon::k500InternalServerError);
-                resp->setBody("Failed to list systemd units: " + std::string(error.message));
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Failed to list systemd units",
+                    drogon::k500InternalServerError,
+                    "Systemd Error",
+                    "LIST_UNITS_ERROR",
+                    std::string("Error: ") + error.message
+                );
                 callback(resp);
                 return;
             }
@@ -88,9 +99,14 @@ namespace provisioner {
                 LOG_ERROR << "Failed to enter array container: " << strerror(-r);
                 sd_bus_message_unref(m);
                 sd_bus_unref(bus);
-                auto resp = drogon::HttpResponse::newHttpResponse();
-                resp->setStatusCode(drogon::k500InternalServerError);
-                resp->setBody("Failed to parse systemd response");
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Failed to parse systemd response",
+                    drogon::k500InternalServerError,
+                    "Parsing Error",
+                    "PARSE_RESPONSE_ERROR", 
+                    std::string("Error: ") + strerror(-r)
+                );
                 callback(resp);
                 return;
             }
@@ -340,9 +356,13 @@ namespace provisioner {
                 serviceName.find("rpi-naked-") != 0 && 
                 serviceName.find("rpi-fde-") != 0) {
                 LOG_INFO << "Rejected access to logs for unauthorized service: " << serviceName;
-                auto resp = drogon::HttpResponse::newHttpResponse();
-                resp->setStatusCode(drogon::k403Forbidden);
-                resp->setBody("Access denied: Only logs for rpi-sb, rpi-naked, and rpi-fde services are available");
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Access denied: Only logs for rpi-sb, rpi-naked, and rpi-fde services are available",
+                    drogon::k403Forbidden,
+                    "Unauthorized Service",
+                    "SERVICE_UNAUTHORIZED"
+                );
                 callback(resp);
                 return;
             }
@@ -352,9 +372,14 @@ namespace provisioner {
             int r = sd_journal_open(&j, SD_JOURNAL_LOCAL_ONLY);
             if (r < 0) {
                 LOG_ERROR << "Failed to open journal: " << strerror(-r);
-                auto resp = drogon::HttpResponse::newHttpResponse();
-                resp->setStatusCode(drogon::k500InternalServerError);
-                resp->setBody("Failed to open journal");
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Failed to open journal",
+                    drogon::k500InternalServerError,
+                    "Journal Error",
+                    "JOURNAL_OPEN_ERROR", 
+                    std::string("Error: ") + strerror(-r)
+                );
                 callback(resp);
                 return;
             }
@@ -365,9 +390,14 @@ namespace provisioner {
             if (r < 0) {
                 LOG_ERROR << "Failed to add journal match: " << strerror(-r);
                 sd_journal_close(j);
-                auto resp = drogon::HttpResponse::newHttpResponse();
-                resp->setStatusCode(drogon::k500InternalServerError);
-                resp->setBody("Failed to filter journal");
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Failed to filter journal",
+                    drogon::k500InternalServerError,
+                    "Journal Error",
+                    "JOURNAL_FILTER_ERROR",
+                    std::string("Error: ") + strerror(-r)
+                );
                 callback(resp);
                 return;
             }
@@ -377,9 +407,14 @@ namespace provisioner {
             if (r < 0) {
                 LOG_ERROR << "Failed to seek to end of journal: " << strerror(-r);
                 sd_journal_close(j);
-                auto resp = drogon::HttpResponse::newHttpResponse();
-                resp->setStatusCode(drogon::k500InternalServerError);
-                resp->setBody("Failed to seek in journal");
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Failed to seek in journal",
+                    drogon::k500InternalServerError, 
+                    "Journal Error",
+                    "JOURNAL_SEEK_ERROR",
+                    std::string("Error: ") + strerror(-r)
+                );
                 callback(resp);
                 return;
             }
@@ -389,9 +424,14 @@ namespace provisioner {
             if (r < 0) {
                 LOG_ERROR << "Failed to skip backwards in journal: " << strerror(-r);
                 sd_journal_close(j);
-                auto resp = drogon::HttpResponse::newHttpResponse();
-                resp->setStatusCode(drogon::k500InternalServerError);
-                resp->setBody("Failed to navigate journal");
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Failed to navigate journal",
+                    drogon::k500InternalServerError,
+                    "Journal Error", 
+                    "JOURNAL_NAVIGATION_ERROR",
+                    std::string("Error: ") + strerror(-r)
+                );
                 callback(resp);
                 return;
             }
@@ -485,8 +525,14 @@ namespace provisioner {
                 serviceName.find("rpi-naked-") != 0 && 
                 serviceName.find("rpi-fde-") != 0) {
                 LOG_INFO << "Rejected access to logs for unauthorized service: " << serviceName;
-                auto resp = drogon::HttpResponse::newHttpJsonResponse({{"error", "Access denied: Only logs for rpi-sb, rpi-naked, and rpi-fde services are available"}});
-                resp->setStatusCode(drogon::k403Forbidden);
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Access denied: Only logs for rpi-sb, rpi-naked, and rpi-fde services are available",
+                    drogon::k403Forbidden,
+                    "Unauthorized Service",
+                    "SERVICE_UNAUTHORIZED",
+                    "Requested service: " + serviceName
+                );
                 callback(resp);
                 return;
             }
@@ -496,8 +542,14 @@ namespace provisioner {
             int r = sd_journal_open(&j, SD_JOURNAL_LOCAL_ONLY);
             if (r < 0) {
                 LOG_ERROR << "Failed to open journal: " << strerror(-r);
-                auto resp = drogon::HttpResponse::newHttpJsonResponse({{"error", "Failed to open journal"}});
-                resp->setStatusCode(drogon::k500InternalServerError);
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Failed to open journal",
+                    drogon::k500InternalServerError,
+                    "Journal Error",
+                    "JOURNAL_OPEN_ERROR", 
+                    std::string("Error: ") + strerror(-r)
+                );
                 callback(resp);
                 return;
             }
@@ -508,8 +560,14 @@ namespace provisioner {
             if (r < 0) {
                 LOG_ERROR << "Failed to add journal match: " << strerror(-r);
                 sd_journal_close(j);
-                auto resp = drogon::HttpResponse::newHttpJsonResponse({{"error", "Failed to filter journal"}});
-                resp->setStatusCode(drogon::k500InternalServerError);
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Failed to filter journal",
+                    drogon::k500InternalServerError,
+                    "Journal Error",
+                    "JOURNAL_FILTER_ERROR",
+                    std::string("Error: ") + strerror(-r)
+                );
                 callback(resp);
                 return;
             }
@@ -519,8 +577,14 @@ namespace provisioner {
             if (r < 0) {
                 LOG_ERROR << "Failed to seek to end of journal: " << strerror(-r);
                 sd_journal_close(j);
-                auto resp = drogon::HttpResponse::newHttpJsonResponse({{"error", "Failed to seek in journal"}});
-                resp->setStatusCode(drogon::k500InternalServerError);
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Failed to seek in journal",
+                    drogon::k500InternalServerError,
+                    "Journal Error",
+                    "JOURNAL_SEEK_ERROR",
+                    std::string("Error: ") + strerror(-r)
+                );
                 callback(resp);
                 return;
             }
@@ -530,8 +594,14 @@ namespace provisioner {
             if (r < 0) {
                 LOG_ERROR << "Failed to skip backwards in journal: " << strerror(-r);
                 sd_journal_close(j);
-                auto resp = drogon::HttpResponse::newHttpJsonResponse({{"error", "Failed to navigate journal"}});
-                resp->setStatusCode(drogon::k500InternalServerError);
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Failed to navigate journal",
+                    drogon::k500InternalServerError,
+                    "Journal Error",
+                    "JOURNAL_NAVIGATION_ERROR",
+                    std::string("Error: ") + strerror(-r)
+                );
                 callback(resp);
                 return;
             }

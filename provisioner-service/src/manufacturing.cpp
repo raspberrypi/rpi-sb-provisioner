@@ -10,6 +10,7 @@
 #include <sqlite3.h>
 
 #include "include/manufacturing.h"
+#include "utils.h"
 
 namespace provisioner {
 
@@ -31,69 +32,123 @@ namespace provisioner {
             
             if (!configFile.is_open()) {
                 LOG_ERROR << "Failed to open config file";
-                errorMessage = "Failed to read configuration file";
-            } else {
-                while (std::getline(configFile, line)) {
-                    size_t delimiter_pos = line.find('=');
-                    if (delimiter_pos != std::string::npos) {
-                        std::string key = line.substr(0, delimiter_pos);
-                        if (key == "RPI_SB_PROVISIONER_MANUFACTURING_DB") {
-                            dbPath = line.substr(delimiter_pos + 1);
-                            break;
-                        }
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Failed to read configuration file",
+                    drogon::k500InternalServerError,
+                    "Config Error",
+                    "CONFIG_READ_ERROR"
+                );
+                callback(resp);
+                return;
+            }
+
+            while (std::getline(configFile, line)) {
+                size_t delimiter_pos = line.find('=');
+                if (delimiter_pos != std::string::npos) {
+                    std::string key = line.substr(0, delimiter_pos);
+                    if (key == "RPI_SB_PROVISIONER_MANUFACTURING_DB") {
+                        dbPath = line.substr(delimiter_pos + 1);
+                        break;
                     }
                 }
-                configFile.close();
-                
-                if (dbPath.empty()) {
-                    LOG_ERROR << "Manufacturing database path not configured";
-                    errorMessage = "Manufacturing database path not configured";
-                } else if (!std::filesystem::exists(dbPath)) {
-                    LOG_ERROR << "Manufacturing database file does not exist: " << dbPath;
-                    errorMessage = "Manufacturing database file not found";
+            }
+            configFile.close();
+            
+            if (dbPath.empty()) {
+                LOG_ERROR << "Manufacturing database path not configured";
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Manufacturing database path not configured in settings",
+                    drogon::k500InternalServerError,
+                    "Configuration Error",
+                    "DB_PATH_NOT_SET"
+                );
+                callback(resp);
+                return;
+            } else if (!std::filesystem::exists(dbPath)) {
+                LOG_ERROR << "Manufacturing database file does not exist: " << dbPath;
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Manufacturing database file not found",
+                    drogon::k500InternalServerError,
+                    "Database Error",
+                    "DB_FILE_NOT_FOUND",
+                    "Path: " + dbPath
+                );
+                callback(resp);
+                return;
+            } else {
+                // Open the database
+                sqlite3 *db;
+                int rc = sqlite3_open(dbPath.c_str(), &db);
+                if (rc != SQLITE_OK) {
+                    LOG_ERROR << "Failed to open manufacturing database: " << sqlite3_errmsg(db);
+                    auto resp = provisioner::utils::createErrorResponse(
+                        req,
+                        "Failed to open manufacturing database",
+                        drogon::k500InternalServerError,
+                        "Database Error",
+                        "DB_OPEN_ERROR",
+                        std::string(sqlite3_errmsg(db))
+                    );
+                    sqlite3_close(db);
+                    callback(resp);
+                    return;
                 } else {
-                    // Open the database
-                    sqlite3 *db;
-                    int rc = sqlite3_open(dbPath.c_str(), &db);
+                    // Query all devices
+                    const char *sql = "SELECT * FROM devices ORDER BY provision_ts DESC;";
+                    sqlite3_stmt *stmt;
+                    rc = sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr);
                     if (rc != SQLITE_OK) {
-                        LOG_ERROR << "Failed to open manufacturing database: " << sqlite3_errmsg(db);
-                        errorMessage = "Failed to open manufacturing database: " + std::string(sqlite3_errmsg(db));
+                        LOG_ERROR << "Failed to prepare SQL statement: " << sqlite3_errmsg(db);
+                        auto resp = provisioner::utils::createErrorResponse(
+                            req,
+                            "Failed to query manufacturing database",
+                            drogon::k500InternalServerError,
+                            "Database Error",
+                            "SQL_PREPARE_ERROR",
+                            std::string(sqlite3_errmsg(db))
+                        );
                         sqlite3_close(db);
+                        callback(resp);
+                        return;
                     } else {
-                        // Query all devices
-                        const char *sql = "SELECT * FROM devices ORDER BY provision_ts DESC;";
-                        sqlite3_stmt *stmt;
-                        rc = sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr);
-                        if (rc != SQLITE_OK) {
-                            LOG_ERROR << "Failed to prepare SQL statement: " << sqlite3_errmsg(db);
-                            errorMessage = "Failed to query manufacturing database: " + std::string(sqlite3_errmsg(db));
-                            sqlite3_close(db);
-                        } else {
-                            // Get column count
-                            int colCount = sqlite3_column_count(stmt);
+                        // Get column count
+                        int colCount = sqlite3_column_count(stmt);
+                        
+                        // Process each row
+                        while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+                            std::map<std::string, std::string> device;
                             
-                            // Process each row
-                            while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
-                                std::map<std::string, std::string> device;
+                            for (int i = 0; i < colCount; i++) {
+                                const char* colName = sqlite3_column_name(stmt, i);
+                                const char* value = reinterpret_cast<const char*>(sqlite3_column_text(stmt, i));
                                 
-                                for (int i = 0; i < colCount; i++) {
-                                    const char* colName = sqlite3_column_name(stmt, i);
-                                    const char* value = reinterpret_cast<const char*>(sqlite3_column_text(stmt, i));
-                                    
-                                    device[colName] = value ? value : "";
-                                }
-                                
-                                devicesList.push_back(device);
+                                device[colName] = value ? value : "";
                             }
                             
-                            if (rc != SQLITE_DONE) {
-                                LOG_ERROR << "Error while fetching data: " << sqlite3_errmsg(db);
-                                errorMessage = "Error while fetching data: " + std::string(sqlite3_errmsg(db));
-                            }
-                            
+                            devicesList.push_back(device);
+                        }
+                        
+                        if (rc != SQLITE_DONE) {
+                            LOG_ERROR << "Error while fetching data: " << sqlite3_errmsg(db);
+                            auto resp = provisioner::utils::createErrorResponse(
+                                req,
+                                "Error while fetching data from manufacturing database",
+                                drogon::k500InternalServerError,
+                                "Database Error",
+                                "DB_FETCH_ERROR",
+                                std::string(sqlite3_errmsg(db))
+                            );
                             sqlite3_finalize(stmt);
                             sqlite3_close(db);
+                            callback(resp);
+                            return;
                         }
+                        
+                        sqlite3_finalize(stmt);
+                        sqlite3_close(db);
                     }
                 }
             }
@@ -121,12 +176,15 @@ namespace provisioner {
                 }
                 
                 if (!errorMessage.empty()) {
-                    Json::Value root;
-                    root["error"] = errorMessage;
-                    root["devices"] = devicesArray;
-                    resp->setStatusCode(k500InternalServerError);
-                    resp->setContentTypeCode(CT_APPLICATION_JSON);
-                    resp->setBody(Json::FastWriter().write(root));
+                    auto resp = provisioner::utils::createErrorResponse(
+                        req,
+                        errorMessage,
+                        drogon::k500InternalServerError,
+                        "Database Error",
+                        "DB_ERROR"
+                    );
+                    callback(resp);
+                    return;
                 } else {
                     resp->setStatusCode(k200OK);
                     resp->setContentTypeCode(CT_APPLICATION_JSON);

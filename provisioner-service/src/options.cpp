@@ -4,6 +4,7 @@
 
 #include <options.h>
 #include <drogon/HttpAppFramework.h>
+#include "utils.h"
 
 namespace provisioner {
     namespace {
@@ -25,9 +26,13 @@ namespace provisioner {
             
             if (!config_file.is_open()) {
                 LOG_ERROR << "Failed to open config file";
-                auto resp = HttpResponse::newHttpResponse();
-                resp->setStatusCode(k500InternalServerError);
-                resp->setBody("Failed to read config");
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Failed to read configuration file",
+                    drogon::k500InternalServerError,
+                    "Config Error",
+                    "CONFIG_READ_ERROR"
+                );
                 callback(resp);
                 return;
             }
@@ -69,9 +74,13 @@ namespace provisioner {
             auto body = req->getJsonObject();
             if (!body) {
                 LOG_ERROR << "Options::set: Invalid JSON body";
-                auto resp = HttpResponse::newHttpResponse();
-                resp->setStatusCode(k400BadRequest);
-                resp->setBody("Invalid JSON body");
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Invalid JSON request body",
+                    drogon::k400BadRequest,
+                    "Invalid Request",
+                    "INVALID_JSON"
+                );
                 callback(resp);
                 return;
             }
@@ -102,9 +111,13 @@ namespace provisioner {
                 std::ofstream config_write("/etc/rpi-sb-provisioner/config");
                 if (!config_write.is_open()) {
                     LOG_ERROR << "Failed to open config file for writing";
-                    auto resp = HttpResponse::newHttpResponse();
-                    resp->setStatusCode(k500InternalServerError);
-                    resp->setBody("Failed to write config");
+                    auto resp = provisioner::utils::createErrorResponse(
+                        req,
+                        "Failed to write configuration file",
+                        drogon::k500InternalServerError,
+                        "Config Error",
+                        "CONFIG_WRITE_ERROR"
+                    );
                     callback(resp);
                     return;
                 }
@@ -122,9 +135,14 @@ namespace provisioner {
                     std::ofstream mfg_db(mfg_db_path->second);
                     if (!mfg_db.is_open()) {
                         LOG_ERROR << "Failed to create manufacturing DB file at " << mfg_db_path->second;
-                        auto resp = HttpResponse::newHttpResponse();
-                        resp->setStatusCode(k500InternalServerError);
-                        resp->setBody("Failed to create manufacturing DB file");
+                        auto resp = provisioner::utils::createErrorResponse(
+                            req,
+                            "Failed to create manufacturing database file",
+                            drogon::k500InternalServerError,
+                            "Database Error",
+                            "DB_CREATE_ERROR",
+                            "Path: " + mfg_db_path->second
+                        );
                         callback(resp);
                         return;
                     }
@@ -136,9 +154,14 @@ namespace provisioner {
                             std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
                     } catch (const std::filesystem::filesystem_error& e) {
                         LOG_ERROR << "Failed to set permissions on manufacturing DB file: " << e.what();
-                        auto resp = HttpResponse::newHttpResponse();
-                        resp->setStatusCode(k500InternalServerError);
-                        resp->setBody("Failed to set permissions on manufacturing DB file");
+                        auto resp = provisioner::utils::createErrorResponse(
+                            req,
+                            "Failed to set permissions on manufacturing database file",
+                            drogon::k500InternalServerError,
+                            "Permission Error",
+                            "DB_PERMISSION_ERROR",
+                            e.what()
+                        );
                         callback(resp);
                         return;
                     }

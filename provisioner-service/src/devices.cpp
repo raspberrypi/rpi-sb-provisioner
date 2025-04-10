@@ -6,6 +6,7 @@
 #include <fstream>
 #include <sstream>
 #include <systemd/sd-bus.h>
+#include "utils.h"
 
 using namespace drogon;
 
@@ -51,17 +52,26 @@ namespace provisioner {
                 // Check if the client accepts HTML
                 auto acceptHeader = req->getHeader("Accept");
                 if (!acceptHeader.empty() && (acceptHeader.find("text/html") != std::string::npos)) {
-                    HttpViewData viewData;
-                    viewData.insert("currentPage", std::string("devices"));
-                    viewData.insert("warning", errorMsg);
-                    resp = HttpResponse::newHttpViewResponse("devices.csp", viewData);
+                    auto resp = provisioner::utils::createErrorResponse(
+                        req,
+                        errorMsg,
+                        drogon::k500InternalServerError,
+                        "Database Error",
+                        "DB_OPEN_ERROR"
+                    );
+                    callback(resp);
+                    return;
                 } else {
-                    resp->setStatusCode(k500InternalServerError);
-                    resp->setBody(errorMsg);
+                    auto resp = provisioner::utils::createErrorResponse(
+                        req,
+                        errorMsg,
+                        drogon::k500InternalServerError,
+                        "Database Error",
+                        "DB_OPEN_ERROR"
+                    );
+                    callback(resp);
+                    return;
                 }
-                
-                callback(resp);
-                return;
             }
 
             std::vector<std::string> serials;
@@ -75,18 +85,14 @@ namespace provisioner {
                 LOG_ERROR << errorMsg;
                 sqlite3_close(db);
                 
-                // Check if the client accepts HTML
-                auto acceptHeader = req->getHeader("Accept");
-                if (!acceptHeader.empty() && (acceptHeader.find("text/html") != std::string::npos)) {
-                    HttpViewData viewData;
-                    viewData.insert("currentPage", std::string("devices"));
-                    viewData.insert("warning", errorMsg);
-                    resp = HttpResponse::newHttpViewResponse("devices.csp", viewData);
-                } else {
-                    resp->setStatusCode(k500InternalServerError);
-                    resp->setBody(errorMsg);
-                }
-                
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    errorMsg,
+                    drogon::k500InternalServerError,
+                    "Database Error",
+                    "SQL_PREPARE_ERROR",
+                    std::string(sqlite3_errmsg(db))
+                );
                 callback(resp);
                 return;
             }
@@ -158,12 +164,19 @@ namespace provisioner {
             callback(resp);
         }); // devices handler
 
-        app.registerHandler("/devices/:serialno", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
+        app.registerHandler("/devices/{serialno}", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback, const std::string &serialno) {
             auto resp = HttpResponse::newHttpResponse();
-            auto serialno = req->getParameter("serialno");
+            LOG_INFO << "Device detail request for serial: '" << serialno << "'";
+            
             if (serialno.empty()) {
-                resp->setStatusCode(k400BadRequest);
-                resp->setBody("Serial number is required");
+                LOG_ERROR << "Empty serial number in request";
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Serial number is required",
+                    drogon::k400BadRequest,
+                    "Missing Parameter",
+                    "MISSING_SERIAL"
+                );
                 callback(resp);
                 return;
             }
@@ -171,8 +184,15 @@ namespace provisioner {
             sqlite3* db;
             int rc = sqlite3_open("/srv/rpi-sb-provisioner/state.db", &db);
             if (rc) {
-                resp->setStatusCode(k500InternalServerError);
-                resp->setBody("Failed to open database");
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Failed to open device database",
+                    drogon::k500InternalServerError,
+                    "Database Error",
+                    "DB_OPEN_ERROR",
+                    std::string(sqlite3_errmsg(db))
+                );
+                sqlite3_close(db);
                 callback(resp);
                 return;
             }
@@ -183,8 +203,14 @@ namespace provisioner {
 
             if (rc != SQLITE_OK) {
                 sqlite3_close(db);
-                resp->setStatusCode(k500InternalServerError);
-                resp->setBody("Failed to prepare SQL statement");
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Failed to prepare SQL statement",
+                    drogon::k500InternalServerError,
+                    "Database Error",
+                    "SQL_PREPARE_ERROR",
+                    std::string(sqlite3_errmsg(db))
+                );
                 callback(resp);
                 return;
             }
@@ -194,8 +220,14 @@ namespace provisioner {
             if (sqlite3_step(stmt) != SQLITE_ROW) {
                 sqlite3_finalize(stmt);
                 sqlite3_close(db);
-                resp->setStatusCode(k404NotFound);
-                resp->setBody("Device not found");
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Device not found in database",
+                    drogon::k400BadRequest,
+                    "Device Not Found",
+                    "DEVICE_NOT_FOUND",
+                    "Requested serial: " + serialno
+                );
                 callback(resp);
                 return;
             }
@@ -222,7 +254,7 @@ namespace provisioner {
                 // Read log files
                 std::string provisioner_log, bootstrap_log, triage_log;
                 
-                std::string logPath = "/var/log/rpi-sb-provisioner/" + device.serial + "/provisioner.log";
+                std::string logPath = "/var/log/rpi-sb-provisioner/" + utils::sanitize_path_component(device.serial) + "/provisioner.log";
                 std::ifstream provisionerFile(logPath);
                 if (provisionerFile.is_open()) {
                     std::stringstream buffer;
@@ -230,7 +262,7 @@ namespace provisioner {
                     provisioner_log = buffer.str();
                 }
 
-                logPath = "/var/log/rpi-sb-provisioner/" + device.serial + "/bootstrap.log";
+                logPath = "/var/log/rpi-sb-provisioner/" + utils::sanitize_path_component(device.serial) + "/bootstrap.log";
                 std::ifstream bootstrapFile(logPath);
                 if (bootstrapFile.is_open()) {
                     std::stringstream buffer;
@@ -238,7 +270,7 @@ namespace provisioner {
                     bootstrap_log = buffer.str();
                 }
 
-                logPath = "/var/log/rpi-sb-provisioner/" + device.serial + "/triage.log";
+                logPath = "/var/log/rpi-sb-provisioner/" + utils::sanitize_path_component(device.serial) + "/triage.log";
                 std::ifstream triageFile(logPath);
                 if (triageFile.is_open()) {
                     std::stringstream buffer;
@@ -267,81 +299,132 @@ namespace provisioner {
             }
 
             callback(resp);
-        }); // serial-specific handler
+        }); // devices/{serialno} handler
 
-        app.registerHandler("/devices/:serialno/log/provisioner", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
+        app.registerHandler("/devices/{serialno}/log/provisioner", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback, const std::string &serialno) {
             auto resp = HttpResponse::newHttpResponse();
-            auto serialno = req->getParameter("serialno");
+            LOG_INFO << "Provisioner log request for serial: '" << serialno << "'";
+            
             if (serialno.empty()) {
-                resp->setStatusCode(k400BadRequest);
-                resp->setBody("Serial number is required");
+                LOG_ERROR << "Empty serial number in request";
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Serial number is required",
+                    drogon::k400BadRequest,
+                    "Missing Parameter",
+                    "MISSING_SERIAL"
+                );
                 callback(resp);
                 return;
             }
 
-            std::string logPath = "/var/log/rpi-sb-provisioner/" + serialno + "/provisioner.log";
+            std::string logPath = "/var/log/rpi-sb-provisioner/" + utils::sanitize_path_component(serialno) + "/provisioner.log";
+            LOG_INFO << "Attempting to open log file at: " << logPath;
+            
             std::ifstream logFile(logPath);
             if (!logFile.is_open()) {
-                resp->setStatusCode(k404NotFound);
-                resp->setBody("Log file not found");
+                LOG_ERROR << "Failed to open log file: " << logPath;
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Log file not found",
+                    drogon::k400BadRequest,
+                    "Log Not Found",
+                    "LOG_NOT_FOUND",
+                    "Attempted path: " + logPath
+                );
                 callback(resp);
                 return;
             }
 
+            LOG_INFO << "Successfully opened log file: " << logPath;
             std::stringstream buffer;
             buffer << logFile.rdbuf();
             resp->setStatusCode(k200OK);
             resp->setContentTypeCode(CT_TEXT_PLAIN);
             resp->setBody(buffer.str());
             callback(resp);
-        }); // devices/:serialno/log/provisioner handler
+        }); // devices/{serialno}/log/provisioner handler
 
-        app.registerHandler("/devices/:serialno/log/bootstrap", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
+        app.registerHandler("/devices/{serialno}/log/bootstrap", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback, const std::string &serialno) {
             auto resp = HttpResponse::newHttpResponse();
-            auto serialno = req->getParameter("serialno");
+            LOG_INFO << "Bootstrap log request for serial: '" << serialno << "'";
+            
             if (serialno.empty()) {
-                resp->setStatusCode(k400BadRequest);
-                resp->setBody("Serial number is required");
+                LOG_ERROR << "Empty serial number in request";
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Serial number is required",
+                    drogon::k400BadRequest,
+                    "Missing Parameter",
+                    "MISSING_SERIAL"
+                );
                 callback(resp);
                 return;
             }
 
-            std::string logPath = "/var/log/rpi-sb-provisioner/" + serialno + "/bootstrap.log";
+            std::string logPath = "/var/log/rpi-sb-provisioner/" + utils::sanitize_path_component(serialno) + "/bootstrap.log";
+            LOG_INFO << "Attempting to open log file at: " << logPath;
+            
             std::ifstream logFile(logPath);
             if (!logFile.is_open()) {
-                resp->setStatusCode(k404NotFound);
-                resp->setBody("Log file not found");
+                LOG_ERROR << "Failed to open log file: " << logPath;
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Log file not found",
+                    drogon::k400BadRequest,
+                    "Log Not Found",
+                    "LOG_NOT_FOUND",
+                    "Attempted path: " + logPath
+                );
                 callback(resp);
                 return;
             }
 
+            LOG_INFO << "Successfully opened log file: " << logPath;
             std::stringstream buffer;
             buffer << logFile.rdbuf();
             resp->setStatusCode(k200OK);
             resp->setContentTypeCode(CT_TEXT_PLAIN);
             resp->setBody(buffer.str());
             callback(resp);
-        }); // devices/:serialno/log/bootstrap handler
+        }); // devices/{serialno}/log/bootstrap handler
 
-        app.registerHandler("/devices/:serialno/log/triage", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
+        app.registerHandler("/devices/{serialno}/log/triage", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback, const std::string &serialno) {
             auto resp = HttpResponse::newHttpResponse();
-            auto serialno = req->getParameter("serialno");
+            LOG_INFO << "Triage log request for serial: '" << serialno << "'";
+            
             if (serialno.empty()) {
-                resp->setStatusCode(k400BadRequest);
-                resp->setBody("Serial number is required");
+                LOG_ERROR << "Empty serial number in request";
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Serial number is required",
+                    drogon::k400BadRequest,
+                    "Missing Parameter",
+                    "MISSING_SERIAL"
+                );
                 callback(resp);
                 return;
             }
 
-            std::string logPath = "/var/log/rpi-sb-provisioner/" + serialno + "/triage.log";
+            std::string logPath = "/var/log/rpi-sb-provisioner/" + utils::sanitize_path_component(serialno) + "/triage.log";
+            LOG_INFO << "Attempting to open log file at: " << logPath;
+            
             std::ifstream logFile(logPath);
             if (!logFile.is_open()) {
-                resp->setStatusCode(k404NotFound);
-                resp->setBody("Log file not found");
+                LOG_ERROR << "Failed to open log file: " << logPath;
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Log file not found",
+                    drogon::k400BadRequest,
+                    "Log Not Found",
+                    "LOG_NOT_FOUND",
+                    "Attempted path: " + logPath
+                );
                 callback(resp);
                 return;
             }
 
+            LOG_INFO << "Successfully opened log file: " << logPath;
             std::stringstream buffer;
             buffer << logFile.rdbuf();
             resp->setStatusCode(k200OK);
@@ -350,21 +433,34 @@ namespace provisioner {
             callback(resp);
         }); // devices/:serialno/log/triage handler
 
-        app.registerHandler("/devices/:serialno/key/public", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
+        app.registerHandler("/devices/{serialno}/key/public", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback, const std::string &serialno) {
             auto resp = HttpResponse::newHttpResponse();
-            auto serialno = req->getParameter("serialno");
+            LOG_INFO << "Public key request for serial: '" << serialno << "'";
+            
             if (serialno.empty()) {
-                resp->setStatusCode(k400BadRequest);
-                resp->setBody("Serial number is required");
+                LOG_ERROR << "Empty serial number in request";
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Serial number is required",
+                    drogon::k400BadRequest,
+                    "Missing Parameter",
+                    "MISSING_SERIAL"
+                );
                 callback(resp);
                 return;
             }
 
-            std::string keyPath = "/var/log/rpi-sb-provisioner/" + serialno + "/keypair/" + serialno + ".pub";
+            std::string keyPath = "/var/log/rpi-sb-provisioner/" + utils::sanitize_path_component(serialno) + "/keypair/" + utils::sanitize_path_component(serialno) + ".pub";
             std::ifstream keyFile(keyPath);
             if (!keyFile.is_open()) {
-                resp->setStatusCode(k404NotFound);
-                resp->setBody("Key file not found");
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Public key file not found",
+                    drogon::k400BadRequest,
+                    "Key Not Found",
+                    "KEY_NOT_FOUND",
+                    "Attempted path: " + keyPath
+                );
                 callback(resp);
                 return;
             }
@@ -375,23 +471,36 @@ namespace provisioner {
             resp->setStatusCode(k200OK);
             resp->setBody(buffer.str());
             callback(resp);
-        }); // devices/:serialno/key/public handler
+        }); // devices/{serialno}/key/public handler
 
-        app.registerHandler("/devices/:serialno/key/private", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
+        app.registerHandler("/devices/{serialno}/key/private", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback, const std::string &serialno) {
             auto resp = HttpResponse::newHttpResponse();
-            auto serialno = req->getParameter("serialno");
+            LOG_INFO << "Private key request for serial: '" << serialno << "'";
+            
             if (serialno.empty()) {
-                resp->setStatusCode(k400BadRequest);
-                resp->setBody("Serial number is required");
+                LOG_ERROR << "Empty serial number in request";
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Serial number is required",
+                    drogon::k400BadRequest,
+                    "Missing Parameter",
+                    "MISSING_SERIAL"
+                );
                 callback(resp);
                 return;
             }
 
-            std::string keyPath = "/var/log/rpi-sb-provisioner/" + serialno + "/keypair/" + serialno + ".der";
+            std::string keyPath = "/var/log/rpi-sb-provisioner/" + utils::sanitize_path_component(serialno) + "/keypair/" + utils::sanitize_path_component(serialno) + ".der";
             std::ifstream keyFile(keyPath);
             if (!keyFile.is_open()) {
-                resp->setStatusCode(k404NotFound);
-                resp->setBody("Key file not found");
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Private key file not found",
+                    drogon::k400BadRequest,
+                    "Key Not Found",
+                    "KEY_NOT_FOUND",
+                    "Attempted path: " + keyPath
+                );
                 callback(resp);
                 return;
             }
@@ -402,7 +511,7 @@ namespace provisioner {
             resp->setContentTypeCode(CT_APPLICATION_OCTET_STREAM);
             resp->setBody(buffer.str());
             callback(resp);
-        }); // devices/:serialno/key/private handler
+        }); // devices/{serialno}/key/private handler
     }
 
     

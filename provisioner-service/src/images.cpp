@@ -8,6 +8,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include "utils.h"
 
 #include <filesystem>
 #include <string>
@@ -140,8 +141,13 @@ namespace provisioner {
             // Get the image name from the request
             std::string imageName = req->getParameter("name");
             if (imageName.empty()) {
-                resp->setStatusCode(k400BadRequest);
-                resp->setBody("Image name is required");
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Image name is required",
+                    drogon::k400BadRequest,
+                    "Missing Parameter",
+                    "MISSING_IMAGE_NAME"
+                );
                 callback(resp);
                 return;
             }
@@ -150,8 +156,14 @@ namespace provisioner {
             imagePath /= imageName;
 
             if (!std::filesystem::exists(imagePath)) {
-                resp->setStatusCode(k404NotFound);
-                resp->setBody("Image not found");
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "The requested image file was not found",
+                    drogon::k400BadRequest,
+                    "Image Not Found",
+                    "IMAGE_NOT_FOUND",
+                    "Requested image: " + imageName
+                );
                 callback(resp);
                 return;
             }
@@ -200,8 +212,13 @@ namespace provisioner {
             // Get the file from the request
             MultiPartParser parser;
             if (parser.parse(req) != 0 || parser.getFiles().size() != 1) {
-                resp->setStatusCode(k400BadRequest);
-                resp->setBody("Invalid request");
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Invalid request: Expected exactly one file in multipart form data",
+                    drogon::k400BadRequest,
+                    "Invalid Request",
+                    "INVALID_UPLOAD_REQUEST"
+                );
                 callback(resp);
                 return;
             }
@@ -220,8 +237,14 @@ namespace provisioner {
                 resp->setStatusCode(k200OK);
             } catch (const std::exception& e) {
                 LOG_ERROR << "Failed to save uploaded file: " << e.what();
-                resp->setStatusCode(k500InternalServerError);
-                resp->setBody("Failed to save file");
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Failed to save uploaded file",
+                    drogon::k500InternalServerError,
+                    "Upload Error",
+                    "UPLOAD_SAVE_ERROR",
+                    e.what()
+                );
                 callback(resp);
                 return;
             }
@@ -236,8 +259,13 @@ namespace provisioner {
             // Get the image name from the request
             std::string imageName = req->getParameter("name");
             if (imageName.empty()) {
-                resp->setStatusCode(k400BadRequest);
-                resp->setBody("Image name is required");
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Image name is required",
+                    drogon::k400BadRequest,
+                    "Missing Parameter",
+                    "MISSING_IMAGE_NAME"
+                );
                 callback(resp);
                 return;
             }
@@ -249,18 +277,34 @@ namespace provisioner {
                 try {
                     std::filesystem::remove(imagePath);
                     resp->setStatusCode(k200OK);
+                    callback(resp);
+                    return;
                 } catch (const std::filesystem::filesystem_error& e) {
                     LOG_ERROR << "Failed to delete image: " << e.what();
-                    resp->setStatusCode(k500InternalServerError);
-                    resp->setBody("Failed to delete image");
+                    auto resp = provisioner::utils::createErrorResponse(
+                        req,
+                        "Failed to delete image file",
+                        drogon::k500InternalServerError,
+                        "Deletion Error",
+                        "IMAGE_DELETE_ERROR",
+                        e.what()
+                    );
+                    callback(resp);
+                    return;
                 }
             } else {
                 LOG_ERROR << "Image not found: " << imagePath;
-                resp->setStatusCode(k404NotFound);
-                resp->setBody("Image not found");
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "The requested image file was not found",
+                    drogon::k400BadRequest,
+                    "Image Not Found",
+                    "IMAGE_NOT_FOUND",
+                    "Requested image: " + imageName
+                );
+                callback(resp);
+                return;
             }
-
-            callback(resp);
         });
     }
 } // namespace provisioner
