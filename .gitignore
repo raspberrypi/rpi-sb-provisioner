@@ -8,4 +8,6 @@
 build
 *.egg-info
 debian/rpi-sb-provisioner.1
+debian/*.debhelper.log
 obj-*-gnu/
+.vscode/
