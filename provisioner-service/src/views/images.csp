@@ -4,6 +4,10 @@
     <title>System Images</title>
     <%view stylesheet %>
     <script>
+        // WebSocket connection
+        let ws = null;
+        let pendingSha256Requests = new Set();
+
         function showMessage(message, isError = false) {
             const messageDiv = document.getElementById(isError ? 'error-message' : 'success-message');
             messageDiv.textContent = message;
@@ -62,74 +66,94 @@
                 showMessage('Failed to delete image', true);
             }
         }
-
-        async function updateImageSha256(imageName, sha256Cell) {
-            try {
-                const controller = new AbortController();
-                // Store the controller for cleanup
-                sha256Cell.dataset.controller = controller;
-                
-                const response = await fetch(`/get-image-sha256?name=${encodeURIComponent(imageName)}`, {
-                    signal: controller.signal
-                });
-                if (response.ok) {
-                    const data = await response.json();
-                    sha256Cell.textContent = data.sha256;
-                } else {
-                    sha256Cell.textContent = 'Error calculating SHA256';
-                }
-            } catch (error) {
-                if (error.name === 'AbortError') {
-                    console.log('SHA256 request cancelled');
-                    return;
-                }
-                console.error('Error:', error);
-                sha256Cell.textContent = 'Error calculating SHA256';
+        
+        // Initialize WebSocket connection
+        function initWebSocket() {
+            // Check if WebSockets are supported
+            if (!window.WebSocket) {
+                console.error('WebSockets not supported');
+                return;
             }
+            
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws/sha256`;
+            
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = function() {
+                console.log('WebSocket connection established');
+                initializeSha256Requests();
+            };
+            
+            ws.onmessage = function(event) {
+                try {
+                    const response = JSON.parse(event.data);
+                    if (response.image_name && pendingSha256Requests.has(response.image_name)) {
+                        const sha256Cell = document.querySelector(`.sha256-cell[data-image="${response.image_name}"]`);
+                        if (sha256Cell) {
+                            if (response.status === 'complete') {
+                                sha256Cell.textContent = response.sha256;
+                                pendingSha256Requests.delete(response.image_name);
+                            } else if (response.status === 'error') {
+                                sha256Cell.textContent = 'Error: ' + (response.error || 'Unknown error');
+                                pendingSha256Requests.delete(response.image_name);
+                            } else if (response.status === 'pending' && sha256Cell.textContent === 'use-websocket') {
+                                sha256Cell.textContent = 'Calculating...';
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.error('Error parsing WebSocket message:', e);
+                }
+            };
+            
+            ws.onerror = function(error) {
+                console.error('WebSocket error:', error);
+            };
+            
+            ws.onclose = function() {
+                console.log('WebSocket connection closed');
+                // Try to reconnect after a delay
+                setTimeout(initWebSocket, 5000);
+            };
         }
-
-        // Function to start polling for SHA256 values
-        function startSha256Polling() {
-            const rows = document.querySelectorAll('.image-list tbody tr');
-            rows.forEach(row => {
-                const nameCell = row.cells[0];
-                const sha256Cell = row.cells[1];
-                const imageName = nameCell.textContent;
-                
-                // Only poll if SHA256 is still "Calculating..."
-                if (sha256Cell.textContent === 'Calculating...') {
-                    updateImageSha256(imageName, sha256Cell);
+        
+        // Send SHA256 calculation request via WebSocket
+        function requestSha256(imageName) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                setTimeout(() => requestSha256(imageName), 1000);
+                return;
+            }
+            
+            pendingSha256Requests.add(imageName);
+            ws.send(JSON.stringify({
+                action: 'get_sha256',
+                image_name: imageName
+            }));
+        }
+        
+        // Initialize SHA256 requests for all images
+        function initializeSha256Requests() {
+            const sha256Cells = document.querySelectorAll('.sha256-cell');
+            sha256Cells.forEach(cell => {
+                const imageName = cell.dataset.image;
+                if (cell.textContent === 'use-websocket') {
+                    cell.textContent = 'Connecting...';
+                    requestSha256(imageName);
                 }
             });
         }
 
-        // Function to cancel all pending SHA256 requests
-        function cancelAllSha256Requests() {
-            const cells = document.querySelectorAll('.image-list tbody td[data-controller]');
-            cells.forEach(cell => {
-                const controller = cell.dataset.controller;
-                if (controller) {
-                    controller.abort();
-                    delete cell.dataset.controller;
-                }
-            });
-        }
-
-        // Start polling when the page loads
+        // Initialize when DOM is loaded
         document.addEventListener('DOMContentLoaded', () => {
-            startSha256Polling();
+            initWebSocket();
         });
 
-        // Cancel requests when navigating away
+        // Cleanup when navigating away
         window.addEventListener('beforeunload', () => {
-            cancelAllSha256Requests();
-        });
-
-        // Cancel requests when clicking navigation links
-        document.querySelectorAll('.navbar a').forEach(link => {
-            link.addEventListener('click', () => {
-                cancelAllSha256Requests();
-            });
+            if (ws) {
+                ws.close();
+            }
         });
     </script>
 </head>
@@ -174,7 +198,7 @@
             %>
                 <tr class="<%c++ $$ << (image.at("is_gold_master") == "true" ? "gold-master" : ""); %>">
                     <td><%c++ $$ << image.at("name"); %></td>
-                    <td><%c++ $$ << image.at("sha256"); %></td>
+                    <td class="sha256-cell" data-image="<%c++ $$ << image.at("name"); %>"><%c++ $$ << image.at("sha256"); %></td>
                     <td><%c++ $$ << (image.at("is_gold_master") == "true" ? "Current Gold Master" : ""); %></td>
                     <td>
                         <button class="use-btn" onclick="useImage('<%c++ $$ << image.at("name"); %>')">Use</button>
@@ -274,97 +298,100 @@
     </style>
 
     <script>
-        let currentXHR = null;
-
-        document.getElementById('uploadForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const form = e.target;
-            const formData = new FormData(form);
-            const fileInput = form.querySelector('input[type="file"]');
-            const file = fileInput.files[0];
-            
-            // Show progress bar and switch to cancel button
-            const progressContainer = form.querySelector('.progress-container');
-            const progressFill = form.querySelector('.progress-fill');
-            const progressText = form.querySelector('.progress-text');
-            const uploadButton = form.querySelector('#uploadButton');
-            const cancelButton = form.querySelector('#cancelButton');
-            
-            progressContainer.style.display = 'block';
-            uploadButton.style.display = 'none';
-            cancelButton.style.display = 'block';
-            
-            try {
-                currentXHR = new XMLHttpRequest();
-                currentXHR.open('POST', '/upload-image', true);
-                
-                currentXHR.upload.onprogress = (event) => {
-                    if (event.lengthComputable) {
-                        const percentComplete = (event.loaded / event.total) * 100;
-                        progressFill.style.width = percentComplete + '%';
-                        progressText.textContent = Math.round(percentComplete) + '%';
-                        
-                        // When upload reaches 100%, change text to indicate processing
-                        if (percentComplete >= 100) {
-                            progressText.textContent = 'Processing...';
-                        }
-                    }
-                };
-                
-                // Add load end event to handle upload completion
-                currentXHR.upload.onloadend = () => {
-                    progressText.textContent = 'Processing...';
-                    // Keep progress bar but change color to indicate processing state
-                    progressFill.style.backgroundColor = '#FFA500'; // Orange
-                };
-                
-                currentXHR.onload = () => {
-                    if (currentXHR.status === 200) {
-                        showMessage('Image uploaded successfully');
-                        location.reload();
-                    } else {
-                        showMessage('Failed to upload image', true);
-                    }
-                    resetUploadUI();
-                };
-                
-                currentXHR.onerror = () => {
-                    showMessage('Failed to upload image', true);
-                    resetUploadUI();
-                };
-                
-                currentXHR.send(formData);
-            } catch (error) {
-                console.error('Error:', error);
-                showMessage('Failed to upload image', true);
-                resetUploadUI();
-            }
-        });
-
-        document.getElementById('cancelButton').addEventListener('click', () => {
-            if (currentXHR) {
-                currentXHR.abort();
-                showMessage('Upload cancelled', true);
-                resetUploadUI();
-            }
-        });
-
-        function resetUploadUI() {
+        // Handle image upload with progress
+        document.addEventListener('DOMContentLoaded', () => {
+            const form = document.getElementById('uploadForm');
+            const uploadButton = document.getElementById('uploadButton');
+            const cancelButton = document.getElementById('cancelButton');
             const progressContainer = document.querySelector('.progress-container');
             const progressFill = document.querySelector('.progress-fill');
             const progressText = document.querySelector('.progress-text');
-            const uploadButton = document.querySelector('#uploadButton');
-            const cancelButton = document.querySelector('#cancelButton');
-            const fileInput = document.querySelector('input[type="file"]');
+            let controller;
+
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                
+                const fileInput = form.querySelector('input[type="file"]');
+                if (!fileInput.files.length) {
+                    showMessage('Please select a file to upload', true);
+                    return;
+                }
+                
+                const file = fileInput.files[0];
+                const formData = new FormData();
+                formData.append('image', file);
+                
+                // Show progress UI
+                uploadButton.style.display = 'none';
+                cancelButton.style.display = 'inline-block';
+                progressContainer.style.display = 'block';
+                progressFill.style.width = '0%';
+                progressText.textContent = '0%';
+                
+                controller = new AbortController();
+                
+                try {
+                    const response = await fetch('/upload-image', {
+                        method: 'POST',
+                        body: formData,
+                        signal: controller.signal,
+                    });
+                    
+                    if (response.ok) {
+                        const data = await response.json();
+                        showMessage('Image uploaded successfully');
+                        
+                        // Add the uploaded image to the table
+                        const tbody = document.querySelector('.image-list tbody');
+                        const newRow = document.createElement('tr');
+                        
+                        newRow.innerHTML = `
+                            <td>${data.filename}</td>
+                            <td class="sha256-cell" data-image="${data.filename}">Connecting...</td>
+                            <td></td>
+                            <td>
+                                <button class="use-btn" onclick="useImage('${data.filename}')">Use</button>
+                                <button class="delete-btn" onclick="deleteImage('${data.filename}')">Delete</button>
+                            </td>
+                        `;
+                        
+                        tbody.appendChild(newRow);
+                        
+                        // Request SHA256 for the new image
+                        requestSha256(data.filename);
+                    } else {
+                        const errorData = await response.json();
+                        showMessage(`Upload failed: ${errorData.message || 'Unknown error'}`, true);
+                    }
+                } catch (error) {
+                    if (error.name !== 'AbortError') {
+                        showMessage(`Upload failed: ${error.message}`, true);
+                    }
+                } finally {
+                    // Reset the form
+                    form.reset();
+                    uploadButton.style.display = 'inline-block';
+                    cancelButton.style.display = 'none';
+                    progressContainer.style.display = 'none';
+                    controller = null;
+                }
+            });
             
-            progressContainer.style.display = 'none';
-            progressFill.style.width = '0%';
-            progressText.textContent = '0%';
-            uploadButton.style.display = 'block';
-            cancelButton.style.display = 'none';
-            fileInput.value = '';
-            currentXHR = null;
-        }
+            cancelButton.addEventListener('click', () => {
+                if (controller) {
+                    controller.abort();
+                    controller = null;
+                    
+                    // Reset the form
+                    form.reset();
+                    uploadButton.style.display = 'inline-block';
+                    cancelButton.style.display = 'none';
+                    progressContainer.style.display = 'none';
+                    
+                    showMessage('Upload cancelled');
+                }
+            });
+        });
     </script>
 </body>
 </html> 
