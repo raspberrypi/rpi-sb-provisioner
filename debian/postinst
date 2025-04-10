@@ -9,41 +9,43 @@ mkdir -p /var/log/rpi-sb-provisioner
 
 # Initialize SQLite databases
 if [ ! -f "/srv/rpi-sb-provisioner/state.db" ]; then
-    sqlite3 "/srv/rpi-sb-provisioner/state.db" "
-    PRAGMA journal_mode=WAL;
-    CREATE TABLE IF NOT EXISTS devices(
-        id              integer primary key,
-        serial          TEXT                not null,
-        endpoint        TEXT                not null,
-        state           TEXT                not null,
-        image           TEXT                not null,
-        ip_address      TEXT                not null,
-        ts              timestamp           default current_timestamp
-    );"
+    touch /srv/rpi-sb-provisioner/state.db
     chmod 644 /srv/rpi-sb-provisioner/state.db
 fi
+sqlite3 "/srv/rpi-sb-provisioner/state.db" "
+PRAGMA journal_mode=WAL;
+CREATE TABLE IF NOT EXISTS devices(
+    id              integer primary key,
+    serial          TEXT                not null,
+    endpoint        TEXT                not null,
+    state           TEXT                not null,
+    image           TEXT                not null,
+    ip_address      TEXT                not null,
+    ts              timestamp           default current_timestamp
+);"
 
 if [ ! -f "/srv/rpi-sb-provisioner/manufacturing.db" ]; then
-    sqlite3 "/srv/rpi-sb-provisioner/manufacturing.db" "
-    PRAGMA journal_mode=WAL;
-    CREATE TABLE IF NOT EXISTS devices(
-        id              integer primary key,
-        boardname       varchar(255)        not null,
-        serial          char(8)             not null,
-        eth_mac         char(17)            not null,
-        wifi_mac        char(17)            not null,
-        bt_mac          char(17)            not null,
-        mmc_size        integer             not null,
-        mmc_cid         char(32)            not null,
-        rpi_duid        char(32)            not null,
-        board_revision  varchar(255)        not null,
-        processor       varchar(255)        not null,
-        memory          varchar(255)        not null,
-        manufacturer    varchar(255)        not null,
-        provision_ts    timestamp           default current_timestamp
-    );"
+    touch /srv/rpi-sb-provisioner/manufacturing.db
     chmod 644 /srv/rpi-sb-provisioner/manufacturing.db
 fi
+sqlite3 "/srv/rpi-sb-provisioner/manufacturing.db" "
+PRAGMA journal_mode=WAL;
+CREATE TABLE IF NOT EXISTS devices(
+    id              integer primary key,
+    boardname       varchar(255)        not null,
+    serial          char(8)             not null,
+    eth_mac         char(17)            not null,
+    wifi_mac        char(17)            not null,
+    bt_mac          char(17)            not null,
+    mmc_size        integer             not null,
+    mmc_cid         char(32)            not null,
+    rpi_duid        char(32)            not null,
+    board_revision  varchar(255)        not null,
+    processor       varchar(255)        not null,
+    memory          varchar(255)        not null,
+    manufacturer    varchar(255)        not null,
+    provision_ts    timestamp           default current_timestamp
+);"
 
 # Set up systemd services
 if [ "$1" = "configure" ] || [ "$1" = "abort-upgrade" ] || [ "$1" = "abort-deconfigure" ] || [ "$1" = "abort-remove" ] ; then
@@ -57,14 +59,10 @@ if [ "$1" = "configure" ] || [ "$1" = "abort-upgrade" ] || [ "$1" = "abort-decon
 	deb-systemd-helper enable 'rpi-naked-provisioner@.service' >/dev/null || true
 	deb-systemd-helper enable 'rpi-sb-bootstrap@.service' >/dev/null || true
 	deb-systemd-helper enable 'rpi-sb-triage@.service' >/dev/null || true
-	deb-systemd-helper enable 'fetch-repo-package-list@.service' >/dev/null || true
-	deb-systemd-helper enable 'fetch-repo-package-list@.timer' >/dev/null || true
-	deb-systemd-helper enable 'rpi-package-download@.service' >/dev/null || true
 	
 	# Start the services that should be running by default
 	if [ -d /run/systemd/system ]; then
 		deb-systemd-invoke start 'rpi-provisioner-ui.service' >/dev/null || true
-		deb-systemd-invoke start 'fetch-repo-package-list@.timer' >/dev/null || true
 	fi
 fi
 
