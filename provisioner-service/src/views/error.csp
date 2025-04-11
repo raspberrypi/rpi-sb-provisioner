@@ -12,19 +12,22 @@
     <div class="error-container">
         <h1>Error</h1>
         <div class="error-box">
-            <%c++ if(@@.has("error_title")) { %>
-                <h2><%c++ $$ << @@.get<std::string>("error_title"); %></h2>
+            <%c++ auto errorTitle = @@.get<std::string>("error_title"); %>
+            <%c++ if(!errorTitle.empty()) { %>
+                <h2><%c++ $$ << errorTitle; %></h2>
             <%c++ } %>
             <p class="error-message-text">
                 <%c++ $$ << @@.get<std::string>("error_message"); %>
             </p>
-            <%c++ if(@@.has("error_code")) { %>
-                <p class="error-code">Error code: <%c++ $$ << @@.get<std::string>("error_code"); %></p>
+            <%c++ auto errorCode = @@.get<std::string>("error_code"); %>
+            <%c++ if(!errorCode.empty()) { %>
+                <p class="error-code">Error code: <%c++ $$ << errorCode; %></p>
             <%c++ } %>
-            <%c++ if(@@.has("error_details")) { %>
+            <%c++ auto errorDetails = @@.get<std::string>("error_details"); %>
+            <%c++ if(!errorDetails.empty()) { %>
                 <div class="error-details">
                     <h3>Technical Details</h3>
-                    <pre><%c++ $$ << @@.get<std::string>("error_details"); %></pre>
+                    <pre><%c++ $$ << errorDetails; %></pre>
                 </div>
             <%c++ } %>
         </div>

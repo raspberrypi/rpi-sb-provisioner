@@ -7,6 +7,9 @@
         // WebSocket connection
         let ws = null;
         let pendingSha256Requests = new Set();
+        // For polling SHA256 calculations
+        let pollingIntervals = {};
+        const POLLING_INTERVAL = 1000; // Poll every 1 second for better UI responsiveness
 
         function showMessage(message, isError = false) {
             const messageDiv = document.getElementById(isError ? 'error-message' : 'success-message');
@@ -72,56 +75,301 @@
             // Check if WebSockets are supported
             if (!window.WebSocket) {
                 console.error('WebSockets not supported');
+                // Fallback to polling for all images
+                initializePolling();
                 return;
+            }
+            
+            // Close existing connection if any
+            if (ws) {
+                try {
+                    ws.close();
+                } catch (e) {
+                    console.error('Error closing existing WebSocket:', e);
+                }
             }
             
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const wsUrl = `${protocol}//${window.location.host}/ws/sha256`;
             
-            ws = new WebSocket(wsUrl);
-            
-            ws.onopen = function() {
-                console.log('WebSocket connection established');
-                initializeSha256Requests();
-            };
-            
-            ws.onmessage = function(event) {
-                try {
-                    const response = JSON.parse(event.data);
-                    if (response.image_name && pendingSha256Requests.has(response.image_name)) {
-                        const sha256Cell = document.querySelector(`.sha256-cell[data-image="${response.image_name}"]`);
-                        if (sha256Cell) {
-                            if (response.status === 'complete') {
-                                sha256Cell.textContent = response.sha256;
+            try {
+                console.log('Connecting to WebSocket:', wsUrl);
+                ws = new WebSocket(wsUrl);
+                
+                ws.onopen = function() {
+                    console.log('WebSocket connection established');
+                    // Re-send requests for all pending SHA256 calculations
+                    initializeSha256Requests();
+                    // Stop any polling that might have been started
+                    stopAllPolling();
+                };
+                
+                ws.onmessage = function(event) {
+                    try {
+                        const response = JSON.parse(event.data);
+                        console.log('WebSocket message received:', response);
+                        if (response.image_name) {
+                            // Handle the SHA256 update
+                            updateSha256Cell(response);
+                            
+                            // For completed calculations, we can remove from pending
+                            if (response.status === 'complete' || response.status === 'error') {
                                 pendingSha256Requests.delete(response.image_name);
-                            } else if (response.status === 'error') {
-                                sha256Cell.textContent = 'Error: ' + (response.error || 'Unknown error');
-                                pendingSha256Requests.delete(response.image_name);
-                            } else if (response.status === 'pending' && sha256Cell.textContent === 'use-websocket') {
-                                sha256Cell.textContent = 'Calculating...';
                             }
                         }
+                    } catch (e) {
+                        console.error('Error parsing WebSocket message:', e);
                     }
-                } catch (e) {
-                    console.error('Error parsing WebSocket message:', e);
+                };
+                
+                ws.onerror = function(error) {
+                    console.error('WebSocket error:', error);
+                    // Fallback to polling
+                    initializePolling();
+                };
+                
+                ws.onclose = function(event) {
+                    console.log(`WebSocket connection closed: code=${event.code}, reason=${event.reason}`);
+                    
+                    // Fallback to polling while attempting to reconnect
+                    initializePolling();
+                    
+                    // Try to reconnect after a delay (using exponential backoff)
+                    const maxReconnectDelay = 30000; // 30 seconds max
+                    const baseDelay = 1000; // 1 second base
+                    const reconnectAttempts = window.reconnectAttempts || 0;
+                    window.reconnectAttempts = reconnectAttempts + 1;
+                    
+                    const delay = Math.min(
+                        Math.pow(1.5, reconnectAttempts) * baseDelay, 
+                        maxReconnectDelay
+                    );
+                    
+                    console.log(`Will attempt to reconnect in ${delay/1000} seconds (attempt #${reconnectAttempts+1})`);
+                    
+                    setTimeout(() => {
+                        if (document.visibilityState !== 'hidden') {
+                            initWebSocket();
+                        } else {
+                            // If page is hidden, wait for it to become visible
+                            const visibilityHandler = () => {
+                                if (document.visibilityState === 'visible') {
+                                    document.removeEventListener('visibilitychange', visibilityHandler);
+                                    initWebSocket();
+                                }
+                            };
+                            document.addEventListener('visibilitychange', visibilityHandler);
+                        }
+                    }, delay);
+                };
+            } catch (e) {
+                console.error('Error creating WebSocket:', e);
+                // Fallback to polling
+                initializePolling();
+            }
+        }
+        
+        // Update SHA256 cell with response data
+        function updateSha256Cell(response) {
+            const sha256Cell = document.querySelector(`.sha256-cell[data-image="${response.image_name}"]`);
+            if (!sha256Cell) {
+                console.warn(`No SHA256 cell found for image: ${response.image_name}`);
+                return;
+            }
+            
+            if (response.status === 'complete') {
+                console.log(`SHA256 calculation complete for ${response.image_name}: ${response.sha256}`);
+                sha256Cell.textContent = response.sha256;
+                pendingSha256Requests.delete(response.image_name);
+                // Stop polling for this image if it was being polled
+                stopPolling(response.image_name);
+                
+                // Remove progress bar if it exists
+                const progressContainer = sha256Cell.querySelector('.hash-progress-container');
+                if (progressContainer) {
+                    progressContainer.remove();
                 }
-            };
+            } else if (response.status === 'error') {
+                console.log(`SHA256 calculation error for ${response.image_name}: ${response.error || 'Unknown error'}`);
+                sha256Cell.textContent = 'Error: ' + (response.error || 'Unknown error');
+                pendingSha256Requests.delete(response.image_name);
+                // Stop polling for this image if it was being polled
+                stopPolling(response.image_name);
+                
+                // Remove progress bar if it exists
+                const progressContainer = sha256Cell.querySelector('.hash-progress-container');
+                if (progressContainer) {
+                    progressContainer.remove();
+                }
+            } else if (response.status === 'pending') {
+                // Show progress if available
+                if (response.progress !== undefined || response.progress_percent !== undefined) {
+                    const progressPercent = response.progress_percent !== undefined ? 
+                        response.progress_percent : 
+                        Math.round(response.progress * 100);
+                    
+                    console.log(`SHA256 progress update for ${response.image_name}: ${progressPercent}%`);
+                    sha256Cell.textContent = `Calculating... ${progressPercent}%`;
+                    
+                    // Create/update progress bar if not exists
+                    let progressContainer = sha256Cell.querySelector('.hash-progress-container');
+                    if (!progressContainer) {
+                        // Create progress bar structure
+                        progressContainer = document.createElement('div');
+                        progressContainer.className = 'hash-progress-container';
+                        
+                        const progressBar = document.createElement('div');
+                        progressBar.className = 'hash-progress-bar';
+                        
+                        const progressFill = document.createElement('div');
+                        progressFill.className = 'hash-progress-fill';
+                        
+                        progressBar.appendChild(progressFill);
+                        progressContainer.appendChild(progressBar);
+                        sha256Cell.appendChild(progressContainer);
+                    }
+                    
+                    // Update progress fill
+                    const progressFill = sha256Cell.querySelector('.hash-progress-fill');
+                    if (progressFill) {
+                        progressFill.style.width = `${progressPercent}%`;
+                    }
+                } else if (sha256Cell.textContent === 'use-websocket' || 
+                           sha256Cell.textContent === 'Connecting...') {
+                    sha256Cell.textContent = 'Calculating...';
+                }
+            }
+        }
+        
+        // Start polling for SHA256 calculation result
+        function startPolling(imageName) {
+            if (pollingIntervals[imageName]) {
+                // Already polling
+                return;
+            }
             
-            ws.onerror = function(error) {
-                console.error('WebSocket error:', error);
-            };
+            pollingIntervals[imageName] = setInterval(() => {
+                fetchSha256(imageName);
+            }, POLLING_INTERVAL);
             
-            ws.onclose = function() {
-                console.log('WebSocket connection closed');
-                // Try to reconnect after a delay
-                setTimeout(initWebSocket, 5000);
-            };
+            // Immediately fetch once
+            fetchSha256(imageName);
+        }
+        
+        // Stop polling for a specific image
+        function stopPolling(imageName) {
+            if (pollingIntervals[imageName]) {
+                clearInterval(pollingIntervals[imageName]);
+                delete pollingIntervals[imageName];
+            }
+        }
+        
+        // Stop all polling intervals
+        function stopAllPolling() {
+            Object.keys(pollingIntervals).forEach(imageName => {
+                clearInterval(pollingIntervals[imageName]);
+                delete pollingIntervals[imageName];
+            });
+        }
+        
+        // Fetch SHA256 calculation result
+        async function fetchSha256(imageName) {
+            try {
+                // Then fetch the actual SHA256 status
+                const response = await fetch(`/get-image-sha256?name=${encodeURIComponent(imageName)}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log(`SHA256 status for ${imageName}:`, data);
+                    
+                    // If we have a completed hash, update the cell with the final value
+                    if (data.sha256 && data.sha256 !== 'use-websocket') {
+                        console.log(`Got complete SHA256 for ${imageName}: ${data.sha256}`);
+                        updateSha256Cell({
+                            image_name: imageName,
+                            sha256: data.sha256,
+                            status: data.status || 'complete'
+                        });
+                        return;
+                    }
+                    
+                    // Handle progress information
+                    if (data.progress !== undefined) {
+                        const progressPercent = data.progress_percent || Math.round(data.progress * 100);
+                        console.log(`Got progress update for ${imageName}: ${progressPercent}%`);
+                        updateSha256Cell({
+                            image_name: imageName,
+                            status: 'pending',
+                            progress_percent: progressPercent
+                        });
+                        return;
+                    }
+                    
+                    // If it's still calculating but no progress info
+                    if (data.sha256 === 'use-websocket') {
+                        // Get metadata for estimation
+                        try {
+                            const metadataResponse = await fetch(`/get-image-metadata?name=${encodeURIComponent(imageName)}`);
+                            if (metadataResponse.ok) {
+                                const metadata = await metadataResponse.json();
+                                let estimatedTimeMsg = '';
+                                
+                                if (metadata.size_mb) {
+                                    const fileSizeMB = metadata.size_mb;
+                                    // Estimate based on 40MB/sec processing speed
+                                    const estimatedMinutes = Math.max(1, Math.ceil(fileSizeMB / 40));
+                                    
+                                    if (estimatedMinutes < 2) {
+                                        estimatedTimeMsg = '(should complete shortly)';
+                                    } else if (estimatedMinutes < 5) {
+                                        estimatedTimeMsg = `(est. ${estimatedMinutes} minutes)`;
+                                    } else {
+                                        estimatedTimeMsg = `(est. ${estimatedMinutes} minutes for ${Math.round(fileSizeMB)} MB)`;
+                                    }
+                                }
+                                
+                                // If we're getting 'use-websocket', display informative calculating message
+                                const cell = document.querySelector(`.sha256-cell[data-image="${imageName}"]`);
+                                if (cell) {
+                                    const currentText = cell.textContent;
+                                    // Only update if not already showing a calculation message
+                                    // or if it's the first calculation message
+                                    if (currentText === 'use-websocket' || 
+                                        currentText === 'Connecting...' ||
+                                        !currentText.includes('Calculating')) {
+                                        console.log(`Setting calculation message for ${imageName}`);
+                                        cell.textContent = `Calculating... ${estimatedTimeMsg}`;
+                                    }
+                                }
+                            }
+                        } catch (e) {
+                            console.error('Error getting metadata:', e);
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('Error fetching SHA256:', error);
+            }
+        }
+        
+        // Initialize polling for all SHA256 cells that need it
+        function initializePolling() {
+            const sha256Cells = document.querySelectorAll('.sha256-cell');
+            sha256Cells.forEach(cell => {
+                const imageName = cell.dataset.image;
+                if (cell.textContent === 'use-websocket' || 
+                    cell.textContent === 'Connecting...' ||
+                    cell.textContent === 'Calculating...') {
+                    cell.textContent = 'Calculating...';
+                    startPolling(imageName);
+                }
+            });
         }
         
         // Send SHA256 calculation request via WebSocket
         function requestSha256(imageName) {
             if (!ws || ws.readyState !== WebSocket.OPEN) {
-                setTimeout(() => requestSha256(imageName), 1000);
+                // If WebSocket not ready, use polling instead
+                startPolling(imageName);
                 return;
             }
             
@@ -134,11 +382,30 @@
         
         // Initialize SHA256 requests for all images
         function initializeSha256Requests() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                console.warn('WebSocket not connected, falling back to polling');
+                initializePolling();
+                return;
+            }
+            
+            // Reset reconnect attempts on successful connection
+            window.reconnectAttempts = 0;
+            
             const sha256Cells = document.querySelectorAll('.sha256-cell');
+            console.log(`Found ${sha256Cells.length} SHA256 cells to initialize`);
+            
             sha256Cells.forEach(cell => {
                 const imageName = cell.dataset.image;
-                if (cell.textContent === 'use-websocket') {
-                    cell.textContent = 'Connecting...';
+                const currentText = cell.textContent;
+                
+                // Request SHA256 for cells that need calculation
+                if (currentText === 'use-websocket' || 
+                    currentText === 'Connecting...' || 
+                    currentText === 'Calculating...' ||
+                    currentText.includes('Calculating')) {
+                    
+                    console.log(`Requesting SHA256 for ${imageName}`);
+                    cell.textContent = 'Calculating...';
                     requestSha256(imageName);
                 }
             });
@@ -146,6 +413,9 @@
 
         // Initialize when DOM is loaded
         document.addEventListener('DOMContentLoaded', () => {
+            // Force polling to start immediately, before WebSocket setup
+            initializePolling();
+            // Then try to establish WebSocket
             initWebSocket();
         });
 
@@ -154,6 +424,7 @@
             if (ws) {
                 ws.close();
             }
+            stopAllPolling();
         });
     </script>
 </head>
@@ -294,6 +565,29 @@
         }
         #cancelButton:hover {
             background-color: #da190b;
+        }
+        
+        /* SHA256 hash progress bar styles */
+        .hash-progress-container {
+            margin-top: 5px;
+            width: 100%;
+        }
+        .hash-progress-bar {
+            width: 100%;
+            height: 10px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+            overflow: hidden;
+        }
+        .hash-progress-fill {
+            width: 0%;
+            height: 100%;
+            background-color: #4CAF50;
+            transition: width 0.4s ease-in-out;
+        }
+        .sha256-cell {
+            position: relative;
+            min-height: 20px;
         }
     </style>
 
