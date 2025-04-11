@@ -73,6 +73,58 @@
             cursor: help;
             text-decoration: underline dotted #666;
         }
+
+        /* Toggle switch styles */
+        .toggle-container {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 50px;
+            height: 24px;
+            margin-right: 10px;
+        }
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 24px;
+        }
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        input:checked + .toggle-slider {
+            background-color: #0066cc;
+        }
+        input:checked + .toggle-slider:before {
+            transform: translateX(26px);
+        }
+        #refresh-status {
+            margin-left: 10px;
+            font-size: 0.9em;
+            color: #666;
+        }
     </style>
 </head>
 <body>
@@ -100,7 +152,16 @@
         <button id="exportCsv" class="export-btn">Export to CSV</button>
     </div>
     
-    <div class="table-container">
+    <div class="toggle-container">
+        <label class="toggle-switch">
+            <input type="checkbox" id="auto-refresh" checked>
+            <span class="toggle-slider"></span>
+        </label>
+        <span>Auto Refresh</span>
+        <span id="refresh-status">(Enabled - refreshing every 1s)</span>
+    </div>
+    
+    <div class="table-container" id="manu-table-container">
         <div class="scroll-indicator">Scroll to see more</div>
         <table id="manufacturingTable">
             <thead>
@@ -239,6 +300,122 @@
             // Download the CSV file
             link.click();
             document.body.removeChild(link);
+        });
+
+        // Auto-refresh functionality
+        let refreshInterval;
+        const refreshToggle = document.getElementById('auto-refresh');
+        const refreshStatus = document.getElementById('refresh-status');
+        const tableContainer = document.getElementById('manu-table-container');
+        
+        // Function to fetch and update the manufacturing data table
+        async function refreshManufacturingTable() {
+            try {
+                const response = await fetch('/manu-db', {
+                    headers: {
+                        'Accept': 'application/json'
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to fetch manufacturing data');
+                }
+                
+                const data = await response.json();
+                
+                // Create a new table with the updated data
+                let tableHtml = `
+                    <div class="scroll-indicator">Scroll to see more</div>
+                    <table id="manufacturingTable">
+                        <thead>
+                            <tr>
+                                <th>Provision Time</th>
+                                <th>ID</th>
+                                <th>Board</th>
+                                <th>Serial</th>
+                                <th>Ethernet MAC</th>
+                                <th>WiFi MAC</th>
+                                <th>Bluetooth MAC</th>
+                                <th>eMMC Size</th>
+                                <th>eMMC CID</th>
+                                <th>RPi DUID</th>
+                                <th>Revision</th>
+                                <th>Processor</th>
+                                <th>Memory</th>
+                                <th>Manufacturer</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+                
+                if (data && data.length > 0) {
+                    data.forEach(device => {
+                        tableHtml += `
+                            <tr>
+                                <td>${device.provision_ts || ''}</td>
+                                <td>${device.id || ''}</td>
+                                <td>${device.boardname || ''}</td>
+                                <td>${device.serial || ''}</td>
+                                <td>${device.eth_mac || ''}</td>
+                                <td>${device.wifi_mac || ''}</td>
+                                <td>${device.bt_mac || ''}</td>
+                                <td class="emmc-size" data-size="${device.mmc_size || ''}">${device.mmc_size || ''}</td>
+                                <td>${device.mmc_cid || ''}</td>
+                                <td>${device.rpi_duid || ''}</td>
+                                <td>${device.board_revision || ''}</td>
+                                <td>${device.processor || ''}</td>
+                                <td>${device.memory || ''}</td>
+                                <td>${device.manufacturer || ''}</td>
+                            </tr>
+                        `;
+                    });
+                } else {
+                    tableHtml += `
+                        <tr>
+                            <td colspan="14" class="no-devices">No manufacturing data available</td>
+                        </tr>
+                    `;
+                }
+                
+                tableHtml += `
+                        </tbody>
+                    </table>
+                `;
+                
+                tableContainer.innerHTML = tableHtml;
+                updateScrollIndicator();
+                applyEmmcSizeTooltips();
+            } catch (error) {
+                console.error('Error refreshing manufacturing table:', error);
+            }
+        }
+        
+        // Function to start the refresh interval
+        function startRefresh() {
+            refreshInterval = setInterval(refreshManufacturingTable, 1000);
+            refreshStatus.textContent = '(Enabled - refreshing every 1s)';
+        }
+        
+        // Function to stop the refresh interval
+        function stopRefresh() {
+            clearInterval(refreshInterval);
+            refreshStatus.textContent = '(Disabled)';
+        }
+        
+        // Initialize auto-refresh based on toggle state
+        if (refreshToggle.checked) {
+            startRefresh();
+        } else {
+            stopRefresh();
+        }
+        
+        // Toggle auto-refresh when the checkbox is changed
+        refreshToggle.addEventListener('change', function() {
+            if (this.checked) {
+                startRefresh();
+            } else {
+                stopRefresh();
+            }
         });
     </script>
 </body>

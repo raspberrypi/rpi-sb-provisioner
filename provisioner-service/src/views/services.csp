@@ -3,80 +3,59 @@
 <head>
     <title>Services</title>
     <%view stylesheet %>
-    <script>
-        // Function to fetch service data and update the table
-        function updateServicesTable() {
-            fetch('/services', {
-                headers: {
-                    'Accept': 'application/json'
-                }
-            })
-                .then(response => response.json())
-                .then(data => {
-                    const tableBody = document.querySelector('table tbody');
-                    
-                    // Clear existing rows
-                    tableBody.innerHTML = '';
-                    
-                    if(data.services && data.services.length > 0) {
-                        // Add service rows
-                        data.services.forEach(service => {
-                            const row = document.createElement('tr');
-                            
-                            // Name cell
-                            const nameCell = document.createElement('td');
-                            // Display base_name and instance if available
-                            if (service.instance && service.instance.length > 0) {
-                                nameCell.textContent = service.base_name + '@' + service.instance;
-                            } else {
-                                nameCell.textContent = service.name;
-                            }
-                            row.appendChild(nameCell);
-                            
-                            // Status cell
-                            const statusCell = document.createElement('td');
-                            statusCell.textContent = service.status;
-                            row.appendChild(statusCell);
-                            
-                            // Active cell
-                            const activeCell = document.createElement('td');
-                            activeCell.textContent = service.active;
-                            row.appendChild(activeCell);
-                            
-                            // Actions cell
-                            const actionsCell = document.createElement('td');
-                            const link = document.createElement('a');
-                            link.href = '/service-log/' + service.full_name;
-                            link.className = 'log-link';
-                            link.textContent = 'View Logs';
-                            actionsCell.appendChild(link);
-                            row.appendChild(actionsCell);
-                            
-                            tableBody.appendChild(row);
-                        });
-                    } else {
-                        // No services found
-                        const row = document.createElement('tr');
-                        const cell = document.createElement('td');
-                        cell.setAttribute('colspan', '4');
-                        cell.className = 'no-devices';
-                        cell.textContent = 'No services available';
-                        row.appendChild(cell);
-                        tableBody.appendChild(row);
-                    }
-                })
-                .catch(error => console.error('Error updating services:', error));
+    <style>
+        /* Toggle switch styles */
+        .toggle-container {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
         }
-        
-        // Set interval to update every second
-        document.addEventListener('DOMContentLoaded', function() {
-            // Initial update
-            updateServicesTable();
-            
-            // Set interval for updates
-            setInterval(updateServicesTable, 1000);
-        });
-    </script>
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 50px;
+            height: 24px;
+            margin-right: 10px;
+        }
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 24px;
+        }
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        input:checked + .toggle-slider {
+            background-color: #0066cc;
+        }
+        input:checked + .toggle-slider:before {
+            transform: translateX(26px);
+        }
+        #refresh-status {
+            margin-left: 10px;
+            font-size: 0.9em;
+            color: #666;
+        }
+    </style>
 </head>
 <body>
     <%view navbar %>
@@ -98,45 +77,159 @@
     </div>
     <%c++ } %>
     <h1>System Services</h1>
-    <table>
-        <thead>
-            <tr>
-                <th>Service Name</th>
-                <th>Status</th>
-                <th>Active</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-        <%c++ 
-        auto servicesList = @@.get<std::vector<std::map<std::string, std::string>>>("services");
-        if(servicesList.size() > 0) {
-        %>
-            <%c++ for(const auto& service : servicesList) { %>
+    
+    <div class="toggle-container">
+        <label class="toggle-switch">
+            <input type="checkbox" id="auto-refresh" checked>
+            <span class="toggle-slider"></span>
+        </label>
+        <span>Auto Refresh</span>
+        <span id="refresh-status">(Enabled - refreshing every 1s)</span>
+    </div>
+    
+    <div id="services-table-container">
+        <table>
+            <thead>
                 <tr>
-                    <td>
-                        <%c++ 
-                        // Display base_name and instance if available
-                        if (!service.at("instance").empty()) {
-                            $$ << service.at("base_name") << "@" << service.at("instance");
-                        } else {
-                            $$ << service.at("name");
-                        }
-                        %>
-                    </td>
-                    <td><%c++ $$ << service.at("status"); %></td>
-                    <td><%c++ $$ << service.at("active"); %></td>
-                    <td>
-                        <a href="/service-log/<%c++ $$ << service.at("full_name"); %>" class="log-link">View Logs</a>
-                    </td>
+                    <th>Service Name</th>
+                    <th>Status</th>
+                    <th>Active</th>
+                    <th>Actions</th>
                 </tr>
+            </thead>
+            <tbody>
+            <%c++ 
+            auto servicesList = @@.get<std::vector<std::map<std::string, std::string>>>("services");
+            if(servicesList.size() > 0) {
+            %>
+                <%c++ for(const auto& service : servicesList) { %>
+                    <tr>
+                        <td>
+                            <%c++ 
+                            // Display base_name and instance if available
+                            if (!service.at("instance").empty()) {
+                                $$ << service.at("base_name") << "@" << service.at("instance");
+                            } else {
+                                $$ << service.at("name");
+                            }
+                            %>
+                        </td>
+                        <td><%c++ $$ << service.at("status"); %></td>
+                        <td><%c++ $$ << service.at("active"); %></td>
+                        <td>
+                            <a href="/service-log/<%c++ $$ << service.at("full_name"); %>" class="log-link">View Logs</a>
+                        </td>
+                    </tr>
+                <%c++ } %>
+            <%c++ } else { %>
+                    <tr>
+                        <td colspan="4" class="no-devices">No services available</td>
+                    </tr>
             <%c++ } %>
-        <%c++ } else { %>
-                <tr>
-                    <td colspan="4" class="no-devices">No services available</td>
-                </tr>
-        <%c++ } %>
-        </tbody>
-    </table>
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        // Auto-refresh functionality
+        let refreshInterval;
+        const refreshToggle = document.getElementById('auto-refresh');
+        const refreshStatus = document.getElementById('refresh-status');
+        const tableContainer = document.getElementById('services-table-container');
+        
+        // Function to fetch and update the services table
+        async function refreshServicesTable() {
+            try {
+                const response = await fetch('/services', {
+                    headers: {
+                        'Accept': 'application/json'
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to fetch services');
+                }
+                
+                const data = await response.json();
+                
+                // Create a new table with the updated data
+                let tableHtml = `
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Service Name</th>
+                                <th>Status</th>
+                                <th>Active</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+                
+                if (data.services && data.services.length > 0) {
+                    data.services.forEach(service => {
+                        let serviceName = service.name;
+                        if (service.instance && service.instance.length > 0) {
+                            serviceName = service.base_name + '@' + service.instance;
+                        }
+                        
+                        tableHtml += `
+                            <tr>
+                                <td>${serviceName}</td>
+                                <td>${service.status}</td>
+                                <td>${service.active}</td>
+                                <td>
+                                    <a href="/service-log/${service.full_name}" class="log-link">View Logs</a>
+                                </td>
+                            </tr>
+                        `;
+                    });
+                } else {
+                    tableHtml += `
+                        <tr>
+                            <td colspan="4" class="no-devices">No services available</td>
+                        </tr>
+                    `;
+                }
+                
+                tableHtml += `
+                        </tbody>
+                    </table>
+                `;
+                
+                tableContainer.innerHTML = tableHtml;
+            } catch (error) {
+                console.error('Error refreshing services table:', error);
+            }
+        }
+        
+        // Function to start the refresh interval
+        function startRefresh() {
+            refreshInterval = setInterval(refreshServicesTable, 1000);
+            refreshStatus.textContent = '(Enabled - refreshing every 1s)';
+        }
+        
+        // Function to stop the refresh interval
+        function stopRefresh() {
+            clearInterval(refreshInterval);
+            refreshStatus.textContent = '(Disabled)';
+        }
+        
+        // Initialize auto-refresh based on toggle state
+        if (refreshToggle.checked) {
+            startRefresh();
+        } else {
+            stopRefresh();
+        }
+        
+        // Toggle auto-refresh when the checkbox is changed
+        refreshToggle.addEventListener('change', function() {
+            if (this.checked) {
+                startRefresh();
+            } else {
+                stopRefresh();
+            }
+        });
+    </script>
 </body>
 </html> 

@@ -159,6 +159,7 @@ namespace provisioner {
                 HttpViewData viewData;
                 viewData.insert("devices", devicesList);
                 viewData.insert("currentPage", std::string("manufacturing"));
+                viewData.insert("auto_refresh", true);
                 
                 if (!errorMessage.empty()) {
                     viewData.insert("warning", errorMessage);
