@@ -314,6 +314,7 @@ std::string currentPage = "customisation";
           <div id="debugInfo" class="debug-info">
             <h4>Debug Information</h4>
             <pre id="scriptsData"></pre>
+            <div id="fileCheckResults"></div>
           </div>
         </div>
     </div>
@@ -332,12 +333,67 @@ std::string currentPage = "customisation";
   // Store the active tab name
   window.activeTab = '';
   
+  // Helper function to get URL parameters
+  function getUrlParameter(name) {
+    name = name.replace(/[\[]/, '\\[').replace(/[\]]/, '\\]');
+    var regex = new RegExp('[\\?&]' + name + '=([^&#]*)');
+    var results = regex.exec(location.search);
+    return results === null ? '' : decodeURIComponent(results[1].replace(/\+/g, ' '));
+  }
+  
   // Populate debug data
   document.addEventListener('DOMContentLoaded', function() {
     var scriptsData = <%c++ $$ << scripts.toStyledString(); %>;
     document.getElementById('scriptsData').textContent = JSON.stringify(scriptsData, null, 2);
     
-    // Activate the first tab by default
+    // Add a section to verify script enabled states
+    let checkResults = document.getElementById('fileCheckResults');
+    checkResults.innerHTML = "<h5>Script State Verification</h5>";
+    
+    // For each script that exists, verify its enabled state
+    scriptsData.forEach(script => {
+      if (script.exists) {
+        // Get the state shown in the UI
+        let card = document.querySelector(`.hook-card[data-filename="${script.filename}"]`);
+        if (card) {
+          let statusSpan = card.querySelector('.hook-status');
+          let uiEnabled = false;
+          if (statusSpan) {
+            uiEnabled = statusSpan.classList.contains('hook-enabled');
+          }
+          
+          // Verify UI matches data
+          const stateMatch = uiEnabled === script.enabled;
+          const stateColor = stateMatch ? 'green' : 'red';
+          
+          // Add verification result
+          checkResults.innerHTML += `
+            <div style="margin-bottom: 8px; border-bottom: 1px solid #eee; padding-bottom: 5px;">
+              <div><strong>${script.filename}</strong></div>
+              <div>Data shows: enabled=${script.enabled}, executable=${script.executable}</div>
+              <div>UI shows: enabled=${uiEnabled}</div>
+              <div style="color: ${stateColor}">Match: ${stateMatch ? 'Yes' : 'No'}</div>
+            </div>
+          `;
+        }
+      }
+    });
+    
+    // Check if we have an activeTab parameter in the URL
+    var tabFromUrl = getUrlParameter('activeTab');
+    
+    if (tabFromUrl) {
+      console.log('Restoring active tab from URL parameter:', tabFromUrl);
+      // Find the tab button for this tab
+      var tabButton = document.getElementById(tabFromUrl + '-tab');
+      if (tabButton) {
+        // Click the tab button to activate it
+        tabButton.click();
+        return;
+      }
+    }
+    
+    // If no tab from URL or tab not found, activate the first tab by default
     var firstTabButton = document.querySelector('.tab-button');
     if (firstTabButton) {
       firstTabButton.click();
@@ -367,6 +423,22 @@ function openTab(evt, tabName) {
   document.getElementById(tabName).classList.add("active");
   evt.currentTarget.classList.add("active");
 }
+
+// Update edit links to include activeTab parameter
+document.addEventListener('DOMContentLoaded', function() {
+  // After tabs have been set up, update all edit links
+  const editLinks = document.querySelectorAll('a[href^="/customisation/get-script"]');
+  editLinks.forEach(link => {
+    link.addEventListener('click', function(e) {
+      if (window.activeTab) {
+        e.preventDefault();
+        const currentHref = this.getAttribute('href');
+        window.location.href = currentHref + (currentHref.includes('?') ? '&' : '?') + 
+                              'activeTab=' + encodeURIComponent(window.activeTab);
+      }
+    });
+  });
+});
 
 function getScriptBaseName(filename) {
   // Extract the base name without the extension
@@ -601,15 +673,70 @@ function enableScript(filename) {
 
 function deleteScript(filename) {
   if (confirm('Are you sure you want to delete this script?')) {
-    fetch('/customisation/delete-script?script=' + encodeURIComponent(filename), {
+    console.log(`Attempting to delete script: ${filename}`);
+    
+    // Get the card element for this script
+    const card = document.querySelector(`.hook-card[data-filename="${filename}"]`);
+    if (!card) {
+      console.error(`Could not find card for script: ${filename}`);
+      return;
+    }
+    
+    // Use only the base name without extension
+    const baseScriptName = getScriptBaseName(filename);
+    console.log(`Using script base name: ${baseScriptName}`);
+    
+    fetch('/customisation/delete-script?script=' + encodeURIComponent(baseScriptName), {
       method: 'GET'
     })
     .then(response => {
-      if (response.ok) {
-        window.location.reload();
-      } else {
-        alert('Failed to delete script');
+      console.log(`Delete script response status: ${response.status}`);
+      return response.text().then(text => {
+        console.log(`Response body: ${text}`);
+        try {
+          return { ok: response.ok, text: text, json: JSON.parse(text) };
+        } catch(e) {
+          return { ok: response.ok, text: text };
+        }
+      });
+    })
+    .then(result => {
+      console.log(`Response OK: ${result.ok}`);
+      if (result.json) {
+        console.log('Response JSON:', result.json);
       }
+      
+      if (result.ok) {
+        console.log('Script deleted successfully, updating UI');
+        
+        // Update the card to show "Not Created" state
+        // Update status label
+        const statusSpan = card.querySelector('.hook-status');
+        if (statusSpan) {
+          statusSpan.className = 'hook-status hook-missing';
+          statusSpan.textContent = 'Not Created';
+        }
+        
+        // Update actions div
+        const actionsDiv = card.querySelector('.hook-actions');
+        if (actionsDiv) {
+          // Replace with a single "Create Script" button
+          actionsDiv.innerHTML = `
+            <a href="/customisation/get-script?script=${encodeURIComponent(filename)}" class="cust-btn cust-btn-success cust-btn-sm">Create Script</a>
+          `;
+        }
+      } else {
+        const errorMsg = result.json ? 
+          (result.json.error || 'Unknown error') : 
+          (result.text || 'Unknown error');
+        
+        console.error(`Failed to delete script: ${errorMsg}`);
+        alert('Failed to delete script: ' + errorMsg);
+      }
+    })
+    .catch(error => {
+      console.error('Error deleting script:', error);
+      alert('Error deleting script: ' + error.message);
     });
   }
 }

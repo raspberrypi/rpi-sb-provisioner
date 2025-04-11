@@ -249,6 +249,15 @@ try {
             color: #6c757d;
             border: 1px solid #ced4da;
         }
+
+        .script-status-note {
+            background-color: #f8f9fa;
+            padding: 10px 15px;
+            border-left: 4px solid #6c757d;
+            margin-bottom: 1rem;
+            color: #495057;
+            font-style: italic;
+        }
     </style>
 </head>
 <body>
@@ -261,10 +270,9 @@ try {
             
             <div class="row mb-3">
                 <div class="col-md-auto">
-                    <button id="enableScriptToggle" class="toggle-btn <%c++ if(script_enabled) $$ << "enabled"; else $$ << "disabled"; %>" <%c++ if(!script_exists) $$ << "disabled"; %>>
-                        <i class="fas <%c++ if(script_enabled) $$ << "fa-toggle-on"; else $$ << "fa-toggle-off"; %>"></i>
-                        Script <%c++ if(script_enabled) $$ << "Enabled"; else $$ << "Disabled"; %>
-                    </button>
+                    <p class="script-status-note">
+                        To enable or disable this script, use the controls on the scripts list page.
+                    </p>
                 </div>
             </div>
 
@@ -333,6 +341,18 @@ try {
         var scriptName = $("#script-filename").text();
         var scriptExists = <%c++ $$ << (script_exists ? "true" : "false"); %>;
         
+        // Extract active tab from URL if present
+        var activeTab = getUrlParameter('activeTab');
+        console.log('Active tab from URL:', activeTab);
+        
+        // Helper function to get URL parameters
+        function getUrlParameter(name) {
+            name = name.replace(/[\[]/, '\\[').replace(/[\]]/, '\\]');
+            var regex = new RegExp('[\\?&]' + name + '=([^&#]*)');
+            var results = regex.exec(location.search);
+            return results === null ? '' : decodeURIComponent(results[1].replace(/\+/g, ' '));
+        }
+        
         // Help modal
         $("#script-help-btn").click(function() {
             $("#helpModal").css("display", "block").addClass("show");
@@ -352,6 +372,14 @@ try {
             }
         };
         
+        // Add "Back" button navigation with active tab preservation
+        $("a[href='/customisation/list-scripts']").click(function(e) {
+            if (activeTab) {
+                e.preventDefault();
+                window.location.href = '/customisation/list-scripts?activeTab=' + encodeURIComponent(activeTab);
+            }
+        });
+        
         // Save button
         $("#save-btn").click(function() {
             var content = editor.getValue();
@@ -362,46 +390,20 @@ try {
             saveScript(content, !scriptExists);
         });
         
-        // Enable/disable toggle
-        $("#enableScriptToggle").click(function() {
-            if ($(this).prop('disabled')) return;
-            
-            var wasEnabled = $(this).hasClass('enabled');
-            var willBeEnabled = !wasEnabled;
-            
-            var url = willBeEnabled ? '/customisation/enable-script' : '/customisation/disable-script';
-            
-            $.ajax({
-                url: url + '?script=' + encodeURIComponent(scriptName),
-                type: 'POST',
-                success: function(response) {
-                    console.log("Script " + (willBeEnabled ? "enabled" : "disabled"));
-                    
-                    // Update button UI
-                    var $btn = $("#enableScriptToggle");
-                    if (willBeEnabled) {
-                        $btn.removeClass('disabled').addClass('enabled');
-                        $btn.html('<i class="fas fa-toggle-on"></i> Script Enabled');
-                    } else {
-                        $btn.removeClass('enabled').addClass('disabled');
-                        $btn.html('<i class="fas fa-toggle-off"></i> Script Disabled');
-                    }
-                },
-                error: function(xhr) {
-                    console.error("Error toggling script", xhr);
-                    alert("Failed to " + (willBeEnabled ? "enable" : "disable") + " script. Please try again.");
-                }
-            });
-        });
-        
         function saveScript(content, isNewScript) {
+            // Process script name consistently - remove .sh extension if present
+            var baseScriptName = scriptName;
+            if (baseScriptName.endsWith('.sh')) {
+                baseScriptName = baseScriptName.substring(0, baseScriptName.length - 3);
+                console.log('Removed .sh extension for saving, using: ' + baseScriptName);
+            }
+            
             $.ajax({
                 url: '/customisation/save-script',
                 type: 'POST',
                 data: JSON.stringify({ 
-                    filename: scriptName,
-                    content: content,
-                    enabled: $("#enableScriptToggle").hasClass('enabled')
+                    filename: baseScriptName,
+                    content: content
                 }),
                 contentType: 'application/json',
                 success: function(response) {
@@ -409,11 +411,14 @@ try {
                     if (isNewScript) {
                         // Update UI for an existing script
                         $("#save-btn").prop('disabled', false);
-                        $("#enableScriptToggle").prop('disabled', false);
                         scriptExists = true;
                     }
-                    // Redirect back to the list
-                    window.location.href = '/customisation/list-scripts';
+                    // Redirect back to the list with active tab
+                    if (activeTab) {
+                        window.location.href = '/customisation/list-scripts?activeTab=' + encodeURIComponent(activeTab);
+                    } else {
+                        window.location.href = '/customisation/list-scripts';
+                    }
                 },
                 error: function(xhr) {
                     console.error("Error saving script", xhr);

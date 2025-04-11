@@ -36,18 +36,31 @@ namespace provisioner {
         };
 
         // Helper function to get script metadata
-        Json::Value getScriptMetadata(const std::string& filename, bool includeContent = false) {
+        Json::Value getScriptMetadata(const std::string& filepath, bool includeContent = false) {
             namespace fs = std::filesystem;
             Json::Value script;
-            std::string sanitized_filename = utils::sanitize_path_component(filename);
-            std::string filepath = SCRIPTS_DIR + sanitized_filename;
             
+            // Extract the filename from the filepath using std::filesystem
+            std::string filename = std::filesystem::path(filepath).filename().string();
             script["filename"] = filename;
 
+            // Ensure we have the full path to check permissions
+            std::string fullPath = filepath;
+            if (!fs::path(filepath).is_absolute() && fs::path(filepath).filename() == filepath) {
+                fullPath = SCRIPTS_DIR + filename;
+                LOG_INFO << "Using full path for permission check: " << fullPath;
+            }
+
             // Get file permissions to determine if script is enabled (executable)
-            const auto perms = fs::status(filepath).permissions();
-            script["executable"] = ((perms & fs::perms::owner_exec) != fs::perms::none);
-            script["enabled"] = script["executable"];
+            if (fs::exists(fullPath)) {
+                const auto perms = fs::status(fullPath).permissions();
+                script["executable"] = ((perms & fs::perms::owner_exec) != fs::perms::none);
+                script["enabled"] = script["executable"];
+            } else {
+                LOG_WARN << "File does not exist for permission check: " << fullPath;
+                script["executable"] = false;
+                script["enabled"] = false;
+            }
 
             // Calculate SHA256
             EVP_MD_CTX *mdctx = EVP_MD_CTX_new();
@@ -56,7 +69,7 @@ namespace provisioner {
             unsigned int hash_len;
             char buffer[4096];
             
-            std::ifstream file(filepath, std::ios::binary);
+            std::ifstream file(fullPath, std::ios::binary);
             if (file) {
                 EVP_DigestInit_ex(mdctx, md, nullptr);
                 
@@ -153,7 +166,8 @@ namespace provisioner {
             if (fs::exists(SCRIPTS_DIR) && fs::is_directory(SCRIPTS_DIR)) {
                 for (const auto& entry : fs::directory_iterator(SCRIPTS_DIR)) {
                     if (fs::is_regular_file(entry.path())) {
-                        Json::Value script = getScriptMetadata(entry.path().filename().string());
+                        // Pass the full path to getScriptMetadata
+                        Json::Value script = getScriptMetadata(entry.path().string());
                         script["exists"] = true;
                         scripts["scripts"].append(script);
                     }
@@ -372,7 +386,7 @@ namespace provisioner {
             buffer << scriptFile.rdbuf();
             
             // Get script metadata
-            Json::Value scriptMetadata = getScriptMetadata(sanitized_filename, true);
+            Json::Value scriptMetadata = getScriptMetadata(scriptPath, true);
 
             auto acceptHeader = req->getHeader("accept");
             if (acceptHeader.find("text/html") != std::string::npos) {
@@ -428,7 +442,14 @@ namespace provisioner {
                 return;
             }
 
-            std::string scriptPath = SCRIPTS_DIR + filename;
+            // Prune any .sh extension from the filename
+            if (filename.find(".sh") != std::string::npos) {
+                filename.erase(filename.end() - 3, filename.end());
+            }
+
+            std::string sanitized_filename = utils::sanitize_path_component(filename);
+            std::string scriptPath = SCRIPTS_DIR + sanitized_filename + ".sh";
+            LOG_INFO << "Deleting script: " << scriptPath;
             
             namespace fs = std::filesystem;
             std::error_code ec;
@@ -659,11 +680,6 @@ namespace provisioner {
             
             std::string filename = (*json)["filename"].asString();
             std::string content = (*json)["content"].asString();
-            bool shouldEnable = false;
-            
-            if (json->isMember("enabled")) {
-                shouldEnable = (*json)["enabled"].asBool();
-            }
             
             // Create directories if they don't exist
             namespace fs = std::filesystem;
@@ -685,8 +701,25 @@ namespace provisioner {
             }
             
             // Write the script content
+            // Prune any .sh extension from the filename
+            if (filename.find(".sh") != std::string::npos) {
+                filename.erase(filename.end() - 3, filename.end());
+            }
+
             std::string sanitized_filename = utils::sanitize_path_component(filename);
-            std::string scriptPath = SCRIPTS_DIR + sanitized_filename;
+            std::string scriptPath = SCRIPTS_DIR + sanitized_filename + ".sh";
+            LOG_INFO << "Saving script: " << scriptPath;
+            
+            // Check if we need to preserve existing permissions
+            bool scriptAlreadyExists = fs::exists(scriptPath);
+            fs::perms existingPerms = fs::perms::none;
+            if (scriptAlreadyExists) {
+                // Store existing permissions if file exists
+                existingPerms = fs::status(scriptPath).permissions();
+                LOG_INFO << "Preserving existing permissions for " << scriptPath;
+            }
+            
+            // Write file content
             std::ofstream file(scriptPath, std::ios::binary);
             if (!file.is_open()) {
                 auto errorResp = provisioner::utils::createErrorResponse(
@@ -704,36 +737,45 @@ namespace provisioner {
             file.write(content.c_str(), content.size());
             file.close();
             
-            // Set appropriate permissions based on enabled status
+            // For new files, set default permissions (non-executable: 0644)
             std::error_code ec;
-            if (shouldEnable) {
-                // Set file permissions to 0755 (rwxr-xr-x)
-                fs::permissions(scriptPath, 
-                              fs::perms::owner_all | fs::perms::group_read | fs::perms::group_exec | fs::perms::others_read | fs::perms::others_exec,
-                              fs::perm_options::replace, ec);
-            } else {
-                // Set file permissions to 0644 (rw-r--r--)
+            if (!scriptAlreadyExists) {
                 fs::permissions(scriptPath, 
                               fs::perms::owner_read | fs::perms::owner_write | fs::perms::group_read | fs::perms::others_read,
                               fs::perm_options::replace, ec);
-            }
-            
-            if (ec) {
-                LOG_ERROR << "Failed to set script file permissions";
-                auto errorResp = provisioner::utils::createErrorResponse(
-                    req,
-                    "Failed to set script file permissions",
-                    drogon::k500InternalServerError,
-                    "File Error",
-                    "FILE_PERMISSION_ERROR",
-                    "Could not set execute permissions on script file: " + scriptPath
-                );
-                callback(errorResp);
-                return;
+                if (ec) {
+                    LOG_ERROR << "Failed to set new script file permissions";
+                    auto errorResp = provisioner::utils::createErrorResponse(
+                        req,
+                        "Failed to set script file permissions",
+                        drogon::k500InternalServerError,
+                        "File Error",
+                        "FILE_PERMISSION_ERROR",
+                        "Could not set permissions on new script file: " + scriptPath
+                    );
+                    callback(errorResp);
+                    return;
+                }
+            } else {
+                // For existing files, restore the original permissions
+                fs::permissions(scriptPath, existingPerms, fs::perm_options::replace, ec);
+                if (ec) {
+                    LOG_ERROR << "Failed to restore original script file permissions";
+                    auto errorResp = provisioner::utils::createErrorResponse(
+                        req,
+                        "Failed to restore original script file permissions",
+                        drogon::k500InternalServerError,
+                        "File Error",
+                        "FILE_PERMISSION_ERROR",
+                        "Could not restore permissions on existing script file: " + scriptPath
+                    );
+                    callback(errorResp);
+                    return;
+                }
             }
             
             // Get updated script metadata
-            Json::Value scriptMetadata = getScriptMetadata(sanitized_filename);
+            Json::Value scriptMetadata = getScriptMetadata(scriptPath);
             
             resp->setStatusCode(k200OK);
             resp->setContentTypeCode(CT_APPLICATION_JSON);
@@ -843,8 +885,15 @@ namespace provisioner {
             }
             
             // Write the file content to the customisation directory
-            std::string sanitized_filename = utils::sanitize_path_component(fileInfo.getFileName());
-            std::string scriptPath = SCRIPTS_DIR + sanitized_filename;
+            // Prune any .sh extension from the filename
+            auto filename = fileInfo.getFileName();
+            if (filename.find(".sh") != std::string::npos) {
+                filename.erase(filename.end() - 3, filename.end());
+            }
+
+            std::string sanitized_filename = utils::sanitize_path_component(filename);
+            std::string scriptPath = SCRIPTS_DIR + sanitized_filename + ".sh";
+            LOG_INFO << "Disabling script: " << scriptPath;
             std::ofstream file(scriptPath, std::ios::binary);
             if (!file.is_open()) {
                 auto errorResp = provisioner::utils::createErrorResponse(
