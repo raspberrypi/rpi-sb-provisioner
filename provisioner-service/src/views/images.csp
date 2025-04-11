@@ -179,7 +179,7 @@
             
             if (response.status === 'complete') {
                 console.log(`SHA256 calculation complete for ${response.image_name}: ${response.sha256}`);
-                sha256Cell.textContent = response.sha256;
+                displayTruncatedHash(sha256Cell, response.sha256);
                 pendingSha256Requests.delete(response.image_name);
                 // Stop polling for this image if it was being polled
                 stopPolling(response.image_name);
@@ -191,7 +191,7 @@
                 }
             } else if (response.status === 'error') {
                 console.log(`SHA256 calculation error for ${response.image_name}: ${response.error || 'Unknown error'}`);
-                sha256Cell.textContent = 'Error: ' + (response.error || 'Unknown error');
+                displayTruncatedHash(sha256Cell, response.error || 'Unknown error');
                 pendingSha256Requests.delete(response.image_name);
                 // Stop polling for this image if it was being polled
                 stopPolling(response.image_name);
@@ -209,7 +209,7 @@
                         Math.round(response.progress * 100);
                     
                     console.log(`SHA256 progress update for ${response.image_name}: ${progressPercent}%`);
-                    sha256Cell.textContent = `Calculating... ${progressPercent}%`;
+                    displayTruncatedHash(sha256Cell, `Calculating... ${progressPercent}%`);
                     
                     // Create/update progress bar if not exists
                     let progressContainer = sha256Cell.querySelector('.hash-progress-container');
@@ -236,11 +236,66 @@
                     }
                 } else if (sha256Cell.textContent === 'use-websocket' || 
                            sha256Cell.textContent === 'Connecting...') {
-                    sha256Cell.textContent = 'Calculating...';
+                    displayTruncatedHash(sha256Cell, 'Calculating...');
                 }
             }
         }
         
+        // Show notification when hash is copied
+        function showCopyNotification(message) {
+            // Create notification element if it doesn't exist
+            let notification = document.getElementById('copy-notification');
+            if (!notification) {
+                notification = document.createElement('div');
+                notification.id = 'copy-notification';
+                document.body.appendChild(notification);
+            }
+            
+            // Set message and show
+            notification.textContent = message;
+            notification.classList.add('show');
+            
+            // Hide after 2 seconds
+            setTimeout(() => {
+                notification.classList.remove('show');
+            }, 2000);
+        }
+        
+        // Display truncated hash with tooltip and copy functionality
+        function displayTruncatedHash(cell, fullHash) {
+            // Don't process non-hash values
+            if (!fullHash || fullHash.length < 10 || 
+                fullHash === 'use-websocket' || 
+                fullHash.includes('Calculating') || 
+                fullHash.includes('Error')) {
+                cell.textContent = fullHash;
+                return;
+            }
+            
+            // Clear previous content
+            cell.innerHTML = '';
+            
+            // Create truncated hash element
+            const truncatedHash = document.createElement('span');
+            truncatedHash.className = 'truncated-hash';
+            truncatedHash.textContent = fullHash.substring(0, 10) + '...';
+            truncatedHash.title = fullHash;
+            truncatedHash.setAttribute('data-full-hash', fullHash);
+            
+            // Add click handler for copy
+            truncatedHash.addEventListener('click', async () => {
+                try {
+                    await navigator.clipboard.writeText(fullHash);
+                    showCopyNotification('SHA256 hash copied to clipboard');
+                } catch (err) {
+                    console.error('Failed to copy hash:', err);
+                    showCopyNotification('Failed to copy hash');
+                }
+            });
+            
+            cell.appendChild(truncatedHash);
+        }
+
         // Start polling for SHA256 calculation result
         function startPolling(imageName) {
             if (pollingIntervals[imageName]) {
@@ -337,7 +392,7 @@
                                         currentText === 'Connecting...' ||
                                         !currentText.includes('Calculating')) {
                                         console.log(`Setting calculation message for ${imageName}`);
-                                        cell.textContent = `Calculating... ${estimatedTimeMsg}`;
+                                        displayTruncatedHash(cell, `Calculating... ${estimatedTimeMsg}`);
                                     }
                                 }
                             }
@@ -411,8 +466,25 @@
             });
         }
 
+        // Initialize truncated hash display for all existing hashes
+        function initializeTruncatedHashes() {
+            const sha256Cells = document.querySelectorAll('.sha256-cell');
+            sha256Cells.forEach(cell => {
+                const hash = cell.textContent;
+                // Only process cells with actual hash values (not calculating or error messages)
+                if (hash && hash.length > 10 && 
+                    !hash.includes('use-websocket') && 
+                    !hash.includes('Calculating') && 
+                    !hash.includes('Error')) {
+                    displayTruncatedHash(cell, hash);
+                }
+            });
+        }
+
         // Initialize when DOM is loaded
         document.addEventListener('DOMContentLoaded', () => {
+            // Initialize truncated hashes for existing values
+            initializeTruncatedHashes();
             // Force polling to start immediately, before WebSocket setup
             initializePolling();
             // Then try to establish WebSocket
@@ -588,6 +660,37 @@
         .sha256-cell {
             position: relative;
             min-height: 20px;
+        }
+        
+        /* Truncated hash styles */
+        .truncated-hash {
+            cursor: pointer;
+            color: #0066cc;
+            position: relative;
+        }
+        
+        .truncated-hash:hover {
+            text-decoration: underline;
+        }
+        
+        /* Copy notification */
+        #copy-notification {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background-color: #333;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 4px;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            pointer-events: none;
+            z-index: 1000;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        }
+        
+        #copy-notification.show {
+            opacity: 1;
         }
     </style>
 
