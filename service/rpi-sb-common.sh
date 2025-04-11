@@ -184,9 +184,19 @@ run_customisation_script() {
     if [ -f "${SCRIPT_PATH}" ]; then
         announce_start "Running customisation script for ${PROVISIONER_NAME} at stage ${STAGE_NAME}"
         
-        # Ensure script is executable
-        chmod +x "${SCRIPT_PATH}"
+        # Check if script is executable
+        if [ ! -x "${SCRIPT_PATH}" ]; then
+            log "Skipping disabled customisation script: ${SCRIPT_NAME}"
+            return 0
+        fi
         
+        # Temporarily disable error exit to prevent script failures from aborting the provisioning process
+        # Save current error exit setting and disable it
+        ERROR_EXIT_WAS_SET=0
+        if [ -o errexit ]; then
+            ERROR_EXIT_WAS_SET=1
+        fi
+        set +e
         # Handle different stages with appropriate parameters
         if [ "${STAGE_NAME}" = "post-flash" ]; then
             # For post-flash stage, pass device info that can be used with fastboot
@@ -197,7 +207,9 @@ run_customisation_script() {
             ROOTFS_MOUNT="$4"
             "${SCRIPT_PATH}" "${BOOT_MOUNT}" "${ROOTFS_MOUNT}"
         fi
-        
+        if [ "${ERROR_EXIT_WAS_SET}" -eq 1 ]; then
+            set -e
+        fi
         SCRIPT_EXIT_CODE=$?
         
         if [ $SCRIPT_EXIT_CODE -eq 0 ]; then
