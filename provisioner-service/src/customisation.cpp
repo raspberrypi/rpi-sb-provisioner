@@ -481,7 +481,14 @@ namespace provisioner {
                 return;
             }
 
-            std::string scriptPath = SCRIPTS_DIR + filename;
+            // Prune any .sh extension from the filename
+            if (filename.find(".sh") != std::string::npos) {
+                filename.erase(filename.end() - 3, filename.end());
+            }
+
+            std::string sanitized_filename = utils::sanitize_path_component(filename);
+            std::string scriptPath = SCRIPTS_DIR + sanitized_filename + ".sh";
+            LOG_INFO << "Disabling script: " << scriptPath;
             
             namespace fs = std::filesystem;
             if (!fs::exists(scriptPath)) {
@@ -551,9 +558,15 @@ namespace provisioner {
                 return;
             }
 
+            // Prune any .sh extension from the filename
+            if (filename.find(".sh") != std::string::npos) {
+                filename.erase(filename.end() - 3, filename.end());
+            }
+
             std::string sanitized_filename = utils::sanitize_path_component(filename);
-            std::string scriptPath = SCRIPTS_DIR + sanitized_filename;
-            
+            std::string scriptPath = SCRIPTS_DIR + sanitized_filename + ".sh";
+            LOG_INFO << "Enabling script: " << scriptPath;
+
             namespace fs = std::filesystem;
             if (!fs::exists(scriptPath)) {
                 auto resp = provisioner::utils::createErrorResponse(

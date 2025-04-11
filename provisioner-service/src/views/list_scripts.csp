@@ -329,6 +329,9 @@ std::string currentPage = "customisation";
     }
   });
   
+  // Store the active tab name
+  window.activeTab = '';
+  
   // Populate debug data
   document.addEventListener('DOMContentLoaded', function() {
     var scriptsData = <%c++ $$ << scripts.toStyledString(); %>;
@@ -344,6 +347,9 @@ std::string currentPage = "customisation";
 
 function openTab(evt, tabName) {
   console.log("Opening tab: " + tabName);
+  
+  // Store active tab
+  window.activeTab = tabName;
   
   // Hide all tab content
   var tabContents = document.querySelectorAll('.tab-content');
@@ -362,28 +368,233 @@ function openTab(evt, tabName) {
   evt.currentTarget.classList.add("active");
 }
 
-function enableScript(filename) {
-  fetch('/customisation/enable-script?script=' + encodeURIComponent(filename), {
+function getScriptBaseName(filename) {
+  // Extract the base name without the extension
+  return filename.replace(/\.sh$/, '');
+}
+
+function disableScript(filename) {
+  console.log(`Attempting to disable script: ${filename}`);
+  
+  // Show loading state
+  const card = document.querySelector(`.hook-card[data-filename="${filename}"]`);
+  if (!card) {
+    console.error(`Could not find card for script: ${filename}`);
+    return;
+  }
+  
+  const statusSpan = card.querySelector('.hook-status');
+  const disableButton = card.querySelector('button.cust-btn-warning');
+  
+  if (disableButton) {
+    console.log('Found disable button, setting to loading state');
+    disableButton.textContent = 'Disabling...';
+    disableButton.disabled = true;
+  } else {
+    console.warn('Could not find disable button');
+  }
+  
+  // Use only the base name without extension
+  const baseScriptName = getScriptBaseName(filename);
+  console.log(`Using script base name: ${baseScriptName}`);
+  
+  // Use GET method since that's what the server expects
+  fetch('/customisation/disable-script?script=' + encodeURIComponent(baseScriptName), {
     method: 'GET'
   })
   .then(response => {
-    if (response.ok) {
-      window.location.reload();
+    console.log(`Disable script response status: ${response.status}`);
+    return response.text().then(text => {
+      console.log(`Response body: ${text}`);
+      try {
+        return { ok: response.ok, text: text, json: JSON.parse(text) };
+      } catch(e) {
+        return { ok: response.ok, text: text };
+      }
+    });
+  })
+  .then(result => {
+    console.log(`Response OK: ${result.ok}`);
+    if (result.json) {
+      console.log('Response JSON:', result.json);
+    }
+    
+    if (result.ok) {
+      console.log('Script disabled successfully, updating UI');
+      
+      // Update the status span
+      if (statusSpan) {
+        statusSpan.className = 'hook-status hook-disabled';
+        statusSpan.textContent = 'Disabled';
+      }
+      
+      // Create new button
+      const enableButton = document.createElement('button');
+      enableButton.className = 'cust-btn cust-btn-success cust-btn-sm';
+      enableButton.textContent = 'Enable';
+      enableButton.onclick = function() { enableScript(filename); };
+      
+      // Find and replace the disable button
+      if (disableButton && disableButton.parentNode) {
+        disableButton.parentNode.replaceChild(enableButton, disableButton);
+      } else {
+        console.warn('Could not replace disable button with enable button');
+        
+        // Fallback: Update the entire actions div
+        const actionsDiv = card.querySelector('.hook-actions');
+        if (actionsDiv) {
+          const editButton = actionsDiv.querySelector('a.cust-btn-primary');
+          const deleteButton = actionsDiv.querySelector('button.cust-btn-danger');
+          
+          // Clear actions div
+          actionsDiv.innerHTML = '';
+          
+          // Add back the edit button
+          if (editButton) actionsDiv.appendChild(editButton.cloneNode(true));
+          
+          // Add the new enable button
+          actionsDiv.appendChild(enableButton);
+          
+          // Add back the delete button
+          if (deleteButton) actionsDiv.appendChild(deleteButton.cloneNode(true));
+        }
+      }
     } else {
-      alert('Failed to enable script');
+      const errorMsg = result.json ? 
+        (result.json.error || 'Unknown error') : 
+        (result.text || 'Unknown error');
+      
+      console.error(`Failed to disable script: ${errorMsg}`);
+      alert('Failed to disable script: ' + errorMsg);
+      
+      // Reset button state
+      if (disableButton) {
+        disableButton.textContent = 'Disable';
+        disableButton.disabled = false;
+      }
+    }
+  })
+  .catch(error => {
+    console.error('Error disabling script:', error);
+    alert('Error disabling script: ' + error.message);
+    
+    // Reset button state
+    if (disableButton) {
+      disableButton.textContent = 'Disable';
+      disableButton.disabled = false;
     }
   });
 }
 
-function disableScript(filename) {
-  fetch('/customisation/disable-script?script=' + encodeURIComponent(filename), {
+function enableScript(filename) {
+  console.log(`Attempting to enable script: ${filename}`);
+  
+  // Show loading state
+  const card = document.querySelector(`.hook-card[data-filename="${filename}"]`);
+  if (!card) {
+    console.error(`Could not find card for script: ${filename}`);
+    return;
+  }
+  
+  const statusSpan = card.querySelector('.hook-status');
+  const enableButton = card.querySelector('button.cust-btn-success');
+  
+  if (enableButton) {
+    console.log('Found enable button, setting to loading state');
+    enableButton.textContent = 'Enabling...';
+    enableButton.disabled = true;
+  } else {
+    console.warn('Could not find enable button');
+  }
+  
+  // Use only the base name without extension
+  const baseScriptName = getScriptBaseName(filename);
+  console.log(`Using script base name: ${baseScriptName}`);
+  
+  // Use GET method since that's what the server expects
+  fetch('/customisation/enable-script?script=' + encodeURIComponent(baseScriptName), {
     method: 'GET'
   })
   .then(response => {
-    if (response.ok) {
-      window.location.reload();
+    console.log(`Enable script response status: ${response.status}`);
+    return response.text().then(text => {
+      console.log(`Response body: ${text}`);
+      try {
+        return { ok: response.ok, text: text, json: JSON.parse(text) };
+      } catch(e) {
+        return { ok: response.ok, text: text };
+      }
+    });
+  })
+  .then(result => {
+    console.log(`Response OK: ${result.ok}`);
+    if (result.json) {
+      console.log('Response JSON:', result.json);
+    }
+    
+    if (result.ok) {
+      console.log('Script enabled successfully, updating UI');
+      
+      // Update the status span
+      if (statusSpan) {
+        statusSpan.className = 'hook-status hook-enabled';
+        statusSpan.textContent = 'Enabled';
+      }
+      
+      // Create new button
+      const disableButton = document.createElement('button');
+      disableButton.className = 'cust-btn cust-btn-warning cust-btn-sm';
+      disableButton.textContent = 'Disable';
+      disableButton.onclick = function() { disableScript(filename); };
+      
+      // Find and replace the enable button
+      if (enableButton && enableButton.parentNode) {
+        enableButton.parentNode.replaceChild(disableButton, enableButton);
+      } else {
+        console.warn('Could not replace enable button with disable button');
+        
+        // Fallback: Update the entire actions div
+        const actionsDiv = card.querySelector('.hook-actions');
+        if (actionsDiv) {
+          const editButton = actionsDiv.querySelector('a.cust-btn-primary');
+          const deleteButton = actionsDiv.querySelector('button.cust-btn-danger');
+          
+          // Clear actions div
+          actionsDiv.innerHTML = '';
+          
+          // Add back the edit button
+          if (editButton) actionsDiv.appendChild(editButton.cloneNode(true));
+          
+          // Add the new disable button
+          actionsDiv.appendChild(disableButton);
+          
+          // Add back the delete button
+          if (deleteButton) actionsDiv.appendChild(deleteButton.cloneNode(true));
+        }
+      }
     } else {
-      alert('Failed to disable script');
+      const errorMsg = result.json ? 
+        (result.json.error || 'Unknown error') : 
+        (result.text || 'Unknown error');
+      
+      console.error(`Failed to enable script: ${errorMsg}`);
+      alert('Failed to enable script: ' + errorMsg);
+      
+      // Reset button state
+      if (enableButton) {
+        enableButton.textContent = 'Enable';
+        enableButton.disabled = false;
+      }
+    }
+  })
+  .catch(error => {
+    console.error('Error enabling script:', error);
+    alert('Error enabling script: ' + error.message);
+    
+    // Reset button state
+    if (enableButton) {
+      enableButton.textContent = 'Enable';
+      enableButton.disabled = false;
     }
   });
 }
