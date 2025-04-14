@@ -8,3 +8,6 @@ tar-ignore = *.log
 tar-ignore = *.egg-info
 tar-ignore = .git
 tar-ignore = build
+tar-ignore = provisioner-service/build
+tar-ignore = obj-aarch64-linux-gnu
+tar-ignore = .vscode
