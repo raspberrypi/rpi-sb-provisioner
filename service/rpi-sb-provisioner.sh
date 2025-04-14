@@ -105,6 +105,25 @@ timeout_fatal() {
     set -e
 }
 
+get_signing_directives() {
+    if [ -n "${CUSTOMER_KEY_PKCS11_NAME}" ]; then
+        echo "${CUSTOMER_KEY_PKCS11_NAME} -engine pkcs11 -keyform engine"
+    else
+        if [ -n "${CUSTOMER_KEY_FILE_PEM}" ]; then
+            if [ -f "${CUSTOMER_KEY_FILE_PEM}" ]; then
+                echo "${CUSTOMER_KEY_FILE_PEM} -keyform PEM"
+            else
+                echo "RSA private key \"${CUSTOMER_KEY_FILE_PEM}\" not a file. Aborting." >&2
+                exit 1
+            fi
+        else
+            echo "Neither PKCS11 key name, or PEM key file specified. Aborting." >&2
+            exit 1
+        fi
+    fi
+}
+
+
 CUSTOMER_PUBLIC_KEY_FILE=
 derivePublicKey() {
     CUSTOMER_PUBLIC_KEY_FILE="$(mktemp)"
@@ -131,15 +150,9 @@ writeSig() {
 
    # Include the update-timestamp
    echo "ts: $(date -u +%s)" >> "${OUTPUT}"
-      # shellcheck disable=SC2046
-      
-    if [ -n "${CUSTOMER_KEY_PKCS11_NAME}" ]; then
-        "${OPENSSL}" dgst -sign "${CUSTOMER_KEY_PKCS11_NAME}" -engine pkcs11 -keyform engine -sha256 -out "${SIG_TMP}" "${IMAGE}"
-    else
-    
-        "${OPENSSL}" dgst -sign ${CUSTOMER_KEY_FILE_PEM} -keyform PEM -sha256 -out "${SIG_TMP}" "${IMAGE}"
-    fi
-      echo "rsa2048: $(xxd -c 4096 -p < "${SIG_TMP}")" >> "${OUTPUT}"
+   # shellcheck disable=SC2046
+   "${OPENSSL}" dgst -sign $(get_signing_directives) -sha256 -out "${SIG_TMP}" "${IMAGE}"
+   echo "rsa2048: $(xxd -c 4096 -p < "${SIG_TMP}")" >> "${OUTPUT}"
    rm "${SIG_TMP}"
 }
 
@@ -687,11 +700,7 @@ sha256sum "${RPI_SB_WORKDIR}"/boot.img | awk '{print $1}' > "${RPI_SB_WORKDIR}"/
 printf 'rsa2048: ' >> "${RPI_SB_WORKDIR}"/boot.sig
 # Prefer PKCS11 over PEM keyfiles, if both are specified.
 # shellcheck disable=SC2046
-if [ -n "${CUSTOMER_KEY_PKCS11_NAME}" ]; then
-    "${OPENSSL}" dgst -sign "${CUSTOMER_KEY_PKCS11_NAME}" -engine pkcs11 -keyform engine -sha256 "${RPI_SB_WORKDIR}"/boot.img | xxd -c 4096 -p >> "${RPI_SB_WORKDIR}"/boot.sig
-else
-    "${OPENSSL}" dgst -sign ${CUSTOMER_KEY_FILE_PEM} -keyform PEM -sha256 "${RPI_SB_WORKDIR}"/boot.img | xxd -c 4096 -p >> "${RPI_SB_WORKDIR}"/boot.sig
-fi
+${OPENSSL} dgst -sign $(get_signing_directives) -sha256 "${RPI_SB_WORKDIR}"/boot.img | xxd -c 4096 -p >> "${RPI_SB_WORKDIR}"/boot.sig
 announce_stop "Finding/generating fastboot image"
 
 announce_start "Starting fastboot"
@@ -889,11 +898,7 @@ if [ ! -e "${RPI_SB_WORKDIR}/bootfs-temporary.img" ] ||
     sha256sum "${TMP_DIR}"/boot.img | awk '{print $1}' > "${TMP_DIR}"/boot.sig
     printf 'rsa2048: ' >> "${TMP_DIR}"/boot.sig
     # shellcheck disable=SC2046
-    if [ -n "${CUSTOMER_KEY_PKCS11_NAME}" ]; then
-        "${OPENSSL}" dgst -sign "${CUSTOMER_KEY_PKCS11_NAME}" -engine pkcs11 -keyform engine -sha256 "${TMP_DIR}"/boot.img | xxd -c 4096 -p >> "${TMP_DIR}"/boot.sig
-    else
-        "${OPENSSL}" dgst -sign ${CUSTOMER_KEY_FILE_PEM} -keyform PEM -sha256 "${TMP_DIR}"/boot.img | xxd -c 4096 -p >> "${TMP_DIR}"/boot.sig
-   fi
+    ${OPENSSL} dgst -sign $(get_signing_directives) -sha256 "${TMP_DIR}"/boot.img | xxd -c 4096 -p >> "${TMP_DIR}"/boot.sig
     announce_stop "boot.img signing"
 
     announce_start "Boot Image partition extraction"
