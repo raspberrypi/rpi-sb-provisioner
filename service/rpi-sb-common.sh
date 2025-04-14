@@ -222,3 +222,7 @@ run_customisation_script() {
         log "No customisation script found for ${PROVISIONER_NAME} at stage ${STAGE_NAME}"
     fi
 }
+
+get_variable() {
+    fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar "$1" 2>&1 | grep -oP "${1}"': \K[^\r\n]*'
+}
