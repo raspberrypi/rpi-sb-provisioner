@@ -306,10 +306,6 @@ check_command_exists mkfs.fat
 
 check_command_exists systemd-notify
 
-get_variable() {
-    fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar "$1" 2>&1 | grep -oP "${1}"': \K[^\r\n]*'
-}
-
 setup_fastboot_and_id_vars "$1"
 
 record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_STARTED}" "${TARGET_USB_PATH}"
