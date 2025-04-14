@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS devices(
     image           TEXT                not null,
     ip_address      TEXT                not null,
     ts              timestamp           default current_timestamp
-);"
+);" > /dev/null
 
 if [ ! -f "/srv/rpi-sb-provisioner/manufacturing.db" ]; then
     touch /srv/rpi-sb-provisioner/manufacturing.db
@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS devices(
     memory          varchar(255)        not null,
     manufacturer    varchar(255)        not null,
     provision_ts    timestamp           default current_timestamp
-);"
+);" > /dev/null
 
 # Set up systemd services
 if [ "$1" = "configure" ] || [ "$1" = "abort-upgrade" ] || [ "$1" = "abort-deconfigure" ] || [ "$1" = "abort-remove" ] ; then
