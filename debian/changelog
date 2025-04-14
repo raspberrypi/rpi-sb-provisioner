@@ -1,30 +1,46 @@
 rpi-sb-provisioner (2.0.0) unstable; urgency=medium
 
-  * global: Introduce FDE-Only, Naked and Secure-Boot provisioning modes
-  * global: Add support for Zero 2W (2710) devices
-  * global: Add Debian hardening options and build improvements
-  * global: Enhance error management and logging across all provisioners
-  * global: Remove DEMO_MODE from all components
-  * architectural: Split pre-and-post-Fastboot phases for better reliability
-  * architectural: Add support for multiple Fastboot devices with improved device tracking
-  * architectural: Add support for state tracking database with SQLite
-  * architectural: Add WebUI for provisioning management and monitoring
-  * architectural: Remove TUI (Python-based) provisioning interface
-  * provisioner: Add systemd service integration with notification support
-  * provisioner: Implement ethernet data transfer when available for faster provisioning
-  * provisioner: Use sparse boot images for improved performance
-  * provisioner: Restructure environment setup and cleanup processes
-  * provisioner: Enhance timeout handling with reduced fatal timeouts
-  * provisioner: Add manufacturing database integration and device metadata collection
-  * provisioner: Improve JTAG lock configuration
-  * udev: Increase specificity in device handling and ignore rpiboot mass-storage endpoint
-  * packaging: Fix lintian warnings and implement proper systemd service handling
-  * security: Add branch protection and other hardening measures
-  * ui: Add version check and GitHub link in WebUI
-  * config: Removed RPI_DEVICE_FETCH_METADATA, we now always fetch metadata
-  * ui: Add customisation scripts to the WebUI
+  * Architecture and Core Changes:
+    - Split pre-and-post-Fastboot phases for better reliability
+    - Add support for multiple Fastboot devices with improved
+      device tracking
+    - Add support for state tracking database with SQLite
+    - Add WebUI for provisioning management and monitoring
+    - Remove TUI (Python-based) provisioning interface
 
- -- Tom Dewey <tom.dewey@raspberrypi.com>  Tue, 07 Apr 2025 11:59:55 +0000
+  * Provisioning Modes and Device Support:
+    - Introduce FDE-Only, Naked and Secure-Boot provisioning modes
+    - Add support for Zero 2W (2710) devices
+    - Improve JTAG lock configuration
+
+  * Performance Improvements:
+    - Implement ethernet data transfer when available for faster
+      provisioning
+    - Use sparse boot images for improved performance
+    - Restructure environment setup and cleanup processes
+    - Enhance timeout handling with reduced fatal timeouts
+
+  * Security and Reliability:
+    - Add branch protection and other hardening measures
+    - Enhance error management and logging across all provisioners
+    - Add manufacturing database integration and device metadata
+      collection
+    - Remove DEMO_MODE from all components
+
+  * UI and Configuration:
+    - Add customisation scripts to the WebUI
+    - Add version check and GitHub link in WebUI
+    - Add Debian hardening options and build improvements
+    - Removed RPI_DEVICE_FETCH_METADATA, we now always fetch metadata
+
+  * System Integration:
+    - Add systemd service integration
+    - Fix lintian warnings and implement proper systemd service
+      handling
+    - Increase specificity in device handling and ignore rpiboot 
+      mass-storage endpoint
+
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Mon, 14 Apr 2025 11:59:55 +0000
 
 rpi-sb-provisioner (1.3.7) unstable; urgency=medium
 
