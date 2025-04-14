@@ -44,6 +44,23 @@ if [ -d "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL32}" ]; then
 fi
 
 read_config
+setup_fastboot_and_id_vars "${TARGET_DEVICE_SERIAL}"
+
+KEYPAIR_DIR="${LOG_DIRECTORY}/${TARGET_DEVICE_SERIAL}"/keypair
+if [ -d "${RPI_DEVICE_RETRIEVE_KEYPAIR}" ]; then
+    KEYPAIR_DIR="${RPI_DEVICE_RETRIEVE_KEYPAIR}"
+fi
+mkdir -p "${KEYPAIR_DIR}"
+log "Capturing device keypair to ${KEYPAIR_DIR}"
+N_ALREADY_PROVISIONED=0
+PRIVATE_KEY=$(get_variable private-key) || N_ALREADY_PROVISIONED=$?
+if [ 0 -ne "$N_ALREADY_PROVISIONED" ]; then
+    log "Warning: Unable to retrieve device private key; already provisioned"
+else
+    echo "${PRIVATE_KEY}" > "${KEYPAIR_DIR}/${TARGET_DEVICE_SERIAL}.der"
+    PRIVATE_KEY=""
+fi
+get_variable public-key > "${KEYPAIR_DIR}/${TARGET_DEVICE_SERIAL}.pub"
 
 # Based on the provisioning style, we can determine which systemd unit to trigger.
 # All systemd must be parameterised with the device serial number.
