@@ -165,10 +165,6 @@ check_command_exists img2simg
 
 check_command_exists systemd-notify
 
-get_variable() {
-    fastboot getvar "$1" 2>&1 | grep -oP "${1}"': \K[^\r\n]*'
-}
-
 TMP_DIR=$(mktemp -d)
 RPI_DEVICE_STORAGE_TYPE="$(check_pidevice_storage_type "${RPI_DEVICE_STORAGE_TYPE}")"
 DELETE_PRIVATE_TMPDIR=
