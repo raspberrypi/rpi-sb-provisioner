@@ -34,13 +34,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=format-nonliteral")
 FetchContent_GetProperties(drogon)
 string(TOLOWER "drogon" lcName)
 if(NOT ${lcName}_POPULATED)
-  # Fetch the content using previously declared details
   FetchContent_Populate(drogon)
-
-  # Set custom variables, policies, etc.
-  # ...
-
-  # Bring the populated content into the build
   add_subdirectory(${${lcName}_SOURCE_DIR} ${${lcName}_BINARY_DIR} EXCLUDE_FROM_ALL)
 endif()
 # Restore original flags
@@ -91,18 +85,19 @@ set(CURL_DISABLE_HEADERS_API ON CACHE BOOL "Set to ON to disable headers-api sup
 set(CURL_DISABLE_SOCKETPAIR ON CACHE BOOL "Set to ON to disable use of socketpair." FORCE)
 # Disable authentication methods (we only need simple HTTPS requests)
 # BUG: Authentication provicers are required to build curl, due to a bug in the curl code
-#set(CURL_DISABLE_BASIC_AUTH ON CACHE BOOL "Set to ON to disable Basic authentication." FORCE)
-#set(CURL_DISABLE_BEARER_AUTH ON CACHE BOOL "Set to ON to disable Bearer authentication." FORCE)
-#set(CURL_DISABLE_DIGEST_AUTH ON CACHE BOOL "Set to ON to disable Digest authentication." FORCE)
-#set(CURL_DISABLE_KERBEROS_AUTH ON CACHE BOOL "Set to ON to disable Kerberos authentication." FORCE)
-#set(CURL_DISABLE_NEGOTIATE_AUTH ON CACHE BOOL "Set to ON to disable negotiate authentication." FORCE)
-#set(CURL_DISABLE_AWS ON CACHE BOOL "Set to ON to disable aws-sigv4." FORCE)
-#set(CURL_DISABLE_NTLM ON CACHE BOOL "Set to ON to disable NTLM support." FORCE)
+set(CURL_DISABLE_BASIC_AUTH ON CACHE BOOL "Set to ON to disable Basic authentication." FORCE)
+set(CURL_DISABLE_BEARER_AUTH ON CACHE BOOL "Set to ON to disable Bearer authentication." FORCE)
+set(CURL_DISABLE_DIGEST_AUTH ON CACHE BOOL "Set to ON to disable Digest authentication." FORCE)
+set(CURL_DISABLE_KERBEROS_AUTH ON CACHE BOOL "Set to ON to disable Kerberos authentication." FORCE)
+set(CURL_DISABLE_NEGOTIATE_AUTH ON CACHE BOOL "Set to ON to disable negotiate authentication." FORCE)
+set(CURL_DISABLE_AWS ON CACHE BOOL "Set to ON to disable aws-sigv4." FORCE)
+set(CURL_DISABLE_NTLM ON CACHE BOOL "Set to ON to disable NTLM support." FORCE)
 
 FetchContent_Declare(curl
  GIT_REPOSITORY https://github.com/curl/curl.git
  GIT_TAG        curl-8_13_0
- PATCH_COMMAND patch -R -p1 < ${CMAKE_SOURCE_DIR}/cmake/curl/http-no-auth.patch
+ PATCH_COMMAND patch -p1 < ${CMAKE_SOURCE_DIR}/cmake/curl/http-no-auth.patch
+ UPDATE_DISCONNECTED 1
  EXCLUDE_FROM_ALL  # Prevents installation in packages
 )
 
