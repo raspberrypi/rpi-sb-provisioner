@@ -26,6 +26,9 @@ rpi-sb-provisioner (2.0.0) unstable; urgency=medium
     - Add manufacturing database integration and device metadata
       collection
     - Remove DEMO_MODE from all components
+    - Switch from system curl to minimal embedded curl library
+    - Reduce attack surface by disabling unneeded curl features
+    - Use libcurl directly instead of calling out to curl binary
 
   * UI and Configuration:
     - Add customisation scripts to the WebUI
@@ -39,6 +42,7 @@ rpi-sb-provisioner (2.0.0) unstable; urgency=medium
       handling
     - Increase specificity in device handling and ignore rpiboot 
       mass-storage endpoint
+    - Add lintian override for embedded curl library
 
  -- Tom Dewey <tom.dewey@raspberrypi.com>  Mon, 14 Apr 2025 11:59:55 +0000
 

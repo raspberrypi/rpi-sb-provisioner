@@ -1,0 +1,20 @@
+diff --git a/lib/http.c b/lib/http.c
+index 51515d1fe..a9de9901f 100644
+--- a/lib/http.c
++++ b/lib/http.c
+@@ -1005,6 +1005,7 @@ CURLcode Curl_http_input_auth(struct Curl_easy *data, bool proxy,
+   /*
+    * This resource requires authentication
+    */
++  CURLcode result = CURLE_OK;
+ #if defined(USE_SPNEGO) ||                      \
+   defined(USE_NTLM) ||                          \
+   !defined(CURL_DISABLE_DIGEST_AUTH) ||         \
+@@ -1013,7 +1014,6 @@ CURLcode Curl_http_input_auth(struct Curl_easy *data, bool proxy,
+ 
+   unsigned long *availp;
+   struct auth *authp;
+-  CURLcode result = CURLE_OK;
+   DEBUGASSERT(auth);
+   DEBUGASSERT(data);
+ 

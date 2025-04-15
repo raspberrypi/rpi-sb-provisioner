@@ -8,6 +8,7 @@
 #include <getopt.h>
 #include <map>
 #include <algorithm>
+#include <curl/curl.h>
 
 #include "images.h"
 #include "devices.h"
@@ -38,6 +39,12 @@ std::string getPackageVersion() {
     return version;
 }
 
+// Callback function for curl
+static size_t WriteCallback(void *contents, size_t size, size_t nmemb, std::string *userp) {
+    userp->append((char*)contents, size * nmemb);
+    return size * nmemb;
+}
+
 // Function to check for newer GitHub releases
 struct VersionInfo {
     std::string latest;
@@ -48,46 +55,51 @@ struct VersionInfo {
 VersionInfo checkForNewerRelease(const std::string& current_version) {
     VersionInfo info = {"", false, ""};
     
-    // Use curl to fetch the latest release from GitHub API
-    FILE* pipe = popen("curl -s https://api.github.com/repos/raspberrypi/rpi-sb-provisioner/releases/latest | grep '\"tag_name\"\\|\"html_url\"' | head -2", "r");
-    if (!pipe) return info;
+    CURL *curl;
+    CURLcode res;
+    std::string readBuffer;
     
-    std::string tag_name, html_url;
-    char buffer[512];
-    
-    while (fgets(buffer, sizeof(buffer), pipe)) {
-        std::string line(buffer);
+    curl = curl_easy_init();
+    if(curl) {
+        curl_easy_setopt(curl, CURLOPT_URL, "https://api.github.com/repos/raspberrypi/rpi-sb-provisioner/releases/latest");
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
+        curl_easy_setopt(curl, CURLOPT_USERAGENT, "rpi-sb-provisioner/" + current_version + " libcurl-agent/1.0");
         
-        if (line.find("tag_name") != std::string::npos) {
-            std::regex tag_regex("\"tag_name\":\\s*\"([^\"]+)\"");
-            std::smatch matches;
-            if (std::regex_search(line, matches, tag_regex) && matches.size() > 1) {
-                tag_name = matches[1].str();
-                // Remove 'v' prefix if present
-                if (!tag_name.empty() && tag_name[0] == 'v') {
-                    tag_name = tag_name.substr(1);
-                }
+        res = curl_easy_perform(curl);
+        curl_easy_cleanup(curl);
+        
+        if(res != CURLE_OK) {
+            return info;
+        }
+        
+        std::string tag_name, html_url;
+        
+        // Extract tag_name using regex
+        std::regex tag_regex("\"tag_name\":\\s*\"([^\"]+)\"");
+        std::smatch tag_matches;
+        if (std::regex_search(readBuffer, tag_matches, tag_regex) && tag_matches.size() > 1) {
+            tag_name = tag_matches[1].str();
+            // Remove 'v' prefix if present
+            if (!tag_name.empty() && tag_name[0] == 'v') {
+                tag_name = tag_name.substr(1);
             }
         }
         
-        if (line.find("html_url") != std::string::npos) {
-            std::regex url_regex("\"html_url\":\\s*\"([^\"]+)\"");
-            std::smatch matches;
-            if (std::regex_search(line, matches, url_regex) && matches.size() > 1) {
-                html_url = matches[1].str();
-            }
+        // Extract html_url using regex
+        std::regex url_regex("\"html_url\":\\s*\"([^\"]+)\"");
+        std::smatch url_matches;
+        if (std::regex_search(readBuffer, url_matches, url_regex) && url_matches.size() > 1) {
+            html_url = url_matches[1].str();
         }
-    }
-    
-    pclose(pipe);
-    
-    info.latest = tag_name;
-    info.release_url = html_url;
-    
-    // Compare versions (simple string comparison - assuming versions are in compatible format)
-    // For more complex version comparison, a dedicated version comparison function would be needed
-    if (!tag_name.empty() && !current_version.empty() && tag_name != current_version) {
-        info.has_newer = tag_name > current_version;
+        
+        info.latest = tag_name;
+        info.release_url = html_url;
+        
+        // Compare versions (simple string comparison - assuming versions are in compatible format)
+        if (!tag_name.empty() && !current_version.empty() && tag_name != current_version) {
+            info.has_newer = tag_name > current_version;
+        }
     }
     
     return info;
@@ -144,6 +156,9 @@ void printVersion() {
 
 int main(int argc, char* argv[])
 {
+    // Initialize libcurl globally
+    curl_global_init(CURL_GLOBAL_DEFAULT);
+    
     // Default values for listener
     std::string listenerAddress = "127.0.0.1";
     int listenerPort = 3142;
@@ -253,4 +268,9 @@ int main(int argc, char* argv[])
     .setUploadPath(uploadPath)
     //.enableRunAsDaemon()
     .run();
+    
+    // Clean up curl global resources
+    curl_global_cleanup();
+    
+    return 0;
 }
