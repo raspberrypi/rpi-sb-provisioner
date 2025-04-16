@@ -16,6 +16,7 @@
 #include "options.h"
 #include <services.h>
 #include "manufacturing.h"
+#include "include/scantool.h"
 
 using namespace drogon;
 
@@ -216,6 +217,7 @@ int main(int argc, char* argv[])
     provisioner::Options optionHandlers = {};
     provisioner::Services serviceHandlers = {};
     provisioner::Manufacturing manufacturingHandlers = {};
+    provisioner::ScanTool scanToolHandlers = {};
 
     auto& app = HttpAppFramework::instance();
 
@@ -233,6 +235,7 @@ int main(int argc, char* argv[])
     optionHandlers.registerHandlers(app);
     serviceHandlers.registerHandlers(app);
     manufacturingHandlers.registerHandlers(app);
+    scanToolHandlers.registerHandlers(app);
 
     // Register root path handler to redirect to devices
     app.registerHandler("/", [](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
@@ -248,6 +251,9 @@ int main(int argc, char* argv[])
     if (!std::filesystem::exists(uploadPath)) {
         std::filesystem::create_directories(uploadPath);
     }
+    
+    // Configure static files path
+    constexpr const char *staticPath = "/var/lib/rpi-sb-provisioner/static";
     
     app
     .setBeforeListenSockOptCallback([](int fd) {
@@ -266,6 +272,7 @@ int main(int argc, char* argv[])
     .setClientMaxBodySize(std::numeric_limits<size_t>::max())
     .setThreadNum(nthreads)
     .setUploadPath(uploadPath)
+    .setDocumentRoot(staticPath)  // Set static files path
     //.enableRunAsDaemon()
     .run();
     

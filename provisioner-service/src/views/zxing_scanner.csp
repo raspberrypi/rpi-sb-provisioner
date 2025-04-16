@@ -1,0 +1,638 @@
+<script type="text/javascript">
+/**
+ * ZXing Scanner Implementation
+ * Implements a browser-based scanner that uses the ZXing library
+ */
+class ZXingScanner {
+  constructor(elementId, config = {}) {
+    this.elementId = elementId;
+    this.element = document.getElementById(elementId);
+    if (!this.element) {
+      throw new Error(`Element with ID '${elementId}' not found`);
+    }
+    
+    // Default configuration
+    this.config = {
+      fps: 10,
+      qrbox: { width: 350, height: 350 },
+      aspectRatio: 1.0,
+      formats: [ZXing.BarcodeFormat.QR_CODE, ZXing.BarcodeFormat.DATA_MATRIX],
+      disableFlip: false,
+      showOverlay: true,
+      testMode: false,
+      ...config
+    };
+    
+    // Initialize state variables
+    this.isScanning = false;
+    this.videoElement = null;
+    this.canvasElement = null;
+    this.overlayElement = null;
+    this.scanRegion = null;
+    this.scanCanvas = null;
+    this.scanRegionSize = 0;
+    this.lastFrameTime = 0;
+    this.successCallback = null;
+    this.errorCallback = null;
+    this.testModeEnabled = this.config.testMode;
+    this.reader = new ZXing.MultiFormatReader();
+    
+    // Set hints for the reader
+    const hints = new Map();
+    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, this.config.formats);
+    hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+    if (this.testModeEnabled) {
+      hints.set(ZXing.DecodeHintType.ENABLE_TEST_MODE, true);
+    }
+    this.reader.setHints(hints);
+  }
+  
+  render(successCallback, errorCallback) {
+    this.successCallback = successCallback;
+    this.errorCallback = errorCallback;
+    
+    // Clear element content
+    this.element.innerHTML = '';
+    this.element.classList.add('zxing-scanner-container');
+    
+    // Create styles
+    this._createScannerStyles();
+    
+    // Create UI
+    this._createScannerUI();
+    
+    // Check if camera is supported
+    if (!this._isCameraSupported()) {
+      this._onCameraError(new Error("Camera not supported in this browser"));
+      return;
+    }
+    
+    // Request camera access
+    this._startCamera();
+  }
+  
+  _createScannerStyles() {
+    const styleEl = document.createElement('style');
+    styleEl.innerHTML = `
+      .zxing-scanner-container {
+        position: relative;
+        width: 100%;
+        min-height: 300px;
+        overflow: hidden;
+        background: #000;
+        border-radius: 5px;
+      }
+      
+      .zxing-scanner-video {
+        width: 100%;
+        height: 100%;
+        min-height: 300px;
+        object-fit: cover;
+        background-color: #000;
+      }
+      
+      .zxing-scanner-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 10;
+        background: rgba(0, 0, 0, 0.3);
+      }
+      
+      .zxing-scanner-region {
+        position: absolute;
+        border: 2px solid #fff;
+        box-shadow: 0 0 0 4000px rgba(0, 0, 0, 0.5);
+      }
+      
+      .zxing-scanner-region::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 2px;
+        background: #0066cc;
+        animation: scanline 2s linear infinite;
+      }
+      
+      .zxing-scanner-error {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        background: rgba(0, 0, 0, 0.7);
+        color: #fff;
+        padding: 20px;
+        text-align: center;
+        z-index: 20;
+      }
+      
+      @keyframes scanline {
+        0% { top: 0; }
+        50% { top: 100%; }
+        100% { top: 0; }
+      }
+    `;
+    document.head.appendChild(styleEl);
+  }
+  
+  _createScannerUI() {
+    // Create video element
+    this.videoElement = document.createElement('video');
+    this.videoElement.classList.add('zxing-scanner-video');
+    this.videoElement.setAttribute('playsinline', 'true');
+    this.videoElement.setAttribute('autoplay', 'true');
+    this.videoElement.setAttribute('muted', 'true');
+    this.element.appendChild(this.videoElement);
+    
+    // Add status display
+    const statusDisplay = document.createElement('div');
+    statusDisplay.id = 'scanner-status';
+    statusDisplay.style.position = 'absolute';
+    statusDisplay.style.bottom = '10px';
+    statusDisplay.style.left = '10px';
+    statusDisplay.style.color = '#fff';
+    statusDisplay.style.fontSize = '12px';
+    statusDisplay.style.backgroundColor = 'rgba(0,0,0,0.5)';
+    statusDisplay.style.padding = '5px';
+    statusDisplay.style.borderRadius = '3px';
+    statusDisplay.style.zIndex = '30';
+    statusDisplay.textContent = 'Starting camera...';
+    this.element.appendChild(statusDisplay);
+    this.statusDisplay = statusDisplay;
+    
+    // Create overlay
+    if (this.config.showOverlay) {
+      this.overlayElement = document.createElement('div');
+      this.overlayElement.classList.add('zxing-scanner-overlay');
+      this.element.appendChild(this.overlayElement);
+      
+      // Create scan region
+      this.scanRegion = document.createElement('div');
+      this.scanRegion.classList.add('zxing-scanner-region');
+      this.overlayElement.appendChild(this.scanRegion);
+    }
+    
+    // Create hidden canvas for frame extraction
+    this.canvasElement = document.createElement('canvas');
+    this.canvasElement.style.display = 'none';
+    this.element.appendChild(this.canvasElement);
+  }
+  
+  _isCameraSupported() {
+    return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  }
+  
+  _startCamera() {
+    this.statusDisplay.textContent = 'Requesting camera access...';
+    
+    const constraints = {
+      audio: false,
+      video: {
+        facingMode: 'environment',
+        width: { ideal: 1280 },
+        height: { ideal: 720 }
+      }
+    };
+    
+    navigator.mediaDevices.getUserMedia(constraints)
+      .then(stream => {
+        this.statusDisplay.textContent = 'Camera connected, starting preview...';
+        this._onCameraSuccess(stream);
+      })
+      .catch(error => {
+        this.statusDisplay.textContent = 'Camera error: ' + error.message;
+        console.error('Camera getUserMedia error:', error);
+        this._onCameraError(error);
+      });
+  }
+  
+  _onCameraSuccess(stream) {
+    try {
+      this.videoElement.srcObject = stream;
+      
+      // Debug info
+      console.log('Camera stream obtained, tracks:', stream.getVideoTracks().length);
+      const track = stream.getVideoTracks()[0];
+      if (track) {
+        console.log('Using camera:', track.label);
+      }
+      
+      this.videoElement.onloadedmetadata = () => {
+        this.statusDisplay.textContent = 'Camera ready, starting scan...';
+        console.log('Video metadata loaded, dimensions:', 
+          this.videoElement.videoWidth, 'x', this.videoElement.videoHeight);
+          
+        this.videoElement.play()
+          .then(() => {
+            console.log('Video playback started');
+            this.statusDisplay.textContent = 'Scanning...';
+            
+            // Set canvas dimensions
+            const videoWidth = this.videoElement.videoWidth;
+            const videoHeight = this.videoElement.videoHeight;
+            this.canvasElement.width = videoWidth;
+            this.canvasElement.height = videoHeight;
+            
+            // Calculate scan region position and size
+            if (this.config.showOverlay && this.scanRegion) {
+              const containerWidth = this.element.clientWidth;
+              const containerHeight = this.element.clientHeight;
+              
+              let regionSize;
+              if (typeof this.config.qrbox === 'object') {
+                regionSize = Math.min(
+                  this.config.qrbox.width || containerWidth * 0.6,
+                  this.config.qrbox.height || containerHeight * 0.6
+                );
+              } else {
+                regionSize = Math.min(containerWidth, containerHeight) * 0.6;
+              }
+              
+              this.scanRegionSize = regionSize;
+              
+              const left = (containerWidth - regionSize) / 2;
+              const top = (containerHeight - regionSize) / 2;
+              
+              this.scanRegion.style.width = `${regionSize}px`;
+              this.scanRegion.style.height = `${regionSize}px`;
+              this.scanRegion.style.left = `${left}px`;
+              this.scanRegion.style.top = `${top}px`;
+            }
+            
+            // Start scanning frames
+            this.isScanning = true;
+            this._scanFrame();
+          })
+          .catch(err => {
+            console.error('Error playing video:', err);
+            this.statusDisplay.textContent = 'Error starting video: ' + err.message;
+          });
+      };
+      
+      this.videoElement.onerror = (err) => {
+        console.error('Video element error:', err);
+        this.statusDisplay.textContent = 'Video error';
+      };
+    } catch (err) {
+      console.error('Error setting up video:', err);
+      this.statusDisplay.textContent = 'Video setup error: ' + err.message;
+      this._onCameraError(err);
+    }
+  }
+  
+  _onCameraError(error) {
+    console.error('Camera error:', error);
+    
+    // Create error message element
+    const errorElement = document.createElement('div');
+    errorElement.classList.add('zxing-scanner-error');
+    
+    const errorTitle = document.createElement('h3');
+    errorTitle.textContent = 'Camera Error';
+    errorElement.appendChild(errorTitle);
+    
+    const errorMessage = document.createElement('p');
+    errorMessage.textContent = this._getCameraErrorMessage(error);
+    errorElement.appendChild(errorMessage);
+    
+    this.element.appendChild(errorElement);
+    
+    if (this.errorCallback) {
+      this.errorCallback(error);
+    }
+  }
+  
+  _getCameraErrorMessage(error) {
+    if (error.name === 'NotAllowedError') {
+      return 'Camera access denied. Please grant permission to use your camera.';
+    } else if (error.name === 'NotFoundError') {
+      return 'No camera found on this device.';
+    } else if (error.name === 'NotReadableError') {
+      return 'Camera is already in use by another application.';
+    } else if (error.name === 'OverconstrainedError') {
+      return 'The requested camera settings are not supported.';
+    } else if (error.name === 'AbortError') {
+      return 'Camera access was aborted.';
+    } else {
+      return `Error accessing camera: ${error.message}`;
+    }
+  }
+  
+  _scanFrame() {
+    if (!this.isScanning) {
+      return;
+    }
+    
+    // Control frame rate
+    const now = performance.now();
+    const elapsed = now - this.lastFrameTime;
+    const interval = 1000 / this.config.fps;
+    
+    if (elapsed < interval) {
+      requestAnimationFrame(() => this._scanFrame());
+      return;
+    }
+    
+    this.lastFrameTime = now;
+    
+    // Add periodic debug info every 30 frames
+    if (!this._frameCount) this._frameCount = 0;
+    this._frameCount++;
+    const isDebugFrame = this._frameCount % 30 === 0;
+    
+    // Check for test mode
+    if (this.testModeEnabled) {
+      // In test mode, generate a fake detection every 5 seconds
+      if (now - (this._lastTestDetection || 0) > 5000) {
+        this._lastTestDetection = now;
+        
+        // Create a fake result
+        const testText = "TEST_QR_" + Math.floor(Math.random() * 10000);
+        const format = ZXing.BarcodeFormat.QR_CODE; // Changed to QR_CODE to match scanner displays
+        
+        console.log("[TEST MODE] Generated fake detection:", testText);
+        if (this.statusDisplay) {
+          this.statusDisplay.textContent = "Test mode detected: " + testText;
+        }
+        
+        // Call success callback with the fake result
+        if (this.successCallback) {
+          this.successCallback(testText, format);
+        }
+        
+        // Pause scanning briefly
+        this.isScanning = false;
+        setTimeout(() => {
+          if (this.videoElement && this.videoElement.srcObject) {
+            this.isScanning = true;
+            this._scanFrame();
+          }
+        }, 2000);
+        
+        return;
+      }
+    }
+    
+    if (this.videoElement.readyState === this.videoElement.HAVE_ENOUGH_DATA) {
+      if (isDebugFrame) {
+        console.log("[DEBUG] Video ready state: HAVE_ENOUGH_DATA, dimensions:", 
+                    this.videoElement.videoWidth, "x", this.videoElement.videoHeight);
+      }
+      
+      // Draw video frame to canvas
+      const context = this.canvasElement.getContext('2d', { willReadFrequently: true });
+      const width = this.canvasElement.width;
+      const height = this.canvasElement.height;
+      
+      // Clear canvas and draw video frame
+      context.drawImage(this.videoElement, 0, 0, width, height);
+      
+      try {
+        // Get image data
+        let imageData;
+        let scanAreaLabel = "full frame";
+        
+        if (this.scanRegion && this.config.showOverlay) {
+          // Calculate region in video coordinates
+          const videoWidth = this.videoElement.videoWidth;
+          const videoHeight = this.videoElement.videoHeight;
+          const elementWidth = this.element.clientWidth;
+          const elementHeight = this.element.clientHeight;
+          
+          // Calculate scaling factors
+          const scaleX = videoWidth / elementWidth;
+          const scaleY = videoHeight / elementHeight;
+          
+          // Get scan region in element coordinates
+          const regionLeft = parseInt(this.scanRegion.style.left, 10);
+          const regionTop = parseInt(this.scanRegion.style.top, 10);
+          
+          // Convert to video coordinates
+          const sourceX = Math.floor(regionLeft * scaleX);
+          const sourceY = Math.floor(regionTop * scaleY);
+          const sourceWidth = Math.floor(this.scanRegionSize * scaleX);
+          const sourceHeight = Math.floor(this.scanRegionSize * scaleY);
+          
+          scanAreaLabel = `region ${sourceWidth}x${sourceHeight} at (${sourceX},${sourceY})`;
+          
+          if (isDebugFrame) {
+            console.log(`[DEBUG] Getting image data from ${scanAreaLabel}`);
+          }
+          
+          // Get image data from region
+          imageData = context.getImageData(sourceX, sourceY, sourceWidth, sourceHeight);
+        } else {
+          // Get entire image
+          if (isDebugFrame) {
+            console.log(`[DEBUG] Getting image data from ${scanAreaLabel}`);
+          }
+          imageData = context.getImageData(0, 0, width, height);
+        }
+        
+        if (isDebugFrame) {
+          console.log(`[DEBUG] Image data acquired: ${imageData.width}x${imageData.height}, ${imageData.data.length} bytes`);
+          
+          // Basic image data statistics for debugging
+          let pixelSum = 0;
+          const samplePixels = Math.min(1000, imageData.data.length / 4);
+          for (let i = 0; i < samplePixels; i++) {
+            const idx = i * 4;
+            pixelSum += imageData.data[idx] + imageData.data[idx+1] + imageData.data[idx+2];
+          }
+          const avgPixelValue = pixelSum / (samplePixels * 3);
+          console.log(`[DEBUG] Average pixel value (sample): ${avgPixelValue.toFixed(2)}/255`);
+          
+          if (this.statusDisplay) {
+            this.statusDisplay.textContent = `Scanning ${scanAreaLabel}...`;
+          }
+        }
+        
+        // Process image with ZXing
+        const source = new ZXing.RGBLuminanceSource(
+          imageData.data,
+          imageData.width,
+          imageData.height
+        );
+        const bitmap = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(source));
+        
+        try {
+          // Attempt to decode
+          if (isDebugFrame) {
+            console.log("[DEBUG] Attempting to decode with ZXing...");
+          }
+          
+          const result = this.reader.decode(bitmap);
+          
+          // Success!
+          console.log("[SUCCESS] Code detected:", result.getText(), "format:", ZXingScanner.formatName(result.getBarcodeFormat()));
+          if (this.statusDisplay) {
+            this.statusDisplay.textContent = `Detected: ${result.getText().substring(0, 20)}...`;
+          }
+          
+          this._onCodeDetected(result);
+        } catch (error) {
+          // No code found, continue scanning
+          if (isDebugFrame) {
+            console.log("[DEBUG] No code found in this frame:", error.message || "unknown error");
+            
+            // Check error message for specific ZXing errors to help debug
+            const errorMsg = error.message || "";
+            if (errorMsg.includes("FormatException")) {
+              console.log("[DEBUG] ZXing Format Exception - barcode pattern detected but couldn't be decoded");
+            } else if (errorMsg.includes("NotFoundException")) {
+              console.log("[DEBUG] ZXing Not Found Exception - no barcode pattern detected");
+            } else if (errorMsg.includes("ChecksumException")) {
+              console.log("[DEBUG] ZXing Checksum Exception - barcode detected but invalid checksum");
+            }
+          }
+          
+          requestAnimationFrame(() => this._scanFrame());
+        }
+      } catch (error) {
+        console.error('[ERROR] Scan processing error:', error);
+        if (this.statusDisplay) {
+          this.statusDisplay.textContent = `Error: ${error.message || "scan failed"}`;
+        }
+        requestAnimationFrame(() => this._scanFrame());
+      }
+    } else {
+      if (isDebugFrame) {
+        console.log("[DEBUG] Video not ready yet, state:", this.videoElement.readyState);
+      }
+      requestAnimationFrame(() => this._scanFrame());
+    }
+  }
+  
+  _onCodeDetected(result) {
+    // Don't stop scanning - just pass the result to the callback
+    if (this.successCallback) {
+      this.successCallback(result.getText(), result.getBarcodeFormat());
+    }
+    
+    // Continue scanning after a short pause to avoid multiple rapid detections
+    this.isScanning = false;
+    setTimeout(() => {
+      if (this.videoElement && this.videoElement.srcObject) {
+        this.isScanning = true;
+        this._scanFrame();
+      }
+    }, 2000); // Resume scanning after 2 seconds
+  }
+  
+  clear(keepCameraActive = false) {
+    // Stop scanning
+    this.isScanning = false;
+    
+    if (!keepCameraActive) {
+      // Stop video stream
+      if (this.videoElement && this.videoElement.srcObject) {
+        const tracks = this.videoElement.srcObject.getTracks();
+        tracks.forEach(track => track.stop());
+        this.videoElement.srcObject = null;
+      }
+      
+      // Clear UI
+      if (this.element) {
+        this.element.innerHTML = '';
+      }
+    } else {
+      // Just update status
+      if (this.statusDisplay) {
+        this.statusDisplay.textContent = 'Scanner stopped (camera still active)';
+      }
+      console.log('Scanner stopped but camera kept active');
+    }
+  }
+  
+  // API compatible with Html5QrcodeScanner
+  static formatName(format) {
+    const names = {
+      [ZXing.BarcodeFormat.QR_CODE]: 'QR_CODE',
+      [ZXing.BarcodeFormat.DATA_MATRIX]: 'DATA_MATRIX',
+      [ZXing.BarcodeFormat.EAN_13]: 'EAN_13',
+      [ZXing.BarcodeFormat.CODE_128]: 'CODE_128',
+      [ZXing.BarcodeFormat.CODE_39]: 'CODE_39',
+      [ZXing.BarcodeFormat.CODE_93]: 'CODE_93',
+      [ZXing.BarcodeFormat.ITF]: 'ITF',
+      [ZXing.BarcodeFormat.AZTEC]: 'AZTEC',
+      [ZXing.BarcodeFormat.PDF_417]: 'PDF_417'
+    };
+    return names[format] || 'UNKNOWN';
+  }
+  
+  setHints(hints) {
+    this.hints = hints;
+    if (this.reader) {
+      this.reader.setHints(hints);
+      
+      // Apply test mode setting if available
+      if (hints && hints.has(ZXing.DecodeHintType.ENABLE_TEST_MODE)) {
+        this.testModeEnabled = hints.get(ZXing.DecodeHintType.ENABLE_TEST_MODE) === true;
+        console.log('Scanner test mode set to:', this.testModeEnabled);
+        
+        // Update status display
+        if (this.statusDisplay) {
+          this.statusDisplay.textContent = this.testModeEnabled 
+            ? 'Test mode enabled' 
+            : 'Scanning...';
+        }
+        
+        // If we're enabling test mode and not currently scanning, restart scanning
+        if (this.testModeEnabled && !this.isScanning && this.videoElement && this.videoElement.srcObject) {
+          this.isScanning = true;
+          this._scanFrame();
+        }
+      }
+    }
+  }
+  
+  pauseScanning() {
+    this.isScanning = false;
+    if (this.statusDisplay) {
+      this.statusDisplay.textContent = 'Scanning paused (camera still active)';
+    }
+    console.log('Scanning paused, camera still active');
+  }
+  
+  resumeScanning() {
+    if (this.videoElement && this.videoElement.srcObject) {
+      this.isScanning = true;
+      if (this.statusDisplay) {
+        this.statusDisplay.textContent = 'Scanning...';
+      }
+      console.log('Scanning resumed');
+      this._scanFrame();
+    } else {
+      console.error('Cannot resume scanning - video not initialized');
+    }
+  }
+}
+
+// Define supported formats for compatibility with Html5QrcodeScanner
+const Html5QrcodeSupportedFormats = {
+  QR_CODE: ZXing.BarcodeFormat.QR_CODE,
+  DATA_MATRIX: ZXing.BarcodeFormat.DATA_MATRIX,
+  EAN_13: ZXing.BarcodeFormat.EAN_13,
+  CODE_128: ZXing.BarcodeFormat.CODE_128,
+  CODE_39: ZXing.BarcodeFormat.CODE_39,
+  CODE_93: ZXing.BarcodeFormat.CODE_93,
+  ITF: ZXing.BarcodeFormat.ITF
+};
+
+// Create Html5QrcodeScanner class for backward compatibility
+class Html5QrcodeScanner extends ZXingScanner {
+  constructor(elementId, config, verbose = false) {
+    super(elementId, config);
+  }
+}
+</script>
+<%view-end%> 

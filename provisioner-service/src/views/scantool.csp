@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>QR Code Scanner</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <%view stylesheet %>
+    <style>
+       
+        /* QR Scanner specific container style - override any global container styles */
+        body .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            position: relative;
+        }
+        
+        .scan-container {
+            display: none; /* Hide it instead of removing to prevent layout shifts */
+        }
+        
+        .video-container {
+            position: relative;
+            max-width: 100%;
+            margin-bottom: 20px;
+        }
+        
+        #video {
+            width: 100%;
+            border: 1px solid #ddd;
+            display: block;
+        }
+        
+        #canvas {
+            display: none;
+        }
+        
+        .controls {
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        button {
+            padding: 10px 20px;
+            margin: 0 5px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        
+        button:hover {
+            background-color: #45a049;
+        }
+        
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        
+        .message-container {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 4px;
+            display: none;
+        }
+        
+        .success {
+            background-color: #dff0d8;
+            border: 1px solid #d6e9c6;
+            color: #3c763d;
+        }
+        
+        .error {
+            background-color: #f2dede;
+            border: 1px solid #ebccd1;
+            color: #a94442;
+        }
+        
+        .warning {
+            background-color: #fcf8e3;
+            border: 1px solid #faebcc;
+            color: #8a6d3b;
+            display: block;
+            margin-bottom: 20px;
+        }
+        
+        /* Debug Panel Styles */
+        #debug-panel {
+            margin-top: 20px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 10px;
+            background-color: #f9f9f9;
+        }
+        
+        .debug-controls {
+            margin-bottom: 10px;
+        }
+        
+        #debug-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 10px;
+        }
+        
+        #debug-table th, #debug-table td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        
+        #debug-table th {
+            background-color: #f2f2f2;
+        }
+        
+        #console-output {
+            max-height: 200px;
+            overflow-y: auto;
+            background-color: #333;
+            color: #fff;
+            font-family: monospace;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        
+        .log-entry {
+            margin-bottom: 5px;
+            border-bottom: 1px solid #555;
+            padding-bottom: 5px;
+        }
+        
+        .log-entry .timestamp {
+            color: #aaa;
+            margin-right: 10px;
+        }
+        
+        .log-entry.info {
+            color: #4CAF50;
+        }
+        
+        .log-entry.warn {
+            color: #ff9800;
+        }
+        
+        .log-entry.error {
+            color: #f44336;
+        }
+    </style>
+    <!-- Include the ZXing library from local static files -->
+    <script src="/js/zxing.js"></script>
+    
+    <!-- Fallback message if camera access fails -->
+    <div id="cameraError" style="display: none; color: #a94442; background-color: #f2dede; border: 1px solid #ebccd1; padding: 15px; margin: 15px 0; border-radius: 5px;">
+        <strong>Camera Error:</strong> <span id="errorDetails"></span>
+        <p>Please ensure you've granted camera permissions to this website.</p>
+    </div>
+</head>
+<body>
+    <%view navbar %>
+    
+    <div class="container">
+        <h1>QR Code Scanner</h1>
+        
+        <div class="controls">
+            <button id="start-button">Start Scanner</button>
+            <button id="stop-button" disabled>Stop Scanner</button>
+            <button id="toggle-debug">Show Debug Panel</button>
+        </div>
+        
+        <div id="scanner">
+            <video id="video"></video>
+            <canvas id="canvas" style="display:none;"></canvas>
+        </div>
+        
+        <div id="results">
+            <div id="success-container" class="message-container success">
+                <h2>Success</h2>
+                <p>Code Value: <span id="code-value"></span></p>
+                <p>Status: <span id="code-status"></span></p>
+                <p>Message: <span id="code-message"></span></p>
+            </div>
+            
+            <div id="error-container" class="message-container error">
+                <h2>Error</h2>
+                <p>Message: <span id="error-message"></span></p>
+            </div>
+        </div>
+        
+        <div id="debug-panel" class="debug-panel">
+            <h2>Debug Panel</h2>
+            <div class="debug-controls">
+                <button id="clear-console">Clear Console</button>
+            </div>
+            
+            <h3>Scanner Metrics</h3>
+            <table id="debug-table">
+                <tr>
+                    <td>ZXing Library:</td>
+                    <td id="metric-libraryStatus">Not initialized</td>
+                </tr>
+                <tr>
+                    <td>Camera Support:</td>
+                    <td id="metric-cameraSupport">Checking...</td>
+                </tr>
+                <tr>
+                    <td>Video Dimensions:</td>
+                    <td id="metric-videoDimensions">Unknown</td>
+                </tr>
+                <tr>
+                    <td>Scanner State:</td>
+                    <td id="metric-scannerState">Inactive</td>
+                </tr>
+                <tr>
+                    <td>Frames Processed:</td>
+                    <td id="metric-framesProcessed">0</td>
+                </tr>
+                <tr>
+                    <td>Last Frame Time:</td>
+                    <td id="metric-lastFrameTime">0ms</td>
+                </tr>
+                <tr>
+                    <td>Frame Brightness:</td>
+                    <td id="metric-frameBrightness">0%</td>
+                </tr>
+                <tr>
+                    <td>Decoder Errors:</td>
+                    <td id="metric-decoderErrors">0</td>
+                </tr>
+            </table>
+            
+            <h3>Console Output</h3>
+            <div id="console-output" class="console-output"></div>
+        </div>
+    </div>
+    
+    <script>
+        window.addEventListener('load', function () {
+            let selectedDeviceId;
+            const codeReader = new ZXing.BrowserMultiFormatReader();
+            console.log('ZXing code reader initialized');
+            
+            const startButton = document.getElementById('start-button');
+            const stopButton = document.getElementById('stop-button');
+            
+            // Hide result containers initially
+            document.getElementById('success-container').style.display = 'none';
+            document.getElementById('error-container').style.display = 'none';
+            
+            // Check if we're in a secure context
+            checkSecureContext();
+            
+            function checkSecureContext() {
+                // Warning container for security context issues
+                const securityWarning = document.createElement('div');
+                securityWarning.className = 'message-container warning';
+                securityWarning.id = 'security-warning';
+                securityWarning.style.display = 'none';
+                
+                // Add warning text
+                const securityHeading = document.createElement('h3');
+                securityHeading.textContent = 'Security Warning';
+                securityWarning.appendChild(securityHeading);
+                
+                const securityText = document.createElement('p');
+                securityText.textContent = 'This page is not running in a secure context (HTTPS or localhost). Camera access may be denied by your browser.';
+                securityWarning.appendChild(securityText);
+                
+                // Insert at the top of the container
+                const container = document.querySelector('.container');
+                container.insertBefore(securityWarning, container.firstChild);
+                
+                // Check if we're in a secure context
+                const isSecure = window.isSecureContext;
+                const isLocalhost = window.location.hostname === 'localhost' || 
+                                    window.location.hostname === '127.0.0.1' ||
+                                    window.location.hostname.includes('192.168.') ||
+                                    window.location.hostname.includes('10.0.');
+                
+                // Show warning if not secure and not localhost
+                if (!isSecure && !isLocalhost) {
+                    securityWarning.style.display = 'block';
+                    console.warn('Not running in a secure context. Camera access may be restricted.');
+                }
+            }
+
+            codeReader.listVideoInputDevices()
+                .then((videoInputDevices) => {
+                    console.log('videoInputDevices', videoInputDevices);
+                    
+                    if (videoInputDevices.length === 0) {
+                        showError('No camera detected. Please ensure your camera is connected and permissions are granted.');
+                        return;
+                    }
+                    
+                    // Select the first available device
+                    selectedDeviceId = videoInputDevices[0].deviceId;
+                    console.log('Selected device:', selectedDeviceId);
+                    
+                    // Configure high-resolution video before starting the camera
+                    configureHighResVideo();
+                    
+                    // Add device selection if there are multiple cameras
+                    // For now, we just use the first camera
+                    
+                    startButton.addEventListener('click', () => {
+                        console.log('Start button clicked');
+                        
+                        // Setup hints with formats we want to scan
+                        const hints = new Map();
+                        const formats = [
+                            ZXing.BarcodeFormat.QR_CODE,
+                            ZXing.BarcodeFormat.DATA_MATRIX
+                        ];
+                        hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, formats);
+                        hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+                        
+                        // Start scanning from selected device
+                        codeReader.decodeFromVideoDevice(selectedDeviceId, 'video', (result, err) => {
+                            if (result) {
+                                console.log('Found code!', result);
+                                
+                                // Display the scanned code 
+                                const code = result.getText();
+                                showSuccess(code, "Scanned", "Code scanned successfully");
+                            }
+                            
+                            if (err && !(err instanceof ZXing.NotFoundException)) {
+                                console.error(err);
+                                // Only show error for significant errors, not just "code not found"
+                            }
+                        }, hints);
+                        
+                        console.log(`Started continuous decode from camera with id ${selectedDeviceId}`);
+                        
+                        // Update button states
+                        startButton.disabled = true;
+                        stopButton.disabled = false;
+                    });
+                    
+                    // Configure video for high resolution
+                    function configureHighResVideo() {
+                        return new Promise((resolve, reject) => {
+                            const videoElement = document.getElementById('video');
+                            
+                            // Set video attributes for higher resolution
+                            // Note: Actual resolution depends on the camera capabilities
+                            videoElement.setAttribute('width', '1280');
+                            videoElement.setAttribute('height', '720');
+                            
+                            // Add constraints to request higher resolution
+                            const mediaConstraints = {
+                                video: {
+                                    deviceId: { exact: selectedDeviceId },
+                                    width: { ideal: 1920, min: 1280 },
+                                    height: { ideal: 1080, min: 720 },
+                                    facingMode: 'environment'
+                                }
+                            };
+                            
+                            console.log('Applying high-resolution constraints:', mediaConstraints);
+                            
+                            // Apply constraints through getUserMedia first to set up the camera properly
+                            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                                navigator.mediaDevices.getUserMedia(mediaConstraints)
+                                    .then(stream => {
+                                        console.log('Applied high-resolution constraints to camera');
+                                        // Get the actual resolution that was applied
+                                        const videoTrack = stream.getVideoTracks()[0];
+                                        if (videoTrack) {
+                                            const settings = videoTrack.getSettings();
+                                            console.log('Actual camera settings:', settings);
+                                        }
+                                        
+                                        // Store the constraint settings for ZXing to use
+                                        window.cameraConstraints = mediaConstraints;
+                                        
+                                        // Release the stream for now - ZXing will get its own
+                                        stream.getTracks().forEach(track => track.stop());
+                                        resolve();
+                                    })
+                                    .catch(err => {
+                                        console.warn('Could not set high-resolution:', err);
+                                        // Continue with default resolution
+                                        resolve();
+                                    });
+                            } else {
+                                console.warn('getUserMedia not supported - using default resolution');
+                                resolve();
+                            }
+                        });
+                    }
+                    
+                    // Override ZXing's decodeFromVideoDevice to use our constraints
+                    const originalDecodeFromVideoDevice = codeReader.decodeFromVideoDevice.bind(codeReader);
+                    codeReader.decodeFromVideoDevice = function(deviceId, videoSource, resultCallback, hints) {
+                        // Use our custom constraints if available
+                        const constraints = window.cameraConstraints || { video: { deviceId: { exact: deviceId } } };
+                        console.log('ZXing using constraints:', constraints);
+                        
+                        // Call the original method but with our constraints
+                        return codeReader.decodeFromConstraints(constraints, videoSource, resultCallback, hints);
+                    };
+                    
+                    stopButton.addEventListener('click', () => {
+                        console.log('Stop button clicked');
+                        
+                        codeReader.reset();
+                        console.log('Reset.');
+                        
+                        // Hide results
+                        document.getElementById('success-container').style.display = 'none';
+                        document.getElementById('error-container').style.display = 'none';
+                        
+                        // Update button states
+                        startButton.disabled = false;
+                        stopButton.disabled = true;
+                    });
+                })
+                .catch((err) => {
+                    console.error(err);
+                    showError('Error listing video devices: ' + err);
+                });
+            
+            // Function to show success message
+            function showSuccess(code, status, message) {
+                const successContainer = document.getElementById('success-container');
+                const errorContainer = document.getElementById('error-container');
+                
+                document.getElementById('code-value').textContent = code;
+                document.getElementById('code-status').textContent = status;
+                document.getElementById('code-message').textContent = message;
+                
+                successContainer.style.display = 'block';
+                errorContainer.style.display = 'none';
+            }
+            
+            // Function to show error message
+            function showError(message) {
+                const successContainer = document.getElementById('success-container');
+                const errorContainer = document.getElementById('error-container');
+                
+                document.getElementById('error-message').textContent = message;
+                
+                successContainer.style.display = 'none';
+                errorContainer.style.display = 'block';
+            }
+        });
+    </script>
+</body>
+</html> 

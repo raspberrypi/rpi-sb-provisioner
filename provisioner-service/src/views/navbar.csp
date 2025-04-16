@@ -68,6 +68,7 @@
     <a href="/customisation/list-scripts" <%c++ if(@@.get<std::string>("currentPage") == "customisation") { %>class="active"<%c++ } %>>Customisation</a>
     <a href="/services" <%c++ if(@@.get<std::string>("currentPage") == "services") { %>class="active"<%c++ } %>>Services</a>
     <a href="/manu-db" <%c++ if(@@.get<std::string>("currentPage") == "manufacturing") { %>class="active"<%c++ } %>>Manufacturing Database</a>
+    <a href="/scantool" <%c++ if(@@.get<std::string>("currentPage") == "scantool") { %>class="active"<%c++ } %>>QR Scanner</a>
     
     <div class="rpi-right-items">
         <a href="https://github.com/raspberrypi/rpi-sb-provisioner" target="_blank" class="rpi-github-link">GitHub</a>

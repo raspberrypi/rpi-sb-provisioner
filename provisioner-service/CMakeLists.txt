@@ -149,6 +149,24 @@ unset(CURL_DISABLE_SOCKETPAIR)
 # unset(CURL_DISABLE_AWS)
 # unset(CURL_DISABLE_NTLM)
 
+# Download the ZXing library for barcode scanning
+set(ZXING_JS_URL "https://cdn.jsdelivr.net/npm/@zxing/library/umd/index.min.js")
+set(ZXING_JS_PATH "${CMAKE_SOURCE_DIR}/static/js/zxing.js")
+
+# Add a custom command to download the ZXing library at build time
+add_custom_command(
+    OUTPUT ${ZXING_JS_PATH}
+    COMMAND ${CMAKE_COMMAND} -E echo "Downloading ZXing library from ${ZXING_JS_URL}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_SOURCE_DIR}/static/js"
+    COMMAND curl --silent --show-error --output ${ZXING_JS_PATH} ${ZXING_JS_URL}
+    COMMAND ${CMAKE_COMMAND} -E echo "ZXing library downloaded to ${ZXING_JS_PATH}"
+    COMMENT "Downloading ZXing barcode scanning library"
+    VERBATIM
+)
+
+# Create a custom target for downloading ZXing
+add_custom_target(download_zxing DEPENDS ${ZXING_JS_PATH})
+
 project(rpi-provisioner-ui)
 
 find_package(SQLite3 REQUIRED)
@@ -188,6 +206,9 @@ add_executable(rpi-provisioner-ui)
 # Add dependency on the compile_views target
 add_dependencies(rpi-provisioner-ui compile_views)
 
+# Add zxing dependency
+add_dependencies(rpi-provisioner-ui download_zxing)
+
 target_sources(rpi-provisioner-ui
     PRIVATE
     src/main.cpp
@@ -197,6 +218,7 @@ target_sources(rpi-provisioner-ui
     src/customisation.cpp
     src/services.cpp
     src/manufacturing.cpp
+    src/scantool.cpp
     ${VIEW_SOURCES}
 )
 
@@ -229,3 +251,9 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/rpi-provisioner-ui.service")
             DESTINATION /usr/lib/systemd/system
             PERMISSIONS OWNER_READ GROUP_READ WORLD_READ)
 endif()
+
+# Install static files
+install(DIRECTORY "${CMAKE_SOURCE_DIR}/static/"
+        DESTINATION /var/lib/rpi-sb-provisioner/static
+        FILES_MATCHING PATTERN "*.js"
+        PERMISSIONS OWNER_READ GROUP_READ WORLD_READ)
