@@ -173,6 +173,7 @@ find_package(SQLite3 REQUIRED)
 find_package(jsoncpp REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(systemd REQUIRED libsystemd)
+find_package(OpenSSL REQUIRED)
 
 # Define the views directory and output directory for compiled templates
 set(VIEWS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/views)
@@ -237,6 +238,8 @@ target_link_libraries(rpi-provisioner-ui
     ${systemd_LIBRARIES}
     ${SQLite3_LIBRARY}
     libcurl
+    OpenSSL::SSL
+    OpenSSL::Crypto
 )
 
 # Install directives
@@ -254,6 +257,6 @@ endif()
 
 # Install static files
 install(DIRECTORY "${CMAKE_SOURCE_DIR}/static/"
-        DESTINATION /var/lib/rpi-sb-provisioner/static
+        DESTINATION /usr/share/rpi-sb-provisioner/static
         FILES_MATCHING PATTERN "*.js"
         PERMISSIONS OWNER_READ GROUP_READ WORLD_READ)

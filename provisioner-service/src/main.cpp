@@ -9,6 +9,11 @@
 #include <map>
 #include <algorithm>
 #include <curl/curl.h>
+#include <openssl/rsa.h>
+#include <openssl/pem.h>
+#include <openssl/x509.h>
+#include <openssl/err.h>
+#include <fstream>
 
 #include "images.h"
 #include "devices.h"
@@ -119,8 +124,16 @@ void printHelp(const char* programName) {
               << "  -v, --version              Display version information and exit\n"
               << "  -a, --address <address>    Set listener address (default: 127.0.0.1)\n"
               << "  -p, --port <port>          Set listener port (default: 3142)\n"
+              << "  -s, --https-port <port>    Set HTTPS listener port (default: 3143)\n"
+              << "  -d, --disable-https        Disable HTTPS\n"
               << "  -l, --log-level <level>    Set log level (trace, debug, info, warn, error, fatal)\n"
               << "                             Default: trace\n"
+              << std::endl;
+    
+    std::cout << "HTTPS Support:\n"
+              << "  By default, the application generates a self-signed certificate\n"
+              << "  and sets up an HTTPS listener. The certificate is valid for 1 year\n"
+              << "  and is regenerated every time the application starts.\n"
               << std::endl;
 }
 
@@ -155,6 +168,103 @@ void printVersion() {
     std::cout << "Raspberry Pi Secure Boot Provisioner v" << version << std::endl;
 }
 
+// Function to generate a self-signed certificate and key
+bool generateSelfSignedCertificate(const std::string& certPath, const std::string& keyPath) {
+    // Initialize OpenSSL
+    OpenSSL_add_all_algorithms();
+    ERR_load_crypto_strings();
+
+    // Create RSA key
+    EVP_PKEY* pkey = nullptr;
+    EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, nullptr);
+    if (!ctx) {
+        std::cerr << "Error creating EVP_PKEY_CTX" << std::endl;
+        return false;
+    }
+    
+    if (EVP_PKEY_keygen_init(ctx) <= 0) {
+        std::cerr << "Error initializing key generation" << std::endl;
+        EVP_PKEY_CTX_free(ctx);
+        return false;
+    }
+    
+    if (EVP_PKEY_CTX_set_rsa_keygen_bits(ctx, 2048) <= 0) {
+        std::cerr << "Error setting RSA key length" << std::endl;
+        EVP_PKEY_CTX_free(ctx);
+        return false;
+    }
+    
+    if (EVP_PKEY_keygen(ctx, &pkey) <= 0) {
+        std::cerr << "Error generating RSA key" << std::endl;
+        EVP_PKEY_CTX_free(ctx);
+        return false;
+    }
+    
+    EVP_PKEY_CTX_free(ctx);
+
+    // Create X509 certificate
+    X509* x509 = X509_new();
+    if (!x509) {
+        std::cerr << "Error creating X509 certificate" << std::endl;
+        EVP_PKEY_free(pkey);
+        return false;
+    }
+
+    // Set certificate details
+    ASN1_INTEGER_set(X509_get_serialNumber(x509), 1);
+    X509_gmtime_adj(X509_get_notBefore(x509), 0);
+    X509_gmtime_adj(X509_get_notAfter(x509), 31536000L); // Valid for 1 year
+
+    X509_set_pubkey(x509, pkey);
+
+    X509_NAME* name = X509_get_subject_name(x509);
+    X509_NAME_add_entry_by_txt(name, "C", MBSTRING_ASC, (unsigned char*)"UK", -1, -1, 0);
+    X509_NAME_add_entry_by_txt(name, "O", MBSTRING_ASC, (unsigned char*)"rpi-sb-provisioner User", -1, -1, 0);
+    X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, (unsigned char*)"Raspberry Pi Provisioner", -1, -1, 0);
+    X509_set_issuer_name(x509, name);
+
+    // Sign the certificate
+    if (!X509_sign(x509, pkey, EVP_sha256())) {
+        std::cerr << "Error signing certificate" << std::endl;
+        X509_free(x509);
+        EVP_PKEY_free(pkey);
+        return false;
+    }
+
+    // Save certificate to file
+    FILE* certFile = fopen(certPath.c_str(), "wb");
+    if (!certFile) {
+        std::cerr << "Error opening certificate file for writing" << std::endl;
+        X509_free(x509);
+        EVP_PKEY_free(pkey);
+        return false;
+    }
+    
+    PEM_write_X509(certFile, x509);
+    fclose(certFile);
+
+    // Save private key to file
+    FILE* keyFile = fopen(keyPath.c_str(), "wb");
+    if (!keyFile) {
+        std::cerr << "Error opening key file for writing" << std::endl;
+        X509_free(x509);
+        EVP_PKEY_free(pkey);
+        return false;
+    }
+    
+    PEM_write_PrivateKey(keyFile, pkey, nullptr, nullptr, 0, nullptr, nullptr);
+    fclose(keyFile);
+
+    // Clean up
+    X509_free(x509);
+    EVP_PKEY_free(pkey);
+    
+    std::cout << "Generated self-signed certificate at " << certPath << std::endl;
+    std::cout << "Generated private key at " << keyPath << std::endl;
+    
+    return true;
+}
+
 int main(int argc, char* argv[])
 {
     // Initialize libcurl globally
@@ -163,6 +273,8 @@ int main(int argc, char* argv[])
     // Default values for listener
     std::string listenerAddress = "127.0.0.1";
     int listenerPort = 3142;
+    int httpsPort = 3143; // Default HTTPS port
+    bool enableHttps = true; // Enable HTTPS by default
     trantor::Logger::LogLevel logLevel = trantor::Logger::kTrace;
 
     // Parse command line options
@@ -171,12 +283,14 @@ int main(int argc, char* argv[])
         {"version", no_argument, 0, 'v'},
         {"address", required_argument, 0, 'a'},
         {"port", required_argument, 0, 'p'},
+        {"https-port", required_argument, 0, 's'},
+        {"disable-https", no_argument, 0, 'd'},
         {"log-level", required_argument, 0, 'l'},
         {0, 0, 0, 0}
     };
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "hva:p:l:", long_options, nullptr)) != -1) {
+    while ((opt = getopt_long(argc, argv, "hva:p:s:dl:", long_options, nullptr)) != -1) {
         switch (opt) {
             case 'h':
                 printHelp(argv[0]);
@@ -199,12 +313,45 @@ int main(int argc, char* argv[])
                     return 1;
                 }
                 break;
+            case 's':
+                try {
+                    httpsPort = std::stoi(optarg);
+                    if (httpsPort <= 0 || httpsPort > 65535) {
+                        std::cerr << "HTTPS port must be between 1 and 65535" << std::endl;
+                        return 1;
+                    }
+                } catch (const std::exception& e) {
+                    std::cerr << "Invalid HTTPS port number: " << optarg << std::endl;
+                    return 1;
+                }
+                break;
+            case 'd':
+                enableHttps = false;
+                break;
             case 'l':
                 logLevel = parseLogLevel(optarg);
                 break;
             default:
                 printHelp(argv[0]);
                 return 1;
+        }
+    }
+
+    // Create the certificates directory if it doesn't exist
+    std::string certDir = "/tmp/rpi-sb-provisioner";
+    std::filesystem::create_directories(certDir);
+    
+    // Generate self-signed certificate paths
+    std::string certPath = certDir + "/cert.pem";
+    std::string keyPath = certDir + "/key.pem";
+
+    // Generate the self-signed certificate
+    bool certGenerated = false;
+    if (enableHttps) {
+        certGenerated = generateSelfSignedCertificate(certPath, keyPath);
+        if (!certGenerated) {
+            std::cerr << "Failed to generate self-signed certificate. HTTPS will be disabled." << std::endl;
+            enableHttps = false;
         }
     }
 
@@ -248,13 +395,13 @@ int main(int argc, char* argv[])
     // Configure upload path
     constexpr const char *uploadPath = "/srv/rpi-sb-provisioner/uploads";
 
-    if (!std::filesystem::exists(uploadPath)) {
-        std::filesystem::create_directories(uploadPath);
-    }
-    
+    // Create directory if it doesn't exist
+    std::filesystem::create_directories(uploadPath);
+
     // Configure static files path
-    constexpr const char *staticPath = "/var/lib/rpi-sb-provisioner/static";
+    constexpr const char *staticPath = "/usr/share/rpi-sb-provisioner/static";
     
+    // Configure Drogon app framework
     app
     .setBeforeListenSockOptCallback([](int fd) {
         LOG_INFO << "setBeforeListenSockOptCallback:" << fd;
@@ -268,16 +415,30 @@ int main(int argc, char* argv[])
         }
     })
     .setLogLevel(logLevel)
-    .addListener(listenerAddress, listenerPort)
+    .addListener(listenerAddress, listenerPort) // HTTP listener
     .setClientMaxBodySize(std::numeric_limits<size_t>::max())
     .setThreadNum(nthreads)
     .setUploadPath(uploadPath)
-    .setDocumentRoot(staticPath)  // Set static files path
-    //.enableRunAsDaemon()
-    .run();
+    .setDocumentRoot(staticPath);  // Set static files path
+    
+    // Add HTTPS listener if enabled
+    if (enableHttps && certGenerated) {
+        app.setSSLFiles(certPath, keyPath)
+           .addListener(listenerAddress, httpsPort, true); // true for HTTPS
+        LOG_INFO << "HTTPS listener enabled on " << listenerAddress << ":" << httpsPort;
+    }
+    
+    // Run the application
+    app.run();
     
     // Clean up curl global resources
     curl_global_cleanup();
+    
+    // Clean up the certificate files
+    if (certGenerated) {
+        std::remove(certPath.c_str());
+        std::remove(keyPath.c_str());
+    }
     
     return 0;
 }
