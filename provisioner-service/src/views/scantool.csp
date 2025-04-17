@@ -23,10 +23,17 @@
             position: relative;
             max-width: 100%;
             margin-bottom: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
         }
         
         #video {
             width: 100%;
+            height: auto;
+            max-height: 70vh;
+            object-fit: contain;
             border: 1px solid #ddd;
             display: block;
         }
@@ -293,15 +300,6 @@
                 }
             }
 
-            // Configure video for high resolution
-            function configureHighResVideo() {
-                const videoElement = document.getElementById('video');
-                
-                // Set video attributes for higher resolution
-                videoElement.setAttribute('width', '1280');
-                videoElement.setAttribute('height', '720');
-            }
-
             codeReader.listVideoInputDevices()
                 .then((videoInputDevices) => {
                     console.log('videoInputDevices', videoInputDevices);
@@ -314,9 +312,6 @@
                     // Select the first available device
                     selectedDeviceId = videoInputDevices[0].deviceId;
                     console.log('Selected device:', selectedDeviceId);
-                    
-                    // Configure high-resolution video
-                    configureHighResVideo();
                     
                     // Setup hints with formats we want to scan
                     const hints = new Map();
