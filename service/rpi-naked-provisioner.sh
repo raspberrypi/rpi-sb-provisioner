@@ -30,8 +30,6 @@ log() {
     printf "%s\n" "$@"
 }
 
-setup_fastboot_and_id_vars "$1"
-
 read_config
 
 TMP_DIR=""
@@ -164,6 +162,8 @@ check_command_exists grep
 check_command_exists img2simg
 
 check_command_exists systemd-notify
+
+setup_fastboot_and_id_vars "$1"
 
 TMP_DIR=$(mktemp -d)
 RPI_DEVICE_STORAGE_TYPE="$(check_pidevice_storage_type "${RPI_DEVICE_STORAGE_TYPE}")"
