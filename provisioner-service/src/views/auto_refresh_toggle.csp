@@ -1,0 +1,100 @@
+<!-- Auto Refresh Toggle Partial -->
+<style>
+    /* Toggle switch styles */
+    .toggle-container {
+        display: flex;
+        align-items: center;
+        margin-bottom: 15px;
+    }
+    .toggle-switch {
+        position: relative;
+        display: inline-block;
+        width: 50px;
+        height: 24px;
+        margin-right: 10px;
+    }
+    .toggle-switch input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+    }
+    .toggle-slider {
+        position: absolute;
+        cursor: pointer;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: #ccc;
+        transition: .4s;
+        border-radius: 24px;
+    }
+    .toggle-slider:before {
+        position: absolute;
+        content: "";
+        height: 18px;
+        width: 18px;
+        left: 3px;
+        bottom: 3px;
+        background-color: white;
+        transition: .4s;
+        border-radius: 50%;
+    }
+    input:checked + .toggle-slider {
+        background-color: #0066cc;
+    }
+    input:checked + .toggle-slider:before {
+        transform: translateX(26px);
+    }
+    #refresh-status {
+        margin-left: 10px;
+        font-size: 0.9em;
+        color: #666;
+    }
+</style>
+
+<div class="toggle-container">
+    <label class="toggle-switch">
+        <input type="checkbox" id="auto-refresh" checked>
+        <span class="toggle-slider"></span>
+    </label>
+    <span>Auto Refresh</span>
+    <span id="refresh-status">(Enabled - refreshing every 1s)</span>
+</div>
+
+<script>
+    // Auto-refresh functionality
+    let refreshInterval;
+    const refreshToggle = document.getElementById('auto-refresh');
+    const refreshStatus = document.getElementById('refresh-status');
+    
+    // Function to start the refresh interval
+    function startRefresh(refreshFunction, interval = 1000) {
+        refreshInterval = setInterval(refreshFunction, interval);
+        refreshStatus.textContent = '(Enabled - refreshing every 1s)';
+    }
+    
+    // Function to stop the refresh interval
+    function stopRefresh() {
+        clearInterval(refreshInterval);
+        refreshStatus.textContent = '(Disabled)';
+    }
+    
+    // Initialize auto-refresh based on toggle state
+    function initAutoRefresh(refreshFunction) {
+        if (refreshToggle.checked) {
+            startRefresh(refreshFunction);
+        } else {
+            stopRefresh();
+        }
+        
+        // Toggle auto-refresh when the checkbox is changed
+        refreshToggle.addEventListener('change', function() {
+            if (this.checked) {
+                startRefresh(refreshFunction);
+            } else {
+                stopRefresh();
+            }
+        });
+    }
+</script> 

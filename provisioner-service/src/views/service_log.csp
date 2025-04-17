@@ -26,15 +26,6 @@
             margin-top: 20px;
             display: inline-block;
         }
-        .auto-refresh-controls {
-            margin-top: 10px;
-            margin-bottom: 10px;
-        }
-        .auto-refresh-status {
-            margin-left: 10px;
-            font-size: 0.9em;
-            color: #666;
-        }
     </style>
 </head>
 <body>
@@ -44,10 +35,7 @@
     
     <a href="/services" class="back-link">← Back to Services</a>
     
-    <div class="auto-refresh-controls">
-        <button id="toggleRefresh" class="btn btn-primary btn-sm">Pause Auto-Refresh</button>
-        <span id="refreshStatus" class="auto-refresh-status">Auto-refreshing every 1s</span>
-    </div>
+    <%view auto_refresh_toggle %>
     
     <div class="log-container" id="logContainer">
     <%c++ 
@@ -72,29 +60,8 @@
             const path = window.location.pathname;
             const serviceName = path.substring(path.lastIndexOf('/') + 1);
             
-            // Variables for auto-refresh
-            let autoRefreshEnabled = true;
-            let refreshInterval = 1000; // 1 second
-            let refreshTimer = null;
-            
             // UI elements
             const logContainer = document.getElementById('logContainer');
-            const toggleButton = document.getElementById('toggleRefresh');
-            const statusText = document.getElementById('refreshStatus');
-            
-            // Toggle auto-refresh functionality
-            toggleButton.addEventListener('click', function() {
-                autoRefreshEnabled = !autoRefreshEnabled;
-                if (autoRefreshEnabled) {
-                    toggleButton.textContent = 'Pause Auto-Refresh';
-                    statusText.textContent = 'Auto-refreshing every 1s';
-                    startAutoRefresh();
-                } else {
-                    toggleButton.textContent = 'Resume Auto-Refresh';
-                    statusText.textContent = 'Auto-refresh paused';
-                    stopAutoRefresh();
-                }
-            });
             
             // Function to fetch logs via API
             function fetchLogs() {
@@ -154,31 +121,11 @@
                 logContainer.scrollTop = logContainer.scrollHeight;
             }
             
-            // Start auto-refresh
-            function startAutoRefresh() {
-                if (refreshTimer === null) {
-                    refreshTimer = setInterval(fetchLogs, refreshInterval);
-                }
-            }
-            
-            // Stop auto-refresh
-            function stopAutoRefresh() {
-                if (refreshTimer !== null) {
-                    clearInterval(refreshTimer);
-                    refreshTimer = null;
-                }
-            }
-            
-            // Initial scroll to bottom - REMOVED since logs are in newest-first order
-            // scrollToBottom();
-            
-            // Instead, scroll to top
+            // Instead, scroll to top on initial load
             logContainer.scrollTop = 0;
             
-            // Start auto-refresh on page load
-            if (autoRefreshEnabled) {
-                startAutoRefresh();
-            }
+            // Initialize auto-refresh with the log fetch function
+            initAutoRefresh(fetchLogs);
         });
     </script>
 </body>
