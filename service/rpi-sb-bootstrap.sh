@@ -88,6 +88,12 @@ TARGET_USB_PATH="$(udevadm info "${TARGET_DEVICE_PATH}" | grep -oP '^M: \K.*')"
 TARGET_DEVICE_FAMILY="$(udevadm info --name="$TARGET_DEVICE_PATH" --query=property --property=ID_MODEL_ID --value)"
 # TARGET_DEVICE_SERIAL is best-effort, not all rpiboot devices have it set (some only show 32-bits)
 TARGET_DEVICE_SERIAL="$(udevadm info --name="$TARGET_DEVICE_PATH" --query=property --property=ID_SERIAL_SHORT --value)"
+# If TARGET_DEVICE_SERIAL is empty or equals "Broadcom", use TARGET_DEVICE_PATH instead
+if [ -z "${TARGET_DEVICE_SERIAL}" ] || [ "${TARGET_DEVICE_SERIAL}" = "Broadcom" ]; then
+    TARGET_DEVICE_SERIAL="${TARGET_DEVICE_PATH}"
+    log "Using device path as serial: ${TARGET_DEVICE_SERIAL}"
+fi
+
 
 EARLY_LOG_DIRECTORY="/var/log/rpi-sb-provisioner/early/${TARGET_DEVICE_PATH}"
 mkdir -p "${EARLY_LOG_DIRECTORY}"
@@ -107,9 +113,6 @@ read_config
 DEVICE_LOCK="${LOCK_BASE}/${TARGET_DEVICE_SERIAL}"
 if atomic_mkdir "$DEVICE_LOCK"; then
     HOLDING_LOCKFILE=1
-    echo "ACTION==\"*\", ATTRS{idSerial}==\"${TARGET_DEVICE_SERIAL}\", GOTO=\"end\"" > "/etc/udev/rules.d/99-rpi-sb-bootstrap-${TARGET_DEVICE_SERIAL}.rules"
-    echo "LABEL=\"end\"" >> "/etc/udev/rules.d/99-rpi-sb-bootstrap-${TARGET_DEVICE_SERIAL}.rules"
-    udevadm control --reload-rules
 else
     die "Bootstrap already in progress for ${TARGET_DEVICE_SERIAL}"
 fi
@@ -631,7 +634,7 @@ set -e
 # The special exit code 0 indicates success to systemd
 # Additionally, we can use systemd-notify if available to indicate completion
 if command -v systemd-notify >/dev/null 2>&1; then
-    systemd-notify --ready --status="Provisioning completed successfully"
+    systemd-notify --status="Provisioning completed successfully" STOPPING=1
 fi
 
 # Exit with success code for systemd
