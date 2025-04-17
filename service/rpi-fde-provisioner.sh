@@ -604,7 +604,7 @@ log "Provisioning completed. Remove the device from this machine."
 # This is used when the script is run as a systemd service
 # The special exit code 0 indicates success to systemd
 # Additionally, we can use systemd-notify if available to indicate completion
-systemd-notify --stopping --status="Provisioning completed successfully"
+systemd-notify --status="Provisioning completed successfully" STOPPING=1
 
 # Exit with success code for systemd
 true
