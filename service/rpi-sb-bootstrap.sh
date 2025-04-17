@@ -151,10 +151,11 @@ check_command_exists() {
 
 timeout_fatal() {
     command="$*"
+    timeout_seconds=60
     set +e
-    log "Running command with 30-second timeout: \"${command}\""
+    log "Running command with ${timeout_seconds}-second timeout: \"${command}\""
     # shellcheck disable=SC2086
-    timeout 30 ${command}
+    timeout ${timeout_seconds} ${command}
     command_exit_status=$?
     
     # Handle different exit codes from the timeout command
@@ -165,7 +166,7 @@ timeout_fatal() {
             ;;
         124)
             # Exit code 124 means the command timed out (TERM signal sent but command didn't exit)
-            die "\"${command}\" FAILED: Timed out after 30 seconds (exit code 124)."
+            die "\"${command}\" FAILED: Timed out after ${timeout_seconds} seconds (exit code 124)."
             ;;
         125)
             # Exit code 125 means the timeout command itself failed
