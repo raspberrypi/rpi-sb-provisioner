@@ -3,7 +3,7 @@ Description=Bootstrap a Raspberry Pi device in to Fastboot, for full-disk encryp
 After=%i.device
 
 [Service]
-Type=oneshot
+Type=notify
 ExecStart=/usr/bin/rpi-sb-bootstrap.sh /%I
 # '/' is needed - otherwise triage does not use correct address of device
 EnvironmentFile=/etc/rpi-sb-provisioner/config

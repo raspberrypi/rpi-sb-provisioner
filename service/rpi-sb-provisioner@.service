@@ -2,6 +2,6 @@
 Description=Provision a Raspberry Pi Device with a authentication key, a device-unique key, and an OS that you supply.
 
 [Service]
-Type=oneshot
+Type=notify
 ExecStart=/usr/bin/rpi-sb-provisioner.sh %I
 EnvironmentFile=/etc/rpi-sb-provisioner/config
