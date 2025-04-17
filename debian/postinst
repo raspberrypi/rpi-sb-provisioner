@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS devices(
 );" > /dev/null
 
 # Set up systemd services
-if [ "$1" = "configure" ] || [ "$1" = "abort-upgrade" ] || [ "$1" = "abort-deconfigure" ] || [ "$1" = "abort-remove" ] ; then
+if [ "$1" = "configure" ] || [ "$1" = "abort-upgrade" ] || [ "$1" = "abort-deconfigure" ] || [ "$1" = "abort-remove" ] || [ "$1" = "triggered" ]; then
 	# Reload systemd to pick up new service files
 	deb-systemd-helper daemon-reload >/dev/null || true
 	
@@ -60,9 +60,13 @@ if [ "$1" = "configure" ] || [ "$1" = "abort-upgrade" ] || [ "$1" = "abort-decon
 	deb-systemd-helper enable 'rpi-sb-bootstrap@.service' >/dev/null || true
 	deb-systemd-helper enable 'rpi-sb-triage@.service' >/dev/null || true
 	
-	# Start the services that should be running by default
+	# Start or restart the services that should be running by default
 	if [ -d /run/systemd/system ]; then
-		deb-systemd-invoke start 'rpi-provisioner-ui.service' >/dev/null || true
+		if [ "$1" = "triggered" ]; then
+			deb-systemd-invoke restart 'rpi-provisioner-ui.service' >/dev/null || true
+		else
+			deb-systemd-invoke start 'rpi-provisioner-ui.service' >/dev/null || true
+		fi
 	fi
 fi
 
