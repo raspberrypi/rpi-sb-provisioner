@@ -38,6 +38,11 @@ namespace provisioner {
             }
 
             while (std::getline(config_file, line)) {
+                // Skip commented lines
+                if (!line.empty() && line[0] == '#') {
+                    continue;
+                }
+                
                 size_t delimiter_pos = line.find('=');
                 if (delimiter_pos != std::string::npos) {
                     std::string key = line.substr(0, delimiter_pos);
@@ -91,6 +96,11 @@ namespace provisioner {
             
             if (config_read.is_open()) {
                 while (std::getline(config_read, line)) {
+                    // Skip commented lines
+                    if (!line.empty() && line[0] == '#') {
+                        continue;
+                    }
+                    
                     size_t delimiter_pos = line.find('=');
                     if (delimiter_pos != std::string::npos) {
                         std::string key = line.substr(0, delimiter_pos);
