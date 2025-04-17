@@ -99,7 +99,7 @@ metadata_gather() {
                     memory          varchar(255)        not null,   \
                     manufacturer    varchar(255)        not null,    \
                     provision_ts    timestamp           default current_timestamp \
-        );"
+        );" > /dev/null 2>&1
         sqlite3 "${RPI_SB_PROVISIONER_MANUFACTURING_DB}" \
         "INSERT INTO devices(           \
                     boardname,                  \
@@ -127,7 +127,7 @@ metadata_gather() {
                     '${PROCESSOR_STR}',           \
                     '${MEMORY_STR}',              \
                     '${MANUFACTURER_STR}'         \
-        );"
+        );" > /dev/null 2>&1
         announce_stop "Manufacturing Database Insertion"
     fi
     announce_stop "Metadata extraction"

@@ -24,14 +24,14 @@ record_state() {
         image           TEXT                not null,   \
         ip_address      TEXT                not null,   \
         ts              timestamp           default current_timestamp \
-        );"
+        );" > /dev/null 2>&1
 
     serial=$1
     state=$2
     endpoint=$3
     image=${4:-""}
     ip_address=${5:-""}
-    sqlite3 "/srv/rpi-sb-provisioner/state.db" "PRAGMA busy_timeout=5000; INSERT INTO devices(serial, endpoint, state, image, ip_address) VALUES ('$serial', '$endpoint', '$state', '$image', '$ip_address');"
+    sqlite3 "/srv/rpi-sb-provisioner/state.db" "PRAGMA busy_timeout=5000; INSERT INTO devices(serial, endpoint, state, image, ip_address) VALUES ('$serial', '$endpoint', '$state', '$image', '$ip_address');" > /dev/null 2>&1
 }
 
 # get_usb_path_for_serial() - Finds the USB path for a device with a specific serial number
