@@ -144,7 +144,7 @@ trap cleanup INT TERM
 
 # Start the provisioner phase
 
-record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_STARTED}" "${TARGET_USB_PATH}"
+
 # These tools are used to modify the supplied images, and deal with mounting and unmounting the images.
 check_command_exists losetup
 check_command_exists mknod
@@ -164,6 +164,8 @@ check_command_exists img2simg
 check_command_exists systemd-notify
 
 setup_fastboot_and_id_vars "$1"
+
+record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_STARTED}" "${TARGET_USB_PATH}"
 
 TMP_DIR=$(mktemp -d)
 RPI_DEVICE_STORAGE_TYPE="$(check_pidevice_storage_type "${RPI_DEVICE_STORAGE_TYPE}")"
