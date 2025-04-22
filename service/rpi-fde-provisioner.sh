@@ -427,7 +427,110 @@ augment_initramfs() {
     zstd --no-progress --rm -f -6 "${TMP_DIR}"/initramfs.cpio -o "${initramfs_compressed_file}"
 }
 
-prepare_pre_boot_auth_images() {
+prepare_pre_boot_auth_images_as_filesystems() {
+    # If the bootfs-temporary hasn't been generated, we are the first to run,
+    # and need to generate the bootfs-temporary.simg file, which will also create the
+    # mount points for the boot and root partitions.
+    if [ ! -f "${RPI_SB_WORKDIR}/rootfs-temporary.simg" ] || [ ! -f "${RPI_SB_WORKDIR}/bootfs-temporary.simg" ]; then
+        announce_start "OS Image Mounting"
+
+        # Mount the 'complete' image as a series of partitions 
+        cnt=0
+        until ensure_next_loopdev && LOOP_DEV="$(losetup --show --find --partscan "${GOLD_MASTER_OS_FILE}")"; do
+            if [ $cnt -lt 5 ]; then
+                cnt=$((cnt + 1))
+                log "Error in losetup.  Retrying..."
+                sleep 5
+            else
+                log "ERROR: losetup failed; exiting"
+                sleep 5
+            fi
+        done
+
+        ensure_loopdev_partitions "$LOOP_DEV"
+        BOOT_DEV="${LOOP_DEV}"p1
+        ROOT_DEV="${LOOP_DEV}"p2
+
+        # shellcheck disable=SC2086
+        mkdir -p "${TMP_DIR}"/rpi-boot-img-mount ${DEBUG}
+        # shellcheck disable=SC2086
+        mkdir -p "${TMP_DIR}"/rpi-rootfs-img-mount ${DEBUG}
+
+        # shellcheck disable=SC2086
+        mkdir -p "${TMP_DIR}"/rpi-cryptroot-bootfs-img-mount ${DEBUG}
+
+        announce_start "OS Image Copying (potentially slow)"
+        dd if="${BOOT_DEV}" of="${TMP_DIR}"/bootfs-original.img bs=1M status=progress
+        dd if="${ROOT_DEV}" of="${TMP_DIR}"/rootfs-original.img bs=1M status=progress
+        announce_stop "OS Image Copying (potentially slow)"
+
+        unmount_image "${GOLD_MASTER_OS_FILE}"
+
+        # Use the size of the original boot image, or the size of the cryptroot initramfs, whichever is larger.
+        BOOTFS_ORIGINAL_SIZE_MB=$(( ($(stat -c%s "${TMP_DIR}"/bootfs-original.img) + 1048575) / 1048576 ))
+        CRYPTROOT_MINIMUM_SIZE_MB=$(( ($(stat -c%s "$(get_cryptroot)") + 1048575) / 1048576 ))
+        BOOTFS_SIZE_MB=$(( BOOTFS_ORIGINAL_SIZE_MB > CRYPTROOT_MINIMUM_SIZE_MB ? BOOTFS_ORIGINAL_SIZE_MB : CRYPTROOT_MINIMUM_SIZE_MB ))
+        # Using 1M which is 1 MiB (1048576 bytes) as the block size
+        CRYPTROOT_BOOTFS_FILE="${RPI_SB_WORKDIR}/cryptroot-bootfs.img"
+        dd if=/dev/zero of="${CRYPTROOT_BOOTFS_FILE}" bs=1M count="${BOOTFS_SIZE_MB}" status=progress
+        mkfs.fat -n "BOOT" "${CRYPTROOT_BOOTFS_FILE}"
+
+        # OS Images are, by convention, packed as a MBR whole-disk file,
+        # containing two partitions: A FAT boot partition, which contains the kernel, command line,
+        # and supporting boot infrastructure for the Raspberry Pi Device.
+        # And in partition 2, the OS rootfs itself.
+        # Note that this mechanism is _assuming_ Linux. We may revise that in the future, but
+        # to do so would require a concrete support commitment from the vendor - and Raspberry Pi only
+        # support Linux.
+        # shellcheck disable=SC2086
+        mount -t vfat "${TMP_DIR}"/bootfs-original.img "${TMP_DIR}"/rpi-boot-img-mount ${DEBUG}
+        # shellcheck disable=SC2086
+        mount -t ext4 "${TMP_DIR}"/rootfs-original.img "${TMP_DIR}"/rpi-rootfs-img-mount ${DEBUG}
+
+        # shellcheck disable=SC2086
+        mount -t vfat "${CRYPTROOT_BOOTFS_FILE}" "${TMP_DIR}"/rpi-cryptroot-bootfs-img-mount ${DEBUG}
+
+        announce_stop "OS Image Mounting"
+
+        # We supply a pre-baked Raspberry Pi Pre-boot-authentication initramfs, which we insert here.
+        # This image is maintained by Raspberry Pi, with sources available on our GitHub pages.
+        announce_start "Insert pre-boot authentication initramfs"
+        zstd -f -d "$(get_cryptroot)" -o "${TMP_DIR}"/rpi-cryptroot-bootfs-img-mount/
+        announce_stop "Insert pre-boot authentication initramfs"
+
+        announce_start "Cryptroot synthesis"
+
+        # Use subshells to avoid polluting our CWD.
+        ( augment_initramfs "${TMP_DIR}"/rpi-cryptroot-bootfs-img-mount/ )
+        announce_stop "Cryptroot synthesis"
+
+        announce_start "cmdline.txt modification"
+        sed --in-place 's%\b\(root=\)\S*%\1/dev/ram0%' "${TMP_DIR}"/rpi-cryptroot-bootfs-img-mount/cmdline.txt
+        sed --in-place 's%\binit=\S*%%' "${TMP_DIR}"/rpi-cryptroot-bootfs-img-mount/cmdline.txt
+        sed --in-place 's%\brootfstype=\S*%%' "${TMP_DIR}"/rpi-cryptroot-bootfs-img-mount/cmdline.txt
+        # TODO: Consider deleting quiet
+        sed --in-place 's%\bquiet\b%%' "${TMP_DIR}"/rpi-cryptroot-bootfs-img-mount/cmdline.txt
+        announce_stop "cmdline.txt modification"
+
+        # Run customisation script for bootfs-mounted stage
+        run_customisation_script "fde-provisioner" "bootfs-mounted" "${TMP_DIR}/rpi-cryptroot-bootfs-img-mount" "${TMP_DIR}/rpi-rootfs-img-mount"
+
+        # Run customisation script for rootfs-mounted stage
+        run_customisation_script "fde-provisioner" "rootfs-mounted" "${TMP_DIR}/rpi-cryptroot-bootfs-img-mount" "${TMP_DIR}/rpi-rootfs-img-mount"
+
+        umount "${TMP_DIR}"/rpi-boot-img-mount
+        umount "${TMP_DIR}"/rpi-rootfs-img-mount
+        umount "${TMP_DIR}"/rpi-cryptroot-bootfs-img-mount
+
+        sync; sync; sync;
+
+        img2simg -s "${CRYPTROOT_BOOTFS_FILE}" "${RPI_SB_WORKDIR}"/bootfs-temporary.simg
+        rm -f "${CRYPTROOT_BOOTFS_FILE}"
+        announce_stop "Boot Image partition extraction"
+    fi # Slow path
+} # prepare_pre_boot_auth_images_as_bootfiles
+
+prepare_pre_boot_auth_images_as_bootimg() {
     # If the bootfs-temporary hasn't been generated, we are the first to run,
     # and need to generate the bootfs-temporary.simg file, which will also create the
     # mount points for the boot and root partitions.
@@ -531,6 +634,9 @@ prepare_pre_boot_auth_images() {
         cp "${TMP_DIR}"/boot.img "${META_BOOTIMG_MOUNT_PATH}"/boot.img
         cp "${TMP_DIR}"/config.txt "${META_BOOTIMG_MOUNT_PATH}"/config.txt
 
+        umount "${TMP_DIR}"/rpi-boot-img-mount
+        umount "${TMP_DIR}"/rpi-rootfs-img-mount
+
         sync; sync; sync;
 
         umount "${META_BOOTIMG_MOUNT_PATH}"
@@ -539,9 +645,19 @@ prepare_pre_boot_auth_images() {
         rm -f "${TMP_DIR}"/bootfs-temporary.img
         announce_stop "Boot Image partition extraction"
     fi # Slow path
-} # prepare_pre_boot_auth_images
+} # prepare_pre_boot_auth_images_as_bootimg
 
-with_lock "${LOCK_BASE}/pre-boot-auth-images.lock" 600 prepare_pre_boot_auth_images
+case "${RPI_DEVICE_FAMILY}" in
+    "4" | "5")
+        with_lock "${LOCK_BASE}/pre-boot-auth-images.lock" 600 prepare_pre_boot_auth_images_as_bootimg
+        ;;
+    "2W")
+        with_lock "${LOCK_BASE}/pre-boot-auth-images.lock" 600 prepare_pre_boot_auth_images_as_filesystems
+        ;;
+    *)
+        die "Unsupported device family: ${RPI_DEVICE_FAMILY}"
+        ;;
+esac
 
 announce_start "Erase / Partition Device Storage"
 
@@ -564,8 +680,10 @@ prepare_rootfs_image() {
     if [ -f "${RPI_SB_WORKDIR}/rootfs-temporary.simg" ] && [ "$((TARGET_STORAGE_ROOT_EXTENT))" -eq "$(simg_expanded_size "${RPI_SB_WORKDIR}"/rootfs-temporary.simg)" ]; then
         announce_stop "Resizing OS images: Not required, already the correct size"
     else
+        mount -t ext4 "${RPI_SB_WORKDIR}"/rootfs-original.img "${TMP_DIR}"/rpi-rootfs-img-mount
         mke2fs -t ext4 -b 4096 -d "${TMP_DIR}"/rpi-rootfs-img-mount "${RPI_SB_WORKDIR}"/rootfs-temporary.img $((TARGET_STORAGE_ROOT_EXTENT / 4096))
         img2simg -s "${RPI_SB_WORKDIR}"/rootfs-temporary.img "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
+        umount "${TMP_DIR}"/rpi-rootfs-img-mount
         rm -f "${RPI_SB_WORKDIR}"/rootfs-temporary.img
         announce_stop "Resizing OS images: Resized to $((TARGET_STORAGE_ROOT_EXTENT))"
     fi
