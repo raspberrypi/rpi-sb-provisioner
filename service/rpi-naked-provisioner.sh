@@ -182,18 +182,7 @@ else
     announce_stop "Finding the cache directory: Using specified name"
 fi
 
-prepare_image_file() {
-    if [ ! -f "${RPI_SB_WORKDIR}/image-temporary.simg" ] ||
-       [ ! -s "${RPI_SB_WORKDIR}/image-temporary.simg" ]; then
-        announce_start "Sparsing the OS image"
-        img2simg -s "${GOLD_MASTER_OS_FILE}" "${RPI_SB_WORKDIR}"/image-temporary.simg
-        announce_stop "Sparsing the OS image"
-    fi
-}
-
 systemd-notify --ready --status="Provisioning started"
-
-with_lock "${LOCK_BASE}/sparse-image-generation.lock" 120 prepare_image_file
 
 announce_start "Writing OS images"
 
@@ -202,7 +191,7 @@ fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" erase "${RPI_DEVICE_STORAGE_TYPE}"
 sleep 2
 announce_stop "Erase Device Storage"
 
-fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}" "${RPI_SB_WORKDIR}"/image-temporary.simg
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}" "${GOLD_MASTER_OS_FILE}"
 announce_stop "Writing OS images"
 
 announce_start "Set LED status"
