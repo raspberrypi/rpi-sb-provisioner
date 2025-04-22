@@ -69,129 +69,9 @@ $ xdg-open http://localhost:3142
 ----
 
 At the minimum, you must consult the 'Options' and 'Images' pages, having uploaded your OS image and set the options as guided by the inline
-help text (which is generated from the reference section of this README)
+help text (which is generated from the reference documentation in docs/)
 
 Once you have followed all those steps, `rpi-sb-provisioner` should be correctly configured and ready to run.
-
-== Configuration fields
-
-Configure `rpi-sb-provisioner` by using the Web UI, for setting the following fields in `/etc/rpi-sb-provisioner/config`.
-
-=== PROVISIONING_STYLE
-*Mandatory, with a default*
-
-Select the provisioning style you wish to use. Supported values are `secure-boot`, `fde-only` and `naked`.
-
-If `PROVISIONING_STYLE` is not specified, it defaults to `secure-boot`.
-
-=== CUSTOMER_KEY_FILE_PEM
-*Optional, mandatory if CUSTOMER_KEY_PKCS11_NAME is not set*
-
-The fully qualified path to your signing key, encoded in PEM format. This file is expected to contain an RSA 2048-bit Private Key.
-
-WARNING: This file should be considered key material, and should be protected while at rest and in use according to your threat model.
-
-=== CUSTOMER_KEY_PKCS11_NAME
-*Optional, mandatory if CUSTOMER_KEY_FILE_PEM is not set*
-
-The keypair alias for a PKCS11 keypair, typically stored on a Hardware Security Module (HSM) and provided through a helper tool. This is expected to act in place of the RSA 2048-bit Private key specified with CUSTOMER_KEY_FILE_PEM, and will be used as the signing device for all future pre-boot authentication images.
-
-The value should take the format:
-
-----
-"pkcs11:object=<keypair-alias>;type=private"
-----
-
-WARNING: You must use double quotes to enclose the value.
-
-WARNING: The PKCS11 provider, and it's associated HSM, should be considered key material and should be protected while at rest and in use according to your threat model.
-
-=== GOLD_MASTER_OS_FILE
-*Mandatory*
-
-This should be your 'gold master' OS image. No customisation should be present in this image that you would not expect to be deployed to your entire fleet. `rpi-sb-provisioner` assumes this image has been created using `pi-gen`, and using a non-`pi-gen` image may produce undefined behaviour.
-
-WARNING: This file *must* be the uncompressed image.
-
-=== RPI_DEVICE_STORAGE_TYPE
-*Mandatory*
-
-Specify the kind of storage your target will use. Supported values are `sd`, `emmc`, `nvme`.
-
-=== RPI_DEVICE_STORAGE_CIPHER
-*Optional*
-
-Specify the full-disk-encryption cipher. Supported values are `aes-xts-plain64`, `xchacha12,aes-adiantum-plain64`. If `RPI_DEVICE_STORAGE_CIPHER` is not specified, it defaults to `aes-xts-plain64`. `aes-xts-plain64` is recommended for Raspberry Pi 5 family devices (including Compute Module 5); all other Raspberry Pi devices are recommended to use `xchacha12,aes-adiantum-plain64` for performance reasons.
-
-=== RPI_DEVICE_FAMILY
-*Mandatory*
-
-Specify the family of Raspberry Pi device you are provisioning. Supported values are `4, 5, 2W`. For example,
-
-A Raspberry Pi Compute Module 4 would be family `4`
-A Raspberry Pi 5 would be family `5`
-A Raspberry Pi Compute Module 5 would be family `5`
-A Raspberry Pi Zero 2 W would be family `2W`
-
-=== RPI_DEVICE_BOOTLOADER_CONFIG_FILE
-*Mandatory, with a default*
-
-WARNING: `rpi-sb-provisioner` will ignore the Raspberry Pi Bootloader configuration built by `pi-gen`, and use the one provided in this variable.
-
-Specify the Raspberry Pi Bootloader configuration you want your provisioned devices to use. A default is provided.
-
-Further information on the format of this configuration file can be found in the Raspberry Pi Documentation, at https://www.raspberrypi.com/documentation/computers/config_txt.html
-
-=== RPI_DEVICE_LOCK_JTAG
-*Optional*
-
-Raspberry Pi devices have a mechanism to restrict JTAG access to the device.
-
-Note that using this function will prevent Raspberry Pi engineers from being able to assist in debugging your device, should you request assitance.
-
-Set to any value to enable the JTAG restrictions.
-
-=== RPI_DEVICE_EEPROM_WP_SET
-*Optional*
-
-Raspberry Pi devices that use an EEPROM as part of their boot flow can configure that EEPROM to enable write protection - preventing modification.
-
-Set to any value to enable EEPROM write protection.
-
-=== RPI_SB_PROVISIONER_MANUFACTURING_DB
-*Optional*
-
-Store manufacturing data in a sqlite3 database. This will include the board serial, board revision, the boot ROM version, the MAC address of the ethernet port, any set hash of the customer signing key, the JTAG lock state, the board attributes and the advanced boot flags.
-
-You must not specify the path of a database stored on a network drive or similar storage, as this mechanism is only safe to use on a single provisioning system. For merging the output with multiple provisioning systems, consider "Processing the manufacturing database" later in this document.
-
-Create this file before execution, for example using `touch`:
-
-----
-$ touch ${RPI_SB_PROVISIONER_MANUFACTURING_DB}
-----
-
-Set to the path of a file to contain a SQLite database stored on local storage.
-
-=== RPI_DEVICE_RETRIEVE_KEYPAIR
-*Optional*
-
-Specify a directory to copy the device unique keypair to. The keys will be named <serial>.der and <serial>.pub
-
-Set to the path of a directory to use, leave blank to disable.
-
-NOTE: These keys are sensitive key material, and you must ensure they are handled appropriately.
-
-=== RPI_SB_WORKDIR
-*Optional*
-
-WARNING: If you do not set this variable, your modified OS intermediates will not be stored, and will be unavailable for inspection.
-
-Set to a location to cache OS assets between provisioning sessions. Recommended for use in production. For example:
-
-----
-RPI_SB_WORKDIR=/srv/rpi-sb-provisioner/
-----
 
 == Using rpi-sb-provisioner
 `rpi-sb-provisioner` is composed of three `systemd` services that are triggered by the connection of a device in RPIBOOT mode to a USB port. With `rpi-sb-provisioner` configured to your requirements, all that is therefore required is to connect your target Raspberry Pi device in RPIBOOT mode.
@@ -282,10 +162,11 @@ $ stat mfg_db.csv
 
 A 'secured device' is one where your customer signing key has been written - regardless of the state of your OS or other software. Such devices can only load Linux images signed by your customer signing key.
 
-Obtain this by inspecting the rpi-sb-provisioner logs:
+Obtain this by inspecting the manufacturing database:
 
 ----
-grep -R /var/log/rpi-sb-provisioner/ --include="progress" -e "PROVISIONER-FINISHED" | tail -n 1 | cut -d '/' -f 5
+$ sqlite3 ${RPI_SB_PROVISIONER_MANUFACTURING_DB} -cmd ".headers on" -cmd ".mode csv" -cmd ".output mfg_db.csv" "SELECT serial FROM rpi_sb_provisioner WHERE secure = 1;"
+$ stat mfg_db.csv
 ----
 
 === Debugging unexpected results
