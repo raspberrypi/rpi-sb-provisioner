@@ -23,6 +23,7 @@ metadata_gather() {
     MEMORY=$(metadata_get "revision-memory")
     MANUFACTURER=$(metadata_get "revision-manufacturer")
     REVISION=$(metadata_get "revision-revision")
+    SECURE=$(metadata_get "secure")
     
     case ${TYPE} in
         "0x06") BOARD_STR="CM1" ;;
@@ -82,24 +83,82 @@ metadata_gather() {
     if [ -f "${RPI_SB_PROVISIONER_MANUFACTURING_DB}" ]; then
         announce_start "Manufacturing Database Insertion"
         check_command_exists sqlite3
-        sqlite3 "${RPI_SB_PROVISIONER_MANUFACTURING_DB}"         \
-        -cmd "PRAGMA journal_mode=WAL;"                     \
-        "CREATE TABLE IF NOT EXISTS devices(                \
-                    id              integer primary key,            \
-                    boardname       varchar(255)        not null,   \
-                    serial          char(8)             not null,   \
-                    eth_mac         char(17)            not null,   \
-                    wifi_mac        char(17)            not null,   \
-                    bt_mac          char(17)            not null,   \
-                    mmc_size        integer             not null,   \
-                    mmc_cid         char(32)            not null,   \
-                    rpi_duid        char(32)            not null,   \
-                    board_revision  varchar(255)        not null,   \
-                    processor       varchar(255)        not null,   \
-                    memory          varchar(255)        not null,   \
-                    manufacturer    varchar(255)        not null,    \
-                    provision_ts    timestamp           default current_timestamp \
-        );" > /dev/null 2>&1
+        
+        # Ensure WAL journal mode
+        sqlite3 "${RPI_SB_PROVISIONER_MANUFACTURING_DB}" "PRAGMA journal_mode=WAL;" > /dev/null 2>&1
+        
+        # Define the expected schema for devices table
+        EXPECTED_SCHEMA="id              integer primary key,
+                    boardname       varchar(255)        not null,
+                    serial          char(8)             not null,
+                    eth_mac         char(17)            not null,
+                    wifi_mac        char(17)            not null,
+                    bt_mac          char(17)            not null,
+                    mmc_size        integer             not null,
+                    mmc_cid         char(32)            not null,
+                    rpi_duid        char(32)            not null,
+                    board_revision  varchar(255)        not null,
+                    processor       varchar(255)        not null,
+                    memory          varchar(255)        not null,
+                    manufacturer    varchar(255)        not null,
+                    secure          integer             not null,
+                    provision_ts    timestamp           default current_timestamp"
+        
+        # Check if the table exists
+        TABLE_EXISTS=$(sqlite3 "${RPI_SB_PROVISIONER_MANUFACTURING_DB}" "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='devices';")
+        
+        if [ "$TABLE_EXISTS" -eq 0 ]; then
+            # Table doesn't exist, create it
+            sqlite3 "${RPI_SB_PROVISIONER_MANUFACTURING_DB}" "CREATE TABLE devices($EXPECTED_SCHEMA);" > /dev/null 2>&1
+        else
+            # Table exists, check if migration is needed
+            # Get current schema
+            CURRENT_COLUMNS=$(sqlite3 "${RPI_SB_PROVISIONER_MANUFACTURING_DB}" "PRAGMA table_info(devices);" | awk -F'|' '{print $2}' | tr '\n' ',')
+            
+            # Check if any expected columns are missing
+            for COL in id boardname serial eth_mac wifi_mac bt_mac mmc_size mmc_cid rpi_duid board_revision processor memory manufacturer secure provision_ts; do
+                if ! echo "$CURRENT_COLUMNS" | grep -q "$COL"; then
+                    echo "Migration needed: column $COL is missing from devices table"
+                    
+                    # Create a new table with correct schema
+                    sqlite3 "${RPI_SB_PROVISIONER_MANUFACTURING_DB}" "
+                    CREATE TABLE devices_new($EXPECTED_SCHEMA);
+                    
+                    -- Copy data from old table to new table
+                    INSERT INTO devices_new
+                    SELECT 
+                        id, 
+                        boardname, 
+                        serial, 
+                        eth_mac, 
+                        wifi_mac, 
+                        bt_mac, 
+                        mmc_size, 
+                        mmc_cid, 
+                        rpi_duid, 
+                        board_revision, 
+                        processor, 
+                        memory, 
+                        manufacturer, 
+                        secure, 
+                        provision_ts
+                    FROM devices
+                    ON CONFLICT(id) DO NOTHING;
+                    
+                    -- Drop old table
+                    DROP TABLE devices;
+                    
+                    -- Rename new table to original name
+                    ALTER TABLE devices_new RENAME TO devices;
+                    " > /dev/null 2>&1
+                    
+                    echo "Migration completed successfully"
+                    break
+                fi
+            done
+        fi
+        
+        # Insert new device data
         sqlite3 "${RPI_SB_PROVISIONER_MANUFACTURING_DB}" \
         "INSERT INTO devices(           \
                     boardname,                  \
@@ -113,7 +172,8 @@ metadata_gather() {
                     board_revision,             \
                     processor,                  \
                     memory,                     \
-                    manufacturer                \
+                    manufacturer,               \
+                    secure                      \
                 ) VALUES (                      \
                     '${BOARD_STR}',               \
                     '${TARGET_DEVICE_SERIAL}',    \
@@ -126,7 +186,8 @@ metadata_gather() {
                     '${REVISION}',                \
                     '${PROCESSOR_STR}',           \
                     '${MEMORY_STR}',              \
-                    '${MANUFACTURER_STR}'         \
+                    '${MANUFACTURER_STR}',        \
+                    '${SECURE}'                   \
         );" > /dev/null 2>&1
         announce_stop "Manufacturing Database Insertion"
     fi
