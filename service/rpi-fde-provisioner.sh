@@ -329,6 +329,7 @@ check_command_exists grep
 check_command_exists mke2fs
 check_command_exists img2simg
 check_command_exists mkfs.fat
+check_command_exists truncate
 
 check_command_exists systemd-notify
 
@@ -472,7 +473,7 @@ prepare_pre_boot_auth_images_as_filesystems() {
         BOOTFS_SIZE_MB=$(( BOOTFS_ORIGINAL_SIZE_MB > CRYPTROOT_MINIMUM_SIZE_MB ? BOOTFS_ORIGINAL_SIZE_MB : CRYPTROOT_MINIMUM_SIZE_MB ))
         # Using 1M which is 1 MiB (1048576 bytes) as the block size
         CRYPTROOT_BOOTFS_FILE="${RPI_SB_WORKDIR}/cryptroot-bootfs.img"
-        dd if=/dev/zero of="${CRYPTROOT_BOOTFS_FILE}" bs=1M count="${BOOTFS_SIZE_MB}" status=progress
+        truncate -s "${BOOTFS_SIZE_MB}M" "${CRYPTROOT_BOOTFS_FILE}"
         mkfs.fat -n "BOOT" "${CRYPTROOT_BOOTFS_FILE}"
 
         # OS Images are, by convention, packed as a MBR whole-disk file,
@@ -626,7 +627,7 @@ prepare_pre_boot_auth_images_as_bootimg() {
         # Get the size of the original boot image in MiB (rounded up)
         BOOTFS_SIZE_MB=$(( ($(stat -c%s "${TMP_DIR}"/bootfs-original.img) + 1048575) / 1048576 ))
         # Using 1M which is 1 MiB (1048576 bytes) as the block size
-        dd if=/dev/zero of="${TMP_DIR}"/bootfs-temporary.img bs=1M count="${BOOTFS_SIZE_MB}" status=progress
+        truncate -s "${BOOTFS_SIZE_MB}M" "${TMP_DIR}"/bootfs-temporary.img
         mkfs.fat -n "BOOT" "${TMP_DIR}"/bootfs-temporary.img
 
         META_BOOTIMG_MOUNT_PATH=$(mktemp -d)
