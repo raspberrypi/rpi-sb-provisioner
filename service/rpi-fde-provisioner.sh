@@ -683,7 +683,7 @@ prepare_rootfs_image() {
     if [ -f "${RPI_SB_WORKDIR}/rootfs-temporary.simg" ] && [ "$((TARGET_STORAGE_ROOT_EXTENT))" -eq "$(simg_expanded_size "${RPI_SB_WORKDIR}"/rootfs-temporary.simg)" ]; then
         announce_stop "Resizing OS images: Not required, already the correct size"
     else
-        mount -t ext4 "${RPI_SB_WORKDIR}"/rootfs-original.img "${TMP_DIR}"/rpi-rootfs-img-mount
+        mount -t ext4 "${TMP_DIR}"/rootfs-original.img "${TMP_DIR}"/rpi-rootfs-img-mount
         mke2fs -t ext4 -b 4096 -d "${TMP_DIR}"/rpi-rootfs-img-mount "${RPI_SB_WORKDIR}"/rootfs-temporary.img $((TARGET_STORAGE_ROOT_EXTENT / 4096))
         img2simg -s "${RPI_SB_WORKDIR}"/rootfs-temporary.img "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
         umount "${TMP_DIR}"/rpi-rootfs-img-mount
