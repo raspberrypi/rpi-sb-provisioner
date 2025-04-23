@@ -493,16 +493,18 @@ prepare_pre_boot_auth_images_as_filesystems() {
 
         announce_stop "OS Image Mounting"
 
+        cp -R "${TMP_DIR}"/rpi-boot-img-mount/* "${TMP_DIR}"/rpi-cryptroot-bootfs-img-mount/
+
         # We supply a pre-baked Raspberry Pi Pre-boot-authentication initramfs, which we insert here.
         # This image is maintained by Raspberry Pi, with sources available on our GitHub pages.
         announce_start "Insert pre-boot authentication initramfs"
-        zstd -f -d "$(get_cryptroot)" -o "${TMP_DIR}"/rpi-cryptroot-bootfs-img-mount/
+        cp "$(get_cryptroot)" "${TMP_DIR}"/rpi-cryptroot-bootfs-img-mount/initramfs8
         announce_stop "Insert pre-boot authentication initramfs"
 
         announce_start "Cryptroot synthesis"
 
         # Use subshells to avoid polluting our CWD.
-        ( augment_initramfs "${TMP_DIR}"/rpi-cryptroot-bootfs-img-mount/ )
+        ( augment_initramfs "${TMP_DIR}"/rpi-cryptroot-bootfs-img-mount/initramfs8 )
         announce_stop "Cryptroot synthesis"
 
         announce_start "cmdline.txt modification"
