@@ -28,7 +28,6 @@ rpi-sb-provisioner (2.0.0) unstable; urgency=medium
     - Remove DEMO_MODE from all components
     - Switch from system curl to minimal embedded curl library
     - Reduce attack surface by disabling unneeded curl features
-    - Use libcurl directly instead of calling out to curl binary
 
   * UI and Configuration:
     - Add customisation scripts to the WebUI
