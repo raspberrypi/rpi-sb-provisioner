@@ -9,6 +9,22 @@
 namespace provisioner {
     namespace {
         const std::string OPTIONS_PATH = "/options";
+
+        // Function to remove contents of a directory
+        void removeDirectoryContents(const std::string& dirPath) {
+            try {
+                for (const auto& entry : std::filesystem::directory_iterator(dirPath)) {
+                    if (std::filesystem::is_directory(entry.path())) {
+                        std::filesystem::remove_all(entry.path());
+                    } else {
+                        std::filesystem::remove(entry.path());
+                    }
+                }
+                LOG_INFO << "Removed contents of directory: " << dirPath;
+            } catch (const std::filesystem::filesystem_error& e) {
+                LOG_ERROR << "Failed to remove directory contents: " << e.what();
+            }
+        }
     }
 
     Options::Options() = default;
@@ -138,6 +154,17 @@ namespace provisioner {
                 config_write.close();
             }
 
+            // Check if RPI_SB_WORKDIR is set, and if so, clear its contents
+            auto workdir = existing_options.find("RPI_SB_WORKDIR");
+            if (workdir != existing_options.end() && !workdir->second.empty()) {
+                if (std::filesystem::exists(workdir->second) && std::filesystem::is_directory(workdir->second)) {
+                    LOG_INFO << "Removing contents of RPI_SB_WORKDIR at " << workdir->second;
+                    removeDirectoryContents(workdir->second);
+                } else {
+                    LOG_WARN << "RPI_SB_WORKDIR path does not exist or is not a directory: " << workdir->second;
+                }
+            }
+
             // Check if manufacturing DB path is set and create if needed
             auto mfg_db_path = existing_options.find("RPI_SB_PROVISIONER_MANUFACTURING_DB");
             if (mfg_db_path != existing_options.end()) {
@@ -181,6 +208,78 @@ namespace provisioner {
             auto resp = HttpResponse::newHttpResponse();
             resp->setStatusCode(k200OK);
             callback(resp);
+        });
+
+        // Add a new endpoint to clear the workdir contents when an image is selected
+        app.registerHandler(OPTIONS_PATH + "/clear-workdir", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
+            LOG_INFO << "Options::clear-workdir";
+
+            // Read config file to get RPI_SB_WORKDIR value
+            std::ifstream config_file("/etc/rpi-sb-provisioner/config");
+            std::string line;
+            std::string workdir;
+            
+            if (!config_file.is_open()) {
+                LOG_ERROR << "Failed to open config file to determine RPI_SB_WORKDIR";
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Failed to read configuration file",
+                    drogon::k500InternalServerError,
+                    "Config Error",
+                    "CONFIG_READ_ERROR"
+                );
+                callback(resp);
+                return;
+            }
+
+            // Find the RPI_SB_WORKDIR value
+            while (std::getline(config_file, line)) {
+                // Skip commented lines
+                if (!line.empty() && line[0] == '#') {
+                    continue;
+                }
+                
+                size_t delimiter_pos = line.find('=');
+                if (delimiter_pos != std::string::npos) {
+                    std::string key = line.substr(0, delimiter_pos);
+                    std::string value = line.substr(delimiter_pos + 1);
+                    if (key == "RPI_SB_WORKDIR") {
+                        workdir = value;
+                        break;
+                    }
+                }
+            }
+            config_file.close();
+
+            // Check if workdir was found
+            if (workdir.empty()) {
+                LOG_INFO << "RPI_SB_WORKDIR not set in configuration";
+                auto resp = HttpResponse::newHttpResponse();
+                resp->setStatusCode(k200OK);
+                callback(resp);
+                return;
+            }
+
+            LOG_INFO << "Clearing contents of RPI_SB_WORKDIR: " << workdir;
+
+            if (std::filesystem::exists(workdir) && std::filesystem::is_directory(workdir)) {
+                removeDirectoryContents(workdir);
+                
+                auto resp = HttpResponse::newHttpResponse();
+                resp->setStatusCode(k200OK);
+                callback(resp);
+            } else {
+                LOG_ERROR << "RPI_SB_WORKDIR does not exist or is not a directory: " << workdir;
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "RPI_SB_WORKDIR does not exist or is not a directory",
+                    drogon::k500InternalServerError,
+                    "Invalid Directory",
+                    "INVALID_WORKDIR",
+                    "Path: " + workdir
+                );
+                callback(resp);
+            }
         });
     }
 }

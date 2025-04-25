@@ -26,6 +26,7 @@
             }
 
             try {
+                // Set the new gold master image
                 const response = await fetch('/options/set', {
                     method: 'POST',
                     headers: {
@@ -37,6 +38,20 @@
                 });
 
                 if (response.ok) {
+                    // Clear the workdir contents by calling the clear-workdir endpoint
+                    // The endpoint will determine the workdir path from the config
+                    const clearResponse = await fetch('/options/clear-workdir', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        }
+                    });
+                    
+                    if (!clearResponse.ok) {
+                        showMessage('Gold master image updated but failed to clear work directory', true);
+                        return;
+                    }
+                    
                     showMessage('Gold master image updated successfully');
                     location.reload();
                 } else {
@@ -45,6 +60,31 @@
             } catch (error) {
                 console.error('Error:', error);
                 showMessage('Failed to update gold master image', true);
+            }
+        }
+
+        async function clearCaches() {
+            if (!confirm('Are you sure you want to clear the cached files for this image?')) {
+                return;
+            }
+
+            try {
+                // Call the clear-workdir endpoint to clear the cache
+                const clearResponse = await fetch('/options/clear-workdir', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+                
+                if (clearResponse.ok) {
+                    showMessage('Cache files cleared successfully');
+                } else {
+                    showMessage('Failed to clear cache files', true);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                showMessage('Failed to clear cache files', true);
             }
         }
 
@@ -544,7 +584,11 @@
                     <td class="sha256-cell" data-image="<%c++ $$ << image.at("name"); %>"><%c++ $$ << image.at("sha256"); %></td>
                     <td><%c++ $$ << (image.at("is_gold_master") == "true" ? "Current Gold Master" : ""); %></td>
                     <td>
-                        <button class="use-btn" onclick="useImage('<%c++ $$ << image.at("name"); %>')">Use</button>
+                        <%c++ if (image.at("is_gold_master") == "true") { %>
+                            <button class="clear-cache-btn" onclick="clearCaches()">Clear Caches</button>
+                        <%c++ } else { %>
+                            <button class="use-btn" onclick="useImage('<%c++ $$ << image.at("name"); %>')">Use</button>
+                        <%c++ } %>
                         <button class="delete-btn" onclick="deleteImage('<%c++ $$ << image.at("name"); %>')">Delete</button>
                     </td>
                 </tr>
@@ -556,7 +600,7 @@
         .gold-master {
             background-color: #e6ffe6;
         }
-        .use-btn, .delete-btn {
+        .use-btn, .delete-btn, .clear-cache-btn {
             min-width: 80px;
             padding: 8px 16px;
             margin-right: 5px;
@@ -572,6 +616,14 @@
         }
         .use-btn:hover {
             background-color: #45a049;
+        }
+        .clear-cache-btn {
+            background-color: #2196F3;
+            color: white;
+            border: none;
+        }
+        .clear-cache-btn:hover {
+            background-color: #0b7dda;
         }
         .delete-btn {
             background-color: #f44336;
