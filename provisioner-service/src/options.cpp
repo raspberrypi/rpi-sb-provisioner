@@ -5,6 +5,7 @@
 #include <options.h>
 #include <drogon/HttpAppFramework.h>
 #include "utils.h"
+#include "include/audit.h"
 
 namespace provisioner {
     namespace {
@@ -35,6 +36,9 @@ namespace provisioner {
         
         app.registerHandler(OPTIONS_PATH + "/get", [&app](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
             LOG_INFO << "Options::registerHandlers";
+            
+            // Add audit log entry for handler access
+            AuditLog::logHandlerAccess(req, "/options/get");
 
             Json::Value options;
             std::ifstream config_file("/etc/rpi-sb-provisioner/config");
@@ -91,6 +95,9 @@ namespace provisioner {
 
         app.registerHandler(OPTIONS_PATH + "/set", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
             LOG_INFO << "Options::set";
+            
+            // Add audit log entry for handler access
+            AuditLog::logHandlerAccess(req, "/options/set");
 
             auto body = req->getJsonObject();
             if (!body) {
@@ -172,6 +179,10 @@ namespace provisioner {
                     std::ofstream mfg_db(mfg_db_path->second);
                     if (!mfg_db.is_open()) {
                         LOG_ERROR << "Failed to create manufacturing DB file at " << mfg_db_path->second;
+                        
+                        // Log failed file creation to audit log
+                        AuditLog::logFileSystemAccess("CREATE", mfg_db_path->second, false);
+                        
                         auto resp = provisioner::utils::createErrorResponse(
                             req,
                             "Failed to create manufacturing database file",
@@ -185,12 +196,22 @@ namespace provisioner {
                     }
                     mfg_db.close();
                     
+                    // Log successful file creation to audit log
+                    AuditLog::logFileSystemAccess("CREATE", mfg_db_path->second, true);
+                    
                     // Set root read-write permissions (0600)
                     try {
                         std::filesystem::permissions(mfg_db_path->second, 
                             std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
+                        
+                        // Log successful permission change to audit log
+                        AuditLog::logFileSystemAccess("CHMOD", mfg_db_path->second, true);
                     } catch (const std::filesystem::filesystem_error& e) {
                         LOG_ERROR << "Failed to set permissions on manufacturing DB file: " << e.what();
+                        
+                        // Log failed permission change to audit log
+                        AuditLog::logFileSystemAccess("CHMOD", mfg_db_path->second, false, "", e.what());
+                        
                         auto resp = provisioner::utils::createErrorResponse(
                             req,
                             "Failed to set permissions on manufacturing database file",
@@ -213,6 +234,9 @@ namespace provisioner {
         // Add a new endpoint to clear the workdir contents when an image is selected
         app.registerHandler(OPTIONS_PATH + "/clear-workdir", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
             LOG_INFO << "Options::clear-workdir";
+            
+            // Add audit log entry for handler access
+            AuditLog::logHandlerAccess(req, "/options/clear-workdir");
 
             // Read config file to get RPI_SB_WORKDIR value
             std::ifstream config_file("/etc/rpi-sb-provisioner/config");
@@ -263,12 +287,18 @@ namespace provisioner {
             LOG_INFO << "Clearing contents of RPI_SB_WORKDIR: " << workdir;
 
             if (std::filesystem::exists(workdir) && std::filesystem::is_directory(workdir)) {
+                // Log directory deletion to audit log
+                AuditLog::logFileSystemAccess("DELETE_CONTENTS", workdir, true);
+                
                 removeDirectoryContents(workdir);
                 
                 auto resp = HttpResponse::newHttpResponse();
                 resp->setStatusCode(k200OK);
                 callback(resp);
             } else {
+                // Log failed directory access to audit log
+                AuditLog::logFileSystemAccess("DELETE_CONTENTS", workdir, false, "", "Directory does not exist");
+                
                 LOG_ERROR << "RPI_SB_WORKDIR does not exist or is not a directory: " << workdir;
                 auto resp = provisioner::utils::createErrorResponse(
                     req,

@@ -7,6 +7,7 @@
 #include <sstream>
 #include <systemd/sd-bus.h>
 #include "utils.h"
+#include "include/audit.h"
 
 using namespace drogon;
 
@@ -41,6 +42,9 @@ namespace provisioner {
     void Devices::registerHandlers(drogon::HttpAppFramework &app)
     {
         app.registerHandler("/devices", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
+            // Add audit log entry for handler access
+            AuditLog::logHandlerAccess(req, "/devices");
+            
             auto devices = std::make_unique<DeviceList>();
             auto resp = HttpResponse::newHttpResponse();
 
@@ -168,6 +172,9 @@ namespace provisioner {
             auto resp = HttpResponse::newHttpResponse();
             LOG_INFO << "Device detail request for serial: '" << serialno << "'";
             
+            // Add audit log entry for handler access
+            AuditLog::logHandlerAccess(req, "/devices/" + serialno);
+            
             if (serialno.empty()) {
                 LOG_ERROR << "Empty serial number in request";
                 auto resp = provisioner::utils::createErrorResponse(
@@ -257,25 +264,43 @@ namespace provisioner {
                 std::string logPath = "/var/log/rpi-sb-provisioner/" + utils::sanitize_path_component(device.serial) + "/provisioner.log";
                 std::ifstream provisionerFile(logPath);
                 if (provisionerFile.is_open()) {
+                    // Log file access to audit log
+                    AuditLog::logFileSystemAccess("READ", logPath, true);
+                    
                     std::stringstream buffer;
                     buffer << provisionerFile.rdbuf();
                     provisioner_log = buffer.str();
+                } else {
+                    // Log failed file access to audit log
+                    AuditLog::logFileSystemAccess("READ", logPath, false);
                 }
 
                 logPath = "/var/log/rpi-sb-provisioner/" + utils::sanitize_path_component(device.serial) + "/bootstrap.log";
                 std::ifstream bootstrapFile(logPath);
                 if (bootstrapFile.is_open()) {
+                    // Log file access to audit log
+                    AuditLog::logFileSystemAccess("READ", logPath, true);
+                    
                     std::stringstream buffer;
                     buffer << bootstrapFile.rdbuf();
                     bootstrap_log = buffer.str();
+                } else {
+                    // Log failed file access to audit log
+                    AuditLog::logFileSystemAccess("READ", logPath, false);
                 }
 
                 logPath = "/var/log/rpi-sb-provisioner/" + utils::sanitize_path_component(device.serial) + "/triage.log";
                 std::ifstream triageFile(logPath);
                 if (triageFile.is_open()) {
+                    // Log file access to audit log
+                    AuditLog::logFileSystemAccess("READ", logPath, true);
+                    
                     std::stringstream buffer;
                     buffer << triageFile.rdbuf();
                     triage_log = buffer.str();
+                } else {
+                    // Log failed file access to audit log
+                    AuditLog::logFileSystemAccess("READ", logPath, false);
                 }
 
                 HttpViewData viewData;
@@ -305,6 +330,9 @@ namespace provisioner {
             auto resp = HttpResponse::newHttpResponse();
             LOG_INFO << "Provisioner log request for serial: '" << serialno << "'";
             
+            // Add audit log entry for handler access
+            AuditLog::logHandlerAccess(req, "/devices/" + serialno + "/log/provisioner");
+            
             if (serialno.empty()) {
                 LOG_ERROR << "Empty serial number in request";
                 auto resp = provisioner::utils::createErrorResponse(
@@ -324,6 +352,9 @@ namespace provisioner {
             std::ifstream logFile(logPath);
             if (!logFile.is_open()) {
                 LOG_ERROR << "Failed to open log file: " << logPath;
+                // Log failed file access to audit log
+                AuditLog::logFileSystemAccess("READ", logPath, false);
+                
                 auto resp = provisioner::utils::createErrorResponse(
                     req,
                     "Log file not found",
@@ -336,6 +367,9 @@ namespace provisioner {
                 return;
             }
 
+            // Log successful file access to audit log
+            AuditLog::logFileSystemAccess("READ", logPath, true);
+            
             LOG_INFO << "Successfully opened log file: " << logPath;
             std::stringstream buffer;
             buffer << logFile.rdbuf();

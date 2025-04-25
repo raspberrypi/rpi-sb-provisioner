@@ -220,6 +220,7 @@ target_sources(rpi-provisioner-ui
     src/services.cpp
     src/manufacturing.cpp
     src/scantool.cpp
+    src/audit.cpp
     ${VIEW_SOURCES}
 )
 

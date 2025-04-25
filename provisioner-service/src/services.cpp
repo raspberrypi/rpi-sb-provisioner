@@ -26,6 +26,7 @@ using namespace trantor;
 
 #include <services.h>
 #include "utils.h"
+#include "include/audit.h"
 
 namespace provisioner {
 
@@ -38,6 +39,9 @@ namespace provisioner {
         app.registerHandler("/services", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
             using namespace trantor;
             LOG_INFO << "Services::services";
+            
+            // Add audit log entry for handler access
+            AuditLog::logHandlerAccess(req, "/services");
 
             std::vector<ServiceInfo> serviceInfos;
             sd_bus *bus = nullptr;
@@ -349,6 +353,9 @@ namespace provisioner {
             using namespace trantor;
             LOG_INFO << "Services::service-log for " << name;
             
+            // Add audit log entry for handler access
+            AuditLog::logHandlerAccess(req, "/service-log/" + name);
+            
             std::string serviceName = name;
 
             // Validate that the service name starts with one of the allowed prefixes
@@ -366,6 +373,9 @@ namespace provisioner {
                 callback(resp);
                 return;
             }
+
+            // Log systemd log access to audit log
+            AuditLog::logSystemdAccess(serviceName);
 
             // Open the journal
             sd_journal *j;
@@ -518,6 +528,9 @@ namespace provisioner {
             using namespace trantor;
             LOG_INFO << "Services::api-service-log for " << name;
             
+            // Add audit log entry for handler access
+            AuditLog::logHandlerAccess(req, "/api/service-log/" + name);
+            
             std::string serviceName = name;
 
             // Validate that the service name starts with one of the allowed prefixes
@@ -536,6 +549,9 @@ namespace provisioner {
                 callback(resp);
                 return;
             }
+
+            // Log systemd log access to audit log
+            AuditLog::logSystemdAccess(serviceName);
 
             // Open the journal
             sd_journal *j;

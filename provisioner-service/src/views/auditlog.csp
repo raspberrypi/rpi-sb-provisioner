@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Audit Log</title>
+    <%view stylesheet %>
+    <style>
+        .filters {
+            margin-bottom: 20px;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+            border: 1px solid #e9ecef;
+        }
+        
+        .filters .row {
+            display: flex;
+            flex-wrap: wrap;
+            margin-bottom: 10px;
+        }
+        
+        .filters .form-group {
+            margin-right: 15px;
+            margin-bottom: 10px;
+        }
+        
+        .filters label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        
+        .filters select,
+        .filters input {
+            padding: 8px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            width: 100%;
+        }
+        
+        .filters button {
+            padding: 8px 15px;
+            background-color: #0066cc;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-top: 24px;
+        }
+        
+        .filters button:hover {
+            background-color: #0056b3;
+        }
+        
+        .table-container {
+            overflow-x: auto;
+            max-height: 70vh;
+            margin-top: 20px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background-color: #fafafa;
+            padding: 2px;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        th, td {
+            padding: 10px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        th {
+            background-color: #f2f2f2;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        
+        tr:hover {
+            background-color: #f5f5f5;
+        }
+        
+        .event-type {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.8em;
+            font-weight: bold;
+            text-align: center;
+        }
+        
+        .event-type-handler {
+            background-color: #e6f7ff;
+            color: #0066cc;
+        }
+        
+        .event-type-file {
+            background-color: #fff7e6;
+            color: #fa8c16;
+        }
+        
+        .event-type-systemd {
+            background-color: #f6ffed;
+            color: #52c41a;
+        }
+        
+        .success-true {
+            color: green;
+        }
+        
+        .success-false {
+            color: red;
+        }
+        
+        .no-entries {
+            text-align: center;
+            padding: 20px;
+            font-style: italic;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <%view navbar %>
+
+    <h1>Audit Log</h1>
+    
+    <div class="filters">
+        <form id="filterForm" method="get" action="/auditlog">
+            <div class="row">
+                <div class="form-group">
+                    <label for="event_type">Event Type:</label>
+                    <select id="event_type" name="event_type">
+                        <option value="">All Events</option>
+                        <option value="HANDLER_ACCESS" <%c++ if (@@.get<std::string>("event_type") == "HANDLER_ACCESS") $$ << "selected"; %>>Handler Access</option>
+                        <option value="FILE_ACCESS" <%c++ if (@@.get<std::string>("event_type") == "FILE_ACCESS") $$ << "selected"; %>>File Access</option>
+                        <option value="SYSTEMD_LOG_ACCESS" <%c++ if (@@.get<std::string>("event_type") == "SYSTEMD_LOG_ACCESS") $$ << "selected"; %>>Systemd Log Access</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="start_date">Start Date:</label>
+                    <input type="datetime-local" id="start_date" name="start_date" value="<%c++ $$ << @@.get<std::string>("start_date"); %>">
+                </div>
+                
+                <div class="form-group">
+                    <label for="end_date">End Date:</label>
+                    <input type="datetime-local" id="end_date" name="end_date" value="<%c++ $$ << @@.get<std::string>("end_date"); %>">
+                </div>
+                
+                <div class="form-group">
+                    <label for="limit">Limit:</label>
+                    <select id="limit" name="limit">
+                        <option value="50" <%c++ if (@@.get<std::string>("limit") == "50") $$ << "selected"; %>>50 entries</option>
+                        <option value="100" <%c++ if (@@.get<std::string>("limit") == "100" || @@.get<std::string>("limit").empty()) $$ << "selected"; %>>100 entries</option>
+                        <option value="250" <%c++ if (@@.get<std::string>("limit") == "250") $$ << "selected"; %>>250 entries</option>
+                        <option value="500" <%c++ if (@@.get<std::string>("limit") == "500") $$ << "selected"; %>>500 entries</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <button type="submit">Apply Filters</button>
+                </div>
+            </div>
+        </form>
+    </div>
+    
+    <div class="table-container">
+        <table id="auditLogTable">
+            <thead>
+                <tr>
+                    <th>Timestamp</th>
+                    <th>Event Type</th>
+                    <th>Client IP</th>
+                    <th>Handler / Operation</th>
+                    <th>Target Path</th>
+                    <th>Success</th>
+                    <th>Additional Info</th>
+                </tr>
+            </thead>
+            <tbody>
+            <%c++ 
+            auto auditEntries = @@.get<std::vector<std::map<std::string, std::string>>>("audit_entries");
+            if(auditEntries.size() > 0) {
+            %>
+                <%c++ for(const auto& entry : auditEntries) { 
+                    // Determine event type for styling
+                    std::string eventTypeClass = "";
+                    if (entry.at("event_type") == "HANDLER_ACCESS") {
+                        eventTypeClass = "event-type-handler";
+                    } else if (entry.at("event_type") == "FILE_ACCESS") {
+                        eventTypeClass = "event-type-file";
+                    } else if (entry.at("event_type") == "SYSTEMD_LOG_ACCESS") {
+                        eventTypeClass = "event-type-systemd";
+                    }
+                    
+                    // Format event type for display
+                    std::string displayEventType = "";
+                    if (entry.at("event_type") == "HANDLER_ACCESS") {
+                        displayEventType = "API Access";
+                    } else if (entry.at("event_type") == "FILE_ACCESS") {
+                        displayEventType = "File Access";
+                    } else if (entry.at("event_type") == "SYSTEMD_LOG_ACCESS") {
+                        displayEventType = "Systemd Log";
+                    } else {
+                        displayEventType = entry.at("event_type");
+                    }
+                %>
+                    <tr>
+                        <td><%c++ $$ << entry.at("timestamp"); %></td>
+                        <td><span class="event-type <%c++ $$ << eventTypeClass; %>"><%c++ $$ << displayEventType; %></span></td>
+                        <td><%c++ 
+                            if (entry.find("client_ip") != entry.end()) {
+                                $$ << entry.at("client_ip");
+                            }
+                        %></td>
+                        <td><%c++ 
+                            if (entry.find("handler_path") != entry.end() && !entry.at("handler_path").empty()) {
+                                $$ << entry.at("handler_path");
+                            } else if (entry.find("operation") != entry.end() && !entry.at("operation").empty()) {
+                                $$ << entry.at("operation");
+                            }
+                        %></td>
+                        <td><%c++ 
+                            if (entry.find("target_path") != entry.end() && !entry.at("target_path").empty()) {
+                                $$ << entry.at("target_path");
+                            }
+                        %></td>
+                        <td><%c++ 
+                            if (entry.find("success") != entry.end()) {
+                                if (entry.at("success") == "Yes") {
+                                    $$ << "<span class='success-true'>Success</span>";
+                                } else {
+                                    $$ << "<span class='success-false'>Failed</span>";
+                                }
+                            }
+                        %></td>
+                        <td><%c++ 
+                            if (entry.find("additional_info") != entry.end() && !entry.at("additional_info").empty()) {
+                                $$ << entry.at("additional_info");
+                            } else if (entry.find("user_agent") != entry.end() && !entry.at("user_agent").empty()) {
+                                $$ << entry.at("user_agent");
+                            }
+                        %></td>
+                    </tr>
+                <%c++ } %>
+            <%c++ } else { %>
+                    <tr>
+                        <td colspan="7" class="no-entries">No audit log entries found matching the filters</td>
+                    </tr>
+            <%c++ } %>
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        // Convert date inputs to correct format
+        document.addEventListener('DOMContentLoaded', function() {
+            // Format date inputs if they don't have time components
+            const startDate = document.getElementById('start_date');
+            const endDate = document.getElementById('end_date');
+            
+            // Helper function to format a date string to datetime-local format
+            function formatDateForInput(dateStr) {
+                if (!dateStr) return '';
+                
+                // If already contains 'T' (ISO format), return as is
+                if (dateStr.includes('T')) return dateStr;
+                
+                // Otherwise, try to convert YYYY-MM-DD format to YYYY-MM-DDT00:00
+                try {
+                    const date = new Date(dateStr);
+                    return date.toISOString().slice(0, 16);
+                } catch (e) {
+                    return dateStr;
+                }
+            }
+            
+            if (startDate.value) {
+                startDate.value = formatDateForInput(startDate.value);
+            }
+            
+            if (endDate.value) {
+                endDate.value = formatDateForInput(endDate.value);
+            }
+        });
+    </script>
+</body>
+</html> 

@@ -11,6 +11,7 @@
 
 #include "include/manufacturing.h"
 #include "utils.h"
+#include "include/audit.h"
 
 namespace provisioner {
 
@@ -21,6 +22,10 @@ namespace provisioner {
     void Manufacturing::registerHandlers(HttpAppFramework &app) {
         app.registerHandler("/manu-db", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
             LOG_INFO << "Manufacturing::manu-db";
+            
+            // Add audit log entry for handler access
+            AuditLog::logHandlerAccess(req, "/manu-db");
+            
             auto resp = HttpResponse::newHttpResponse();
             
             // Get manufacturing DB path from config
@@ -32,6 +37,10 @@ namespace provisioner {
             
             if (!configFile.is_open()) {
                 LOG_ERROR << "Failed to open config file";
+                
+                // Log failed file access to audit log
+                AuditLog::logFileSystemAccess("READ", "/etc/rpi-sb-provisioner/config", false);
+                
                 auto resp = provisioner::utils::createErrorResponse(
                     req,
                     "Failed to read configuration file",
@@ -42,6 +51,9 @@ namespace provisioner {
                 callback(resp);
                 return;
             }
+
+            // Log successful file access to audit log
+            AuditLog::logFileSystemAccess("READ", "/etc/rpi-sb-provisioner/config", true);
 
             while (std::getline(configFile, line)) {
                 size_t delimiter_pos = line.find('=');
@@ -68,6 +80,10 @@ namespace provisioner {
                 return;
             } else if (!std::filesystem::exists(dbPath)) {
                 LOG_ERROR << "Manufacturing database file does not exist: " << dbPath;
+                
+                // Log failed file access to audit log
+                AuditLog::logFileSystemAccess("READ", dbPath, false);
+                
                 auto resp = provisioner::utils::createErrorResponse(
                     req,
                     "Manufacturing database file not found",
@@ -79,6 +95,9 @@ namespace provisioner {
                 callback(resp);
                 return;
             } else {
+                // Log successful database access to audit log
+                AuditLog::logFileSystemAccess("READ", dbPath, true);
+                
                 // Open the database
                 sqlite3 *db;
                 int rc = sqlite3_open(dbPath.c_str(), &db);

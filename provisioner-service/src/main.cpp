@@ -22,6 +22,7 @@
 #include <services.h>
 #include "manufacturing.h"
 #include "include/scantool.h"
+#include "include/audit.h"
 
 using namespace drogon;
 
@@ -365,6 +366,7 @@ int main(int argc, char* argv[])
     provisioner::Services serviceHandlers = {};
     provisioner::Manufacturing manufacturingHandlers = {};
     provisioner::ScanTool scanToolHandlers = {};
+    provisioner::AuditLog auditLogHandlers = {}; // Audit logging for security monitoring
 
     auto& app = HttpAppFramework::instance();
 
@@ -383,6 +385,7 @@ int main(int argc, char* argv[])
     serviceHandlers.registerHandlers(app);
     manufacturingHandlers.registerHandlers(app);
     scanToolHandlers.registerHandlers(app);
+    auditLogHandlers.registerHandlers(app);
 
     // Register root path handler to redirect to devices
     app.registerHandler("/", [](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
