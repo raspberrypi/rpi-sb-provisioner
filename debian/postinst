@@ -5,10 +5,33 @@ mkdir -p /etc/rpi-sb-provisioner
 mkdir -p /srv/rpi-sb-provisioner
 mkdir -p /var/log/rpi-sb-provisioner
 
+# Default manufacturing DB path
+MFG_DB_PATH="/srv/rpi-sb-provisioner/manufacturing.db"
+STATE_DB_PATH="/srv/rpi-sb-provisioner/state.db"
+
+# Check if config file exists and try to get manufacturing DB path from it
+if [ -f "/etc/rpi-sb-provisioner/config" ]; then
+    # Source the config file to get shell variables
+    . /etc/rpi-sb-provisioner/config
+    
+    # Use the RPI_SB_PROVISIONER_MANUFACTURING_DB variable if it exists
+    if [ -n "$RPI_SB_PROVISIONER_MANUFACTURING_DB" ]; then
+        MFG_DB_PATH="$RPI_SB_PROVISIONER_MANUFACTURING_DB"
+    fi
+
+    # Use the RPI_SB_PROVISIONER_STATE_DB variable if it exists
+    if [ -n "$RPI_SB_PROVISIONER_STATE_DB" ]; then
+        STATE_DB_PATH="$RPI_SB_PROVISIONER_STATE_DB"
+    fi
+fi
+
+# Create directory for state DB if needed
+mkdir -p "$(dirname "$STATE_DB_PATH")"
+
 # Initialize SQLite databases
-if [ ! -f "/srv/rpi-sb-provisioner/state.db" ]; then
-    touch /srv/rpi-sb-provisioner/state.db
-    chmod 644 /srv/rpi-sb-provisioner/state.db
+if [ ! -f "$STATE_DB_PATH" ]; then
+    touch "$STATE_DB_PATH"
+    chmod 644 "$STATE_DB_PATH"
 fi
 
 # Define the expected schema for state.db devices table
@@ -21,18 +44,18 @@ STATE_DB_SCHEMA="id              integer primary key,
     ts              timestamp           default current_timestamp"
 
 # Ensure WAL journal mode
-sqlite3 "/srv/rpi-sb-provisioner/state.db" "PRAGMA journal_mode=WAL;" > /dev/null 2>&1
+sqlite3 "$STATE_DB_PATH" "PRAGMA journal_mode=WAL;" > /dev/null 2>&1
 
 # Check if the table exists in state.db
-STATE_TABLE_EXISTS=$(sqlite3 "/srv/rpi-sb-provisioner/state.db" "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='devices';")
+STATE_TABLE_EXISTS=$(sqlite3 "$STATE_DB_PATH" "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='devices';")
 
 if [ "$STATE_TABLE_EXISTS" -eq 0 ]; then
     # Table doesn't exist, create it
-    sqlite3 "/srv/rpi-sb-provisioner/state.db" "CREATE TABLE devices($STATE_DB_SCHEMA);" > /dev/null 2>&1
+    sqlite3 "$STATE_DB_PATH" "CREATE TABLE devices($STATE_DB_SCHEMA);" > /dev/null 2>&1
 else
     # Table exists, check if migration is needed
     # Get current schema
-    CURRENT_COLUMNS=$(sqlite3 "/srv/rpi-sb-provisioner/state.db" "PRAGMA table_info(devices);" | awk -F'|' '{print $2}' | tr '\n' ',')
+    CURRENT_COLUMNS=$(sqlite3 "$STATE_DB_PATH" "PRAGMA table_info(devices);" | awk -F'|' '{print $2}' | tr '\n' ',')
     
     # Check if any expected columns are missing
     for COL in id serial endpoint state image ip_address ts; do
@@ -40,12 +63,12 @@ else
             echo "Migration needed: column $COL is missing from state.db devices table"
             
             # Create a new table with correct schema
-            sqlite3 "/srv/rpi-sb-provisioner/state.db" "
+            sqlite3 "$STATE_DB_PATH" "
             CREATE TABLE devices_new($STATE_DB_SCHEMA);
             
             -- Copy data from old table to new table (handling all columns)
-            INSERT INTO devices_new(id, serial, endpoint, state, image, ip_address, ts)
-            SELECT id, serial, endpoint, state, image, ip_address, ts
+            INSERT INTO devices_new($CURRENT_COLUMNS)
+            SELECT ${CURRENT_COLUMNS}
             FROM devices
             ON CONFLICT(id) DO NOTHING;
             
@@ -62,12 +85,17 @@ else
     done
 fi
 
-if [ ! -f "/srv/rpi-sb-provisioner/manufacturing.db" ]; then
-    touch /srv/rpi-sb-provisioner/manufacturing.db
-    chmod 644 /srv/rpi-sb-provisioner/manufacturing.db
+# Create directory for manufacturing DB if needed
+mkdir -p "$(dirname "$MFG_DB_PATH")"
+
+# Initialize manufacturing DB
+if [ ! -f "$MFG_DB_PATH" ]; then
+    touch "$MFG_DB_PATH"
+    chmod 644 "$MFG_DB_PATH"
 fi
 
 # Define the expected schema for manufacturing.db devices table
+# secure is set to 1 by default, as any prior release of rpi-sb-provisioner will have only offered secure provisioning
 MFG_DB_SCHEMA="id              integer primary key,
     boardname       varchar(255)        not null,
     serial          char(8)             not null,
@@ -81,22 +109,22 @@ MFG_DB_SCHEMA="id              integer primary key,
     processor       varchar(255)        not null,
     memory          varchar(255)        not null,
     manufacturer    varchar(255)        not null,
-    secure          integer             not null,
+    secure          integer             not null DEFAULT 1,
     provision_ts    timestamp           default current_timestamp"
 
 # Ensure WAL journal mode
-sqlite3 "/srv/rpi-sb-provisioner/manufacturing.db" "PRAGMA journal_mode=WAL;" > /dev/null 2>&1
+sqlite3 "$MFG_DB_PATH" "PRAGMA journal_mode=WAL;" > /dev/null 2>&1
 
 # Check if the table exists in manufacturing.db
-MFG_TABLE_EXISTS=$(sqlite3 "/srv/rpi-sb-provisioner/manufacturing.db" "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='devices';")
+MFG_TABLE_EXISTS=$(sqlite3 "$MFG_DB_PATH" "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='devices';")
 
 if [ "$MFG_TABLE_EXISTS" -eq 0 ]; then
     # Table doesn't exist, create it
-    sqlite3 "/srv/rpi-sb-provisioner/manufacturing.db" "CREATE TABLE devices($MFG_DB_SCHEMA);" > /dev/null 2>&1
+    sqlite3 "$MFG_DB_PATH" "CREATE TABLE devices($MFG_DB_SCHEMA);" > /dev/null 2>&1
 else
     # Table exists, check if migration is needed
     # Get current schema
-    CURRENT_COLUMNS=$(sqlite3 "/srv/rpi-sb-provisioner/manufacturing.db" "PRAGMA table_info(devices);" | awk -F'|' '{print $2}' | tr '\n' ',')
+    CURRENT_COLUMNS=$(sqlite3 "$MFG_DB_PATH" "PRAGMA table_info(devices);" | awk -F'|' '{print $2}' | tr '\n' ',')
     
     # Check if any expected columns are missing
     for COL in id boardname serial eth_mac wifi_mac bt_mac mmc_size mmc_cid rpi_duid board_revision processor memory manufacturer secure provision_ts; do
@@ -104,12 +132,12 @@ else
             echo "Migration needed: column $COL is missing from manufacturing.db devices table"
             
             # Create a new table with correct schema
-            sqlite3 "/srv/rpi-sb-provisioner/manufacturing.db" "
+            sqlite3 "$MFG_DB_PATH" "
             CREATE TABLE devices_new($MFG_DB_SCHEMA);
             
             -- Copy data from old table to new table
-            INSERT INTO devices_new(id, boardname, serial, eth_mac, wifi_mac, bt_mac, mmc_size, mmc_cid, rpi_duid, board_revision, processor, memory, manufacturer, secure, provision_ts)
-            SELECT id, boardname, serial, eth_mac, wifi_mac, bt_mac, mmc_size, mmc_cid, rpi_duid, board_revision, processor, memory, manufacturer, secure, provision_ts
+            INSERT INTO devices_new($CURRENT_COLUMNS)
+            SELECT ${CURRENT_COLUMNS}
             FROM devices
             ON CONFLICT(id) DO NOTHING;
             

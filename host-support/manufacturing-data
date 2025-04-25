@@ -85,7 +85,7 @@ metadata_gather() {
         # Ensure WAL journal mode
         sqlite3 "${RPI_SB_PROVISIONER_MANUFACTURING_DB}" "PRAGMA journal_mode=WAL;" > /dev/null 2>&1
         
-        # Define the expected schema for devices table
+        # Define the schema for devices table
         EXPECTED_SCHEMA="id              integer primary key,
                     boardname       varchar(255)        not null,
                     serial          char(8)             not null,
@@ -108,52 +108,6 @@ metadata_gather() {
         if [ "$TABLE_EXISTS" -eq 0 ]; then
             # Table doesn't exist, create it
             sqlite3 "${RPI_SB_PROVISIONER_MANUFACTURING_DB}" "CREATE TABLE devices($EXPECTED_SCHEMA);" > /dev/null 2>&1
-        else
-            # Table exists, check if migration is needed
-            # Get current schema
-            CURRENT_COLUMNS=$(sqlite3 "${RPI_SB_PROVISIONER_MANUFACTURING_DB}" "PRAGMA table_info(devices);" | awk -F'|' '{print $2}' | tr '\n' ',')
-            
-            # Check if any expected columns are missing
-            for COL in id boardname serial eth_mac wifi_mac bt_mac mmc_size mmc_cid rpi_duid board_revision processor memory manufacturer secure provision_ts; do
-                if ! echo "$CURRENT_COLUMNS" | grep -q "$COL"; then
-                    echo "Migration needed: column $COL is missing from devices table"
-                    
-                    # Create a new table with correct schema
-                    sqlite3 "${RPI_SB_PROVISIONER_MANUFACTURING_DB}" "
-                    CREATE TABLE devices_new($EXPECTED_SCHEMA);
-                    
-                    -- Copy data from old table to new table
-                    INSERT INTO devices_new
-                    SELECT 
-                        id, 
-                        boardname, 
-                        serial, 
-                        eth_mac, 
-                        wifi_mac, 
-                        bt_mac, 
-                        mmc_size, 
-                        mmc_cid, 
-                        rpi_duid, 
-                        board_revision, 
-                        processor, 
-                        memory, 
-                        manufacturer, 
-                        secure, 
-                        provision_ts
-                    FROM devices
-                    ON CONFLICT(id) DO NOTHING;
-                    
-                    -- Drop old table
-                    DROP TABLE devices;
-                    
-                    -- Rename new table to original name
-                    ALTER TABLE devices_new RENAME TO devices;
-                    " > /dev/null 2>&1
-                    
-                    echo "Migration completed successfully"
-                    break
-                fi
-            done
         fi
         
         # Insert new device data
