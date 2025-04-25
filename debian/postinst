@@ -63,21 +63,20 @@ else
             echo "Migration needed: column $COL is missing from state.db devices table"
             
             # Create a new table with correct schema
-            sqlite3 "$STATE_DB_PATH" "
+            sqlite3 "$STATE_DB_PATH" <<EOF
             CREATE TABLE devices_new($STATE_DB_SCHEMA);
             
             -- Copy data from old table to new table (handling all columns)
-            INSERT INTO devices_new($CURRENT_COLUMNS)
-            SELECT ${CURRENT_COLUMNS}
-            FROM devices
-            ON CONFLICT(id) DO NOTHING;
+            INSERT INTO devices_new($(echo $CURRENT_COLUMNS | sed 's/,$//'))
+            SELECT $(echo $CURRENT_COLUMNS | sed 's/,$//') 
+            FROM devices;
             
             -- Drop old table
             DROP TABLE devices;
             
             -- Rename new table to original name
             ALTER TABLE devices_new RENAME TO devices;
-            " > /dev/null 2>&1
+EOF
             
             echo "Migration completed successfully for state.db"
             break
@@ -132,21 +131,20 @@ else
             echo "Migration needed: column $COL is missing from manufacturing.db devices table"
             
             # Create a new table with correct schema
-            sqlite3 "$MFG_DB_PATH" "
+            sqlite3 "$MFG_DB_PATH" <<EOF
             CREATE TABLE devices_new($MFG_DB_SCHEMA);
             
             -- Copy data from old table to new table
-            INSERT INTO devices_new($CURRENT_COLUMNS)
-            SELECT ${CURRENT_COLUMNS}
-            FROM devices
-            ON CONFLICT(id) DO NOTHING;
+            INSERT INTO devices_new($(echo $CURRENT_COLUMNS | sed 's/,$//'))
+            SELECT $(echo $CURRENT_COLUMNS | sed 's/,$//') 
+            FROM devices;
             
             -- Drop old table
             DROP TABLE devices;
             
             -- Rename new table to original name
             ALTER TABLE devices_new RENAME TO devices;
-            " > /dev/null 2>&1
+EOF
             
             echo "Migration completed successfully for manufacturing.db"
             break
