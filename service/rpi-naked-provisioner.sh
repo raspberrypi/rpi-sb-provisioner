@@ -26,8 +26,9 @@ die() {
 }
 
 log() {
-    echo "$@" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/provisioner.log
-    printf "%s\n" "$@"
+    timestamp=$(date +"%Y-%m-%d %H:%M:%S.$(date +%N | cut -c1-3)")
+    echo "[${timestamp}] $*" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/provisioner.log
+    printf "[%s] %s\n" "${timestamp}" "$*"
 }
 
 read_config

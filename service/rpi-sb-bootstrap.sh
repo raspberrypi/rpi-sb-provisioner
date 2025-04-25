@@ -30,6 +30,7 @@ HOLDING_LOCKFILE=0
 
 log() {
     log_file="${EARLY_LOG_DIRECTORY}/bootstrap.log"
+    timestamp=$(date +"%Y-%m-%d %H:%M:%S.$(date +%N | cut -c1-3)")
     message="$*"
     
     # Ensure log directory exists with proper permissions
@@ -38,8 +39,8 @@ log() {
     chmod 644 "$log_file"
     
     # Write log message directly without locking
-    echo "$message" >> "$log_file"
-    printf "%s\n" "$message"
+    echo "[${timestamp}] $message" >> "$log_file"
+    printf "[%s] %s\n" "${timestamp}" "$message"
 }
 
 cleanup() {

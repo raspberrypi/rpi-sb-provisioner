@@ -20,9 +20,10 @@ TARGET_DEVICE_SERIAL32=$(echo "${TARGET_DEVICE_SERIAL}" | cut -c $((${#TARGET_DE
 LOG_DIRECTORY="/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}"
 
 log() {
+    timestamp=$(date +"%Y-%m-%d %H:%M:%S.$(date +%N | cut -c1-3)")
     mkdir -p "${LOG_DIRECTORY}"
-    echo "$@" >> "${LOG_DIRECTORY}"/triage.log
-    printf "%s\n" "$@"
+    echo "[${timestamp}] $*" >> "${LOG_DIRECTORY}"/triage.log
+    printf "[%s] %s\n" "${timestamp}" "$*"
 }
 
 die() {
