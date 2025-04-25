@@ -286,30 +286,25 @@ namespace provisioner {
 
             LOG_INFO << "Clearing contents of RPI_SB_WORKDIR: " << workdir;
 
-            if (std::filesystem::exists(workdir) && std::filesystem::is_directory(workdir)) {
-                // Log directory deletion to audit log
-                AuditLog::logFileSystemAccess("DELETE_CONTENTS", workdir, true);
-                
-                removeDirectoryContents(workdir);
-                
-                auto resp = HttpResponse::newHttpResponse();
-                resp->setStatusCode(k200OK);
-                callback(resp);
+            if (std::filesystem::exists(workdir)) {
+                if (std::filesystem::is_directory(workdir)) {
+                    // Log directory deletion to audit log
+                    AuditLog::logFileSystemAccess("DELETE_CONTENTS", workdir, true);
+                    
+                    removeDirectoryContents(workdir);
+                } else {
+                    LOG_WARN << "RPI_SB_WORKDIR exists but is not a directory: " << workdir;
+                }
             } else {
-                // Log failed directory access to audit log
-                AuditLog::logFileSystemAccess("DELETE_CONTENTS", workdir, false, "", "Directory does not exist");
-                
-                LOG_ERROR << "RPI_SB_WORKDIR does not exist or is not a directory: " << workdir;
-                auto resp = provisioner::utils::createErrorResponse(
-                    req,
-                    "RPI_SB_WORKDIR does not exist or is not a directory",
-                    drogon::k500InternalServerError,
-                    "Invalid Directory",
-                    "INVALID_WORKDIR",
-                    "Path: " + workdir
-                );
-                callback(resp);
+                LOG_INFO << "RPI_SB_WORKDIR does not exist: " << workdir << " - considered already cleared";
+                // Log skipped operation to audit log
+                AuditLog::logFileSystemAccess("SKIP_DELETE_CONTENTS", workdir, true, "", "Directory does not exist");
             }
+            
+            // Return success in all cases
+            auto resp = HttpResponse::newHttpResponse();
+            resp->setStatusCode(k200OK);
+            callback(resp);
         });
     }
 }
