@@ -150,10 +150,11 @@ namespace provisioner {
             return;
         }
         
-        sqlite3_bind_text(stmt, 1, timestamp.str().c_str(), -1, SQLITE_STATIC);
-        sqlite3_bind_text(stmt, 2, clientIP.c_str(), -1, SQLITE_STATIC);
-        sqlite3_bind_text(stmt, 3, userAgent.c_str(), -1, SQLITE_STATIC);
-        sqlite3_bind_text(stmt, 4, handlerPath.c_str(), -1, SQLITE_STATIC);
+        std::string timestampStr = timestamp.str();
+        sqlite3_bind_text(stmt, 1, timestampStr.c_str(), timestampStr.length(), SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 2, clientIP.c_str(), clientIP.length(), SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 3, userAgent.c_str(), userAgent.length(), SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 4, handlerPath.c_str(), handlerPath.length(), SQLITE_TRANSIENT);
         
         rc = sqlite3_step(stmt);
         if (rc != SQLITE_DONE) {
@@ -199,12 +200,13 @@ namespace provisioner {
             return;
         }
         
-        sqlite3_bind_text(stmt, 1, timestamp.str().c_str(), -1, SQLITE_STATIC);
-        sqlite3_bind_text(stmt, 2, operation.c_str(), -1, SQLITE_STATIC);
-        sqlite3_bind_text(stmt, 3, path.c_str(), -1, SQLITE_STATIC);
+        std::string timestampStr = timestamp.str();
+        sqlite3_bind_text(stmt, 1, timestampStr.c_str(), timestampStr.length(), SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 2, operation.c_str(), operation.length(), SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 3, path.c_str(), path.length(), SQLITE_TRANSIENT);
         sqlite3_bind_int(stmt, 4, success ? 1 : 0);
-        sqlite3_bind_text(stmt, 5, username.c_str(), -1, SQLITE_STATIC);
-        sqlite3_bind_text(stmt, 6, additional_info.c_str(), -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, 5, username.c_str(), username.length(), SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 6, additional_info.c_str(), additional_info.length(), SQLITE_TRANSIENT);
         
         rc = sqlite3_step(stmt);
         if (rc != SQLITE_DONE) {
@@ -248,9 +250,10 @@ namespace provisioner {
             return;
         }
         
-        sqlite3_bind_text(stmt, 1, timestamp.str().c_str(), -1, SQLITE_STATIC);
-        sqlite3_bind_text(stmt, 2, service.c_str(), -1, SQLITE_STATIC);
-        sqlite3_bind_text(stmt, 3, username.c_str(), -1, SQLITE_STATIC);
+        std::string timestampStr = timestamp.str();
+        sqlite3_bind_text(stmt, 1, timestampStr.c_str(), timestampStr.length(), SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 2, service.c_str(), service.length(), SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 3, username.c_str(), username.length(), SQLITE_TRANSIENT);
         
         rc = sqlite3_step(stmt);
         if (rc != SQLITE_DONE) {
