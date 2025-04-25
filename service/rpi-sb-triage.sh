@@ -26,8 +26,6 @@ log() {
 }
 
 die() {
-    log "${TRIAGE_ABORTED}"
-    record_state "${TARGET_DEVICE_SERIAL}" "${TRIAGE_ABORTED}" "${TARGET_USB_PATH}"
     # shellcheck disable=SC2086
     echo "$@" ${DEBUG}
     exit 1

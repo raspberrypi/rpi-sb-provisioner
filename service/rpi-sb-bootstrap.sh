@@ -99,8 +99,6 @@ EARLY_LOG_DIRECTORY="/var/log/rpi-sb-provisioner/early/${TARGET_DEVICE_PATH}"
 mkdir -p "${EARLY_LOG_DIRECTORY}"
 
 die() {
-    echo "${BOOTSTRAP_ABORTED}" >> "${EARLY_LOG_DIRECTORY}"/bootstrap.log
-    record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
     # shellcheck disable=SC2086
     echo "$@" ${DEBUG}
     false
@@ -114,6 +112,8 @@ DEVICE_LOCK="${LOCK_BASE}/${TARGET_DEVICE_SERIAL}"
 if atomic_mkdir "$DEVICE_LOCK"; then
     HOLDING_LOCKFILE=1
 else
+    # Don't record state here, as this is an expected failure for devices
+    # that produce multiple matching descriptors.
     die "Bootstrap already in progress for ${TARGET_DEVICE_SERIAL}"
 fi
 
@@ -169,26 +169,32 @@ timeout_fatal() {
             ;;
         124)
             # Exit code 124 means the command timed out (TERM signal sent but command didn't exit)
+            record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
             die "\"${command}\" FAILED: Timed out after ${timeout_seconds} seconds (exit code 124)."
             ;;
         125)
             # Exit code 125 means the timeout command itself failed
+            record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
             die "\"${command}\" FAILED: The timeout command itself failed (exit code 125)."
             ;;
         126)
             # Exit code 126 means the command was found but could not be executed
+            record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
             die "\"${command}\" FAILED: Command found but could not be executed (exit code 126)."
             ;;
         127)
             # Exit code 127 means the command was not found
+            record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
             die "\"${command}\" FAILED: Command not found (exit code 127)."
             ;;
         137)
             # Exit code 137 (128+9) means the command was killed by SIGKILL (kill -9)
+            record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
             die "\"${command}\" FAILED: Command was killed by SIGKILL (exit code 137)."
             ;;
         *)
             # Any other non-zero exit code is a general failure
+            record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
             die "\"${command}\" FAILED: Command returned exit code ${command_exit_status}."
             ;;
     esac
@@ -203,9 +209,11 @@ get_signing_directives() {
             if [ -f "${CUSTOMER_KEY_FILE_PEM}" ]; then
                 echo "${CUSTOMER_KEY_FILE_PEM} -keyform PEM"
             else
+                record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
                 die "RSA private key \"${CUSTOMER_KEY_FILE_PEM}\" not a file. Aborting."
             fi
         else
+            record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
             die "Neither PKCS11 key name, or PEM key file specified. Aborting."
         fi
     fi
@@ -308,10 +316,13 @@ update_eeprom() {
     rm -f "${dst_image}"
     set -x
     # shellcheck disable=SC2086
-    rpi-eeprom-config \
+    if ! rpi-eeprom-config \
         --config "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" \
         --out "${dst_image}" ${sign_args} \
-        "${dst_image}.intermediate" || die "Failed to update EEPROM image"
+        "${dst_image}.intermediate"; then
+        record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
+        die "Failed to update EEPROM image"
+    fi
     rm -f "${dst_image}.intermediate"
     rm -f "${TMP_CONFIG_SIG}"
     set +x
@@ -374,6 +385,7 @@ case $TARGET_DEVICE_FAMILY in
         ALLOW_SIGNED_BOOT=0
         ;;
     *)
+        record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
         die "Refusing to provision an unknown device family"
         ;;
 esac
@@ -401,6 +413,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                 # It's a special case, and should not be used in normal operation.
                 # Additionally, this only works on Raspberry Pi 5-family devices.
                 if [ ! -f "${CUSTOMER_KEY_FILE_PEM}" ]; then
+                    record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
                     die "No customer key file to use for re-provisioning. Aborting."
                 fi
                 log "Re-signing bootcode for special re-provisioning case"
@@ -441,6 +454,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                     BOOTCODE_FLASHING_NAME="${SECURE_BOOTLOADER_DIRECTORY}/bootcode5.bin"
                     ;;
                 *)
+                    record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
                     die "Unable to identify EEPROM parameters for non-Pi4, Pi5 device. Aborting."
             esac
 
@@ -458,6 +472,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
 
                 if [ ! -e "${DESTINATION_EEPROM_SIGNATURE}" ]; then
                     if [ ! -e "${SOURCE_EEPROM_IMAGE}" ]; then
+                        record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
                         die "No Raspberry Pi EEPROM file to use as key vector"
                     else
                         update_eeprom "${SOURCE_EEPROM_IMAGE}" "${DESTINATION_EEPROM_IMAGE}" "${CUSTOMER_KEY_FILE_PEM}" "${CUSTOMER_PUBLIC_KEY_FILE}"
@@ -563,6 +578,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                     BOOTCODE_FLASHING_NAME="${NONSECURE_BOOTLOADER_DIRECTORY}/bootcode5.bin"
                     ;;
                 *)
+                    record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
                     die "Unable to identify EEPROM parameters for non-Pi4, Pi5 device. Aborting."
             esac
 
@@ -585,10 +601,13 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
 
             log "Writing key and EEPROM configuration to the device"
             # shellcheck disable=SC2086
-            rpi-eeprom-config \
+            if ! rpi-eeprom-config \
                 --config "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" \
                 --out "${DESTINATION_EEPROM_IMAGE}" \
-                "${SOURCE_EEPROM_IMAGE}" || die "Failed to update EEPROM image"
+                "${SOURCE_EEPROM_IMAGE}"; then
+                record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
+                die "Failed to update EEPROM image"
+            fi
             [ ! -f "/etc/rpi-sb-provisioner/special-skip-eeprom/${TARGET_DEVICE_SERIAL}" ] && timeout_fatal rpiboot -d "${NONSECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
         fi
         case ${TARGET_DEVICE_FAMILY} in
