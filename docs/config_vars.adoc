@@ -103,7 +103,7 @@ $ touch ${RPI_SB_PROVISIONER_MANUFACTURING_DB}
 
 Specify a directory to copy the device unique keypair to. The keys will be named <serial>.der and <serial>.pub
 
-Set to the path of a directory to use, leave blank to disable.
+Set to the path of a directory to use, otherwise keys will be stored alongside provisioning logs in a directory named "keypair".
 
 NOTE: These keys are sensitive key material, and you must ensure they are handled appropriately.
 
