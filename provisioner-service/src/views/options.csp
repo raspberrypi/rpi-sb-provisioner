@@ -196,6 +196,9 @@
                         <option value="5" <%c++ if(value == "5") $$ << "selected"; %>>5</option>
                         <option value="2W" <%c++ if(value == "2W") $$ << "selected"; %>>2W</option>
                     </select>
+                    <%c++ } else if(key == "RPI_DEVICE_LOCK_JTAG" || key == "RPI_DEVICE_EEPROM_WP_SET") { %>
+                    <input type="checkbox" id="<%c++ $$ << key; %>" name="<%c++ $$ << key; %>" <%c++ if(!value.empty()) $$ << "checked"; %>>
+                    <label for="<%c++ $$ << key; %>" style="font-weight: normal; display: inline;">Enable</label>
                     <%c++ } else { %>
                     <input type="text" id="<%c++ $$ << key; %>" name="<%c++ $$ << key; %>" value="<%c++ $$ << value; %>">
                     <%c++ } %>
@@ -221,32 +224,46 @@
                 <p>If <code>PROVISIONING_STYLE</code> is not specified, it defaults to <code>secure-boot</code>.</p>
             <%c++ } else if(key == "CUSTOMER_KEY_FILE_PEM") { %>
                 <p><strong>Optional, mandatory if CUSTOMER_KEY_PKCS11_NAME is not set</strong></p>
-                <p>The fully qualified path to your signing key, encoded in PEM format. This file is expected to contain an RSA 2048-bit Private Key.</p>
+                <p>The fully qualified path to your signing key. This file is expected to contain an RSA 2048-bit Private Key, encoded in PEM format.</p>
                 <p class="warning">This file should be considered key material, and should be protected while at rest and in use according to your threat model.</p>
             <%c++ } else if(key == "CUSTOMER_KEY_PKCS11_NAME") { %>
                 <p><strong>Optional, mandatory if CUSTOMER_KEY_FILE_PEM is not set</strong></p>
-                <p>The keypair alias for a PKCS11 keypair, typically stored on a Hardware Security Module (HSM) and provided through a helper tool. This is expected to act in place of the RSA 2048-bit Private key specified with CUSTOMER_KEY_FILE_PEM, and will be used as the signing device for all future pre-boot authentication images.</p>
+                <p>The keypair alias for a PKCS11 keypair, typically stored on a Hardware Security Module (HSM) and provided through a helper tool.</p>
+                <p>This is expected to act in place of the RSA 2048-bit Private key specified with CUSTOMER_KEY_FILE_PEM, and will be used as the signing device for all future pre-boot authentication images.</p>
                 <p>The value should take the format:</p>
                 <p><code>"pkcs11:object=&lt;keypair-alias&gt;;type=private"</code></p>
                 <p class="warning">You must use double quotes to enclose the value.</p>
                 <p class="warning">The PKCS11 provider, and it's associated HSM, should be considered key material and should be protected while at rest and in use according to your threat model.</p>
             <%c++ } else if(key == "GOLD_MASTER_OS_FILE") { %>
                 <p><strong>Mandatory</strong></p>
-                <p>This should be your 'gold master' OS image. No customisation should be present in this image that you would not expect to be deployed to your entire fleet. <code>rpi-sb-provisioner</code> assumes this image has been created using <code>pi-gen</code>, and using a non-<code>pi-gen</code> image may produce undefined behaviour.</p>
+                <p>This should be your 'gold master' OS image.
+                <p>No customisation should be present in this image that you would not expect to be deployed to your entire fleet.</p>
+                <p><code>rpi-sb-provisioner</code> assumes this image has been created using <code>pi-gen</code>, and using a non-<code>pi-gen</code> image may produce undefined behaviour.</p>
                 <p class="warning">This file <strong>must</strong> be the uncompressed image.</p>
             <%c++ } else if(key == "RPI_DEVICE_STORAGE_TYPE") { %>
                 <p><strong>Mandatory</strong></p>
-                <p>Specify the kind of storage your target will use. Supported values are <code>sd</code>, <code>emmc</code>, <code>nvme</code>.</p>
+                <p>Specify the kind of storage your target will use. Supported values are:</p>
+                <ul>
+                    <li><code>sd</code> - SD card storage</li>
+                    <li><code>emmc</code> - eMMC storage</li>
+                    <li><code>nvme</code> - NVMe storage</li>
+                </ul>
             <%c++ } else if(key == "RPI_DEVICE_STORAGE_CIPHER") { %>
                 <p><strong>Optional</strong></p>
-                <p>Specify the full-disk-encryption cipher. Supported values are <code>aes-xts-plain64</code>, <code>xchacha12,aes-adiantum-plain64</code>. If <code>RPI_DEVICE_STORAGE_CIPHER</code> is not specified, it defaults to <code>aes-xts-plain64</code>. <code>aes-xts-plain64</code> is recommended for Raspberry Pi 5 family devices (including Compute Module 5); all other Raspberry Pi devices are recommended to use <code>xchacha12,aes-adiantum-plain64</code> for performance reasons.</p>
+                <p>Specify the full-disk-encryption cipher.</p>
+                <p>Supported values are <code>aes-xts-plain64</code>, <code>xchacha12,aes-adiantum-plain64</code>.</p>
+                <p>If <code>RPI_DEVICE_STORAGE_CIPHER</code> is not specified, it defaults to <code>aes-xts-plain64</code>.</p>
+                <p><code>aes-xts-plain64</code> is recommended for Raspberry Pi 5 family devices (including Compute Module 5).</p>
+                <p>All other Raspberry Pi devices are recommended to use <code>xchacha12,aes-adiantum-plain64</code> for performance reasons.</p>
             <%c++ } else if(key == "RPI_DEVICE_FAMILY") { %>
                 <p><strong>Mandatory</strong></p>
                 <p>Specify the family of Raspberry Pi device you are provisioning. Supported values are <code>4</code>, <code>5</code>, <code>2W</code>. For example,</p>
-                <p>A Raspberry Pi Compute Module 4 would be family <code>4</code><br>
-                A Raspberry Pi 5 would be family <code>5</code><br>
-                A Raspberry Pi Compute Module 5 would be family <code>5</code><br>
-                A Raspberry Pi Zero 2 W would be family <code>2W</code></p>
+                <ul>
+                    <li>A Raspberry Pi Compute Module 4 would be family <code>4</code></li>
+                    <li>A Raspberry Pi 5 would be family <code>5</code></li>
+                    <li>A Raspberry Pi Compute Module 5 would be family <code>5</code></li>
+                    <li>A Raspberry Pi Zero 2 W would be family <code>2W</code></li>
+                </ul>
             <%c++ } else if(key == "RPI_DEVICE_BOOTLOADER_CONFIG_FILE") { %>
                 <p><strong>Mandatory, with a default</strong></p>
                 <p class="warning"><code>rpi-sb-provisioner</code> will ignore the Raspberry Pi Bootloader configuration built by <code>pi-gen</code>, and use the one provided in this variable.</p>
@@ -269,7 +286,7 @@
             <%c++ } else if(key == "RPI_DEVICE_RETRIEVE_KEYPAIR") { %>
                 <p><strong>Optional</strong></p>
                 <p>Specify a directory to copy the device unique keypair to. The keys will be named &lt;serial&gt;.der and &lt;serial&gt;.pub</p>
-                <p>Set to the path of a directory to use, leave blank to disable.</p>
+                <p>Set to the path of a directory to use, otherwise keys will be stored alongside provisioning logs in a directory named "keypair".</p>
                 <p class="note">These keys are sensitive key material, and you must ensure they are handled appropriately.</p>
             <%c++ } else if(key == "RPI_SB_WORKDIR") { %>
                 <p><strong>Optional</strong></p>
@@ -277,12 +294,29 @@
                 <p>Set to a location to cache OS assets between provisioning sessions. Recommended for use in production. For example:</p>
                 <p><code>RPI_SB_WORKDIR=/srv/rpi-sb-provisioner/</code></p>
             <%c++ } else if(key == "RPI_SB_PROVISIONER_MANUFACTURING_DB") { %>
-                <p><strong>Optional</strong></p>
-                <p>Store manufacturing data in a sqlite3 database. This will include the board serial, board revision, the boot ROM version, the MAC address of the ethernet port, any set hash of the customer signing key, the JTAG lock state, the board attributes and the advanced boot flags.</p>
-                <p>You must not specify the path of a database stored on a network drive or similar storage, as this mechanism is only safe to use on a single provisioning system. For merging the output with multiple provisioning systems, consider "Processing the manufacturing database" later in this document.</p>
-                <p>Create this file before execution, for example using <code>touch</code>:</p>
-                <p><code>$ touch ${RPI_SB_PROVISIONER_MANUFACTURING_DB}</code></p>
+                <p><strong>Mandatory</strong></p>
+                <p>Store manufacturing data in a sqlite3 database.</p>
                 <p>Set to the path of a file to contain a SQLite database stored on local storage.</p>
+                <p>Defaults to /srv/rpi-sb-provisioner/manufacturing.db</p>
+                <p>The manufacturing database will include:
+                <ul>
+                    <li>Board name</li>
+                    <li>Board serial</li>
+                    <li>Ethernet MAC address</li>
+                    <li>WiFi MAC Address (if populated)</li>
+                    <li>Bluetooth MAC Address (if populated)</li>
+                    <li>eMMC Size (in bytes)</li>
+                    <li>eMMC Card ID</li>
+                    <li>Raspberry Pi Device Unique Identifier</li>
+                    <li>Board revision</li>
+                    <li>The processor name</li>
+                    <li>The size of the fitted RAM</li>
+                    <li>The physical board manufacturer</li>
+                </ul>
+                </p>
+                <p>You must not specify the path of a database stored on a network drive or similar storage, as this mechanism is only safe to use on a single provisioning system.</p>
+                <p>For merging the output with multiple provisioning systems, consider "Processing the manufacturing database" later in the README.</p>
+
             <%c++ } else { %>
                 <p>No specific documentation available for this option.</p>
             <%c++ } %>
@@ -324,9 +358,19 @@
             const form = document.getElementById('optionsForm');
             const formData = new FormData(form);
             const options = {};
-            formData.forEach((value, key) => {
-                options[key] = value;
-            });
+            
+            // Get all form elements to handle checkboxes properly
+            const formElements = form.elements;
+            for (let i = 0; i < formElements.length; i++) {
+                const element = formElements[i];
+                if (element.name && element.name !== '') {
+                    if (element.type === 'checkbox') {
+                        options[element.name] = element.checked ? "1" : "";
+                    } else {
+                        options[element.name] = element.value;
+                    }
+                }
+            }
 
             try {
                 const response = await fetch('/options/set', {
