@@ -77,6 +77,29 @@ tr:hover {
     color: #cc0000;
 }
 
+/* Service status highlighting */
+td:nth-child(2), td:nth-child(3) {
+    font-weight: bold;
+}
+
+.status-active {
+    color: #006600;
+}
+
+.status-inactive {
+    color: #cc0000;
+}
+
+.status-inactivedead {
+    color: #cc0000;
+    background-color: #fff0f0;
+}
+
+.status-failed {
+    color: #cc0000;
+    background-color: #ffeeee;
+}
+
 /* Navigation Elements */
 .nav-links {
     margin-bottom: 20px;
@@ -325,6 +348,16 @@ pre {
     white-space: pre;
     overflow-x: auto;
     display: none;
+}
+
+/* Service info text */
+.service-info {
+    margin: 10px 0 20px 0;
+    padding: 8px 12px;
+    background-color: #f0f0f0;
+    border-left: 4px solid #0066cc;
+    font-style: italic;
+    color: #555;
 }
 </style>
 <%view-end%> 

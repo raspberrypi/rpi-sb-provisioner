@@ -63,26 +63,107 @@ namespace provisioner {
                 return;
             }
 
-            // Use D-Bus API as our method of service detection
+            // =================================================================
+            // STEP 1: Use journal to discover ALL services (active and historic)
+            // =================================================================
+            LOG_INFO << "Discovering services via systemd journal...";
             
-            // Use a targeted approach with specific patterns instead of all units
-            LOG_INFO << "Querying systemd for service patterns...";
+            // Map of discovered service names to their timestamps
+            std::unordered_map<std::string, uint64_t> discoveredServices;
+            std::vector<std::string> matchingUnitNames;
+            
+            // Try direct journal command approach instead of pattern-based matching
+            sd_journal *journal;
+            int j_r = sd_journal_open(&journal, SD_JOURNAL_LOCAL_ONLY);
+            if (j_r >= 0) {
+                // Use journal to query for all unique _SYSTEMD_UNIT values
+                LOG_INFO << "Searching journal for all systemd units...";
+                
+                // Process entries and look for matching patterns
+                j_r = sd_journal_query_unique(journal, "_SYSTEMD_UNIT");
+                if (j_r >= 0) {
+                    const void *data;
+                    size_t dataSize;
+                    
+                    // Get all unique unit values
+                    j_r = sd_journal_enumerate_unique(journal, &data, &dataSize);
+                    while (j_r > 0) {
+                        std::string entry(static_cast<const char*>(data), dataSize);
+                        if (entry.length() > 14) { // "_SYSTEMD_UNIT="
+                            std::string unitName = entry.substr(14);
+
+                            // Skip UI service
+                            if (unitName.find("rpi-provisioner-ui") != std::string::npos) {
+                                LOG_INFO << "Skipping UI service: " << unitName;
+                                // Move to next unique value
+                                j_r = sd_journal_enumerate_unique(journal, &data, &dataSize);
+                                continue;
+                            }
+                            
+                            // Check if the unit name is one we're interested in
+                            if ((unitName.find("rpi-sb-") != std::string::npos && unitName.find(".service") != std::string::npos) ||
+                                (unitName.find("rpi-") != std::string::npos && unitName.find("provisioner") != std::string::npos && 
+                                 unitName.find(".service") != std::string::npos)) {
+
+                                // This is a matching service - now find its most recent timestamp
+                                sd_journal *unitJournal;
+                                if (sd_journal_open(&unitJournal, SD_JOURNAL_LOCAL_ONLY) >= 0) {
+                                    // Filter for this specific unit
+                                    std::string match = "_SYSTEMD_UNIT=" + unitName;
+                                    if (sd_journal_add_match(unitJournal, match.c_str(), match.length()) >= 0) {
+                                        // Get the most recent entry
+                                        if (sd_journal_seek_tail(unitJournal) >= 0 && 
+                                            sd_journal_previous(unitJournal) > 0) {
+                                            // Get the timestamp
+                                            uint64_t timestamp;
+                                            if (sd_journal_get_realtime_usec(unitJournal, &timestamp) >= 0) {
+                                                // Successfully got timestamp
+                                                discoveredServices[unitName] = timestamp;
+                                                LOG_INFO << "Found service in journal: " << unitName;
+                                            }
+                                        }
+                                    }
+                                    sd_journal_close(unitJournal);
+                                }
+                            }
+                        }
+                        // Move to next unique value
+                        j_r = sd_journal_enumerate_unique(journal, &data, &dataSize);
+                    }
+                } else {
+                    LOG_WARN << "Failed to query unique journal entries: " << strerror(-j_r);
+                }
+                
+                sd_journal_close(journal);
+            } else {
+                LOG_WARN << "Failed to open journal: " << strerror(-j_r);
+            }
+            
+            LOG_INFO << "Journal discovery found " << discoveredServices.size() << " services";
+            for (const auto& service : discoveredServices) {
+                LOG_INFO << " - Discovered: " << service.first;
+            }
+            
+            // =================================================================
+            // STEP 2: Query systemd for current status of discovered services
+            // =================================================================
+            LOG_INFO << "Querying systemd for service states...";
+            
+            // Now we have all services from the journal, use systemd to get current status
             sd_bus_message *m = nullptr;
             
-            // Use ListUnitsByPatterns to only get the units we're interested in
+            // Use ListUnits to get status of all units
             r = sd_bus_call_method(bus,
                                "org.freedesktop.systemd1",
                                "/org/freedesktop/systemd1",
                                "org.freedesktop.systemd1.Manager",
-                               "ListUnitsByPatterns",
+                               "ListUnits",
                                &error,
                                &m,
-                               "asas",
-                               0, NULL,   // Match all states - empty array means all
-                               3, "rpi-sb-*.service", "rpi-naked-*.service", "rpi-fde-*.service");
+                               "");
             
             if (r < 0) {
-                LOG_ERROR << "Failed to call ListUnitsByPatterns: " << error.message;
+                LOG_ERROR << "Failed to call ListUnits: " << error.message;
                 sd_bus_error_free(&error);
                 sd_bus_unref(bus);
                 auto resp = provisioner::utils::createErrorResponse(
@@ -115,10 +196,10 @@ namespace provisioner {
                 return;
             }
             
-            // Process all units returned
-            int totalUnits = 0;
-            std::vector<std::string> matchingUnitNames;
+            // Map of service name to its current status
+            std::unordered_map<std::string, std::pair<std::string, std::string>> serviceStates;
             
+            // Process all units returned by systemd
             while ((r = sd_bus_message_enter_container(m, SD_BUS_TYPE_STRUCT, "ssssssouso")) == 1) {
                 const char *name, *description, *load_state, *active_state, *sub_state;
                 
@@ -135,119 +216,9 @@ namespace provisioner {
                 // Skip remaining fields in the struct
                 sd_bus_message_skip(m, "souso");
                 
-                totalUnits++;
+                // Store state information for this unit
                 std::string serviceName(name);
-                
-                // Check for any rpi service
-                if (serviceName.find("rpi-sb-") != std::string::npos ||
-                    serviceName.find("rpi-naked-") != std::string::npos ||
-                    serviceName.find("rpi-fde-") != std::string::npos) {
-                    matchingUnitNames.push_back(serviceName);
-                    
-                    // Add matching unit to our service info list
-                    ServiceInfo info;
-                    
-                    // Check if it's an instance unit (has @ symbol)
-                    size_t atPos = serviceName.find('@');
-                    if (atPos != std::string::npos && atPos + 1 < serviceName.length()) {
-                        // It's an instance unit
-                        std::string baseName = serviceName.substr(0, atPos+1);
-                        std::string instanceParam = serviceName.substr(atPos+1);
-                        
-                        // Remove .service suffix if present
-                        size_t servicePos = instanceParam.find(".service");
-                        if (servicePos != std::string::npos) {
-                            instanceParam = instanceParam.substr(0, servicePos);
-                        }
-                        
-                        info.name = baseName;
-                        info.instance = instanceParam;
-                        
-                        // Extract base name without @ for better grouping in UI
-                        std::string baseServiceName = baseName;
-                        if (!baseServiceName.empty() && baseServiceName.back() == '@') {
-                            baseServiceName.pop_back();
-                            info.base_name = baseServiceName;
-                        }
-                    } else {
-                        // Regular service without instance parameter
-                        // Remove .service suffix if present
-                        std::string baseName = serviceName;
-                        size_t servicePos = baseName.find(".service");
-                        if (servicePos != std::string::npos) {
-                            baseName = baseName.substr(0, servicePos);
-                        }
-                        
-                        info.name = baseName;
-                        info.instance = "";
-                        info.base_name = baseName;
-                    }
-                    
-                    info.status = sub_state;
-                    info.active = active_state;
-                    
-                    // Get the last active timestamp for the service
-                    info.timestamp = 0; // Default value
-                    
-                    // Try using journal to get timestamp (more reliable than D-Bus properties)
-                    sd_journal *j;
-                    int j_r = sd_journal_open(&j, SD_JOURNAL_LOCAL_ONLY);
-                    if (j_r >= 0) {
-                        // Add filter for the specific unit
-                        std::string match = "_SYSTEMD_UNIT=" + serviceName;
-                        j_r = sd_journal_add_match(j, match.c_str(), 0);
-                        
-                        if (j_r >= 0) {
-                            // Seek to the latest entry
-                            j_r = sd_journal_seek_tail(j);
-                            if (j_r >= 0) {
-                                // Get the first (latest) entry
-                                j_r = sd_journal_previous(j);
-                                if (j_r > 0) {
-                                    // Get the timestamp
-                                    uint64_t usec;
-                                    j_r = sd_journal_get_realtime_usec(j, &usec);
-                                    if (j_r >= 0) {
-                                        info.timestamp = usec;
-                                        // Don't log success case to reduce noise
-                                    } else {
-                                        LOG_WARN << "Failed to get journal timestamp for " << serviceName << ": " << strerror(-j_r);
-                                    }
-                                } else {
-                                    // Don't log empty journal - normal for new services
-                                }
-                            } else {
-                                LOG_WARN << "Failed to seek journal tail for " << serviceName << ": " << strerror(-j_r);
-                            }
-                        } else {
-                            LOG_WARN << "Failed to add journal match for " << serviceName << ": " << strerror(-j_r);
-                        }
-                        sd_journal_close(j);
-                    } else {
-                        LOG_WARN << "Failed to open journal for " << serviceName << ": " << strerror(-j_r);
-                    }
-                    
-                    // If we couldn't get a timestamp, use current time for active services and a lower value for failed
-                    if (info.timestamp == 0) {
-                        if (info.active == "active") {
-                            // For active services, use current time (prioritize them)
-                            struct timespec ts;
-                            clock_gettime(CLOCK_REALTIME, &ts);
-                            info.timestamp = (uint64_t)ts.tv_sec * 1000000 + (uint64_t)ts.tv_nsec / 1000;
-                            // Reduced logging - no need to log fallback for active services
-                        } else {
-                            // For failed/inactive services, use a lower timestamp (older)
-                            struct timespec ts;
-                            clock_gettime(CLOCK_REALTIME, &ts);
-                            // Subtract 1 hour to make them appear below active services
-                            info.timestamp = ((uint64_t)ts.tv_sec - 3600) * 1000000 + (uint64_t)ts.tv_nsec / 1000;
-                            // Reduced logging - no need to log fallback for inactive services
-                        }
-                    }
-                    
-                    serviceInfos.push_back(info);
-                    // Removed detailed service addition logging
-                }
+                serviceStates[serviceName] = std::make_pair(std::string(active_state), std::string(sub_state));
                 
                 // Exit the struct container for this unit
                 sd_bus_message_exit_container(m);
@@ -257,7 +228,78 @@ namespace provisioner {
             sd_bus_message_exit_container(m);
             sd_bus_message_unref(m);
             
-            LOG_INFO << "Processed " << totalUnits << " units, found " << serviceInfos.size() << " matching services";
+            // =================================================================
+            // STEP 3: Create service info objects for all discovered services
+            // =================================================================
+            for (const auto& service : discoveredServices) {
+                std::string serviceName = service.first;
+                uint64_t timestamp = service.second;
+                
+                ServiceInfo info;
+                
+                // Check if it's an instance unit (has @ symbol)
+                size_t atPos = serviceName.find('@');
+                if (atPos != std::string::npos && atPos + 1 < serviceName.length()) {
+                    // It's an instance unit
+                    std::string baseName = serviceName.substr(0, atPos+1);
+                    std::string instanceParam = serviceName.substr(atPos+1);
+                    
+                    // Remove .service suffix if present
+                    size_t servicePos = instanceParam.find(".service");
+                    if (servicePos != std::string::npos) {
+                        instanceParam = instanceParam.substr(0, servicePos);
+                    }
+                    
+                    info.name = baseName;
+                    info.instance = instanceParam;
+                    
+                    // Extract base name without @ for better grouping in UI
+                    std::string baseServiceName = baseName;
+                    if (!baseServiceName.empty() && baseServiceName.back() == '@') {
+                        baseServiceName.pop_back();
+                        info.base_name = baseServiceName;
+                    }
+                } else {
+                    // Regular service without instance parameter
+                    // Remove .service suffix if present
+                    std::string baseName = serviceName;
+                    size_t servicePos = baseName.find(".service");
+                    if (servicePos != std::string::npos) {
+                        baseName = baseName.substr(0, servicePos);
+                    }
+                    
+                    info.name = baseName;
+                    info.instance = "";
+                    info.base_name = baseName;
+                }
+                
+                // Set status from current state if available, otherwise mark as inactive
+                if (serviceStates.find(serviceName) != serviceStates.end()) {
+                    info.active = serviceStates[serviceName].first;
+                    info.status = serviceStates[serviceName].second;
+                    LOG_INFO << "Current state for " << serviceName << ": " 
+                             << info.active << "/" << info.status;
+                } else {
+                    info.active = "inactive";
+                    info.status = "completed";
+                    LOG_INFO << "Service " << serviceName << " is no longer active, marking as completed";
+                }
+                
+                // Use journal timestamp
+                info.timestamp = timestamp;
+                
+                // Add to the service list
+                serviceInfos.push_back(info);
+                matchingUnitNames.push_back(serviceName);
+            }
+            
+            LOG_INFO << "Found " << serviceInfos.size() << " matching services";
+            
+            // Log all units found for complete debugging
+            LOG_INFO << "All units returned by systemd (" << matchingUnitNames.size() << "):";
+            for (const auto& unit : matchingUnitNames) {
+                LOG_INFO << " - " << unit;
+            }
             
             // Sort services by timestamp (most recent first)
             std::sort(serviceInfos.begin(), serviceInfos.end(), 
