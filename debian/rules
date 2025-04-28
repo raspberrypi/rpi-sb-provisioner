@@ -46,3 +46,14 @@ override_dh_auto_build:
 # Install the CMake project but exclude drogon tools
 override_dh_auto_install:
 	dh_auto_install --sourcedirectory=provisioner-service
+
+# Enable and start the UI service by default
+override_dh_installsystemd:
+	dh_installsystemd --restart-after-upgrade --name=rpi-provisioner-ui
+	dh_installsystemd --name=rpi-sb-provisioner@
+	dh_installsystemd --name=rpi-fde-provisioner@
+	dh_installsystemd --name=rpi-naked-provisioner@
+	dh_installsystemd --name=rpi-sb-bootstrap@
+	dh_installsystemd --name=rpi-sb-triage@
+	dh_installsystemd --no-enable --name=fetch-repo-package-list@
+	dh_installsystemd --no-enable --name=rpi-package-download@

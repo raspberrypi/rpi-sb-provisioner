@@ -249,13 +249,6 @@ install(TARGETS rpi-provisioner-ui
     RUNTIME DESTINATION /usr/bin
 )
 
-# Install systemd service file if it exists
-if(EXISTS "${CMAKE_SOURCE_DIR}/rpi-provisioner-ui.service")
-    install(FILES "${CMAKE_SOURCE_DIR}/rpi-provisioner-ui.service"
-            DESTINATION /usr/lib/systemd/system
-            PERMISSIONS OWNER_READ GROUP_READ WORLD_READ)
-endif()
-
 # Install static files
 install(DIRECTORY "${CMAKE_SOURCE_DIR}/static/"
         DESTINATION /usr/share/rpi-sb-provisioner/static

@@ -152,27 +152,4 @@ EOF
     done
 fi
 
-# Set up systemd services
-if [ "$1" = "configure" ] || [ "$1" = "abort-upgrade" ] || [ "$1" = "abort-deconfigure" ] || [ "$1" = "abort-remove" ] || [ "$1" = "triggered" ]; then
-	# Reload systemd to pick up new service files
-	deb-systemd-helper daemon-reload >/dev/null || true
-	
-	# Enable all services
-	deb-systemd-helper enable 'rpi-provisioner-ui.service' >/dev/null || true
-	deb-systemd-helper enable 'rpi-sb-provisioner@.service' >/dev/null || true
-	deb-systemd-helper enable 'rpi-fde-provisioner@.service' >/dev/null || true
-	deb-systemd-helper enable 'rpi-naked-provisioner@.service' >/dev/null || true
-	deb-systemd-helper enable 'rpi-sb-bootstrap@.service' >/dev/null || true
-	deb-systemd-helper enable 'rpi-sb-triage@.service' >/dev/null || true
-	
-	# Start or restart the services that should be running by default
-	if [ -d /run/systemd/system ]; then
-		if [ "$1" = "triggered" ]; then
-			deb-systemd-invoke restart 'rpi-provisioner-ui.service' >/dev/null || true
-		else
-			deb-systemd-invoke start 'rpi-provisioner-ui.service' >/dev/null || true
-		fi
-	fi
-fi
-
 #DEBHELPER#
