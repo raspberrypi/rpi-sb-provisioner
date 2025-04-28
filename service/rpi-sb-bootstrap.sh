@@ -72,6 +72,12 @@ cleanup() {
     
     # Clean up orphaned resources
     cleanup_orphans
+
+    if [ $returnvalue -eq 0 ]; then
+        systemd-notify --status="Provisioning completed successfully" STOPPING=1
+    else
+        systemd-notify --status="Provisioning failed" STOPPING=1
+    fi
     
     exit $returnvalue
 }
@@ -107,7 +113,7 @@ die() {
 }
 
 read_config
-
+systemd-notify --ready --status="Provisioning started"
 # Create device-specific lock
 DEVICE_LOCK="${LOCK_BASE}/${TARGET_DEVICE_SERIAL}"
 if atomic_mkdir "$DEVICE_LOCK"; then
@@ -648,14 +654,6 @@ fi
 announce_stop "fastboot initialisation"
 record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_FINISHED}" "${TARGET_USB_PATH}"
 set -e
-
-# Indicate successful completion to systemd
-# This is used when the script is run as a systemd service
-# The special exit code 0 indicates success to systemd
-# Additionally, we can use systemd-notify if available to indicate completion
-if command -v systemd-notify >/dev/null 2>&1; then
-    systemd-notify --status="Provisioning completed successfully" STOPPING=1
-fi
 
 # Exit with success code for systemd
 true
