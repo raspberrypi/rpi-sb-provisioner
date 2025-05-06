@@ -1,3 +1,9 @@
+rpi-sb-provisioner (2.0.1) unstable; urgency=medium
+
+  * provisioner: Fixup xxd dependency
+
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Thu, 08 May 2025 11:59:55 +0000
+
 rpi-sb-provisioner (2.0.0) unstable; urgency=medium
 
   * Architecture and Core Changes:
