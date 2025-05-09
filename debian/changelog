@@ -1,6 +1,9 @@
 rpi-sb-provisioner (2.0.1) unstable; urgency=medium
 
   * provisioner: Fixup xxd dependency
+  * provisioner: Fixup ethernet handling
+  * readme: Remove manual cache clearing instructions
+  * WebUI: Add manufacturing database API
 
  -- Tom Dewey <tom.dewey@raspberrypi.com>  Thu, 08 May 2025 11:59:55 +0000
 
