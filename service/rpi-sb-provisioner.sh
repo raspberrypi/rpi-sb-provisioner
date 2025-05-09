@@ -618,6 +618,9 @@ TARGET_STORAGE_ROOT_EXTENT="$(get_variable partition-size:mapper/cryptroot)"
 with_lock "${LOCK_BASE}/rootfs-image.lock" 600 prepare_rootfs_image
 announce_stop "Resizing rootfs image"
 
+# Re-check the fastboot devices specifier, as it may take a while for a device to gain IP connectivity
+setup_fastboot_and_id_vars "${FASTBOOT_DEVICE_SPECIFIER}"
+
 announce_start "Writing OS images"
 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}"p1 "${RPI_SB_WORKDIR}"/bootfs-temporary.simg
 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash mapper/cryptroot "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
