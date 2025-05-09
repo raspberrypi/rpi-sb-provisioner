@@ -197,6 +197,9 @@ announce_stop "Erase Device Storage"
 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}" "${GOLD_MASTER_OS_FILE}"
 announce_stop "Writing OS images"
 
+# Re-check the fastboot devices specifier, as it may take a while for a device to gain IP connectivity
+setup_fastboot_and_id_vars "${FASTBOOT_DEVICE_SPECIFIER}"
+
 announce_start "Set LED status"
 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem led PWR 0
 announce_stop "Set LED status"
