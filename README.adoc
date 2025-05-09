@@ -171,11 +171,7 @@ $ stat mfg_db.csv
 
 === Debugging unexpected results
 
-The first stage of debugging unexpected results is to delete the contents of the directory pointed to by `RPI_SB_WORKDIR`, which will force any intermediate OS images to be deleted.
-
-----
-$ sudo rm ${RPI_SB_WORKDIR}/*
-----
+The first stage of debugging unexpected results is to clear any cached provisioning artefacts. On the WebUI, this can be done by selecting 'Clear caches' from the 'Images' page.
 
 The second stage is to remove the lock directory matching the serial number of the device you are debugging:
 
