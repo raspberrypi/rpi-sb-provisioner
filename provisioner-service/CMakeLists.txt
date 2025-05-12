@@ -221,6 +221,7 @@ target_sources(rpi-provisioner-ui
     src/manufacturing.cpp
     src/scantool.cpp
     src/audit.cpp
+    src/utils.cpp
     ${VIEW_SOURCES}
 )
 

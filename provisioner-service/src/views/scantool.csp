@@ -439,7 +439,7 @@
             // Function to verify QR code with the server
             async function verifyQRCode(qrcode) {
                 try {
-                    const response = await fetch('/api/verify-qrcode', {
+                    const response = await fetch('/api/v2/verify-qrcode', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',

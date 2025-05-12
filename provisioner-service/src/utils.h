@@ -4,6 +4,8 @@
 #include <drogon/HttpTypes.h>
 #include <string>
 #include <regex>
+#include <optional>
+#include <map>
 
 namespace provisioner {
     namespace utils {
@@ -80,5 +82,33 @@ namespace provisioner {
                 return resp;
             }
         }
+
+        /**
+         * Read a single configuration value from the config file
+         * 
+         * @param key The configuration key to look for
+         * @param logAccessToAudit Whether to log file access to the audit log
+         * @return An optional string containing the value if found
+         */
+        std::optional<std::string> getConfigValue(const std::string& key, bool logAccessToAudit = true);
+        
+        /**
+         * Read all configuration values from the config file
+         * 
+         * @param logAccessToAudit Whether to log file access to the audit log
+         * @return A map of all key-value pairs in the config file
+         */
+        std::map<std::string, std::string> getAllConfigValues(bool logAccessToAudit = true);
+        
+        /**
+         * Create an appropriate error response for configuration file read errors
+         * 
+         * @param req The original HTTP request
+         * @param configKey The configuration key that was being searched for (optional)
+         * @return HttpResponsePtr The error response
+         */
+        drogon::HttpResponsePtr createConfigErrorResponse(
+            const drogon::HttpRequestPtr& req,
+            const std::string& configKey = "");
     } // namespace utils
 } // namespace provisioner 

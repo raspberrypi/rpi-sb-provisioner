@@ -65,7 +65,7 @@
             
             // Function to fetch logs via API
             function fetchLogs() {
-                fetch('/api/service-log/' + serviceName, {
+                fetch('/api/v2/service-log/' + serviceName, {
                     headers: {
                         'Accept': 'application/json'
                     }
