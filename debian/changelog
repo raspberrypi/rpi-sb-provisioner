@@ -1,3 +1,11 @@
+rpi-sb-provisioner (2.0.2) unstable; urgency=medium
+
+  * WebUI: Don't hide CUSTOMER_KEY_FILE_PEM in options
+  * WebUI: Introduce naked provisioning customisation hook
+  * WebUI: Customsiation: Fix script name handling
+
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Mon, 12 May 2025 17:00:00 +0100
+
 rpi-sb-provisioner (2.0.1) unstable; urgency=medium
 
   * provisioner: Fixup xxd dependency
