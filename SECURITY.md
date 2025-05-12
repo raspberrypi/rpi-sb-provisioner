@@ -6,6 +6,7 @@ Only listed versions receive active support, and $HEAD may be changed at any tim
 
 | Version | Supported          |
 | ------- | ------------------ |
+| 2.0.2   | ✅ |
 | 2.0.1   | ✅ |
 | 2.0.0   | ✅ |
 | pre-2.0.0 |  |
