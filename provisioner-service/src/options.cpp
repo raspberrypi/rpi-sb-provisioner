@@ -43,14 +43,7 @@ namespace provisioner {
             // Add audit log entry for handler access
             AuditLog::logHandlerAccess(req, "/options/get");
 
-            Json::Value options;
             auto configValues = utils::getAllConfigValues();
-            
-            for (const auto& [key, value] : configValues) {
-                if (key != "CUSTOMER_KEY_FILE_PEM") { // Skip sensitive values
-                    options[key] = value;
-                }
-            }
 
             auto resp = HttpResponse::newHttpResponse();
             
@@ -58,16 +51,16 @@ namespace provisioner {
             auto acceptHeader = req->getHeader("Accept");
             if (!acceptHeader.empty() && (acceptHeader.find("text/html") != std::string::npos)) {
                 HttpViewData viewData;
-                std::map<std::string, std::string> optionsMap;
-                for (const auto& key : options.getMemberNames()) {
-                    optionsMap[key] = options[key].asString();
-                }
-                viewData.insert("options", optionsMap);
+                viewData.insert("options", configValues);
                 viewData.insert("currentPage", std::string("options"));
                 resp = HttpResponse::newHttpViewResponse("options.csp", viewData);
             } else {
+                Json::Value jsonOptions;
+                for (const auto& [key, value] : configValues) {
+                    jsonOptions[key] = value;
+                }
                 resp->setStatusCode(k200OK);
-                resp->setBody(Json::FastWriter().write(options));
+                resp->setBody(Json::FastWriter().write(jsonOptions));
             }
             
             callback(resp);

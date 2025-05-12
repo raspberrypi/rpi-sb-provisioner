@@ -16,16 +16,11 @@ namespace provisioner {
         const std::string CUSTOMISATION_PATH = "/customisation";
         const std::string SCRIPTS_DIR = "/etc/rpi-sb-provisioner/scripts/";
 
-        // Define available provisioners and stages
-        const std::vector<std::string> PROVISIONERS = {
-            "sb-provisioner",
-            "fde-provisioner"
-        };
-        
-        const std::vector<std::string> STAGES = {
-            "bootfs-mounted",
-            "rootfs-mounted",
-            "post-flash"
+        // Define available provisioners and stages using a map
+        const std::map<std::string, std::vector<std::string>> PROVISIONER_STAGES = {
+            {"sb-provisioner", {"bootfs-mounted", "rootfs-mounted", "post-flash"}},
+            {"fde-provisioner", {"bootfs-mounted", "rootfs-mounted", "post-flash"}},
+            {"naked-provisioner", {"post-flash"}}
         };
 
         // Description of each stage for display in the UI
@@ -102,7 +97,7 @@ namespace provisioner {
             EVP_MD_CTX_free(mdctx);
             
             // Extract provisioner and stage from filename
-            for (const auto& provisioner : PROVISIONERS) {
+            for (const auto& [provisioner, stages] : PROVISIONER_STAGES) {
                 if (filename.find(provisioner) == 0) {
                     script["provisioner"] = provisioner;
                     std::string stagePart = filename.substr(provisioner.length() + 1);
@@ -175,8 +170,8 @@ namespace provisioner {
             }
             
             // Add hook points for missing scripts
-            for (const auto& provisioner : PROVISIONERS) {
-                for (const auto& stage : STAGES) {
+            for (const auto& [provisioner, validStages] : PROVISIONER_STAGES) {
+                for (const auto& stage : validStages) {
                     std::string hookFilename = provisioner + "-" + stage + ".sh";
                     
                     // Check if this hook already exists in the scripts list
@@ -216,8 +211,11 @@ namespace provisioner {
                 LOG_INFO << "Scripts data: " << Json::FastWriter().write(scripts["scripts"]);
                 
                 data.insert("scripts", scripts["scripts"]);
-                data.insert("provisioners", PROVISIONERS);
-                data.insert("stages", STAGES);
+                
+                // Collect provisioners and stages for the UI
+                // Pass the PROVISIONER_STAGES map directly to the template
+                data.insert("provisioner_stages", PROVISIONER_STAGES);
+                data.insert("stage_descriptions", STAGE_DESCRIPTIONS);
                 data.insert("currentPage", std::string("customisation"));
                 auto resp = drogon::HttpResponse::newHttpViewResponse("list_scripts.csp", data);
                 resp->setStatusCode(k200OK);
@@ -263,25 +261,40 @@ namespace provisioner {
                 return;
             }
 
+            // Ensure we have a clean base filename (no .sh extension)
+            if (filename.length() > 3 && filename.substr(filename.length() - 3) == ".sh") {
+                filename = filename.substr(0, filename.length() - 3);
+            }
             std::string sanitized_filename = utils::sanitize_path_component(filename);
-            std::string scriptPath = SCRIPTS_DIR + sanitized_filename;
+            
+            // Construct the full path with .sh extension
+            std::string scriptPath = SCRIPTS_DIR + sanitized_filename + ".sh";
             
             if (!std::filesystem::exists(scriptPath)) {
                 // Check if this is a known hook point
                 bool isKnownHook = false;
                 std::string provisioner, stage;
                 
-                for (const auto& p : PROVISIONERS) {
-                    for (const auto& s : STAGES) {
-                        std::string hookName = p + "-" + s + ".sh";
-                        if (hookName == filename) {
+                // Try all possible provisioners to find a match
+                for (const auto& [prov, validStages] : PROVISIONER_STAGES) {
+                    // Check if the filename starts with the provisioner name followed by a dash
+                    if (filename.find(prov + "-") == 0) {
+                        provisioner = prov;
+                        // The stage is everything after the provisioner name and dash
+                        stage = filename.substr(prov.length() + 1);
+                        
+                        LOG_INFO << "Found possible match: provisioner='" << provisioner 
+                                 << "', stage='" << stage << "'";
+                        
+                        // Check if this is a valid stage for this provisioner
+                        if (std::find(validStages.begin(), validStages.end(), stage) != validStages.end()) {
                             isKnownHook = true;
-                            provisioner = p;
-                            stage = s;
+                            LOG_INFO << "Valid hook point found: " << provisioner << "-" << stage;
                             break;
+                        } else {
+                            LOG_INFO << "Stage '" << stage << "' not found in available stages for " << provisioner;
                         }
                     }
-                    if (isKnownHook) break;
                 }
                 
                 if (isKnownHook) {
@@ -299,7 +312,7 @@ namespace provisioner {
                         defaultContent += "STORAGE_TYPE=\"$3\"\n\n";
                         defaultContent += "echo \"Running post-flash customisation for ${TARGET_DEVICE_SERIAL}\"\n\n";
                         defaultContent += "# Example: Run a fastboot command\n";
-                        defaultContent += "# fastboot -s \"${FASTBOOT_DEVICE_SPECIFIER}\" getvar version\n\n";
+                        defaultContent += "# fastboot -s \"${FASTBOOT_DEVICE_SPECIFIER}\" getvar version\n\n";     
                         defaultContent += "# Exit with success\nexit 0\n";
                     } else if (stage == "bootfs-mounted") {
                         defaultContent += "# This script runs when " + stage + " for " + provisioner + "\n";
@@ -355,13 +368,26 @@ namespace provisioner {
                         return;
                     }
                 } else {
+                    // Prepare a helpful error message with valid options
+                    std::stringstream validOptionsMsg;
+                    validOptionsMsg << "Valid script names follow the pattern: <provisioner>-<stage>.sh\n\n";
+                    validOptionsMsg << "Available provisioners and stages:\n";
+                    
+                    for (const auto& [prov, stages] : PROVISIONER_STAGES) {
+                        validOptionsMsg << "- " << prov << ": ";
+                        for (const auto& s : stages) {
+                            validOptionsMsg << s << ", ";
+                        }
+                        validOptionsMsg << "\n";
+                    }
+                    
                     auto resp = provisioner::utils::createErrorResponse(
                         req,
-                        "The requested script file could not be found",
+                        "The requested script name is not a valid hook point",
                         drogon::k400BadRequest,
-                        "Script Not Found", 
-                        "SCRIPT_NOT_FOUND",
-                        "Script path: " + scriptPath
+                        "Invalid Script Name", 
+                        "INVALID_SCRIPT_NAME",
+                        validOptionsMsg.str()
                     );
                     callback(resp);
                     return;
@@ -442,12 +468,13 @@ namespace provisioner {
                 return;
             }
 
-            // Prune any .sh extension from the filename
-            if (filename.find(".sh") != std::string::npos) {
-                filename.erase(filename.end() - 3, filename.end());
+            // Ensure we have a clean base filename (no .sh extension)
+            if (filename.length() > 3 && filename.substr(filename.length() - 3) == ".sh") {
+                filename = filename.substr(0, filename.length() - 3);
             }
-
             std::string sanitized_filename = utils::sanitize_path_component(filename);
+            
+            // Construct the full path with .sh extension
             std::string scriptPath = SCRIPTS_DIR + sanitized_filename + ".sh";
             LOG_INFO << "Deleting script: " << scriptPath;
             
@@ -502,12 +529,13 @@ namespace provisioner {
                 return;
             }
 
-            // Prune any .sh extension from the filename
-            if (filename.find(".sh") != std::string::npos) {
-                filename.erase(filename.end() - 3, filename.end());
+            // Ensure we have a clean base filename (no .sh extension)
+            if (filename.length() > 3 && filename.substr(filename.length() - 3) == ".sh") {
+                filename = filename.substr(0, filename.length() - 3);
             }
-
             std::string sanitized_filename = utils::sanitize_path_component(filename);
+            
+            // Construct the full path with .sh extension
             std::string scriptPath = SCRIPTS_DIR + sanitized_filename + ".sh";
             LOG_INFO << "Disabling script: " << scriptPath;
             
@@ -579,12 +607,13 @@ namespace provisioner {
                 return;
             }
 
-            // Prune any .sh extension from the filename
-            if (filename.find(".sh") != std::string::npos) {
-                filename.erase(filename.end() - 3, filename.end());
+            // Ensure we have a clean base filename (no .sh extension)
+            if (filename.length() > 3 && filename.substr(filename.length() - 3) == ".sh") {
+                filename = filename.substr(0, filename.length() - 3);
             }
-
             std::string sanitized_filename = utils::sanitize_path_component(filename);
+            
+            // Construct the full path with .sh extension
             std::string scriptPath = SCRIPTS_DIR + sanitized_filename + ".sh";
             LOG_INFO << "Enabling script: " << scriptPath;
 
@@ -700,13 +729,13 @@ namespace provisioner {
                 }
             }
             
-            // Write the script content
-            // Prune any .sh extension from the filename
-            if (filename.find(".sh") != std::string::npos) {
-                filename.erase(filename.end() - 3, filename.end());
+            // Ensure we have a clean base filename (no .sh extension)
+            if (filename.length() > 3 && filename.substr(filename.length() - 3) == ".sh") {
+                filename = filename.substr(0, filename.length() - 3);
             }
-
             std::string sanitized_filename = utils::sanitize_path_component(filename);
+            
+            // Construct the full path with .sh extension
             std::string scriptPath = SCRIPTS_DIR + sanitized_filename + ".sh";
             LOG_INFO << "Saving script: " << scriptPath;
             
@@ -884,16 +913,19 @@ namespace provisioner {
                 }
             }
             
-            // Write the file content to the customisation directory
-            // Prune any .sh extension from the filename
+            // Ensure we have a clean base filename (no .sh extension)
             auto filename = fileInfo.getFileName();
-            if (filename.find(".sh") != std::string::npos) {
-                filename.erase(filename.end() - 3, filename.end());
+            if (filename.length() > 3 && filename.substr(filename.length() - 3) == ".sh") {
+                filename = filename.substr(0, filename.length() - 3);
             }
-
+            
             std::string sanitized_filename = utils::sanitize_path_component(filename);
+            
+            // Construct the full path with .sh extension
             std::string scriptPath = SCRIPTS_DIR + sanitized_filename + ".sh";
-            LOG_INFO << "Disabling script: " << scriptPath;
+            
+            // Write the file content to the customisation directory
+            LOG_INFO << "Saving script: " << scriptPath;
             std::ofstream file(scriptPath, std::ios::binary);
             if (!file.is_open()) {
                 auto errorResp = provisioner::utils::createErrorResponse(
@@ -957,13 +989,19 @@ namespace provisioner {
             response["stages"] = Json::Value(Json::arrayValue);
             response["hooks"] = Json::Value(Json::arrayValue);
             
-            // Add provisioners
-            for (const auto& provisioner : PROVISIONERS) {
+            // Collect unique stages
+            std::set<std::string> uniqueStages;
+            
+            // Add provisioners and collect unique stages
+            for (const auto& [provisioner, stages] : PROVISIONER_STAGES) {
                 response["provisioners"].append(provisioner);
+                for (const auto& stage : stages) {
+                    uniqueStages.insert(stage);
+                }
             }
             
             // Add stages with descriptions
-            for (const auto& stage : STAGES) {
+            for (const auto& stage : uniqueStages) {
                 Json::Value stageInfo;
                 stageInfo["name"] = stage;
                 if (STAGE_DESCRIPTIONS.find(stage) != STAGE_DESCRIPTIONS.end()) {
@@ -973,8 +1011,8 @@ namespace provisioner {
             }
             
             // Add all possible hook points
-            for (const auto& provisioner : PROVISIONERS) {
-                for (const auto& stage : STAGES) {
+            for (const auto& [provisioner, validStages] : PROVISIONER_STAGES) {
+                for (const auto& stage : validStages) {
                     Json::Value hook;
                     std::string filename = provisioner + "-" + stage + ".sh";
                     
@@ -1005,6 +1043,159 @@ namespace provisioner {
             resp->setContentTypeCode(CT_APPLICATION_JSON);
             resp->setBody(Json::FastWriter().write(response));
             callback(resp);
+        });
+
+        /**
+         * @brief Creates a new script with a default template
+         * 
+         * @details This endpoint generates a default template for a new script based on the 
+         * provisioner and stage specified in the filename. It doesn't check if the file exists,
+         * making it suitable for the "Create Script" action.
+         *
+         * @param req The HTTP request
+         * @param callback The callback function to send the HTTP response
+         *
+         * @return void
+         */
+        app.registerHandler(CUSTOMISATION_PATH + "/create-script", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
+            LOG_INFO << "Customisation::create-script";
+            auto resp = HttpResponse::newHttpResponse();
+            auto filename = req->getParameter("script");
+            if (filename.empty()) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Script name is required",
+                    drogon::k400BadRequest,
+                    "Missing Parameter",
+                    "MISSING_SCRIPT_NAME"
+                );
+                callback(resp);
+                return;
+            }
+
+            // Ensure we have a clean base filename (no .sh extension)
+            if (filename.length() > 3 && filename.substr(filename.length() - 3) == ".sh") {
+                filename = filename.substr(0, filename.length() - 3);
+            }
+            
+            // Extract provisioner and stage from filename
+            std::string provisioner, stage;
+            bool isValidFormat = false;
+            
+            // Try all possible provisioners to find a match
+            for (const auto& [prov, stages] : PROVISIONER_STAGES) {
+                // Check if the filename starts with the provisioner name followed by a dash
+                if (filename.find(prov + "-") == 0) {
+                    provisioner = prov;
+                    // The stage is everything after the provisioner name and dash
+                    stage = filename.substr(prov.length() + 1);
+                    
+                    LOG_INFO << "Found possible match: provisioner='" << provisioner 
+                             << "', stage='" << stage << "'";
+                    
+                    // Check if this is a valid stage for this provisioner
+                    if (std::find(stages.begin(), stages.end(), stage) != stages.end()) {
+                        isValidFormat = true;
+                        LOG_INFO << "Valid script format: " << provisioner << "-" << stage;
+                        break;
+                    } else {
+                        LOG_INFO << "Stage '" << stage << "' not found in available stages for " << provisioner;
+                    }
+                }
+            }
+            
+            if (!isValidFormat) {
+                // Prepare a helpful error message with valid options
+                std::stringstream validOptionsMsg;
+                validOptionsMsg << "Valid script names follow the pattern: <provisioner>-<stage>\n\n";
+                validOptionsMsg << "Available provisioners and stages:\n";
+                
+                for (const auto& [prov, stages] : PROVISIONER_STAGES) {
+                    validOptionsMsg << "- " << prov << ": ";
+                    for (const auto& s : stages) {
+                        validOptionsMsg << s << ", ";
+                    }
+                    validOptionsMsg << "\n";
+                }
+                
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "The script name is not a valid hook point",
+                    drogon::k400BadRequest,
+                    "Invalid Script Name", 
+                    "INVALID_SCRIPT_NAME",
+                    validOptionsMsg.str()
+                );
+                callback(resp);
+                return;
+            }
+            
+            // Create a new script with default content
+            std::string defaultContent = "#!/bin/sh\n\n";
+            
+            if (stage == "post-flash") {
+                defaultContent += "# This script runs after images have been flashed to the device\n";
+                defaultContent += "# Arguments:\n";
+                defaultContent += "# $1 - Fastboot device specifier\n";
+                defaultContent += "# $2 - Target device serial number\n";
+                defaultContent += "# $3 - Device storage type (e.g., mmcblk0 or nvme0n1)\n\n";
+                defaultContent += "FASTBOOT_DEVICE_SPECIFIER=\"$1\"\n";
+                defaultContent += "TARGET_DEVICE_SERIAL=\"$2\"\n";
+                defaultContent += "STORAGE_TYPE=\"$3\"\n\n";
+                defaultContent += "echo \"Running post-flash customisation for ${TARGET_DEVICE_SERIAL}\"\n\n";
+                defaultContent += "# Example: Run a fastboot command\n";
+                defaultContent += "# fastboot -s \"${FASTBOOT_DEVICE_SPECIFIER}\" getvar version\n\n";     
+                defaultContent += "# Exit with success\nexit 0\n";
+            } else if (stage == "bootfs-mounted") {
+                defaultContent += "# This script runs when " + stage + " for " + provisioner + "\n";
+                defaultContent += "# Arguments:\n";
+                defaultContent += "# $1 - Path to mounted boot image\n";
+                defaultContent += "# $2 - Path to mounted rootfs image\n\n";
+                defaultContent += "BOOT_MOUNT=\"$1\"\n";
+                defaultContent += "ROOTFS_MOUNT=\"$2\"\n\n";
+                defaultContent += "echo \"Running " + stage + " customisation\"\n";
+                defaultContent += "echo \"Boot mount: ${BOOT_MOUNT}\"\n";
+                defaultContent += "echo \"Rootfs mount: ${ROOTFS_MOUNT}\"\n\n";
+                defaultContent += "# Example: Modify boot configuration\n";
+                defaultContent += "# echo \"dtparam=watchdog=off\" >> \"${BOOT_MOUNT}/config.txt\"\n\n";
+                defaultContent += "# Exit with success\nexit 0\n";
+            } else if (stage == "rootfs-mounted") {
+                defaultContent += "# This script runs when " + stage + " for " + provisioner + "\n";
+                defaultContent += "# Arguments:\n";
+                defaultContent += "# $1 - Path to mounted boot image\n";
+                defaultContent += "# $2 - Path to mounted rootfs image\n\n";
+                defaultContent += "BOOT_MOUNT=\"$1\"\n";
+                defaultContent += "ROOTFS_MOUNT=\"$2\"\n\n";
+                defaultContent += "echo \"Running " + stage + " customisation\"\n";
+                defaultContent += "echo \"Boot mount: ${BOOT_MOUNT}\"\n";
+                defaultContent += "echo \"Rootfs mount: ${ROOTFS_MOUNT}\"\n\n";
+                defaultContent += "# Example: Modify rootfs files\n";
+                defaultContent += "echo \"Adding entry to hosts file\"\n\n";
+                defaultContent += "echo \"10.0.0.100 custom-host\" >> ${ROOTFS_MOUNT}/etc/hosts\n\n";
+                defaultContent += "# Exit with success\nexit 0\n";
+            }
+            
+            auto acceptHeader = req->getHeader("accept");
+            if (acceptHeader.find("text/html") != std::string::npos) {
+                drogon::HttpViewData data;
+                data.insert("script_content", defaultContent);
+                data.insert("script_name", filename);
+                data.insert("script_exists", false);
+                data.insert("script_enabled", false);
+                data.insert("currentPage", std::string("customisation"));
+                callback(HttpResponse::newHttpViewResponse("get_script.csp", data));
+            } else {
+                Json::Value response;
+                response["exists"] = false;
+                response["filename"] = filename;
+                response["content"] = defaultContent;
+                response["enabled"] = false;
+                
+                resp->setStatusCode(k200OK);
+                resp->setContentTypeCode(CT_APPLICATION_JSON);
+                resp->setBody(Json::FastWriter().write(response));
+                callback(resp);
+            }
         });
     }
 } // namespace provisioner
