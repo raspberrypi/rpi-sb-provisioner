@@ -27,7 +27,7 @@
 #include <chrono>
 #include <cmath>
 
-#include "images.h"
+#include <images.h>
 
 // WebSocket controller for SHA256 calculations
 // Defined outside the provisioner namespace to avoid registration issues
