@@ -18,29 +18,9 @@ namespace provisioner {
 
     // Utility function to check if a QR code value exists in the manufacturing DB
     bool checkQRCodeInManufacturingDB(const std::string& qrCodeValue, std::string& errorMessage) {
-        std::string dbPath;
-        std::ifstream configFile("/etc/rpi-sb-provisioner/config");
-        std::string line;
-        
-        if (!configFile.is_open()) {
-            errorMessage = "Failed to open config file";
-            LOG_ERROR << errorMessage;
-            return false;
-        }
-
-        while (std::getline(configFile, line)) {
-            size_t delimiter_pos = line.find('=');
-            if (delimiter_pos != std::string::npos) {
-                std::string key = line.substr(0, delimiter_pos);
-                if (key == "RPI_SB_PROVISIONER_MANUFACTURING_DB") {
-                    dbPath = line.substr(delimiter_pos + 1);
-                    break;
-                }
-            }
-        }
-        configFile.close();
-        
-        if (dbPath.empty()) {
+        // Get manufacturing DB path from config
+        auto dbPath = utils::getConfigValue("RPI_SB_PROVISIONER_MANUFACTURING_DB");
+        if (!dbPath) {
             errorMessage = "Manufacturing database path not configured in settings";
             LOG_ERROR << errorMessage;
             return false;
@@ -48,7 +28,7 @@ namespace provisioner {
         
         // Open the database
         sqlite3 *db;
-        int rc = sqlite3_open(dbPath.c_str(), &db);
+        int rc = sqlite3_open(dbPath->c_str(), &db);
         if (rc != SQLITE_OK) {
             errorMessage = "Failed to open manufacturing database: " + std::string(sqlite3_errmsg(db));
             LOG_ERROR << errorMessage;
@@ -104,7 +84,7 @@ namespace provisioner {
         });
         
         // Register API handler for QR code verification
-        app.registerHandler("/api/verify-qrcode", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
+        app.registerHandler("/api/v2/verify-qrcode", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
             auto resp = HttpResponse::newHttpResponse();
             resp->setContentTypeCode(CT_APPLICATION_JSON);
             

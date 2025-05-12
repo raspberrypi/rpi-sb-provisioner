@@ -566,12 +566,12 @@ namespace provisioner {
         });
 
         // Add JSON-only endpoint for polling service logs
-        app.registerHandler("/api/service-log/{name}", [](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback, const std::string &name) {
+        app.registerHandler("/api/v2/service-log/{name}", [](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback, const std::string &name) {
             using namespace trantor;
             LOG_INFO << "Services::api-service-log for " << name;
             
             // Add audit log entry for handler access
-            AuditLog::logHandlerAccess(req, "/api/service-log/" + name);
+            AuditLog::logHandlerAccess(req, "/api/v2/service-log/" + name);
             
             std::string serviceName = name;
 

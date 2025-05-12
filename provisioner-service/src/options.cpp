@@ -1,8 +1,10 @@
 #include <string_view>
 #include <fstream>
 #include <filesystem>
+#include <sstream>
+#include <regex>
 
-#include <options.h>
+#include "include/options.h"
 #include <drogon/HttpAppFramework.h>
 #include "utils.h"
 #include "include/audit.h"
@@ -15,15 +17,16 @@ namespace provisioner {
         void removeDirectoryContents(const std::string& dirPath) {
             try {
                 for (const auto& entry : std::filesystem::directory_iterator(dirPath)) {
-                    if (std::filesystem::is_directory(entry.path())) {
-                        std::filesystem::remove_all(entry.path());
+                    if (std::filesystem::is_directory(entry.path()) && !std::filesystem::is_symlink(entry.path())) {
+                        removeDirectoryContents(entry.path());
+                        std::filesystem::remove(entry.path());
                     } else {
                         std::filesystem::remove(entry.path());
                     }
                 }
-                LOG_INFO << "Removed contents of directory: " << dirPath;
-            } catch (const std::filesystem::filesystem_error& e) {
-                LOG_ERROR << "Failed to remove directory contents: " << e.what();
+                LOG_INFO << "Successfully cleared directory contents: " << dirPath;
+            } catch (const std::exception& e) {
+                LOG_ERROR << "Error removing directory contents: " << e.what();
             }
         }
     }
@@ -41,36 +44,13 @@ namespace provisioner {
             AuditLog::logHandlerAccess(req, "/options/get");
 
             Json::Value options;
-            std::ifstream config_file("/etc/rpi-sb-provisioner/config");
-            std::string line;
+            auto configValues = utils::getAllConfigValues();
             
-            if (!config_file.is_open()) {
-                LOG_ERROR << "Failed to open config file";
-                auto resp = provisioner::utils::createErrorResponse(
-                    req,
-                    "Failed to read configuration file",
-                    drogon::k500InternalServerError,
-                    "Config Error",
-                    "CONFIG_READ_ERROR"
-                );
-                callback(resp);
-                return;
-            }
-
-            while (std::getline(config_file, line)) {
-                // Skip commented lines
-                if (!line.empty() && line[0] == '#') {
-                    continue;
-                }
-                
-                size_t delimiter_pos = line.find('=');
-                if (delimiter_pos != std::string::npos) {
-                    std::string key = line.substr(0, delimiter_pos);
-                    std::string value = line.substr(delimiter_pos + 1);
+            for (const auto& [key, value] : configValues) {
+                if (key != "CUSTOMER_KEY_FILE_PEM") { // Skip sensitive values
                     options[key] = value;
                 }
             }
-            config_file.close();
 
             auto resp = HttpResponse::newHttpResponse();
             
@@ -112,27 +92,7 @@ namespace provisioner {
                 callback(resp);
                 return;
             }
-            std::map<std::string, std::string> existing_options;
-            // Read existing config
-            std::ifstream config_read("/etc/rpi-sb-provisioner/config");
-            std::string line;
-            
-            if (config_read.is_open()) {
-                while (std::getline(config_read, line)) {
-                    // Skip commented lines
-                    if (!line.empty() && line[0] == '#') {
-                        continue;
-                    }
-                    
-                    size_t delimiter_pos = line.find('=');
-                    if (delimiter_pos != std::string::npos) {
-                        std::string key = line.substr(0, delimiter_pos);
-                        std::string value = line.substr(delimiter_pos + 1);
-                        existing_options[key] = value;
-                    }
-                }
-                config_read.close();
-            }
+            std::map<std::string, std::string> existing_options = utils::getAllConfigValues();
 
             for (const auto &key : body->getMemberNames()) {
                 LOG_INFO << "Options::set: " << key << " = " << body->get(key, "").asString();
@@ -162,13 +122,14 @@ namespace provisioner {
             }
 
             // Check if RPI_SB_WORKDIR is set, and if so, clear its contents
-            auto workdir = existing_options.find("RPI_SB_WORKDIR");
-            if (workdir != existing_options.end() && !workdir->second.empty()) {
-                if (std::filesystem::exists(workdir->second) && std::filesystem::is_directory(workdir->second)) {
-                    LOG_INFO << "Removing contents of RPI_SB_WORKDIR at " << workdir->second;
-                    removeDirectoryContents(workdir->second);
+            auto workdirValue = utils::getConfigValue("RPI_SB_WORKDIR");
+            std::string workdir = workdirValue ? *workdirValue : "";
+            if (!workdir.empty()) {
+                if (std::filesystem::exists(workdir) && std::filesystem::is_directory(workdir)) {
+                    LOG_INFO << "Removing contents of RPI_SB_WORKDIR at " << workdir;
+                    removeDirectoryContents(workdir);
                 } else {
-                    LOG_WARN << "RPI_SB_WORKDIR path does not exist or is not a directory: " << workdir->second;
+                    LOG_WARN << "RPI_SB_WORKDIR path does not exist or is not a directory: " << workdir;
                 }
             }
 
@@ -238,42 +199,8 @@ namespace provisioner {
             // Add audit log entry for handler access
             AuditLog::logHandlerAccess(req, "/options/clear-workdir");
 
-            // Read config file to get RPI_SB_WORKDIR value
-            std::ifstream config_file("/etc/rpi-sb-provisioner/config");
-            std::string line;
-            std::string workdir;
-            
-            if (!config_file.is_open()) {
-                LOG_ERROR << "Failed to open config file to determine RPI_SB_WORKDIR";
-                auto resp = provisioner::utils::createErrorResponse(
-                    req,
-                    "Failed to read configuration file",
-                    drogon::k500InternalServerError,
-                    "Config Error",
-                    "CONFIG_READ_ERROR"
-                );
-                callback(resp);
-                return;
-            }
-
-            // Find the RPI_SB_WORKDIR value
-            while (std::getline(config_file, line)) {
-                // Skip commented lines
-                if (!line.empty() && line[0] == '#') {
-                    continue;
-                }
-                
-                size_t delimiter_pos = line.find('=');
-                if (delimiter_pos != std::string::npos) {
-                    std::string key = line.substr(0, delimiter_pos);
-                    std::string value = line.substr(delimiter_pos + 1);
-                    if (key == "RPI_SB_WORKDIR") {
-                        workdir = value;
-                        break;
-                    }
-                }
-            }
-            config_file.close();
+            auto workdirValue = utils::getConfigValue("RPI_SB_WORKDIR");
+            std::string workdir = workdirValue ? *workdirValue : "";
 
             // Check if workdir was found
             if (workdir.empty()) {

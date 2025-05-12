@@ -629,27 +629,14 @@ namespace provisioner {
 
                 // Get current gold master image
                 std::string currentGoldMaster;
-                try {
-                    std::ifstream configFile("/etc/rpi-sb-provisioner/config");
-                    std::string line;
-                    if (configFile.is_open()) {
-                        while (std::getline(configFile, line)) {
-                            size_t delimiter_pos = line.find('=');
-                            if (delimiter_pos != std::string::npos) {
-                                std::string key = line.substr(0, delimiter_pos);
-                                if (key == "GOLD_MASTER_OS_FILE") {
-                                    currentGoldMaster = line.substr(delimiter_pos + 1);
-                                    // Extract just the filename from the full path
-                                    std::filesystem::path path(currentGoldMaster);
-                                    currentGoldMaster = path.filename().string();
-                                    break;
-                                }
-                            }
-                        }
-                        configFile.close();
-                    }
-                } catch (const std::exception& e) {
-                    LOG_ERROR << "Failed to read config file: " << e.what();
+                auto goldMasterPath = provisioner::utils::getConfigValue("GOLD_MASTER_OS_FILE");
+                if (goldMasterPath) {
+                    currentGoldMaster = *goldMasterPath;
+                    // Extract just the filename from the full path
+                    std::filesystem::path path(currentGoldMaster);
+                    currentGoldMaster = path.filename().string();
+                } else {
+                    LOG_ERROR << "Failed to read GOLD_MASTER_OS_FILE from config";
                 }
 
                 drogon::HttpViewData viewData;

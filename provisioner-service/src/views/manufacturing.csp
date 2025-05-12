@@ -125,6 +125,38 @@
             font-size: 0.9em;
             color: #666;
         }
+        
+        /* Loading spinner */
+        .loading-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        
+        .loading-spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #0066cc;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 2s linear infinite;
+            margin-right: 15px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .error-message {
+            background-color: #ffebee;
+            color: #d32f2f;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 15px 0;
+            border-left: 5px solid #d32f2f;
+        }
     </style>
 </head>
 <body>
@@ -158,12 +190,18 @@
             <span class="toggle-slider"></span>
         </label>
         <span>Auto Refresh</span>
-        <span id="refresh-status">(Enabled - refreshing every 1s)</span>
+        <span id="refresh-status">(Enabled - refreshing every 5s)</span>
     </div>
+    
+    <div id="error-container"></div>
     
     <div class="table-container" id="manu-table-container">
         <div class="scroll-indicator">Scroll to see more</div>
-        <table id="manufacturingTable">
+        <div class="loading-container">
+            <div class="loading-spinner"></div>
+            <span>Loading manufacturing data...</span>
+        </div>
+        <table id="manufacturingTable" style="display: none;">
             <thead>
                 <tr>
                     <th>Provision Time</th>
@@ -180,36 +218,11 @@
                     <th>Processor</th>
                     <th>Memory</th>
                     <th>Manufacturer</th>
+                    <th>Secure</th>
                 </tr>
             </thead>
-            <tbody>
-            <%c++ 
-            auto devicesList = @@.get<std::vector<std::map<std::string, std::string>>>("devices");
-            if(devicesList.size() > 0) {
-            %>
-                <%c++ for(const auto& device : devicesList) { %>
-                    <tr>
-                        <td><%c++ $$ << device.at("provision_ts"); %></td>
-                        <td><%c++ $$ << device.at("id"); %></td>
-                        <td><%c++ $$ << device.at("boardname"); %></td>
-                        <td><%c++ $$ << device.at("serial"); %></td>
-                        <td><%c++ $$ << device.at("eth_mac"); %></td>
-                        <td><%c++ $$ << device.at("wifi_mac"); %></td>
-                        <td><%c++ $$ << device.at("bt_mac"); %></td>
-                        <td class="emmc-size" data-size="<%c++ $$ << device.at("mmc_size"); %>"><%c++ $$ << device.at("mmc_size"); %></td>
-                        <td><%c++ $$ << device.at("mmc_cid"); %></td>
-                        <td><%c++ $$ << device.at("rpi_duid"); %></td>
-                        <td><%c++ $$ << device.at("board_revision"); %></td>
-                        <td><%c++ $$ << device.at("processor"); %></td>
-                        <td><%c++ $$ << device.at("memory"); %></td>
-                        <td><%c++ $$ << device.at("manufacturer"); %></td>
-                    </tr>
-                <%c++ } %>
-            <%c++ } else { %>
-                    <tr>
-                        <td colspan="14" class="no-devices">No manufacturing data available</td>
-                    </tr>
-            <%c++ } %>
+            <tbody id="tableBody">
+                <!-- Data will be loaded via JavaScript -->
             </tbody>
         </table>
     </div>
@@ -258,13 +271,91 @@
             });
         }
         
-        // Run on page load
-        window.addEventListener('load', function() {
-            updateScrollIndicator();
-            applyEmmcSizeTooltips();
-        });
-        window.addEventListener('resize', updateScrollIndicator);
+        // Fetch manufacturing data from API
+        async function fetchManufacturingData() {
+            try {
+                // Show loading state
+                document.querySelector('.loading-container').style.display = 'flex';
+                document.getElementById('manufacturingTable').style.display = 'none';
+                document.getElementById('error-container').innerHTML = '';
+                
+                // Fetch data from API
+                const response = await fetch('/api/v2/manufacturing');
+                
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch data: ${response.status} ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                
+                // Hide loading spinner and show table
+                document.querySelector('.loading-container').style.display = 'none';
+                document.getElementById('manufacturingTable').style.display = 'table';
+                
+                // Populate table
+                populateTable(data);
+                
+                // Apply formatting and UI updates
+                updateScrollIndicator();
+                applyEmmcSizeTooltips();
+                
+                return true;
+            } catch (error) {
+                console.error('Error fetching manufacturing data:', error);
+                
+                // Hide loading spinner
+                document.querySelector('.loading-container').style.display = 'none';
+                
+                // Show error message
+                document.getElementById('error-container').innerHTML = `
+                    <div class="error-message">
+                        <strong>Error loading data:</strong> ${error.message || 'Failed to fetch manufacturing data'}
+                    </div>
+                `;
+                
+                return false;
+            }
+        }
         
+        // Populate table with data
+        function populateTable(data) {
+            const tableBody = document.getElementById('tableBody');
+            tableBody.innerHTML = '';
+            
+            if (data && data.length > 0) {
+                data.forEach(device => {
+                    const row = document.createElement('tr');
+                    
+                    // Add cells for each field
+                    row.innerHTML = `
+                        <td>${device.provision_ts || ''}</td>
+                        <td>${device.id || ''}</td>
+                        <td>${device.boardname || ''}</td>
+                        <td>${device.serial || ''}</td>
+                        <td>${device.eth_mac || ''}</td>
+                        <td>${device.wifi_mac || ''}</td>
+                        <td>${device.bt_mac || ''}</td>
+                        <td class="emmc-size" data-size="${device.mmc_size || ''}">${device.mmc_size || ''}</td>
+                        <td>${device.mmc_cid || ''}</td>
+                        <td>${device.rpi_duid || ''}</td>
+                        <td>${device.board_revision || ''}</td>
+                        <td>${device.processor || ''}</td>
+                        <td>${device.memory || ''}</td>
+                        <td>${device.manufacturer || ''}</td>
+                        <td>${device.secure || ''}</td>
+                    `;
+                    
+                    tableBody.appendChild(row);
+                });
+            } else {
+                // No data case
+                const row = document.createElement('tr');
+                row.innerHTML = '<td colspan="15" class="no-devices">No manufacturing data available</td>';
+                tableBody.appendChild(row);
+            }
+        }
+        
+        // Export table to CSV
         document.getElementById('exportCsv').addEventListener('click', function() {
             // Get the table
             const table = document.getElementById('manufacturingTable');
@@ -306,94 +397,12 @@
         let refreshInterval;
         const refreshToggle = document.getElementById('auto-refresh');
         const refreshStatus = document.getElementById('refresh-status');
-        const tableContainer = document.getElementById('manu-table-container');
-        
-        // Function to fetch and update the manufacturing data table
-        async function refreshManufacturingTable() {
-            try {
-                const response = await fetch('/manu-db', {
-                    headers: {
-                        'Accept': 'application/json'
-                    }
-                });
-                
-                if (!response.ok) {
-                    throw new Error('Failed to fetch manufacturing data');
-                }
-                
-                const data = await response.json();
-                
-                // Create a new table with the updated data
-                let tableHtml = `
-                    <div class="scroll-indicator">Scroll to see more</div>
-                    <table id="manufacturingTable">
-                        <thead>
-                            <tr>
-                                <th>Provision Time</th>
-                                <th>ID</th>
-                                <th>Board</th>
-                                <th>Serial</th>
-                                <th>Ethernet MAC</th>
-                                <th>WiFi MAC</th>
-                                <th>Bluetooth MAC</th>
-                                <th>eMMC Size</th>
-                                <th>eMMC CID</th>
-                                <th>RPi DUID</th>
-                                <th>Revision</th>
-                                <th>Processor</th>
-                                <th>Memory</th>
-                                <th>Manufacturer</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                `;
-                
-                if (data && data.length > 0) {
-                    data.forEach(device => {
-                        tableHtml += `
-                            <tr>
-                                <td>${device.provision_ts || ''}</td>
-                                <td>${device.id || ''}</td>
-                                <td>${device.boardname || ''}</td>
-                                <td>${device.serial || ''}</td>
-                                <td>${device.eth_mac || ''}</td>
-                                <td>${device.wifi_mac || ''}</td>
-                                <td>${device.bt_mac || ''}</td>
-                                <td class="emmc-size" data-size="${device.mmc_size || ''}">${device.mmc_size || ''}</td>
-                                <td>${device.mmc_cid || ''}</td>
-                                <td>${device.rpi_duid || ''}</td>
-                                <td>${device.board_revision || ''}</td>
-                                <td>${device.processor || ''}</td>
-                                <td>${device.memory || ''}</td>
-                                <td>${device.manufacturer || ''}</td>
-                            </tr>
-                        `;
-                    });
-                } else {
-                    tableHtml += `
-                        <tr>
-                            <td colspan="14" class="no-devices">No manufacturing data available</td>
-                        </tr>
-                    `;
-                }
-                
-                tableHtml += `
-                        </tbody>
-                    </table>
-                `;
-                
-                tableContainer.innerHTML = tableHtml;
-                updateScrollIndicator();
-                applyEmmcSizeTooltips();
-            } catch (error) {
-                console.error('Error refreshing manufacturing table:', error);
-            }
-        }
         
         // Function to start the refresh interval
         function startRefresh() {
-            refreshInterval = setInterval(refreshManufacturingTable, 1000);
-            refreshStatus.textContent = '(Enabled - refreshing every 1s)';
+            // Use 5 seconds refresh rate to reduce server load
+            refreshInterval = setInterval(fetchManufacturingData, 5000);
+            refreshStatus.textContent = '(Enabled - refreshing every 5s)';
         }
         
         // Function to stop the refresh interval
@@ -402,12 +411,15 @@
             refreshStatus.textContent = '(Disabled)';
         }
         
-        // Initialize auto-refresh based on toggle state
-        if (refreshToggle.checked) {
-            startRefresh();
-        } else {
-            stopRefresh();
-        }
+        // Load data initially
+        document.addEventListener('DOMContentLoaded', function() {
+            fetchManufacturingData();
+            
+            // Initialize auto-refresh based on toggle state
+            if (refreshToggle.checked) {
+                startRefresh();
+            }
+        });
         
         // Toggle auto-refresh when the checkbox is changed
         refreshToggle.addEventListener('change', function() {
