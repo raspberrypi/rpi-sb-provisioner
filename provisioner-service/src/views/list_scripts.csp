@@ -1,13 +1,14 @@
 <%inc
 #include <string>
 #include <vector>
+#include <map>
 #include <json/json.h>
 %>
 
 <%c++
 auto scripts = @@.get<Json::Value>("scripts");
-auto provisioners = @@.get<std::vector<std::string>>("provisioners");
-auto stages = @@.get<std::vector<std::string>>("stages");
+auto provisioner_stages = @@.get<std::map<std::string, std::vector<std::string>>>("provisioner_stages");
+auto stage_descriptions = @@.get<std::map<std::string, std::string>>("stage_descriptions");
 std::string currentPage = "customisation";
 %>
 
@@ -240,35 +241,50 @@ std::string currentPage = "customisation";
           
           <div class="tabs">
             <div class="tab-buttons">
-              <%c++ for (const auto& provisioner : provisioners) { %>
+              <%c++ for (const auto& [provisioner, stages] : provisioner_stages) { %>
                 <button class="tab-button" onclick="openTab(event, '<%c++ $$ << provisioner; %>')" id="<%c++ $$ << provisioner; %>-tab">
                   <%c++ $$ << provisioner; %>
                 </button>
               <%c++ } %>
             </div>
             
-            <%c++ for (const auto& provisioner : provisioners) { %>
+            <%c++ for (const auto& [provisioner, validStages] : provisioner_stages) { %>
               <div id="<%c++ $$ << provisioner; %>" class="tab-content">
                 <h3><%c++ $$ << provisioner; %> scripts</h3>
                 
                 <div class="hook-grid">
-                  <%c++ for (const auto& stage : stages) { %>
+                  <%c++ for (const auto& stage : validStages) { %>
                     <%c++ 
-                      std::string hookFilename = provisioner + "-" + stage + ".sh";
+                      // Create the hook name without extension
+                      std::string hookFilename = provisioner + "-" + stage;
                       bool hookExists = false;
                       bool hookEnabled = false;
                       std::string hookDescription = "";
                       
-                      // Find this hook in the scripts data
+                      // Find this hook in the scripts data with .sh extension
                       for (int i = 0; i < scripts.size(); i++) {
-                        if (scripts[i]["filename"].asString() == hookFilename) {
+                        std::string scriptName = scripts[i]["filename"].asString();
+                        // Strip .sh extension if present for correct comparison
+                        std::string baseScriptName = scriptName;
+                        if (baseScriptName.length() > 3 && baseScriptName.substr(baseScriptName.length() - 3) == ".sh") {
+                          baseScriptName = baseScriptName.substr(0, baseScriptName.length() - 3);
+                        }
+                        
+                        // Log each script name for debugging
+                        LOG_DEBUG << "Script name in data: " << scriptName << ", base name: " << baseScriptName << ", looking for: " << hookFilename;
+                        
+                        // Match by base name (no extension)
+                        if (baseScriptName == hookFilename) {
                           hookExists = scripts[i].isMember("exists") ? scripts[i]["exists"].asBool() : true;
                           hookEnabled = scripts[i]["enabled"].asBool();
-                          if (scripts[i].isMember("description")) {
-                            hookDescription = scripts[i]["description"].asString();
-                          }
                           break;
                         }
+                      }
+
+                      // Get description from stage_descriptions
+                      auto descIt = stage_descriptions.find(stage);
+                      if (descIt != stage_descriptions.end()) {
+                        hookDescription = descIt->second;
                       }
                     %>
                     
@@ -300,7 +316,7 @@ std::string currentPage = "customisation";
                           
                           <button onclick="deleteScript('<%c++ $$ << hookFilename; %>')" class="cust-btn cust-btn-danger cust-btn-sm">Delete</button>
                         <%c++ } else { %>
-                          <a href="/customisation/get-script?script=<%c++ $$ << hookFilename; %>" class="cust-btn cust-btn-success cust-btn-sm">Create Script</a>
+                          <a href="/customisation/create-script?script=<%c++ $$ << hookFilename; %>" class="cust-btn cust-btn-success cust-btn-sm">Create Script</a>
                         <%c++ } %>
                       </div>
                     </div>
@@ -352,9 +368,19 @@ std::string currentPage = "customisation";
     
     // For each script that exists, verify its enabled state
     scriptsData.forEach(script => {
+      // Log script filename for debugging
+      console.log("Script in data:", script.filename);
+      
+      // Strip .sh extension for matching UI elements
+      let baseFilename = script.filename;
+      if (baseFilename.endsWith('.sh')) {
+        baseFilename = baseFilename.substring(0, baseFilename.length - 3);
+      }
+      console.log("Looking for UI element with base filename:", baseFilename);
+      
       if (script.exists) {
         // Get the state shown in the UI
-        let card = document.querySelector(`.hook-card[data-filename="${script.filename}"]`);
+        let card = document.querySelector(`.hook-card[data-filename="${baseFilename}"]`);
         if (card) {
           let statusSpan = card.querySelector('.hook-status');
           let uiEnabled = false;
@@ -441,8 +467,8 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function getScriptBaseName(filename) {
-  // Extract the base name without the extension
-  return filename.replace(/\.sh$/, '');
+  // No need to extract the base name as we're already using it without extension
+  return filename;
 }
 
 function disableScript(filename) {
@@ -466,8 +492,8 @@ function disableScript(filename) {
     console.warn('Could not find disable button');
   }
   
-  // Use only the base name without extension
-  const baseScriptName = getScriptBaseName(filename);
+  // Use the script name directly, server will append .sh
+  const baseScriptName = filename;
   console.log(`Using script base name: ${baseScriptName}`);
   
   // Use GET method since that's what the server expects
@@ -579,8 +605,8 @@ function enableScript(filename) {
     console.warn('Could not find enable button');
   }
   
-  // Use only the base name without extension
-  const baseScriptName = getScriptBaseName(filename);
+  // Use the script name directly, server will append .sh
+  const baseScriptName = filename;
   console.log(`Using script base name: ${baseScriptName}`);
   
   // Use GET method since that's what the server expects
@@ -682,8 +708,8 @@ function deleteScript(filename) {
       return;
     }
     
-    // Use only the base name without extension
-    const baseScriptName = getScriptBaseName(filename);
+    // Use the script name directly, server will append .sh
+    const baseScriptName = filename;
     console.log(`Using script base name: ${baseScriptName}`);
     
     fetch('/customisation/delete-script?script=' + encodeURIComponent(baseScriptName), {
@@ -722,7 +748,7 @@ function deleteScript(filename) {
         if (actionsDiv) {
           // Replace with a single "Create Script" button
           actionsDiv.innerHTML = `
-            <a href="/customisation/get-script?script=${encodeURIComponent(filename)}" class="cust-btn cust-btn-success cust-btn-sm">Create Script</a>
+            <a href="/customisation/create-script?script=${encodeURIComponent(filename)}" class="cust-btn cust-btn-success cust-btn-sm">Create Script</a>
           `;
         }
       } else {
@@ -743,4 +769,4 @@ function deleteScript(filename) {
 </script>
 <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
 </body>
-</html> 
+</html>

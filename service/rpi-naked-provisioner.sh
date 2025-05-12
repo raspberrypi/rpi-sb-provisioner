@@ -204,6 +204,9 @@ announce_start "Set LED status"
 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem led PWR 0
 announce_stop "Set LED status"
 
+# Run post-flash customisation script
+run_customisation_script "naked-provisioner" "post-flash"
+
 metadata_gather
 record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_FINISHED}" "${TARGET_USB_PATH}"
 
