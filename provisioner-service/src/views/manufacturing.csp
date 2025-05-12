@@ -126,29 +126,6 @@
             color: #666;
         }
         
-        /* Loading spinner */
-        .loading-container {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            padding: 20px;
-        }
-        
-        .loading-spinner {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #0066cc;
-            border-radius: 50%;
-            width: 30px;
-            height: 30px;
-            animation: spin 2s linear infinite;
-            margin-right: 15px;
-        }
-        
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        
         .error-message {
             background-color: #ffebee;
             color: #d32f2f;
@@ -197,34 +174,7 @@
     
     <div class="table-container" id="manu-table-container">
         <div class="scroll-indicator">Scroll to see more</div>
-        <div class="loading-container">
-            <div class="loading-spinner"></div>
-            <span>Loading manufacturing data...</span>
-        </div>
-        <table id="manufacturingTable" style="display: none;">
-            <thead>
-                <tr>
-                    <th>Provision Time</th>
-                    <th>ID</th>
-                    <th>Board</th>
-                    <th>Serial</th>
-                    <th>Ethernet MAC</th>
-                    <th>WiFi MAC</th>
-                    <th>Bluetooth MAC</th>
-                    <th>eMMC Size</th>
-                    <th>eMMC CID</th>
-                    <th>RPi DUID</th>
-                    <th>Revision</th>
-                    <th>Processor</th>
-                    <th>Memory</th>
-                    <th>Manufacturer</th>
-                    <th>Secure</th>
-                </tr>
-            </thead>
-            <tbody id="tableBody">
-                <!-- Data will be loaded via JavaScript -->
-            </tbody>
-        </table>
+        <!-- Initial table will be created by JavaScript -->
     </div>
 
     <script>
@@ -271,15 +221,9 @@
             });
         }
         
-        // Fetch manufacturing data from API
-        async function fetchManufacturingData() {
+        // Function to fetch and update the manufacturing table
+        async function refreshManufacturingTable() {
             try {
-                // Show loading state
-                document.querySelector('.loading-container').style.display = 'flex';
-                document.getElementById('manufacturingTable').style.display = 'none';
-                document.getElementById('error-container').innerHTML = '';
-                
-                // Fetch data from API
                 const response = await fetch('/api/v2/manufacturing');
                 
                 if (!response.ok) {
@@ -288,23 +232,76 @@
                 
                 const data = await response.json();
                 
-                // Hide loading spinner and show table
-                document.querySelector('.loading-container').style.display = 'none';
-                document.getElementById('manufacturingTable').style.display = 'table';
+                // Create a new table with the updated data
+                let tableHtml = `
+                    <table id="manufacturingTable">
+                        <thead>
+                            <tr>
+                                <th>Provision Time</th>
+                                <th>ID</th>
+                                <th>Board</th>
+                                <th>Serial</th>
+                                <th>Ethernet MAC</th>
+                                <th>WiFi MAC</th>
+                                <th>Bluetooth MAC</th>
+                                <th>eMMC Size</th>
+                                <th>eMMC CID</th>
+                                <th>RPi DUID</th>
+                                <th>Revision</th>
+                                <th>Processor</th>
+                                <th>Memory</th>
+                                <th>Manufacturer</th>
+                                <th>Secure</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
                 
-                // Populate table
-                populateTable(data);
+                if (data && data.length > 0) {
+                    data.forEach(device => {
+                        tableHtml += `
+                            <tr>
+                                <td>${device.provision_ts || ''}</td>
+                                <td>${device.id || ''}</td>
+                                <td>${device.boardname || ''}</td>
+                                <td>${device.serial || ''}</td>
+                                <td>${device.eth_mac || ''}</td>
+                                <td>${device.wifi_mac || ''}</td>
+                                <td>${device.bt_mac || ''}</td>
+                                <td class="emmc-size" data-size="${device.mmc_size || ''}">${device.mmc_size || ''}</td>
+                                <td>${device.mmc_cid || ''}</td>
+                                <td>${device.rpi_duid || ''}</td>
+                                <td>${device.board_revision || ''}</td>
+                                <td>${device.processor || ''}</td>
+                                <td>${device.memory || ''}</td>
+                                <td>${device.manufacturer || ''}</td>
+                                <td>${device.secure || ''}</td>
+                            </tr>
+                        `;
+                    });
+                } else {
+                    tableHtml += `
+                        <tr>
+                            <td colspan="15" class="no-devices">No manufacturing data available</td>
+                        </tr>
+                    `;
+                }
                 
-                // Apply formatting and UI updates
-                updateScrollIndicator();
+                tableHtml += `
+                        </tbody>
+                    </table>
+                `;
+                
+                // Update the table container without showing/hiding elements
+                document.getElementById('manu-table-container').innerHTML = tableHtml;
+                
+                // Apply tooltips and update UI after the table is updated
                 applyEmmcSizeTooltips();
+                updateScrollIndicator();
                 
                 return true;
             } catch (error) {
                 console.error('Error fetching manufacturing data:', error);
-                
-                // Hide loading spinner
-                document.querySelector('.loading-container').style.display = 'none';
                 
                 // Show error message
                 document.getElementById('error-container').innerHTML = `
@@ -314,44 +311,6 @@
                 `;
                 
                 return false;
-            }
-        }
-        
-        // Populate table with data
-        function populateTable(data) {
-            const tableBody = document.getElementById('tableBody');
-            tableBody.innerHTML = '';
-            
-            if (data && data.length > 0) {
-                data.forEach(device => {
-                    const row = document.createElement('tr');
-                    
-                    // Add cells for each field
-                    row.innerHTML = `
-                        <td>${device.provision_ts || ''}</td>
-                        <td>${device.id || ''}</td>
-                        <td>${device.boardname || ''}</td>
-                        <td>${device.serial || ''}</td>
-                        <td>${device.eth_mac || ''}</td>
-                        <td>${device.wifi_mac || ''}</td>
-                        <td>${device.bt_mac || ''}</td>
-                        <td class="emmc-size" data-size="${device.mmc_size || ''}">${device.mmc_size || ''}</td>
-                        <td>${device.mmc_cid || ''}</td>
-                        <td>${device.rpi_duid || ''}</td>
-                        <td>${device.board_revision || ''}</td>
-                        <td>${device.processor || ''}</td>
-                        <td>${device.memory || ''}</td>
-                        <td>${device.manufacturer || ''}</td>
-                        <td>${device.secure || ''}</td>
-                    `;
-                    
-                    tableBody.appendChild(row);
-                });
-            } else {
-                // No data case
-                const row = document.createElement('tr');
-                row.innerHTML = '<td colspan="15" class="no-devices">No manufacturing data available</td>';
-                tableBody.appendChild(row);
             }
         }
         
@@ -398,10 +357,21 @@
         const refreshToggle = document.getElementById('auto-refresh');
         const refreshStatus = document.getElementById('refresh-status');
         
+        // Load data initially
+        document.addEventListener('DOMContentLoaded', function() {
+            // Do initial load
+            refreshManufacturingTable();
+            
+            // Initialize auto-refresh based on toggle state
+            if (refreshToggle.checked) {
+                startRefresh();
+            }
+        });
+        
         // Function to start the refresh interval
         function startRefresh() {
             // Use 5 seconds refresh rate to reduce server load
-            refreshInterval = setInterval(fetchManufacturingData, 5000);
+            refreshInterval = setInterval(refreshManufacturingTable, 5000);
             refreshStatus.textContent = '(Enabled - refreshing every 5s)';
         }
         
@@ -410,16 +380,6 @@
             clearInterval(refreshInterval);
             refreshStatus.textContent = '(Disabled)';
         }
-        
-        // Load data initially
-        document.addEventListener('DOMContentLoaded', function() {
-            fetchManufacturingData();
-            
-            // Initialize auto-refresh based on toggle state
-            if (refreshToggle.checked) {
-                startRefresh();
-            }
-        });
         
         // Toggle auto-refresh when the checkbox is changed
         refreshToggle.addEventListener('change', function() {
