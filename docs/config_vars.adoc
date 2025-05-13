@@ -1,3 +1,12 @@
+= Confguration variables
+:toc:
+:toc-title: Table of Contents
+:toclevels: 3
+
+This document describes the configuration variables used in /etc/rpi-sb-provisioner/config. You do not typically need to set these variables, and they are set by the WebUI. You may manually set them if you want to use a change management system or similar to update them.
+
+== Variables
+
 === PROVISIONING_STYLE
 *Mandatory, with a default*
 
@@ -116,4 +125,25 @@ Set to a location to cache OS assets between provisioning sessions. Recommended 
 
 ----
 RPI_SB_WORKDIR=/srv/rpi-sb-provisioner/
+----
+
+== Format of the config file
+
+The config file is a simple text file, with one variable per line. Variables are specified in the format:
+
+----
+VARIABLE_NAME=value
+----
+
+For example:
+
+----
+RPI_SB_PROVISIONER_MANUFACTURING_DB=/var/lib/rpi-sb-provisioner/manufacturing.db
+----
+
+Comments can be added to the file by starting a line with a `#` character.
+
+----
+# This is a comment
+RPI_SB_PROVISIONER_MANUFACTURING_DB=/var/lib/rpi-sb-provisioner/manufacturing.db
 ----
