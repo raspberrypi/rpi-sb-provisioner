@@ -9,16 +9,6 @@ This document describes the API endpoints available in the provisioner-service. 
 
 The Manufacturing Database API provides access to device provisioning data collected during the provisioning process. This API allows for integration with other systems and custom UIs.
 
-=== /manu-db
-
-*HTTP Method:* GET
-
-*Description:* Returns an HTML view of the manufacturing database records. This endpoint is primarily intended for browser-based viewing.
-
-*Parameters:* None
-
-*Response:* HTML page displaying device provisioning records in a formatted table.
-
 === /api/v2/manufacturing
 
 *HTTP Method:* GET
@@ -153,7 +143,7 @@ The endpoint returns a JSON object containing an array of devices:
       "port": "usb:1-1.4",
       "ip_address": "192.168.1.100",
       "state": "provisioning",
-      "image": "raspios-bullseye.img"
+      "image": "raspios-trixie.img"
     },
     ...
   ]
@@ -384,6 +374,23 @@ If QR code parameter is missing:
 - This endpoint is particularly useful for integration with barcode scanners or mobile applications.
 - The QR code value is checked against the `rpi_duid` field in the manufacturing database.
 
+== Service Log API
+
+=== /api/v2/service-log/{name}
+
+*HTTP Method:* GET
+
+*Description:* Returns log entries for a specific service identified by its name. This endpoint is used for polling live updates of service logs, and will contain the greatest amount of detail we log.
+
+*Path Parameters:*
+
+[options="header"]
+|===
+|Parameter|Type|Required|Description
+|name|String|Yes|Name of the service to get logs for
+|=== 
+
+
 == Error Response Format
 
 All API endpoints follow a standard error response format:
@@ -421,17 +428,3 @@ Most endpoints support content negotiation through the `Accept` header:
 - `Accept: text/html` - Returns HTML view when available
 
 If no `Accept` header is provided or if it doesn't contain a supported MIME type, the API defaults to returning JSON responses.
-
-=== /api/v2/service-log/{name}
-
-*HTTP Method:* GET
-
-*Description:* Returns log entries for a specific service identified by its name. This endpoint is used for polling live updates of service logs.
-
-*Path Parameters:*
-
-[options="header"]
-|===
-|Parameter|Type|Required|Description
-|name|String|Yes|Name of the service to get logs for
-|=== 
