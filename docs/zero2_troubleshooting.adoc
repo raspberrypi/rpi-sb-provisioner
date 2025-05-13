@@ -1,19 +1,19 @@
-=== Troubleshooting Zero 2 W devices
+= Troubleshooting Zero 2 W devices
 
-==== Failure to enter RPIBOOT mode
+== Failure to enter RPIBOOT mode
 
 If your Zero 2 W device does not enter RPIBOOT mode, try the following:
 
-===== Change your USB cable for a shorter and higher quality cable
+=== Change your USB cable for a shorter and higher quality cable
 
-===== Change your USB port for a different port on your host machine (if you are using a USB 3 port, try a USB 2 port, for example)
+=== Change your USB port for a different port on your host machine (if you are using a USB 3 port, try a USB 2 port, for example)
 
-===== Boot your Zero 2 W device with a recent version of Raspberry Pi OS (https://github.com/raspberrypi/usbboot/issues/101#issuecomment-983641043)
+=== Boot your Zero 2 W device with a recent version of Raspberry Pi OS (https://github.com/raspberrypi/usbboot/issues/101#issuecomment-983641043)
 
-==== Triggering RPIBOOT mode
+== Triggering RPIBOOT mode
 
-===== TODO: Add instructions here
+=== TODO: Add instructions here
 
-==== Using secure-boot provisioning style on Zero 2 W devices
+== Using secure-boot provisioning style on Zero 2 W devices
 
-===== Secure boot is not available on Zero 2 W devices, and forcing the provisioning style will produce undefined results.
+=== Secure boot is not available on Zero 2 W devices, and forcing the provisioning style will produce undefined results.
