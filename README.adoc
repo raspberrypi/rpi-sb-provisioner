@@ -48,7 +48,7 @@ WARNING: You *must not* have additional peripherals connected via USB to the Com
 
 === Software configuration
 
-`rpi-sb-provisioner` is provided from the Raspberry Pi OS APT repositories, and can be installed in the usual manner.
+This repository contains the software comprising `rpi-sb-provisioner`, along with the necessary Debian packaging files. However, it is strongly recommended to install it from the Raspberry Pi OS APT repositories in the usual manner.
 
 First, ensure you are running an up-to-date version of Raspberry Pi OS on your provisioning server:
 
