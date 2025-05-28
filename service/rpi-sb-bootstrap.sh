@@ -419,12 +419,14 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                 # This only makes sense if you're re-provisioning a device that's already been provisioned.
                 # It's a special case, and should not be used in normal operation.
                 # Additionally, this only works on Raspberry Pi 5-family devices.
-                if [ ! -f "${CUSTOMER_KEY_FILE_PEM}" ]; then
-                    record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
-                    die "No customer key file to use for re-provisioning. Aborting."
+                if [ "${TARGET_DEVICE_FAMILY}" = "2712" ]; then
+                    if [ ! -f "${CUSTOMER_KEY_FILE_PEM}" ]; then
+                        record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
+                        die "No customer key file to use for re-provisioning. Aborting."
+                    fi
+                    log "Re-signing bootcode for special re-provisioning case"
+                    rpi-sign-bootcode --debug -c 2712 -i "${BOOTCODE_BINARY_IMAGE}" -o "${BOOTCODE_FLASHING_NAME}" -k "${CUSTOMER_KEY_FILE_PEM}" -v 0 -n 16
                 fi
-                log "Re-signing bootcode for special re-provisioning case"
-                rpi-sign-bootcode --debug -c 2712 -i "${BOOTCODE_BINARY_IMAGE}" -o "${BOOTCODE_FLASHING_NAME}" -k "${CUSTOMER_KEY_FILE_PEM}" -v 0 -n 16
             fi
             [ ! -f "/etc/rpi-sb-provisioner/special-skip-eeprom/${TARGET_DEVICE_SERIAL}" ] && timeout_fatal rpiboot -d "${SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
         else
@@ -502,11 +504,13 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
 
                 log "Writing key and EEPROM configuration to the device"
                 if [ -f "/etc/rpi-sb-provisioner/special-reprovision-device/${TARGET_DEVICE_SERIAL}" ]; then
-                    # This only makes sense if you're re-provisioning a device that's already been provisioned.
-                    # It's a special case, and should not be used in normal operation.
-                    # Additionally, this only works on Raspberry Pi 5-family devices.
-                    log "Re-signing bootcode for special re-provisioning case"
-                    rpi-sign-bootcode --debug -c 2712 -i "${BOOTCODE_BINARY_IMAGE}" -o "${BOOTCODE_FLASHING_NAME}" -k "${CUSTOMER_KEY_FILE_PEM}" -v 0 -n 16
+                    if [ "${TARGET_DEVICE_FAMILY}" = "2712" ]; then
+                        # This only makes sense if you're re-provisioning a device that's already been provisioned.
+                        # It's a special case, and should not be used in normal operation.
+                        # Additionally, this only works on Raspberry Pi 5-family devices.
+                        log "Re-signing bootcode for special re-provisioning case"
+                        rpi-sign-bootcode --debug -c 2712 -i "${BOOTCODE_BINARY_IMAGE}" -o "${BOOTCODE_FLASHING_NAME}" -k "${CUSTOMER_KEY_FILE_PEM}" -v 0 -n 16
+                    fi
                 fi
                 [ ! -f "/etc/rpi-sb-provisioner/special-skip-eeprom/${TARGET_DEVICE_SERIAL}" ] && timeout_fatal rpiboot -d "${SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
             else
