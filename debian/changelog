@@ -1,3 +1,12 @@
+rpi-sb-provisioner (2.0.3) unstable; urgency=medium
+
+  * packaging: Enforce modern (>= 20250519~100421) rpiboot dependency
+  * packaging: Enforce modern (>= 27.10) rpi-eeprom dependency
+  * packaging: Update Standards-Version to 4.7.2
+  * provisioner: Fixup 2712 re-provisioning
+
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Wed, 28 May 2025 17:00:00 +0100
+
 rpi-sb-provisioner (2.0.2) unstable; urgency=medium
 
   * WebUI: Don't hide CUSTOMER_KEY_FILE_PEM in options
