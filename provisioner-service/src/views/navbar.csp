@@ -31,13 +31,13 @@
 .rpi-version-info {
     float: right;
     color: #ddd;
-    padding: 14px 16px;
     font-size: 14px;
 }
 
 .rpi-version-warning {
     color: #ffcc00;
     margin-left: 5px;
+    font-size: 12px;
 }
 
 .rpi-version-link {
