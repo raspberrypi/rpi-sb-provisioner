@@ -11,8 +11,13 @@ metadata_gather() {
     WIFI_MAC_ADDRESS=$(metadata_get "mac-wifi")
     BT_MAC_ADDRESS=$(metadata_get "mac-bt")
     
-    MMC_SIZE=$(( $(metadata_get "mmc-sector-size") * $(metadata_get "mmc-sector-count") ))
+    MMC_SECTOR_SIZE=$(metadata_get "mmc-sector-size")
+    MMC_SECTOR_SIZE=${MMC_SECTOR_SIZE:-0}
+    MMC_SECTOR_COUNT=$(metadata_get "mmc-sector-count")
+    MMC_SECTOR_COUNT=${MMC_SECTOR_COUNT:-0}
+    MMC_SIZE=$(( MMC_SECTOR_SIZE * MMC_SECTOR_COUNT ))
     MMC_CID=$(metadata_get "mmc-cid")
+    MMC_CID=${MMC_CID:-""}
     
     RPI_DUID=$(metadata_get "rpi-duid")
     
