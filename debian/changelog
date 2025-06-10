@@ -1,3 +1,12 @@
+rpi-sb-provisioner (2.0.4) unstable; urgency=medium
+
+  * packaging: Enforce modern (>= 28.2) rpi-eeprom dependency to fix nvme boot
+    issues
+  * manufacturing: Fix crash when provisioning NVMe devices
+  * WebUI: Fix navigation bar disruption when updates are available
+
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Tue, 10 Jun 2025 14:00:00 +0100
+
 rpi-sb-provisioner (2.0.3) unstable; urgency=medium
 
   * packaging: Enforce modern (>= 20250519~100421) rpiboot dependency
