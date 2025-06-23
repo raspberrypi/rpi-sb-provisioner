@@ -1,3 +1,12 @@
+rpi-sb-provisioner (2.0.5) unstable; urgency=medium
+
+  * WebUI: Add audit logging to images API
+  * WebUI: Add firmware selection UI
+  * WebUI: Asynchronous services loading
+  * WebUI: Add SHA256 cancellation when images are deleted
+
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Mon, 23 Jun 2025 16:30:00 +0100
+
 rpi-sb-provisioner (2.0.4) unstable; urgency=medium
 
   * packaging: Enforce modern (>= 28.2) rpi-eeprom dependency to fix nvme boot
