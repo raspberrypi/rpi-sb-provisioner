@@ -2,20 +2,29 @@
 /* Navigation Bar Styles */
 .rpi-navbar {
     background-color: #333;
-    overflow: hidden;
     margin-bottom: 20px;
     border-radius: 4px;
-    position: relative;
+    display: flex;
+    align-items: center;
+    min-height: 50px;
+}
+
+.rpi-nav-items {
+    display: flex;
+    flex: 1;
+    flex-wrap: wrap;
 }
 
 .rpi-navbar a {
-    float: left;
     color: white;
     text-align: center;
-    padding: 14px 16px;
+    padding: 12px 16px;
     text-decoration: none;
-    font-size: 16px;
+    font-size: 14px;
     transition: background-color 0.3s;
+    white-space: nowrap;
+    margin: 2px 1px;
+    border-radius: 3px;
 }
 
 .rpi-navbar a:hover {
@@ -28,16 +37,26 @@
     color: white;
 }
 
+.rpi-right-items {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    margin-left: auto;
+}
+
 .rpi-version-info {
-    float: right;
     color: #ddd;
-    font-size: 14px;
+    font-size: 13px;
+    padding: 12px 16px;
+    white-space: nowrap;
 }
 
 .rpi-version-warning {
     color: #ffcc00;
-    margin-left: 5px;
+    margin-left: 4px;
     font-size: 12px;
+    font-weight: bold;
+    text-shadow: 0 0 3px rgba(255, 204, 0, 0.5);
 }
 
 .rpi-version-link {
@@ -45,9 +64,12 @@
     color: inherit;
 }
 
+.rpi-version-link:hover {
+    color: #ffcc00;
+}
+
 .rpi-github-link {
-    float: right !important;
-    margin-left: 10px;
+    margin-left: 5px;
 }
 
 .rpi-github-link:hover {
@@ -55,25 +77,46 @@
     color: white;
 }
 
-.rpi-right-items {
-    float: right;
+/* Responsive adjustments */
+@media (max-width: 1200px) {
+    .rpi-navbar a {
+        padding: 10px 12px;
+        font-size: 13px;
+    }
+    
+    .rpi-version-info {
+        padding: 10px 12px;
+    }
+}
+
+@media (max-width: 900px) {
+    .rpi-navbar {
+        flex-wrap: wrap;
+    }
+    
+    .rpi-right-items {
+        margin-left: 0;
+        order: -1;
+        margin-bottom: 5px;
+    }
 }
 </style>
 
 <!-- Navigation Bar -->
 <div class="rpi-navbar">
-    <a href="/devices" <%c++ if(@@.get<std::string>("currentPage") == "devices") { %>class="active"<%c++ } %>>Devices</a>
-    <a href="/get-images" <%c++ if(@@.get<std::string>("currentPage") == "images") { %>class="active"<%c++ } %>>Images</a>
-    <a href="/options/get" <%c++ if(@@.get<std::string>("currentPage") == "options") { %>class="active"<%c++ } %>>Options</a>
-    <a href="/options/firmware" <%c++ if(@@.get<std::string>("currentPage") == "firmware") { %>class="active"<%c++ } %>>Firmware</a>
-    <a href="/customisation/list-scripts" <%c++ if(@@.get<std::string>("currentPage") == "customisation") { %>class="active"<%c++ } %>>Customisation</a>
-    <a href="/services" <%c++ if(@@.get<std::string>("currentPage") == "services") { %>class="active"<%c++ } %>>Services</a>
-    <a href="/manu-db" <%c++ if(@@.get<std::string>("currentPage") == "manufacturing") { %>class="active"<%c++ } %>>Manufacturing Database</a>
-    <a href="/auditlog" <%c++ if(@@.get<std::string>("currentPage") == "auditlog") { %>class="active"<%c++ } %>>Audit Log</a>
-    <a href="/scantool" <%c++ if(@@.get<std::string>("currentPage") == "scantool") { %>class="active"<%c++ } %>>QR Scanner</a>
+    <div class="rpi-nav-items">
+        <a href="/devices" <%c++ if(@@.get<std::string>("currentPage") == "devices") { %>class="active"<%c++ } %>>Devices</a>
+        <a href="/get-images" <%c++ if(@@.get<std::string>("currentPage") == "images") { %>class="active"<%c++ } %>>Images</a>
+        <a href="/options/get" <%c++ if(@@.get<std::string>("currentPage") == "options") { %>class="active"<%c++ } %>>Options</a>
+        <a href="/options/firmware" <%c++ if(@@.get<std::string>("currentPage") == "firmware") { %>class="active"<%c++ } %>>Firmware</a>
+        <a href="/customisation/list-scripts" <%c++ if(@@.get<std::string>("currentPage") == "customisation") { %>class="active"<%c++ } %>>Customisation</a>
+        <a href="/services" <%c++ if(@@.get<std::string>("currentPage") == "services") { %>class="active"<%c++ } %>>Services</a>
+        <a href="/manu-db" <%c++ if(@@.get<std::string>("currentPage") == "manufacturing") { %>class="active"<%c++ } %>>Manufacturing Database</a>
+        <a href="/auditlog" <%c++ if(@@.get<std::string>("currentPage") == "auditlog") { %>class="active"<%c++ } %>>Audit Log</a>
+        <a href="/scantool" <%c++ if(@@.get<std::string>("currentPage") == "scantool") { %>class="active"<%c++ } %>>QR Scanner</a>
+    </div>
     
     <div class="rpi-right-items">
-        <a href="https://github.com/raspberrypi/rpi-sb-provisioner" target="_blank" class="rpi-github-link">GitHub</a>
         <span class="rpi-version-info">
             <%c++ extern std::string g_packageVersion; %>
             <%c++ extern bool g_hasNewerVersion; %>
@@ -88,6 +131,7 @@
                 v<%c++ $$ << g_packageVersion; %>
             <%c++ } %>
         </span>
+        <a href="https://github.com/raspberrypi/rpi-sb-provisioner" target="_blank" class="rpi-github-link">GitHub</a>
     </div>
 </div>
 <%view-end%> 

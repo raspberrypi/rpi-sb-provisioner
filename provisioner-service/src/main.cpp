@@ -14,6 +14,7 @@
 #include <openssl/x509.h>
 #include <openssl/err.h>
 #include <fstream>
+#include <sstream>
 
 #include "images.h"
 #include "devices.h"
@@ -59,6 +60,36 @@ struct VersionInfo {
     std::string release_url;
 };
 
+// Function to compare semantic versions (returns -1 if v1 < v2, 0 if equal, 1 if v1 > v2)
+int compareVersions(const std::string& v1, const std::string& v2) {
+    std::vector<int> version1, version2;
+    
+    // Parse version1
+    std::stringstream ss1(v1);
+    std::string part;
+    while (std::getline(ss1, part, '.')) {
+        version1.push_back(std::stoi(part));
+    }
+    
+    // Parse version2
+    std::stringstream ss2(v2);
+    while (std::getline(ss2, part, '.')) {
+        version2.push_back(std::stoi(part));
+    }
+    
+    // Pad shorter version with zeros
+    while (version1.size() < version2.size()) version1.push_back(0);
+    while (version2.size() < version1.size()) version2.push_back(0);
+    
+    // Compare each part
+    for (size_t i = 0; i < version1.size(); ++i) {
+        if (version1[i] < version2[i]) return -1;
+        if (version1[i] > version2[i]) return 1;
+    }
+    
+    return 0; // Equal
+}
+
 VersionInfo checkForNewerRelease(const std::string& current_version) {
     VersionInfo info = {"", false, ""};
     
@@ -103,9 +134,9 @@ VersionInfo checkForNewerRelease(const std::string& current_version) {
         info.latest = tag_name;
         info.release_url = html_url;
         
-        // Compare versions (simple string comparison - assuming versions are in compatible format)
+        // Compare versions using proper semantic version comparison
         if (!tag_name.empty() && !current_version.empty() && tag_name != current_version) {
-            info.has_newer = tag_name > current_version;
+            info.has_newer = compareVersions(current_version, tag_name) < 0;
         }
     }
     
