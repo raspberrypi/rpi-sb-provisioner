@@ -409,6 +409,30 @@ int main(int argc, char* argv[])
     g_hasNewerVersion = versionInfo.has_newer;
     g_releaseUrl = versionInfo.release_url;
 
+    // Add CORS support for all responses
+    app.registerPostHandlingAdvice([](const drogon::HttpRequestPtr &req, const drogon::HttpResponsePtr &resp) {
+        // Add CORS headers to allow cross-origin requests
+        resp->addHeader("Access-Control-Allow-Origin", "*");
+        resp->addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+        resp->addHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
+        resp->addHeader("Access-Control-Max-Age", "86400"); // 24 hours
+    });
+
+    // Handle preflight OPTIONS requests
+    app.registerPreRoutingAdvice([](const drogon::HttpRequestPtr &req, drogon::FilterCallback &&stop, drogon::FilterChainCallback &&pass) {
+        if (req->method() == drogon::Options) {
+            auto resp = drogon::HttpResponse::newHttpResponse();
+            resp->setStatusCode(drogon::k200OK);
+            resp->addHeader("Access-Control-Allow-Origin", "*");
+            resp->addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+            resp->addHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
+            resp->addHeader("Access-Control-Max-Age", "86400"); // 24 hours
+            stop(resp);
+            return;
+        }
+        pass();
+    });
+
     imageHandlers.registerHandlers(app);
     deviceHandlers.registerHandlers(app);
     customisationHandlers.registerHandlers(app);
