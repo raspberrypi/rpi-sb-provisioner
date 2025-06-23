@@ -349,6 +349,16 @@ BOOTLOADER_UPDATE_IMAGE=""
 BOOTLOADER_UPDATE_VERSION=0
 getBootloaderUpdateVersion() {
    BOOTLOADER_UPDATE_VERSION=0
+   
+   # Check if explicit firmware file is specified
+   if [ -n "${RPI_DEVICE_FIRMWARE_FILE}" ] && [ -f "${RPI_DEVICE_FIRMWARE_FILE}" ]; then
+      log "Using explicitly specified firmware file: ${RPI_DEVICE_FIRMWARE_FILE}"
+      BOOTLOADER_UPDATE_IMAGE="${RPI_DEVICE_FIRMWARE_FILE}"
+      BOOTLOADER_UPDATE_VERSION=$(strings "${RPI_DEVICE_FIRMWARE_FILE}" | grep BUILD_TIMESTAMP | sed 's/.*=//g')
+      return
+   fi
+   
+   # Fall back to automatic selection from release channel
    match=".*/pieeprom-[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].bin"
    latest="$(find "${FIRMWARE_IMAGE_DIR}/" -maxdepth 1 -type f -follow -size "${EEPROM_SIZE}c" -regex "${match}" | sort -r | head -n1)"
    if [ -f "${latest}" ]; then

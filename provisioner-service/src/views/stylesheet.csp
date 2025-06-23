@@ -135,6 +135,117 @@ button:hover, .upload-button:hover, .submit-button:hover {
     margin-bottom: 20px;
 }
 
+/* Centralized Button System */
+.btn, .cust-btn {
+    display: inline-block;
+    font-weight: 400;
+    text-align: center;
+    vertical-align: middle;
+    user-select: none;
+    border: 1px solid transparent;
+    padding: 0.375rem 0.75rem;
+    font-size: 1rem;
+    line-height: 1.5;
+    border-radius: 0.25rem;
+    transition: color 0.15s ease-in-out, background-color 0.15s ease-in-out, border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+    text-decoration: none;
+    cursor: pointer;
+    margin: 0.125rem;
+}
+
+/* Button Sizes */
+.btn-sm, .cust-btn-sm {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    border-radius: 0.2rem;
+}
+
+.btn-lg, .cust-btn-lg {
+    padding: 0.5rem 1rem;
+    font-size: 1.125rem;
+    line-height: 1.5;
+    border-radius: 0.3rem;
+}
+
+/* Button Colors - Primary (Blue) */
+.btn-primary, .cust-btn-primary {
+    color: #fff;
+    background-color: #007bff;
+    border-color: #007bff;
+}
+
+.btn-primary:hover, .cust-btn-primary:hover {
+    color: #fff;
+    background-color: #0069d9;
+    border-color: #0062cc;
+}
+
+/* Button Colors - Success (Green) */
+.btn-success, .cust-btn-success {
+    color: #fff;
+    background-color: #28a745;
+    border-color: #28a745;
+}
+
+.btn-success:hover, .cust-btn-success:hover {
+    color: #fff;
+    background-color: #218838;
+    border-color: #1e7e34;
+}
+
+/* Button Colors - Warning (Yellow) */
+.btn-warning, .cust-btn-warning {
+    color: #212529;
+    background-color: #ffc107;
+    border-color: #ffc107;
+}
+
+.btn-warning:hover, .cust-btn-warning:hover {
+    color: #212529;
+    background-color: #e0a800;
+    border-color: #d39e00;
+}
+
+/* Button Colors - Danger (Red) */
+.btn-danger, .cust-btn-danger {
+    color: #fff;
+    background-color: #dc3545;
+    border-color: #dc3545;
+}
+
+.btn-danger:hover, .cust-btn-danger:hover {
+    color: #fff;
+    background-color: #c82333;
+    border-color: #bd2130;
+}
+
+/* Button Colors - Secondary (Gray) */
+.btn-secondary, .cust-btn-secondary {
+    color: #fff;
+    background-color: #6c757d;
+    border-color: #6c757d;
+}
+
+.btn-secondary:hover, .cust-btn-secondary:hover {
+    color: #fff;
+    background-color: #5a6268;
+    border-color: #545b62;
+}
+
+/* Button Colors - Info (Light Blue) */
+.btn-info, .cust-btn-info {
+    color: #fff;
+    background-color: #17a2b8;
+    border-color: #17a2b8;
+}
+
+.btn-info:hover, .cust-btn-info:hover {
+    color: #fff;
+    background-color: #138496;
+    border-color: #117a8b;
+}
+
 /* Form Styles */
 .form-group {
     margin-bottom: 15px;
