@@ -26,6 +26,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <random>
 
 #include <images.h>
 
@@ -213,8 +214,24 @@ namespace provisioner {
     std::unordered_map<std::string, SHA256Result> sha256Cache;
     std::mutex sha256Cache_mutex;
     
+    // Function to cancel SHA256 calculation for a specific image
+    void cancelSHA256Calculation(const std::string& imageName) {
+        std::lock_guard<std::mutex> lock(sha256Cache_mutex);
+        auto it = sha256Cache.find(imageName);
+        if (it != sha256Cache.end()) {
+            if (it->second.cancellation_token) {
+                it->second.cancellation_token->cancel();
+                LOG_INFO << "Cancelled SHA256 calculation for: " << imageName;
+            } else {
+                LOG_WARN << "No cancellation token found for " << imageName << " in cache";
+            }
+        } else {
+            LOG_WARN << "No cache entry found for " << imageName << " during cancellation";
+        }
+    }
+
     // Calculate SHA256 of a file
-    std::string calculateSHA256(const std::filesystem::path& imagePath, const std::string& imageName) {
+    std::string calculateSHA256(const std::filesystem::path& imagePath, const std::string& imageName, std::shared_ptr<SHA256CancellationToken> cancellationToken) {
         // Use larger chunks (8MB) for better performance with large files
         constexpr size_t CHUNK_SIZE = 8 * 1024 * 1024; 
         std::vector<unsigned char> buffer(CHUNK_SIZE);
@@ -243,6 +260,18 @@ namespace provisioner {
         int lastProgressPercent = 0;
         
         while (file) {
+            // Check for cancellation before each chunk
+            if (cancellationToken) {
+                if (cancellationToken->is_cancelled()) {
+                    LOG_INFO << "SHA256 calculation cancelled for " << imageName;
+                    EVP_MD_CTX_free(mdctx);
+                    file.close();
+                    return "calculation-cancelled";
+                }
+            } else {
+                LOG_WARN << "No cancellation token available for " << imageName << " during chunk processing";
+            }
+            
             file.read(reinterpret_cast<char*>(buffer.data()), CHUNK_SIZE);
             std::streamsize bytes_read = file.gcount();
             if (bytes_read > 0) {
@@ -272,6 +301,9 @@ namespace provisioner {
                                     updatedResult.timestamp = it->second.timestamp;
                                 }
                                 
+                                // CRITICAL: Preserve the cancellation token!
+                                updatedResult.cancellation_token = it->second.cancellation_token;
+                                
                                 sha256Cache.insert_or_assign(imageName, updatedResult);
                                 
                                 // Broadcast progress update to connected WebSocket clients
@@ -281,6 +313,14 @@ namespace provisioner {
                     }
                 }
             }
+        }
+        
+        // Final check for cancellation before completing
+        if (cancellationToken && cancellationToken->is_cancelled()) {
+            LOG_INFO << "SHA256 calculation cancelled at completion for " << imageName;
+            EVP_MD_CTX_free(mdctx);
+            file.close();
+            return "calculation-cancelled";
         }
         
         EVP_DigestFinal_ex(mdctx, hash, &hash_len);
@@ -339,12 +379,40 @@ namespace provisioner {
                             false
                         ));
                     } else {
+                        // Get cancellation token from cache
+                        std::shared_ptr<SHA256CancellationToken> cancellationToken;
+                        {
+                            std::lock_guard<std::mutex> lock(sha256Cache_mutex);
+                            auto it = sha256Cache.find(imageName);
+                            if (it != sha256Cache.end()) {
+                                cancellationToken = it->second.cancellation_token;
+                                LOG_INFO << "Retrieved cancellation token for " << imageName 
+                                         << " (token valid: " << (cancellationToken ? "yes" : "no") << ")";
+                            } else {
+                                LOG_WARN << "No cache entry found for " << imageName << " during calculation";
+                            }
+                        }
+                        
                         // Calculate SHA256
-                        std::string sha256 = calculateSHA256(imagePath, imageName);
+                        std::string sha256 = calculateSHA256(imagePath, imageName, cancellationToken);
+                        
+                        // Check if calculation was cancelled
+                        if (sha256 == "calculation-cancelled") {
+                            LOG_INFO << "SHA256 calculation was cancelled for " << imageName;
+                            // Remove from cache since the file was deleted
+                            std::lock_guard<std::mutex> lock(sha256Cache_mutex);
+                            sha256Cache.erase(imageName);
+                            continue; // Skip broadcasting
+                        }
                         
                         // Update cache with result
                         std::lock_guard<std::mutex> lock(sha256Cache_mutex);
                         SHA256Result result(sha256, SHA256Status::COMPLETE, false);
+                        // Preserve cancellation token from existing entry if it exists
+                        auto it = sha256Cache.find(imageName);
+                        if (it != sha256Cache.end()) {
+                            result.cancellation_token = it->second.cancellation_token;
+                        }
                         sha256Cache.insert_or_assign(imageName, result);
                         
                         // Broadcast completion to WebSocket clients
@@ -354,6 +422,11 @@ namespace provisioner {
                     // Update cache with error
                     std::lock_guard<std::mutex> lock(sha256Cache_mutex);
                     SHA256Result result(std::string("Error: ") + e.what(), SHA256Status::ERROR, false);
+                    // Preserve cancellation token from existing entry if it exists
+                    auto it = sha256Cache.find(imageName);
+                    if (it != sha256Cache.end()) {
+                        result.cancellation_token = it->second.cancellation_token;
+                    }
                     sha256Cache.insert_or_assign(imageName, result);
                     
                     // Broadcast error to WebSocket clients
@@ -432,8 +505,9 @@ namespace provisioner {
             if (it == sha256Cache.end()) {
                 // Not in cache at all - needs calculation
                 needsCalculation = true;
-                // Mark as pending in the cache with a timestamp
-                sha256Cache.insert_or_assign(imageName, SHA256Result("", SHA256Status::PENDING, true));
+                // Create cancellation token and mark as pending in the cache with a timestamp
+                auto cancellationToken = std::make_shared<SHA256CancellationToken>();
+                sha256Cache.insert_or_assign(imageName, SHA256Result("", SHA256Status::PENDING, true, cancellationToken));
                 LOG_INFO << "Queuing new SHA256 calculation for " << imageName;
             } else if (it->second.status != SHA256Status::PENDING) {
                 // Only recalculate if not already in PENDING state
@@ -779,26 +853,81 @@ namespace provisioner {
             auto files = parser.getFiles();
 
             const auto& file = files[0];
-            std::string filename = file.getFileName();
+            std::string originalFilename = file.getFileName();
             
-            // Create target path
-            std::filesystem::path targetPath("/srv/rpi-sb-provisioner/images");
-            targetPath /= filename;
+            // Function to generate a unique filename (race-condition safe with timestamp fallback)
+            auto generateUniqueFilename = [](const std::string& originalName, const std::string& basePath) -> std::string {
+                std::filesystem::path targetDir(basePath);
+                std::filesystem::path originalPath = targetDir / originalName;
+                
+                // If file doesn't exist, use original name
+                if (!std::filesystem::exists(originalPath)) {
+                    return originalName;
+                }
+                
+                // Extract filename parts for numbered variants
+                std::filesystem::path nameOnly = originalPath.stem();
+                std::filesystem::path extension = originalPath.extension();
+                
+                // Try numbered variants
+                for (int i = 1; i <= 9999; ++i) {
+                    std::string newName = nameOnly.string() + "_" + std::to_string(i) + extension.string();
+                    std::filesystem::path newPath = targetDir / newName;
+                    
+                    if (!std::filesystem::exists(newPath)) {
+                        return newName;
+                    }
+                }
+                
+                // If we can't find a unique name after 9999 attempts, use timestamp + random
+                auto now = std::chrono::system_clock::now();
+                auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+                std::random_device rd;
+                std::mt19937 gen(rd());
+                std::uniform_int_distribution<> dis(1000, 9999);
+                int random = dis(gen);
+                
+                return nameOnly.string() + "_" + std::to_string(timestamp) + "_" + std::to_string(random) + extension.string();
+            };
+            
+            // Generate unique filename to avoid conflicts
+            std::string finalFilename = generateUniqueFilename(originalFilename, IMAGES_PATH);
+            
+            // Create target path with unique filename
+            std::filesystem::path targetPath(IMAGES_PATH);
+            targetPath /= finalFilename;
 
             try {
-                // Move uploaded file to target location
+                // Move uploaded file to target location with unique name
                 file.saveAs(targetPath);
                 
+                // Clear any stale cache entry for this filename
+                {
+                    std::lock_guard<std::mutex> lock(sha256Cache_mutex);
+                    sha256Cache.erase(finalFilename);
+                }
+                
                 // Start SHA256 calculation in the background
-                requestSHA256Calculation(filename);
+                requestSHA256Calculation(finalFilename);
                 
                 // Set success response with JSON payload
                 resp->setStatusCode(drogon::k200OK);
                 resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
                 Json::Value result;
                 result["success"] = true;
-                result["message"] = "File uploaded successfully";
-                result["filename"] = filename;
+                
+                // Include both original and final filenames in response
+                if (originalFilename != finalFilename) {
+                    result["message"] = "File uploaded successfully (renamed to avoid conflict)";
+                    result["original_filename"] = originalFilename;
+                    result["filename"] = finalFilename;
+                    result["renamed"] = true;
+                } else {
+                    result["message"] = "File uploaded successfully";
+                    result["filename"] = finalFilename;
+                    result["renamed"] = false;
+                }
+                
                 result["sha256"] = "use-websocket"; // Hint to use WebSocket for SHA256
                 resp->setBody(result.toStyledString());
             } catch (const std::exception& e) {
@@ -841,13 +970,16 @@ namespace provisioner {
 
             if (std::filesystem::exists(imagePath)) {
                 try {
-                    std::filesystem::remove(imagePath);
+                    // Cancel any ongoing SHA256 calculation for this image
+                    cancelSHA256Calculation(imageName);
                     
                     // Remove from SHA256 cache
                     {
                         std::lock_guard<std::mutex> lock(sha256Cache_mutex);
                         sha256Cache.erase(imageName);
                     }
+                    
+                    std::filesystem::remove(imagePath);
                     
                     resp->setStatusCode(drogon::k200OK);
                     callback(resp);

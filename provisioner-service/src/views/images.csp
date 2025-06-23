@@ -94,6 +94,10 @@
             }
 
             try {
+                // Stop any ongoing SHA256 calculation for this image
+                pendingSha256Requests.delete(name);
+                stopPolling(name);
+                
                 const response = await fetch(`/delete-image?name=${encodeURIComponent(name)}`, {
                     method: 'POST'
                 });
@@ -231,7 +235,15 @@
                 }
             } else if (response.status === 'error') {
                 console.log(`SHA256 calculation error for ${response.image_name}: ${response.error || 'Unknown error'}`);
-                displayTruncatedHash(sha256Cell, response.error || 'Unknown error');
+                
+                // Check if it was cancelled (file deleted)
+                if (response.error && response.error.includes('calculation-cancelled')) {
+                    console.log(`SHA256 calculation was cancelled for ${response.image_name} (file deleted)`);
+                    // Don't display error, just clean up
+                } else {
+                    displayTruncatedHash(sha256Cell, response.error || 'Unknown error');
+                }
+                
                 pendingSha256Requests.delete(response.image_name);
                 // Stop polling for this image if it was being polled
                 stopPolling(response.image_name);
@@ -658,7 +670,7 @@
             width: 0%;
             height: 100%;
             background-color: #4CAF50;
-            transition: width 0.3s ease-in-out;
+            transition: width 0.1s ease-out;
         }
         .progress-text {
             text-align: center;
@@ -707,7 +719,7 @@
             width: 0%;
             height: 100%;
             background-color: #4CAF50;
-            transition: width 0.4s ease-in-out;
+            transition: width 0.1s ease-out;
         }
         .sha256-cell {
             position: relative;
@@ -775,20 +787,91 @@
                 cancelButton.style.display = 'inline-block';
                 progressContainer.style.display = 'block';
                 progressFill.style.width = '0%';
-                progressText.textContent = '0%';
+                progressText.textContent = 'Starting upload...';
                 
                 controller = new AbortController();
                 
                 try {
-                    const response = await fetch('/upload-image', {
-                        method: 'POST',
-                        body: formData,
-                        signal: controller.signal,
+                    const response = await new Promise((resolve, reject) => {
+                        const xhr = new XMLHttpRequest();
+                        
+                        // Track upload progress
+                        xhr.upload.addEventListener('progress', (e) => {
+                            if (e.lengthComputable) {
+                                // Scale upload progress to 0-90% range
+                                const uploadPercent = (e.loaded / e.total) * 100;
+                                const scaledPercent = (uploadPercent * 90) / 100;
+                                
+                                progressFill.style.width = scaledPercent + '%';
+                                progressText.textContent = Math.round(scaledPercent) + '%';
+                            }
+                        });
+                        
+                        // Handle upload start
+                        xhr.upload.addEventListener('loadstart', () => {
+                            progressText.textContent = '0%';
+                        });
+                        
+                        // Handle upload completion (data sent to server)
+                        xhr.upload.addEventListener('load', () => {
+                            // Upload transmission complete, but server still processing
+                            progressFill.style.width = '90%';
+                            progressText.textContent = 'Server processing...';
+                        });
+                        
+                        // Handle complete response from server
+                        xhr.addEventListener('load', () => {
+                            // Server finished processing
+                            progressFill.style.width = '100%';
+                            progressText.textContent = 'Complete!';
+                            
+                            if (xhr.status >= 200 && xhr.status < 300) {
+                                resolve({
+                                    ok: true,
+                                    status: xhr.status,
+                                    json: () => Promise.resolve(JSON.parse(xhr.responseText))
+                                });
+                            } else {
+                                resolve({
+                                    ok: false,
+                                    status: xhr.status,
+                                    json: () => Promise.resolve(JSON.parse(xhr.responseText))
+                                });
+                            }
+                        });
+                        
+                        // Handle errors
+                        xhr.addEventListener('error', () => {
+                            reject(new Error('Upload failed'));
+                        });
+                        
+                        // Handle abort
+                        xhr.addEventListener('abort', () => {
+                            reject(new Error('Upload cancelled'));
+                        });
+                        
+                        // Set up abort signal
+                        controller.signal.addEventListener('abort', () => {
+                            xhr.abort();
+                        });
+                        
+                        // Start the upload
+                        xhr.open('POST', '/upload-image');
+                        xhr.send(formData);
                     });
                     
                     if (response.ok) {
                         const data = await response.json();
-                        showMessage('Image uploaded successfully');
+                        
+                        // Small delay to show "Complete!" status
+                        await new Promise(resolve => setTimeout(resolve, 500));
+                        
+                        // Show appropriate message based on whether file was renamed
+                        if (data.renamed) {
+                            showMessage(`File uploaded as "${data.filename}" (original name "${data.original_filename}" already existed)`);
+                        } else {
+                            showMessage('Image uploaded successfully');
+                        }
                         
                         // Add the uploaded image to the table
                         const tbody = document.querySelector('.image-list tbody');
@@ -813,7 +896,7 @@
                         showMessage(`Upload failed: ${errorData.message || 'Unknown error'}`, true);
                     }
                 } catch (error) {
-                    if (error.name !== 'AbortError') {
+                    if (error.message !== 'Upload cancelled') {
                         showMessage(`Upload failed: ${error.message}`, true);
                     }
                 } finally {
