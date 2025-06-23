@@ -139,6 +139,10 @@
             font-size: 14px;
             line-height: 1.5;
         }
+        
+        .cust-btn-lg {
+            margin-top: 20px;
+        }
     </style>
     <script>
         function showSuccess() {
@@ -196,6 +200,21 @@
                         <option value="5" <%c++ if(value == "5") $$ << "selected"; %>>5</option>
                         <option value="2W" <%c++ if(value == "2W") $$ << "selected"; %>>2W</option>
                     </select>
+                    <%c++ } else if(key == "RPI_DEVICE_FIRMWARE_FILE") { %>
+                    <div>
+                        <input type="hidden" id="<%c++ $$ << key; %>" name="<%c++ $$ << key; %>" value="<%c++ $$ << value; %>">
+                        <%c++ if(!value.empty()) { %>
+                            <div style="margin-bottom: 10px; padding: 10px; background-color: #e9ecef; border-radius: 4px; font-size: 14px;">
+                                <strong>Currently selected:</strong><br>
+                                <code><%c++ $$ << value; %></code>
+                            </div>
+                        <%c++ } else { %>
+                            <div style="margin-bottom: 10px; padding: 10px; background-color: #fff3cd; border: 1px solid #ffeaa7; border-radius: 4px; font-size: 14px; color: #856404;">
+                                <strong>No firmware selected</strong> - System will use default firmware
+                            </div>
+                        <%c++ } %>
+                        <a href="/options/firmware" target="_blank" class="cust-btn cust-btn-primary">Select Firmware</a>
+                    </div>
                     <%c++ } else if(key == "RPI_DEVICE_LOCK_JTAG" || key == "RPI_DEVICE_EEPROM_WP_SET") { %>
                     <input type="checkbox" id="<%c++ $$ << key; %>" name="<%c++ $$ << key; %>" <%c++ if(!value.empty()) $$ << "checked"; %>>
                     <label for="<%c++ $$ << key; %>" style="font-weight: normal; display: inline;">Enable</label>
@@ -204,7 +223,7 @@
                     <%c++ } %>
                 </div>
             <%c++ } %>
-            <button type="submit">Save Options</button>
+            <button type="submit" class="cust-btn cust-btn-success cust-btn-lg">Save Options</button>
         </form>
     </div>
 
@@ -269,6 +288,13 @@
                 <p class="warning"><code>rpi-sb-provisioner</code> will ignore the Raspberry Pi Bootloader configuration built by <code>pi-gen</code>, and use the one provided in this variable.</p>
                 <p>Specify the Raspberry Pi Bootloader configuration you want your provisioned devices to use. A default is provided.</p>
                 <p>Further information on the format of this configuration file can be found in the Raspberry Pi Documentation, at <a href="https://www.raspberrypi.com/documentation/computers/config_txt.html" target="_blank">https://www.raspberrypi.com/documentation/computers/config_txt.html</a></p>
+            <%c++ } else if(key == "RPI_DEVICE_FIRMWARE_FILE") { %>
+                <p><strong>Optional</strong></p>
+                <p>Specify an explicit path to a specific pieeprom firmware file to use during provisioning.</p>
+                <p>When set, the provisioning system will use the exact firmware file specified. If not set, the system will automatically select the latest firmware from the 'default' release channel.</p>
+                <p>Example: <code>/lib/firmware/raspberrypi/bootloader-2712/default/pieeprom-2025-05-08.bin</code></p>
+                <p>This setting is typically configured through the firmware selection interface (click "Select Firmware" button) rather than manually entering a path.</p>
+                <p class="warning">Ensure the specified firmware file exists and is compatible with your target device family before provisioning.</p>
             <%c++ } else if(key == "RPI_DEVICE_LOCK_JTAG") { %>
                 <p><strong>Optional</strong></p>
                 <p>Raspberry Pi devices have a mechanism to restrict JTAG access to the device.</p>

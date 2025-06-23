@@ -76,6 +76,19 @@ Specify the Raspberry Pi Bootloader configuration you want your provisioned devi
 
 Further information on the format of this configuration file can be found in the Raspberry Pi Documentation, at https://www.raspberrypi.com/documentation/computers/config_txt.html
 
+=== RPI_DEVICE_FIRMWARE_FILE
+*Optional*
+
+Specify an explicit path to a specific pieeprom firmware file to use during provisioning. 
+
+When set, the provisioning system will use the exact firmware file specified. If not set, the system will automatically select the latest firmware from the 'default' release channel.
+
+Example: `RPI_DEVICE_FIRMWARE_FILE=/lib/firmware/raspberrypi/bootloader-2712/default/pieeprom-2025-05-08.bin`
+
+This setting is typically configured through the firmware selection web interface rather than manually.
+
+WARNING: Ensure the specified firmware file exists and is compatible with your target device family before provisioning.
+
 === RPI_DEVICE_LOCK_JTAG
 *Optional*
 

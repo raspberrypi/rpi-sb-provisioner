@@ -21,7 +21,7 @@ set(CMAKE_SKIP_INSTALL_ALL_DEPENDENCY ON CACHE BOOL "Skip installation of all de
 
 FetchContent_Declare(drogon
  GIT_REPOSITORY https://github.com/drogonframework/drogon.git
- GIT_TAG        v1.9.10
+ GIT_TAG        v1.9.11
  EXCLUDE_FROM_ALL  # Prevents installation in packages
 )
 

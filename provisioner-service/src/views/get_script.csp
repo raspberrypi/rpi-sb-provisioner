@@ -103,36 +103,7 @@ try {
             cursor: pointer;
         }
         
-        .btn-sm {
-            padding: 0.25rem 0.5rem;
-            font-size: 0.875rem;
-            line-height: 1.5;
-            border-radius: 0.2rem;
-        }
-        
-        .btn-primary {
-            color: #fff;
-            background-color: #007bff;
-            border-color: #007bff;
-        }
-        
-        .btn-success {
-            color: #fff;
-            background-color: #28a745;
-            border-color: #28a745;
-        }
-        
-        .btn-secondary {
-            color: #fff;
-            background-color: #6c757d;
-            border-color: #6c757d;
-        }
-        
-        .btn-info {
-            color: #fff;
-            background-color: #17a2b8;
-            border-color: #17a2b8;
-        }
+        /* Button styles now centralized in stylesheet.csp */
 
         /* Modal styling */
         .modal {
