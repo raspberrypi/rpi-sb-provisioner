@@ -36,12 +36,13 @@ namespace provisioner {
 
     void Services::registerHandlers(drogon::HttpAppFramework &app)
     {
-        app.registerHandler("/services", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
+        // Add async services endpoint that does the heavy lifting
+        app.registerHandler("/api/v2/services", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
             using namespace trantor;
-            LOG_INFO << "Services::services";
+            LOG_INFO << "Services::api-services (async)";
             
             // Add audit log entry for handler access
-            AuditLog::logHandlerAccess(req, "/services");
+            AuditLog::logHandlerAccess(req, "/api/v2/services");
 
             std::vector<ServiceInfo> serviceInfos;
             sd_bus *bus = nullptr;
@@ -311,82 +312,56 @@ namespace provisioner {
             
             sd_bus_unref(bus);
             
-            auto resp = drogon::HttpResponse::newHttpResponse();
+            // Always return JSON response for this API endpoint
+            Json::Value serviceArray(Json::arrayValue);
             
-            // Check the Accept header for JSON
-            auto acceptHeader = req->getHeader("Accept");
-            if (!acceptHeader.empty() && acceptHeader.find("application/json") != std::string::npos) {
-                // Return JSON response
-                Json::Value serviceArray(Json::arrayValue);
+            for (const auto& info : serviceInfos) {
+                Json::Value serviceObj;
+                serviceObj["name"] = info.name;
+                serviceObj["status"] = info.status;
+                serviceObj["active"] = info.active;
+                serviceObj["instance"] = info.instance;
+                serviceObj["base_name"] = info.base_name;
                 
-                for (const auto& info : serviceInfos) {
-                    Json::Value serviceObj;
-                    serviceObj["name"] = info.name;
-                    serviceObj["status"] = info.status;
-                    serviceObj["active"] = info.active;
-                    serviceObj["instance"] = info.instance;
-                    serviceObj["base_name"] = info.base_name;
-                    
-                    // Reconstruct the full service name for log links
-                    std::string fullName;
-                    if (!info.instance.empty()) {
-                        fullName = info.name + info.instance + ".service";
-                    } else {
-                        fullName = info.name + ".service";
-                    }
-                    serviceObj["full_name"] = fullName;
-                    
-                    // Removed per-service JSON logging
-                    
-                    serviceArray.append(serviceObj);
+                // Reconstruct the full service name for log links
+                std::string fullName;
+                if (!info.instance.empty()) {
+                    fullName = info.name + info.instance + ".service";
+                } else {
+                    fullName = info.name + ".service";
                 }
+                serviceObj["full_name"] = fullName;
                 
-                // Minimal logging for JSON response
-                
-                Json::Value rootObj;
-                rootObj["services"] = serviceArray;
-                
-                resp->setStatusCode(drogon::k200OK);
-                resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
-                std::string jsonOutput = rootObj.toStyledString();
-                // Removed JSON output logging
-                resp->setBody(jsonOutput);
-                
-                LOG_INFO << "JSON response prepared with " << serviceArray.size() << " services";
-            } else {
-                // Return HTML view
-                drogon::HttpViewData viewData;
-                std::vector<std::map<std::string, std::string>> serviceMaps;
-                
-                for (auto && info : serviceInfos) {
-                    std::map<std::string, std::string> serviceMap;
-                    
-                    serviceMap["name"] = info.name;
-                    serviceMap["status"] = info.status;
-                    serviceMap["active"] = info.active;
-                    serviceMap["instance"] = info.instance;
-                    serviceMap["base_name"] = info.base_name;
-                    
-                    // Reconstruct the full service name for log links
-                    std::string fullName;
-                    if (!info.instance.empty()) {
-                        fullName = info.name + info.instance + ".service";
-                    } else {
-                        fullName = info.name + ".service";
-                    }
-                    serviceMap["full_name"] = fullName;
-                    
-                    // Removed per-service UI logging
-                    
-                    serviceMaps.push_back(serviceMap);
-                }
-                viewData.insert("services", serviceMaps);
-                viewData.insert("currentPage", std::string("services"));
-                // Minimal view data logging
-                resp = drogon::HttpResponse::newHttpViewResponse("services.csp", viewData);
-                
-                LOG_INFO << "HTML view prepared with " << serviceMaps.size() << " services";
+                serviceArray.append(serviceObj);
             }
+            
+            Json::Value rootObj;
+            rootObj["services"] = serviceArray;
+            
+            auto resp = drogon::HttpResponse::newHttpJsonResponse(rootObj);
+            LOG_INFO << "Async JSON response prepared with " << serviceArray.size() << " services";
+            
+            callback(resp);
+        });
+
+        // Add fast HTML-only services page that shows loading state
+        app.registerHandler("/services", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
+            using namespace trantor;
+            LOG_INFO << "Services::services (fast HTML)";
+            
+            // Add audit log entry for handler access
+            AuditLog::logHandlerAccess(req, "/services");
+
+            // Return HTML view immediately with empty services list
+            drogon::HttpViewData viewData;
+            std::vector<std::map<std::string, std::string>> serviceMaps; // Empty list
+            
+            viewData.insert("services", serviceMaps);
+            viewData.insert("currentPage", std::string("services"));
+            viewData.insert("loading", true); // Flag to show loading state
+            
+            auto resp = drogon::HttpResponse::newHttpViewResponse("services.csp", viewData);
+            LOG_INFO << "Fast HTML view prepared with loading state";
             
             callback(resp);
         });

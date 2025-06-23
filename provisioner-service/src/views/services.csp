@@ -30,6 +30,21 @@
     <%view auto_refresh_toggle %>
     
     <div id="services-table-container">
+        <%c++ 
+        bool isLoading = false;
+        try {
+            isLoading = @@.get<bool>("loading");
+        } catch(...) {
+            // No loading flag found, default to false
+        }
+        
+        if (isLoading) { 
+        %>
+        <div class="loading-container">
+            <div class="loading-spinner"></div>
+            <p>Loading services...</p>
+        </div>
+        <%c++ } else { %>
         <table>
             <thead>
                 <tr>
@@ -76,6 +91,7 @@
             <%c++ } %>
             </tbody>
         </table>
+        <%c++ } %>
     </div>
 
     <script>
@@ -87,11 +103,7 @@
         // Function to fetch and update the services table
         async function refreshServicesTable() {
             try {
-                const response = await fetch('/services', {
-                    headers: {
-                        'Accept': 'application/json'
-                    }
-                });
+                const response = await fetch('/api/v2/services');
                 
                 if (!response.ok) {
                     throw new Error('Failed to fetch services');
@@ -152,6 +164,13 @@
         
         // Initialize the table container reference
         const tableContainer = document.getElementById('services-table-container');
+        
+        // Check if we're in loading state and need to fetch services initially
+        const loadingContainer = document.querySelector('.loading-container');
+        if (loadingContainer) {
+            // Load services immediately when page loads
+            refreshServicesTable();
+        }
         
         // Initialize auto-refresh with the services table refresh function
         initAutoRefresh(refreshServicesTable);
