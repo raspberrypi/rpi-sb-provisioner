@@ -29,6 +29,8 @@
 #include <random>
 
 #include <images.h>
+#include "utils.h"
+#include "include/audit.h"
 
 // WebSocket controller for SHA256 calculations
 // Defined outside the provisioner namespace to avoid registration issues
@@ -399,6 +401,11 @@ namespace provisioner {
                         // Check if calculation was cancelled
                         if (sha256 == "calculation-cancelled") {
                             LOG_INFO << "SHA256 calculation was cancelled for " << imageName;
+                            
+                            // Log cancelled SHA256 calculation
+                            AuditLog::logFileSystemAccess("SHA256_CANCELLED", imagePath.string(), true, "", 
+                                "SHA256 calculation cancelled for: " + imageName);
+                            
                             // Remove from cache since the file was deleted
                             std::lock_guard<std::mutex> lock(sha256Cache_mutex);
                             sha256Cache.erase(imageName);
@@ -415,6 +422,10 @@ namespace provisioner {
                         }
                         sha256Cache.insert_or_assign(imageName, result);
                         
+                        // Log successful SHA256 calculation
+                        AuditLog::logFileSystemAccess("SHA256_COMPLETE", imagePath.string(), true, "", 
+                            "SHA256 calculated for: " + imageName + " = " + sha256);
+                        
                         // Broadcast completion to WebSocket clients
                         SHA256WebSocketController::broadcastUpdate(imageName, result);
                     }
@@ -428,6 +439,12 @@ namespace provisioner {
                         result.cancellation_token = it->second.cancellation_token;
                     }
                     sha256Cache.insert_or_assign(imageName, result);
+                    
+                    // Log SHA256 calculation error
+                    std::filesystem::path imagePath(IMAGES_PATH);
+                    imagePath /= imageName;
+                    AuditLog::logFileSystemAccess("SHA256_ERROR", imagePath.string(), false, "", 
+                        "SHA256 calculation error for: " + imageName + " - " + e.what());
                     
                     // Broadcast error to WebSocket clients
                     SHA256WebSocketController::broadcastUpdate(imageName, result);
@@ -509,6 +526,12 @@ namespace provisioner {
                 auto cancellationToken = std::make_shared<SHA256CancellationToken>();
                 sha256Cache.insert_or_assign(imageName, SHA256Result("", SHA256Status::PENDING, true, cancellationToken));
                 LOG_INFO << "Queuing new SHA256 calculation for " << imageName;
+                
+                // Log SHA256 calculation request
+                std::filesystem::path imagePath(IMAGES_PATH);
+                imagePath /= imageName;
+                AuditLog::logFileSystemAccess("SHA256_START", imagePath.string(), true, "", 
+                    "SHA256 calculation requested for: " + imageName);
             } else if (it->second.status != SHA256Status::PENDING) {
                 // Only recalculate if not already in PENDING state
                 // (if it's COMPLETE or ERROR, client should use those values)
@@ -583,6 +606,9 @@ namespace provisioner {
         
         app.registerHandler("/get-image-metadata", [](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
             LOG_INFO << "Images::get-image-metadata";
+            
+            // Add audit log entry for handler access
+            AuditLog::logHandlerAccess(req, "/get-image-metadata");
             
             // Get the image name from the request
             std::string imageName = req->getParameter("name");
@@ -677,6 +703,9 @@ namespace provisioner {
         app.registerHandler("/get-images", [](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
             LOG_INFO << "Images::get-images";
 
+            // Add audit log entry for handler access
+            AuditLog::logHandlerAccess(req, "/get-images");
+
             std::vector<ImageInfo> imageInfos;
             
             LOG_INFO << "Scanning directory: " << IMAGES_PATH;
@@ -746,6 +775,9 @@ namespace provisioner {
 
         app.registerHandler("/get-image-sha256", [](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
             LOG_INFO << "Images::get-image-sha256";
+
+            // Add audit log entry for handler access
+            AuditLog::logHandlerAccess(req, "/get-image-sha256");
 
             // Get the image name from the request
             std::string imageName = req->getParameter("name");
@@ -835,6 +867,10 @@ namespace provisioner {
 
         app.registerHandler("/upload-image", [](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
             LOG_INFO << "Images::uploadImage";
+            
+            // Add audit log entry for handler access
+            AuditLog::logHandlerAccess(req, "/upload-image");
+            
             auto resp = drogon::HttpResponse::newHttpResponse();
 
             // Get the file from the request
@@ -901,6 +937,10 @@ namespace provisioner {
                 // Move uploaded file to target location with unique name
                 file.saveAs(targetPath);
                 
+                // Log successful file upload
+                AuditLog::logFileSystemAccess("UPLOAD", targetPath.string(), true, "", 
+                    "Original filename: " + originalFilename + (originalFilename != finalFilename ? ", renamed to: " + finalFilename : ""));
+                
                 // Clear any stale cache entry for this filename
                 {
                     std::lock_guard<std::mutex> lock(sha256Cache_mutex);
@@ -932,6 +972,11 @@ namespace provisioner {
                 resp->setBody(result.toStyledString());
             } catch (const std::exception& e) {
                 LOG_ERROR << "Failed to save uploaded file: " << e.what();
+                
+                // Log failed file upload
+                AuditLog::logFileSystemAccess("UPLOAD", targetPath.string(), false, "", 
+                    "Upload failed: " + std::string(e.what()) + ", Original filename: " + originalFilename);
+                
                 auto resp = provisioner::utils::createErrorResponse(
                     req,
                     "Failed to save uploaded file",
@@ -949,6 +994,10 @@ namespace provisioner {
 
         app.registerHandler("/delete-image", [](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
             LOG_INFO << "Images::deleteImage";
+            
+            // Add audit log entry for handler access
+            AuditLog::logHandlerAccess(req, "/delete-image");
+            
             auto resp = drogon::HttpResponse::newHttpResponse();
 
             // Get the image name from the request
@@ -981,11 +1030,20 @@ namespace provisioner {
                     
                     std::filesystem::remove(imagePath);
                     
+                    // Log successful file deletion
+                    AuditLog::logFileSystemAccess("DELETE", imagePath.string(), true, "", 
+                        "Image file deleted: " + imageName);
+                    
                     resp->setStatusCode(drogon::k200OK);
                     callback(resp);
                     return;
                 } catch (const std::filesystem::filesystem_error& e) {
                     LOG_ERROR << "Failed to delete image: " << e.what();
+                    
+                    // Log failed file deletion
+                    AuditLog::logFileSystemAccess("DELETE", imagePath.string(), false, "", 
+                        "Failed to delete image: " + std::string(e.what()));
+                    
                     auto resp = provisioner::utils::createErrorResponse(
                         req,
                         "Failed to delete image file",
