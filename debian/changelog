@@ -4,8 +4,10 @@ rpi-sb-provisioner (2.0.5) unstable; urgency=medium
   * WebUI: Add firmware selection UI
   * WebUI: Asynchronous services loading
   * WebUI: Add SHA256 cancellation when images are deleted
+  * WebUI: Fix CORS issues with WebUI
+  * provisioner: Fix 2711 Fastboot utility OS signing
 
- -- Tom Dewey <tom.dewey@raspberrypi.com>  Mon, 23 Jun 2025 16:30:00 +0100
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Tue, 24 Jun 2025 16:30:00 +0100
 
 rpi-sb-provisioner (2.0.4) unstable; urgency=medium
 
