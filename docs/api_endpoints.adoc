@@ -390,6 +390,128 @@ If QR code parameter is missing:
 |name|String|Yes|Name of the service to get logs for
 |=== 
 
+== Services API
+
+The Services API provides access to information about provisioning services running on the system. These endpoints allow monitoring of service states and retrieving service logs.
+
+=== /api/v2/services
+
+*HTTP Method:* GET
+
+*Description:* Returns information about all provisioning services discovered on the system. This includes both currently active services and previously run services found in the systemd journal.
+
+*Parameters:* None
+
+*Response Format:*
+
+The endpoint returns a JSON object containing an array of services:
+
+[source,json]
+----
+{
+  "services": [
+    {
+      "name": "rpi-sb-provisioner@",
+      "status": "exited",
+      "active": "inactive",
+      "instance": "10000000abcdef",
+      "base_name": "rpi-sb-provisioner",
+      "full_name": "rpi-sb-provisioner@10000000abcdef.service"
+    },
+    {
+      "name": "rpi-naked-provisioner",
+      "status": "running",
+      "active": "active",
+      "instance": "",
+      "base_name": "rpi-naked-provisioner",
+      "full_name": "rpi-naked-provisioner.service"
+    }
+  ]
+}
+----
+
+*Field Descriptions:*
+
+[options="header"]
+|===
+|Field|Description
+|name|Service name, including @ symbol for instance services
+|status|Current sub-state of the service (e.g., "running", "exited", "failed")
+|active|Current active state of the service (e.g., "active", "inactive", "failed")
+|instance|Instance parameter for template services (empty for non-template services)
+|base_name|Base service name without @ symbol or instance parameter
+|full_name|Complete systemd unit name including .service suffix
+|===
+
+*Notes:*
+
+- Services are returned in reverse chronological order (most recently active first)
+- The API discovers services from the systemd journal, so it includes both currently running and previously executed services
+- Only services with names matching "rpi-sb-*", "rpi-naked-*", or "rpi-fde-*" patterns are included
+- Services with "rpi-provisioner-ui" in the name are excluded from results
+
+=== /api/v2/service-log/{name}
+
+*HTTP Method:* GET
+
+*Description:* Returns recent log entries for a specific provisioning service. This endpoint provides detailed logging information for monitoring service execution.
+
+*Path Parameters:*
+
+[options="header"]
+|===
+|Parameter|Type|Required|Description
+|name|String|Yes|Name of the service to retrieve logs for (must start with rpi-sb-, rpi-naked-, or rpi-fde-)
+|===
+
+*Response Format:*
+
+The endpoint returns a JSON object with log entries:
+
+[source,json]
+----
+{
+  "logs": [
+    "2025-01-25 14:30:45 Foo",
+    "2025-01-25 14:30:46 Bar",
+    "2025-01-25 14:30:47 Baz"
+  ],
+  "service_name": "rpi-sb-provisioner@10000000abcdef.service"
+}
+----
+
+*Field Descriptions:*
+
+[options="header"]
+|===
+|Field|Description
+|logs|Array of log entries, each containing timestamp and message
+|service_name|Name of the service the logs belong to
+|===
+
+*Error Responses:*
+
+If accessing an unauthorized service:
+
+[source,json]
+----
+{
+  "error": {
+    "status": 403,
+    "title": "Unauthorized Service",
+    "code": "SERVICE_UNAUTHORIZED",
+    "detail": "Access denied: Only logs for rpi-sb, rpi-naked, and rpi-fde services are available",
+    "additional": "Requested service: invalid-service-name"
+  }
+}
+----
+
+*Notes:*
+
+- Returns the most recent 100 log entries for the specified service
+- Log entries are returned in reverse chronological order (newest first)
+- Access is restricted to services with approved prefixes for security
+- This endpoint is optimized for polling and provides lighter responses than the HTML view
 
 == Error Response Format
 
