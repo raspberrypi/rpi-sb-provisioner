@@ -538,22 +538,22 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                     tar -vcf "${RPI_SB_WORKDIR}/bootfiles.bin" -- *
                     cd -
                     rm -rf "${FASTBOOT_SIGN_DIR}"
-
-                    announce_start "Signing fastboot image"
-                    cp "$(get_fastboot_gadget)" "${RPI_SB_WORKDIR}"/boot.img
-                    sha256sum "${RPI_SB_WORKDIR}"/boot.img | awk '{print $1}' > "${RPI_SB_WORKDIR}"/boot.sig
-                    printf 'rsa2048: ' >> "${RPI_SB_WORKDIR}"/boot.sig
-                    # Prefer PKCS11 over PEM keyfiles, if both are specified.
-                    # shellcheck disable=SC2046
-                    ${OPENSSL} dgst -sign $(get_signing_directives) -sha256 "${RPI_SB_WORKDIR}"/boot.img | xxd -c 4096 -p >> "${RPI_SB_WORKDIR}"/boot.sig
-                    cp "$(get_fastboot_config_file)" "${RPI_SB_WORKDIR}"/config.txt
-                    announce_stop "Signing fastboot image"
                     ;;
                 *)
                     # Raspberry Pi 4-class devices do not use signed bootcode files, so just copy the file into the relevant place.
                     cp /usr/share/rpiboot/mass-storage-gadget64/bootfiles.bin "${RPI_SB_WORKDIR}/bootfiles.bin"
                     ;;
             esac
+
+            announce_start "Signing fastboot image"
+            cp "$(get_fastboot_gadget)" "${RPI_SB_WORKDIR}"/boot.img
+            sha256sum "${RPI_SB_WORKDIR}"/boot.img | awk '{print $1}' > "${RPI_SB_WORKDIR}"/boot.sig
+            printf 'rsa2048: ' >> "${RPI_SB_WORKDIR}"/boot.sig
+            # Prefer PKCS11 over PEM keyfiles, if both are specified.
+            # shellcheck disable=SC2046
+            ${OPENSSL} dgst -sign $(get_signing_directives) -sha256 "${RPI_SB_WORKDIR}"/boot.img | xxd -c 4096 -p >> "${RPI_SB_WORKDIR}"/boot.sig
+            cp "$(get_fastboot_config_file)" "${RPI_SB_WORKDIR}"/config.txt
+            announce_stop "Signing fastboot image"
         fi
     else # !PROVISIONING_STYLE=secure-boot
         NONSECURE_BOOTLOADER_DIRECTORY="${RPI_SB_WORKDIR}/non-secure-bootloader/"
