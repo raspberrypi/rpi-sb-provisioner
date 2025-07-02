@@ -137,7 +137,7 @@ WARNING: If you do not set this variable, your modified OS intermediates will no
 Set to a location to cache OS assets between provisioning sessions. Recommended for use in production. For example:
 
 ----
-RPI_SB_WORKDIR=/srv/rpi-sb-provisioner/
+/srv/rpi-sb-provisioner/workdir
 ----
 
 == Format of the config file
