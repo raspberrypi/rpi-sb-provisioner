@@ -21,7 +21,8 @@ host-support/cryptroot_initramfs                    /var/lib/rpi-sb-provisioner
 host-support/boot_ramdisk_config.txt                /var/lib/rpi-sb-provisioner
 host-support/fastboot-gadget.img                    /var/lib/rpi-sb-provisioner
 host-support/fastboot-gadget.2710-bootfiles-bin     /var/lib/rpi-sb-provisioner
-host-support/bootloader.config                      /var/lib/rpi-sb-provisioner
+host-support/bootloader.secure                      /var/lib/rpi-sb-provisioner
+host-support/bootloader.naked                       /var/lib/rpi-sb-provisioner
 host-support/manufacturing-data                     /var/lib/rpi-sb-provisioner
 host-support/state-recording                        /var/lib/rpi-sb-provisioner
 

@@ -1,0 +1,12 @@
+[all]
+BOOT_UART=1
+WAKE_ON_GPIO=0
+POWER_OFF_ON_HALT=1
+HDMI_DELAY=0
+
+# Boot Order Codes, from https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#BOOT_ORDER
+# Try SD first (1), followed by, NVME (6), then USB Mass Storage (4), then Network (2), and finally if nothing has worked, reboot (f)
+BOOT_ORDER=0xf2461
+
+# Disable self-update mode
+ENABLE_SELF_UPDATE=0

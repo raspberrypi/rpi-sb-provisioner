@@ -445,7 +445,8 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
 
             announce_start "Setting up the environment for a signed-boot capable device"
             if [ -z "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" ]; then
-                RPI_DEVICE_BOOTLOADER_CONFIG_FILE=/var/lib/rpi-sb-provisioner/bootloader.default
+                RPI_DEVICE_BOOTLOADER_CONFIG_FILE=/var/lib/rpi-sb-provisioner/bootloader.secure
+                log "Using secure bootloader config file: ${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
             fi
 
             SOURCE_EEPROM_IMAGE=
@@ -571,7 +572,8 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
 
             announce_start "Setting up the environment for a non-secure-boot capable device"
             if [ -z "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" ]; then
-                RPI_DEVICE_BOOTLOADER_CONFIG_FILE=/var/lib/rpi-sb-provisioner/bootloader.default
+                RPI_DEVICE_BOOTLOADER_CONFIG_FILE=/var/lib/rpi-sb-provisioner/bootloader.naked
+                log "Using naked bootloader config file: ${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
             fi
 
             SOURCE_EEPROM_IMAGE=
