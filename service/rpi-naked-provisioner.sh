@@ -185,6 +185,20 @@ else
     announce_stop "Finding the cache directory: Using specified name"
 fi
 
+# If the file is already a sparse image, don't re-sparse it
+# Find the name of the sparse-image by extractin the filename sans path from GOLD_MASTER_OS_FILE
+prepare_sparse_image() {
+    SPARSE_IMAGE_NAME=$(basename "${GOLD_MASTER_OS_FILE}")
+    if [ ! -f "${RPI_SB_WORKDIR}/${SPARSE_IMAGE_NAME}" ]; then
+        # If the file doesn't exist, we need to convert it to a sparse image
+        img2simg "${GOLD_MASTER_OS_FILE}" "${RPI_SB_WORKDIR}/${SPARSE_IMAGE_NAME}"
+        announce_stop "Converting OS image to sparse image"
+    else
+        announce_stop "Using existing sparse image"
+    fi
+}
+with_lock "${LOCK_BASE}/rootfs-image.lock" 600 prepare_sparse_image
+
 systemd-notify --ready --status="Provisioning started"
 
 announce_start "Writing OS images"
@@ -194,7 +208,7 @@ fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" erase "${RPI_DEVICE_STORAGE_TYPE}"
 sleep 2
 announce_stop "Erase Device Storage"
 
-fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}" "${GOLD_MASTER_OS_FILE}"
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}" "${RPI_SB_WORKDIR}/${SPARSE_IMAGE_NAME}"
 announce_stop "Writing OS images"
 
 # Re-check the fastboot devices specifier, as it may take a while for a device to gain IP connectivity
