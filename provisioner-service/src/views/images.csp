@@ -168,12 +168,16 @@
                 
                 ws.onerror = function(error) {
                     console.error('WebSocket error:', error);
+                    // Clear the WebSocket reference on error to prevent stalling
+                    ws = null;
                     // Fallback to polling
                     initializePolling();
                 };
                 
                 ws.onclose = function(event) {
                     console.log(`WebSocket connection closed: code=${event.code}, reason=${event.reason}`);
+                    // Clear the WebSocket reference when closed
+                    ws = null;
                     
                     // Fallback to polling while attempting to reconnect
                     initializePolling();
@@ -543,29 +547,59 @@
             initWebSocket();
         });
 
+        // Force close WebSocket with timeout
+        function forceCloseWebSocket() {
+            if (ws) {
+                console.log('Force closing WebSocket connection');
+                try {
+                    // Set a very short timeout to force immediate termination
+                    const closeTimeout = setTimeout(() => {
+                        console.log('WebSocket close timeout reached, forcing termination');
+                        ws = null; // Clear reference immediately
+                    }, 50); // Very short timeout (50ms)
+                    
+                    // Try to close gracefully
+                    ws.close();
+                    
+                    // Clear timeout if close was successful
+                    if (ws && ws.readyState === WebSocket.CLOSED) {
+                        clearTimeout(closeTimeout);
+                    }
+                    
+                    // Also force close after a very short delay regardless
+                    setTimeout(() => {
+                        if (ws) {
+                            console.log('Force terminating WebSocket reference');
+                            ws = null;
+                        }
+                    }, 100);
+                } catch (e) {
+                    console.error('Error closing WebSocket:', e);
+                    ws = null; // Clear reference even on error
+                }
+            }
+        }
+        
         // Cleanup when navigating away
         window.addEventListener('beforeunload', () => {
             console.log('Page unloading - cleaning up WebSocket and polling');
-            if (ws) {
-                // Close WebSocket connection immediately
-                ws.close();
-                ws = null;
-            }
-            // Clear all pending requests
+            // Clear all pending requests first
             pendingSha256Requests.clear();
             // Stop all polling
             stopAllPolling();
+            // Force close WebSocket with timeout
+            forceCloseWebSocket();
         });
         
         // Also cleanup on page hide (covers more navigation scenarios)
         window.addEventListener('pagehide', () => {
             console.log('Page hidden - cleaning up WebSocket and polling');
-            if (ws) {
-                ws.close();
-                ws = null;
-            }
+            // Clear all pending requests first
             pendingSha256Requests.clear();
+            // Stop all polling
             stopAllPolling();
+            // Force close WebSocket with timeout
+            forceCloseWebSocket();
         });
     </script>
 </head>
