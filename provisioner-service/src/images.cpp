@@ -175,18 +175,43 @@ public:
     void handleConnectionClosed(const drogon::WebSocketConnectionPtr& wsConnPtr) override {
         LOG_INFO << "WebSocket connection closed";
         
+        // Track which images need to be checked for cancellation
+        std::vector<std::string> imagesToCheck;
+        
         // Remove this connection from all image subscriptions
-        std::lock_guard<std::mutex> lock(connectionsMutex);
-        for (auto& pair : activeConnections) {
-            auto& connections = pair.second;
-            connections.erase(
-                std::remove_if(connections.begin(), connections.end(),
-                    [&wsConnPtr](const drogon::WebSocketConnectionPtr& conn) {
-                        return conn == wsConnPtr;
-                    }
-                ),
-                connections.end()
-            );
+        {
+            std::lock_guard<std::mutex> lock(connectionsMutex);
+            for (auto& pair : activeConnections) {
+                auto& connections = pair.second;
+                size_t before = connections.size();
+                connections.erase(
+                    std::remove_if(connections.begin(), connections.end(),
+                        [&wsConnPtr](const drogon::WebSocketConnectionPtr& conn) {
+                            return conn == wsConnPtr;
+                        }
+                    ),
+                    connections.end()
+                );
+                
+                // If this connection was removed and no connections remain for this image
+                if (before > connections.size() && connections.empty()) {
+                    imagesToCheck.push_back(pair.first);
+                    LOG_INFO << "WebSocket: No more connections interested in " << pair.first;
+                }
+            }
+        }
+        
+        // Cancel SHA256 calculations for images with no interested connections
+        for (const auto& imageName : imagesToCheck) {
+            // Check if the calculation is still pending before cancelling
+            {
+                std::lock_guard<std::mutex> lock(provisioner::sha256Cache_mutex);
+                auto it = provisioner::sha256Cache.find(imageName);
+                if (it != provisioner::sha256Cache.end() && it->second.status == provisioner::SHA256Status::PENDING) {
+                    LOG_INFO << "WebSocket: Cancelling SHA256 calculation for " << imageName << " (no interested connections)";
+                    provisioner::cancelSHA256Calculation(imageName);
+                }
+            }
         }
     }
     
