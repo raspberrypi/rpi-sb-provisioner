@@ -545,9 +545,26 @@
 
         // Cleanup when navigating away
         window.addEventListener('beforeunload', () => {
+            console.log('Page unloading - cleaning up WebSocket and polling');
+            if (ws) {
+                // Close WebSocket connection immediately
+                ws.close();
+                ws = null;
+            }
+            // Clear all pending requests
+            pendingSha256Requests.clear();
+            // Stop all polling
+            stopAllPolling();
+        });
+        
+        // Also cleanup on page hide (covers more navigation scenarios)
+        window.addEventListener('pagehide', () => {
+            console.log('Page hidden - cleaning up WebSocket and polling');
             if (ws) {
                 ws.close();
+                ws = null;
             }
+            pendingSha256Requests.clear();
             stopAllPolling();
         });
     </script>
