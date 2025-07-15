@@ -259,8 +259,10 @@ namespace provisioner {
 
     // Calculate SHA256 of a file
     std::string calculateSHA256(const std::filesystem::path& imagePath, const std::string& imageName, std::shared_ptr<SHA256CancellationToken> cancellationToken) {
-        // Use larger chunks (8MB) for better performance with large files
-        constexpr size_t CHUNK_SIZE = 8 * 1024 * 1024; 
+        // Use smaller chunks (1MB) for more responsive cancellation
+        constexpr size_t CHUNK_SIZE = 1 * 1024 * 1024; 
+        // For very large files, process in even smaller sub-chunks within each chunk
+        constexpr size_t SUB_CHUNK_SIZE = 256 * 1024; // 256KB sub-chunks
         std::vector<unsigned char> buffer(CHUNK_SIZE);
         unsigned char hash[EVP_MAX_MD_SIZE];
         unsigned int hash_len;
@@ -302,7 +304,22 @@ namespace provisioner {
             file.read(reinterpret_cast<char*>(buffer.data()), CHUNK_SIZE);
             std::streamsize bytes_read = file.gcount();
             if (bytes_read > 0) {
-                EVP_DigestUpdate(mdctx, buffer.data(), bytes_read);
+                // Process in smaller sub-chunks for more frequent cancellation checks
+                std::streamsize processed = 0;
+                while (processed < bytes_read) {
+                    // Check for cancellation every sub-chunk
+                    if (cancellationToken && cancellationToken->is_cancelled()) {
+                        LOG_INFO << "SHA256 calculation cancelled during sub-chunk processing for " << imageName;
+                        EVP_MD_CTX_free(mdctx);
+                        file.close();
+                        return "calculation-cancelled";
+                    }
+                    
+                    std::streamsize sub_chunk_size = std::min(SUB_CHUNK_SIZE, bytes_read - processed);
+                    EVP_DigestUpdate(mdctx, buffer.data() + processed, sub_chunk_size);
+                    processed += sub_chunk_size;
+                }
+                
                 totalBytesRead += bytes_read;
                 
                 // Log progress every 10%
