@@ -1,3 +1,13 @@
+rpi-sb-provisioner (2.0.6) unstable; urgency=medium
+
+  * WebUI: Fixup SHA256 calculation cancellation
+  * naked: Fixup bootloader configuation file default
+  * all: Fixed up post-flash customisation script arguments
+  * naked: Fix up TCP connection set-up
+  * bootstrap: Drop non-secure-boot EEPROM handling
+
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Wed, 16 Jul 2025 16:30:00 +0100
+
 rpi-sb-provisioner (2.0.5) unstable; urgency=medium
 
   * WebUI: Add audit logging to images API
