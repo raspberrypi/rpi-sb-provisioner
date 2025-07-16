@@ -18,13 +18,14 @@ namespace provisioner {
 
         // Define available provisioners and stages using a map
         const std::map<std::string, std::vector<std::string>> PROVISIONER_STAGES = {
-            {"sb-provisioner", {"bootfs-mounted", "rootfs-mounted", "post-flash"}},
-            {"fde-provisioner", {"bootfs-mounted", "rootfs-mounted", "post-flash"}},
-            {"naked-provisioner", {"post-flash"}}
+            {"sb-provisioner", {"bootstrap", "bootfs-mounted", "rootfs-mounted", "post-flash"}},
+            {"fde-provisioner", {"bootstrap", "bootfs-mounted", "rootfs-mounted", "post-flash"}},
+            {"naked-provisioner", {"bootstrap", "post-flash"}}
         };
 
         // Description of each stage for display in the UI
         const std::map<std::string, std::string> STAGE_DESCRIPTIONS = {
+            {"bootstrap", "Executed when a device is detected, before provisioning begins"},
             {"bootfs-mounted", "Executed after boot image is mounted, before modifications"},
             {"rootfs-mounted", "Executed after rootfs is mounted, before final packaging"},
             {"post-flash", "Executed after bootfs and rootfs have been flashed to the device"}
@@ -301,7 +302,24 @@ namespace provisioner {
                     // Create a new script with default content
                     std::string defaultContent = "#!/bin/sh\n\n";
                     
-                    if (stage == "post-flash") {
+                    if (stage == "bootstrap") {
+                        defaultContent += "# This script runs when a device is detected, before provisioning begins\n";
+                        defaultContent += "# Arguments:\n";
+                        defaultContent += "# $1 - Target device serial number\n";
+                        defaultContent += "# $2 - Target device family (e.g., 2712, 2711, 2710)\n";
+                        defaultContent += "# $3 - Target USB path (e.g., 1-1.2)\n";
+                        defaultContent += "# $4 - Target device path (e.g., /dev/bus/usb/001/004)\n\n";
+                        defaultContent += "TARGET_DEVICE_SERIAL=\"$1\"\n";
+                        defaultContent += "TARGET_DEVICE_FAMILY=\"$2\"\n";
+                        defaultContent += "TARGET_USB_PATH=\"$3\"\n";
+                        defaultContent += "TARGET_DEVICE_PATH=\"$4\"\n\n";
+                        defaultContent += "echo \"Running bootstrap customisation for device ${TARGET_DEVICE_SERIAL}\"\n";
+                        defaultContent += "echo \"Device family: ${TARGET_DEVICE_FAMILY}\"\n";
+                        defaultContent += "echo \"USB path: ${TARGET_USB_PATH}\"\n\n";
+                        defaultContent += "# Example: Log device detection\n";
+                        defaultContent += "# logger \"Device ${TARGET_DEVICE_SERIAL} detected for provisioning\"\n\n";
+                        defaultContent += "# Exit with success\nexit 0\n";
+                    } else if (stage == "post-flash") {
                         defaultContent += "# This script runs after images have been flashed to the device\n";
                         defaultContent += "# Arguments:\n";
                         defaultContent += "# $1 - Fastboot device specifier\n";
@@ -1145,6 +1163,23 @@ namespace provisioner {
                 defaultContent += "echo \"Running post-flash customisation for ${TARGET_DEVICE_SERIAL}\"\n\n";
                 defaultContent += "# Example: Run a fastboot command\n";
                 defaultContent += "# fastboot -s \"${FASTBOOT_DEVICE_SPECIFIER}\" getvar version\n\n";     
+                defaultContent += "# Exit with success\nexit 0\n";
+            } else if (stage == "bootstrap") {
+                defaultContent += "# This script runs when a device is detected, before provisioning begins\n";
+                defaultContent += "# Arguments:\n";
+                defaultContent += "# $1 - Target device serial number\n";
+                defaultContent += "# $2 - Target device family (e.g., 2712, 2711, 2710)\n";
+                defaultContent += "# $3 - Target USB path (e.g., 1-1.2)\n";
+                defaultContent += "# $4 - Target device path (e.g., /dev/bus/usb/001/004)\n\n";
+                defaultContent += "TARGET_DEVICE_SERIAL=\"$1\"\n";
+                defaultContent += "TARGET_DEVICE_FAMILY=\"$2\"\n";
+                defaultContent += "TARGET_USB_PATH=\"$3\"\n";
+                defaultContent += "TARGET_DEVICE_PATH=\"$4\"\n\n";
+                defaultContent += "echo \"Running bootstrap customisation for device ${TARGET_DEVICE_SERIAL}\"\n";
+                defaultContent += "echo \"Device family: ${TARGET_DEVICE_FAMILY}\"\n";
+                defaultContent += "echo \"USB path: ${TARGET_USB_PATH}\"\n\n";
+                defaultContent += "# Example: Log device detection\n";
+                defaultContent += "# logger \"Device ${TARGET_DEVICE_SERIAL} detected for provisioning\"\n\n";
                 defaultContent += "# Exit with success\nexit 0\n";
             } else if (stage == "bootfs-mounted") {
                 defaultContent += "# This script runs when " + stage + " for " + provisioner + "\n";

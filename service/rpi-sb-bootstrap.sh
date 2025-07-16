@@ -408,6 +408,24 @@ case $TARGET_DEVICE_FAMILY in
 esac
 
 record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_STARTED}" "${TARGET_USB_PATH}"
+
+# Run bootstrap customisation script for the chosen provisioning style
+# This script runs when a device is detected, before provisioning begins
+case ${PROVISIONING_STYLE} in
+    "secure-boot")
+        run_customisation_script "sb-provisioner" "bootstrap" "${TARGET_DEVICE_SERIAL}" "${TARGET_DEVICE_FAMILY}" "${TARGET_USB_PATH}" "${TARGET_DEVICE_PATH}"
+        ;;
+    "fde-only")
+        run_customisation_script "fde-provisioner" "bootstrap" "${TARGET_DEVICE_SERIAL}" "${TARGET_DEVICE_FAMILY}" "${TARGET_USB_PATH}" "${TARGET_DEVICE_PATH}"
+        ;;
+    "naked")
+        run_customisation_script "naked-provisioner" "bootstrap" "${TARGET_DEVICE_SERIAL}" "${TARGET_DEVICE_FAMILY}" "${TARGET_USB_PATH}" "${TARGET_DEVICE_PATH}"
+        ;;
+    *)
+        log "Warning: Unknown provisioning style: ${PROVISIONING_STYLE}, skipping bootstrap customization"
+        ;;
+esac
+
 # Determine if we're enforcing secure boot, and if so, prepare the environment & eeprom accordingly.
 if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then 
     if [ "${PROVISIONING_STYLE}" = "secure-boot" ]; then
