@@ -205,7 +205,7 @@ announce_start "Writing OS images"
 
 announce_start "Erase Device Storage"
 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" erase "${RPI_DEVICE_STORAGE_TYPE}"
-sleep 2
+sleep 3
 announce_stop "Erase Device Storage"
 
 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}" "${RPI_SB_WORKDIR}/${SPARSE_IMAGE_NAME}"
