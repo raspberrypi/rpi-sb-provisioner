@@ -14,6 +14,7 @@
 #include <atomic>
 #include <chrono>
 #include <optional>
+#include <sys/inotify.h>
 
 namespace provisioner {
 
@@ -91,6 +92,9 @@ namespace provisioner {
     
     // Cancel an ongoing SHA256 calculation by cancelling its token
     void cancelSHA256Calculation(const std::string& imageName);
+    
+    // Calculate SHA256 for all existing images at startup
+    void calculateAllExistingSHA256();
 
     struct ImageInfo {
         std::string name;
@@ -103,6 +107,22 @@ namespace provisioner {
         ~Images();
 
         void registerHandlers(drogon::HttpAppFramework &app);
+        
+    private:
+        // File watching thread
+        std::thread fileWatcherThread;
+        std::atomic<bool> fileWatcherRunning{false};
+        int inotifyFd;
+        int watchDescriptor;
+        
+        // File watcher function
+        void fileWatcherFunction();
+        
+        // Initialize file watching for new images
+        void initFileWatcher();
+        
+        // Shutdown file watching
+        void shutdownFileWatcher();
     };
 
 } // namespace provisioner
