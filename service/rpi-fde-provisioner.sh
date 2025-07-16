@@ -714,7 +714,7 @@ fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash mapper/cryptroot "${RPI_SB_WORK
 announce_stop "Writing OS images"
 
 # Run customisation script for post-flash stage
-run_customisation_script "fde-provisioner" "post-flash"
+run_customisation_script "fde-provisioner" "post-flash" "${FASTBOOT_DEVICE_SPECIFIER}" "${TARGET_DEVICE_SERIAL}" "${RPI_DEVICE_STORAGE_TYPE}"
 
 announce_start "Set LED status"
 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem led PWR 0
