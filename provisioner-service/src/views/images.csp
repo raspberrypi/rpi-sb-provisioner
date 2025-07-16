@@ -118,9 +118,7 @@
         function initWebSocket() {
             // Check if WebSockets are supported
             if (!window.WebSocket) {
-                console.error('WebSockets not supported');
-                // Fallback to polling for all images
-                initializePolling();
+                console.warn('WebSockets not supported, using polling only');
                 return;
             }
             
@@ -321,7 +319,7 @@
         function displayTruncatedHash(cell, fullHash) {
             // Don't process non-hash values
             if (!fullHash || fullHash.length < 10 || 
-                fullHash === 'use-websocket' || 
+                fullHash === 'Calculating...' || 
                 fullHash.includes('Calculating') || 
                 fullHash.includes('Error')) {
                 cell.textContent = fullHash;
@@ -393,7 +391,7 @@
                     console.log(`SHA256 status for ${imageName}:`, data);
                     
                     // If we have a completed hash, update the cell with the final value
-                    if (data.sha256 && data.sha256 !== 'use-websocket') {
+                    if (data.sha256 && data.sha256 !== 'Calculating...') {
                         console.log(`Got complete SHA256 for ${imageName}: ${data.sha256}`);
                         updateSha256Cell({
                             image_name: imageName,
@@ -416,7 +414,7 @@
                     }
                     
                     // If it's still calculating but no progress info
-                    if (data.sha256 === 'use-websocket') {
+                    if (data.sha256 === 'Calculating...') {
                         // Get metadata for estimation
                         try {
                             const metadataResponse = await fetch(`/get-image-metadata?name=${encodeURIComponent(imageName)}`);
@@ -467,19 +465,20 @@
             const sha256Cells = document.querySelectorAll('.sha256-cell');
             sha256Cells.forEach(cell => {
                 const imageName = cell.dataset.image;
-                if (cell.textContent === 'use-websocket' || 
+                if (cell.textContent === 'Calculating...' || 
                     cell.textContent === 'Connecting...' ||
-                    cell.textContent === 'Calculating...') {
-                    cell.textContent = 'Calculating...';
+                    cell.textContent.includes('Calculating')) {
+                    console.log(`Starting polling for ${imageName}`);
                     startPolling(imageName);
                 }
             });
         }
         
-        // Send SHA256 calculation request via WebSocket
+        // Send SHA256 calculation request via WebSocket or start polling
         function requestSha256(imageName) {
             if (!ws || ws.readyState !== WebSocket.OPEN) {
                 // If WebSocket not ready, use polling instead
+                console.log(`WebSocket not available, starting polling for ${imageName}`);
                 startPolling(imageName);
                 return;
             }
@@ -494,8 +493,7 @@
         // Initialize SHA256 requests for all images
         function initializeSha256Requests() {
             if (!ws || ws.readyState !== WebSocket.OPEN) {
-                console.warn('WebSocket not connected, falling back to polling');
-                initializePolling();
+                console.warn('WebSocket not connected, using polling only');
                 return;
             }
             
@@ -510,13 +508,11 @@
                 const currentText = cell.textContent;
                 
                 // Request SHA256 for cells that need calculation
-                if (currentText === 'use-websocket' || 
+                if (currentText === 'Calculating...' || 
                     currentText === 'Connecting...' || 
-                    currentText === 'Calculating...' ||
                     currentText.includes('Calculating')) {
                     
-                    console.log(`Requesting SHA256 for ${imageName}`);
-                    cell.textContent = 'Calculating...';
+                    console.log(`Requesting SHA256 via WebSocket for ${imageName}`);
                     requestSha256(imageName);
                 }
             });
@@ -529,7 +525,6 @@
                 const hash = cell.textContent;
                 // Only process cells with actual hash values (not calculating or error messages)
                 if (hash && hash.length > 10 && 
-                    !hash.includes('use-websocket') && 
                     !hash.includes('Calculating') && 
                     !hash.includes('Error')) {
                     displayTruncatedHash(cell, hash);
@@ -541,9 +536,9 @@
         document.addEventListener('DOMContentLoaded', () => {
             // Initialize truncated hashes for existing values
             initializeTruncatedHashes();
-            // Force polling to start immediately, before WebSocket setup
+            // Start polling for any images that need SHA256 calculation
             initializePolling();
-            // Then try to establish WebSocket
+            // Optional: Still try to establish WebSocket for real-time updates
             initWebSocket();
         });
 
@@ -930,7 +925,7 @@
                         
                         newRow.innerHTML = `
                             <td>${data.filename}</td>
-                            <td class="sha256-cell" data-image="${data.filename}">Connecting...</td>
+                            <td class="sha256-cell" data-image="${data.filename}">Calculating...</td>
                             <td></td>
                             <td>
                                 <button class="use-btn" onclick="useImage('${data.filename}')">Use</button>
@@ -940,8 +935,9 @@
                         
                         tbody.appendChild(newRow);
                         
-                        // Request SHA256 for the new image
-                        requestSha256(data.filename);
+                        // Start polling for SHA256 of the new image
+                        console.log(`Starting polling for newly uploaded image: ${data.filename}`);
+                        startPolling(data.filename);
                     } else {
                         const errorData = await response.json();
                         showMessage(`Upload failed: ${errorData.message || 'Unknown error'}`, true);

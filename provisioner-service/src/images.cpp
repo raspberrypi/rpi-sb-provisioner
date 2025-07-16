@@ -9,6 +9,9 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <sys/inotify.h>
+#include <sys/select.h>
+#include <errno.h>
 #include "utils.h"
 
 #include <filesystem>
@@ -315,7 +318,7 @@ namespace provisioner {
                         return "calculation-cancelled";
                     }
                     
-                    std::streamsize sub_chunk_size = std::min(SUB_CHUNK_SIZE, bytes_read - processed);
+                    std::streamsize sub_chunk_size = std::min(static_cast<std::streamsize>(SUB_CHUNK_SIZE), bytes_read - processed);
                     EVP_DigestUpdate(mdctx, buffer.data() + processed, sub_chunk_size);
                     processed += sub_chunk_size;
                 }
@@ -612,7 +615,7 @@ namespace provisioner {
         }
     }
 
-    Images::Images() {
+    Images::Images() : inotifyFd(-1), watchDescriptor(-1) {
         std::filesystem::path image_dir(IMAGES_PATH);
         
         // Create directory if it doesn't exist
@@ -634,11 +637,160 @@ namespace provisioner {
         
         // Initialize the SHA256 worker thread
         initSHA256Worker();
+        
+        // Calculate SHA256 for all existing images at startup
+        provisioner::calculateAllExistingSHA256();
+        
+        // Initialize file watching for new images
+        initFileWatcher();
     }
 
     Images::~Images() {
+        // Shutdown file watching
+        shutdownFileWatcher();
+        
         // Shutdown the SHA256 worker thread
         shutdownSHA256Worker();
+    }
+
+    // Calculate SHA256 for all existing images at startup
+    void calculateAllExistingSHA256() {
+        LOG_INFO << "Starting automatic SHA256 calculation for all existing images";
+        
+        try {
+            for (const auto& entry : std::filesystem::directory_iterator(IMAGES_PATH)) {
+                if (entry.is_regular_file()) {
+                    std::string imageName = entry.path().filename().string();
+                    LOG_INFO << "Queuing SHA256 calculation for existing image: " << imageName;
+                    requestSHA256Calculation(imageName);
+                }
+            }
+        } catch (const std::exception& e) {
+            LOG_ERROR << "Error scanning images directory for automatic SHA256 calculation: " << e.what();
+        }
+        
+        LOG_INFO << "Automatic SHA256 calculation initiated for all existing images";
+    }
+    
+
+    
+    // File watcher function implementation
+    void Images::fileWatcherFunction() {
+        LOG_INFO << "File watcher thread started";
+        
+        const size_t EVENT_SIZE = sizeof(struct inotify_event);
+        const size_t EVENT_BUF_LEN = 1024 * (EVENT_SIZE + 16);
+        char buffer[EVENT_BUF_LEN];
+        
+        while (fileWatcherRunning) {
+            fd_set fds;
+            FD_ZERO(&fds);
+            FD_SET(inotifyFd, &fds);
+            
+            struct timeval timeout;
+            timeout.tv_sec = 1;  // 1 second timeout
+            timeout.tv_usec = 0;
+            
+            int ret = select(inotifyFd + 1, &fds, nullptr, nullptr, &timeout);
+            
+            if (ret < 0) {
+                if (errno == EINTR) continue;
+                LOG_ERROR << "select() failed in file watcher: " << strerror(errno);
+                break;
+            }
+            
+            if (ret == 0) {
+                // Timeout - check if we should continue running
+                continue;
+            }
+            
+            if (FD_ISSET(inotifyFd, &fds)) {
+                int length = read(inotifyFd, buffer, EVENT_BUF_LEN);
+                if (length < 0) {
+                    if (errno == EINTR) continue;
+                    LOG_ERROR << "read() failed in file watcher: " << strerror(errno);
+                    break;
+                }
+                
+                int i = 0;
+                while (i < length) {
+                    struct inotify_event* event = (struct inotify_event*)&buffer[i];
+                    
+                    if (event->len > 0) {
+                        std::string filename(event->name);
+                        
+                        // Only process regular files (not directories)
+                        if (!(event->mask & IN_ISDIR)) {
+                            if (event->mask & IN_CREATE || event->mask & IN_MOVED_TO) {
+                                LOG_INFO << "New image file detected: " << filename;
+                                
+                                // Wait a moment for the file to be fully written
+                                std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                                
+                                // Verify the file exists and is a regular file
+                                std::filesystem::path filePath(IMAGES_PATH);
+                                filePath /= filename;
+                                
+                                if (std::filesystem::exists(filePath) && std::filesystem::is_regular_file(filePath)) {
+                                    LOG_INFO << "Queuing SHA256 calculation for new image: " << filename;
+                                    requestSHA256Calculation(filename);
+                                }
+                            }
+                        }
+                    }
+                    
+                    i += EVENT_SIZE + event->len;
+                }
+            }
+        }
+        
+        LOG_INFO << "File watcher thread stopped";
+    }
+    
+    void Images::initFileWatcher() {
+        LOG_INFO << "Setting up file watcher for images directory";
+        
+        inotifyFd = inotify_init();
+        if (inotifyFd < 0) {
+            LOG_ERROR << "Failed to initialize inotify: " << strerror(errno);
+            return;
+        }
+        
+        watchDescriptor = inotify_add_watch(inotifyFd, IMAGES_PATH.c_str(), 
+                                           IN_CREATE | IN_MOVED_TO | IN_CLOSE_WRITE);
+        if (watchDescriptor < 0) {
+            LOG_ERROR << "Failed to add watch for images directory: " << strerror(errno);
+            close(inotifyFd);
+            inotifyFd = -1;
+            return;
+        }
+        
+        fileWatcherRunning = true;
+        fileWatcherThread = std::thread(&Images::fileWatcherFunction, this);
+        
+        LOG_INFO << "File watcher initialized successfully";
+    }
+    
+    void Images::shutdownFileWatcher() {
+        if (fileWatcherRunning) {
+            fileWatcherRunning = false;
+            
+            if (fileWatcherThread.joinable()) {
+                fileWatcherThread.join();
+            }
+            
+            if (watchDescriptor >= 0) {
+                inotify_rm_watch(inotifyFd, watchDescriptor);
+                watchDescriptor = -1;
+            }
+            
+            if (inotifyFd >= 0) {
+                close(inotifyFd);
+                inotifyFd = -1;
+            }
+            
+            LOG_INFO << "File watcher shutdown complete";
+        }
     }
 
     void Images::registerHandlers(drogon::HttpAppFramework &app)
@@ -757,7 +909,25 @@ namespace provisioner {
                     std::filesystem::path imagePath = entry.path();
                     ImageInfo info;
                     info.name = imagePath.filename().string();
-                    info.sha256 = "use-websocket"; // Indicate client should use WebSocket
+                    
+                    // Get SHA256 from cache if available
+                    {
+                        std::lock_guard<std::mutex> lock(sha256Cache_mutex);
+                        auto it = sha256Cache.find(info.name);
+                        if (it != sha256Cache.end()) {
+                            if (it->second.status == SHA256Status::COMPLETE) {
+                                info.sha256 = it->second.value;
+                            } else if (it->second.status == SHA256Status::PENDING) {
+                                info.sha256 = "Calculating...";
+                            } else {
+                                info.sha256 = "Error";
+                            }
+                        } else {
+                            // Not in cache yet, calculation may still be pending
+                            info.sha256 = "Calculating...";
+                        }
+                    }
+                    
                     imageInfos.push_back(info);
                     LOG_INFO << "Added image: " << info.name;
                 }
@@ -887,17 +1057,25 @@ namespace provisioner {
             Json::Value result;
             
             if (!resultReady) {
-                // If not in cache or pending, tell client to use WebSocket
-                result["sha256"] = "use-websocket";
-                result["message"] = "SHA256 calculation is in progress. Please use WebSocket API for real-time updates.";
-                // Include progress if available
-                if (progress > 0) {
-                    result["progress"] = progress;
-                    result["progress_percent"] = static_cast<int>(progress * 100);
+                // Return immediate status for pending calculations
+                if (status == SHA256Status::PENDING) {
+                    result["sha256"] = "Calculating...";
+                    result["status"] = "pending";
+                    result["message"] = "SHA256 calculation is in progress.";
+                    // Include progress if available
+                    if (progress > 0) {
+                        result["progress"] = progress;
+                        result["progress_percent"] = static_cast<int>(progress * 100);
+                    }
+                } else {
+                    // Not in cache yet, start calculation and return pending status
+                    result["sha256"] = "Calculating...";
+                    result["status"] = "pending";
+                    result["message"] = "SHA256 calculation started.";
+                    
+                    // Start calculation in background
+                    requestSHA256Calculation(imageName);
                 }
-                
-                // Start calculation in background if it's not already in progress
-                requestSHA256Calculation(imageName);
             } else {
                 result["sha256"] = sha256;
                 result["status"] = (status == SHA256Status::COMPLETE) ? "complete" : "error";
@@ -1010,7 +1188,7 @@ namespace provisioner {
                     result["renamed"] = false;
                 }
                 
-                result["sha256"] = "use-websocket"; // Hint to use WebSocket for SHA256
+                result["sha256"] = "Calculating..."; // SHA256 calculation in progress
                 resp->setBody(result.toStyledString());
             } catch (const std::exception& e) {
                 LOG_ERROR << "Failed to save uploaded file: " << e.what();
