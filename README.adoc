@@ -69,12 +69,15 @@ $ xdg-open http://localhost:3142
 ----
 
 At the minimum, you must consult the 'Options' and 'Images' pages, having uploaded your OS image and set the options as guided by the inline
-help text (which is generated from the reference documentation in docs/)
+help text (which is generated from the <<docs/config_vars.adoc,configuration reference documentation>>)
 
 Once you have followed all those steps, `rpi-sb-provisioner` should be correctly configured and ready to run.
 
+[#using-rpi-sb-provisioner]
 == Using rpi-sb-provisioner
 `rpi-sb-provisioner` is composed of three `systemd` services that are triggered by the connection of a device in RPIBOOT mode to a USB port. With `rpi-sb-provisioner` configured to your requirements, all that is therefore required is to connect your target Raspberry Pi device in RPIBOOT mode.
+
+NOTE: For non-compute module connection instructions, see: <<docs/device-guidance/pi4.adoc,Raspberry Pi 4>>, <<docs/device-guidance/pi5.adoc,Raspberry Pi 5>>, or <<docs/device-guidance/zero2.adoc,Zero 2 W>> guidance documents.
 
 For any Raspberry Pi Compute Module on the matching Raspberry Pi Compute Module IO Board, you can do this by using the single Jumper Wire to connect the `disable eMMC Boot` pins on the 12-pin header at the top of the board.
 
@@ -114,13 +117,22 @@ After these steps have been completed, your device should display both the `acti
 
 No further intervention is required in the success case.
 
-WARNING: `rpi-sb-provisioner` will not, by default, block JTAG access. If you wish to make use of this facility, you _must_ use the `RPI_DEVICE_LOCK_JTAG` configuration option.
+WARNING: `rpi-sb-provisioner` will not, by default, block JTAG access. If you wish to make use of this facility, you _must_ use the <<docs/config_vars.adoc#rpi_device_lock_jtag,RPI_DEVICE_LOCK_JTAG>> configuration option.
 
-== Tips and Tricks
+[#troubleshooting]
+== Troubleshooting
 
 === Observing active provisioning operations
 
-As `rpi-sb-provisioner` is implemented using `systemd` services, you can use the typical `systemctl` commands to observe the services as they provision your device.
+The easiest way to observe active provisioning operations is through the **Web UI**:
+
+1. **Open your browser** and navigate to `http://localhost:3142`
+2. **Click the 'Services' tab** to see all provisioning services and their current status
+3. **View real-time updates** of device provisioning progress, including serial numbers and current phases
+
+==== Command Line Alternative
+
+As `rpi-sb-provisioner` is implemented using `systemd` services, you can also use the typical `systemctl` commands to observe the services as they provision your device.
 
 To see active provisioning operations, and the serial numbers of the devices involved, type into a Terminal window:
 
@@ -130,7 +142,16 @@ $ systemctl list-units rpi-sb-provisioner*
 
 === Observing logs
 
-Logs are stored on a per-device, per-phase basis, where logs for a given device are stored at `/var/log/rpi-sb-provisioner/<serial>/<phase>.log`.
+The most convenient way to observe device provisioning logs is through the **Web UI**:
+
+1. **Open your browser** and navigate to `http://localhost:3142`
+2. **Click the 'Services' tab** to see all provisioning services
+3. **Click on any service** to view its detailed logs with real-time updates
+4. **Monitor progress** as logs are automatically refreshed during provisioning
+
+==== Command Line Alternatives
+
+Logs are also stored on a per-device, per-phase basis, where logs for a given device are stored at `/var/log/rpi-sb-provisioner/<serial>/<phase>.log`.
 
 For example, to observe the progress of an individual device through a phase, you could use `tail`:
 
@@ -149,9 +170,16 @@ Where the `-f` flag will follow the logs as they are written, letting you observ
 
 === Processing the manufacturing database
 
-If you have enabled the manufacturing database (using RPI_SB_PROVISIONER_MANUFACTURING_DB), you can create a comma-separated value (CSV) file from the manufacturing database for use with other software.
+If you have enabled the manufacturing database (using <<docs/config_vars.adoc#rpi_sb_provisioner_manufacturing_db,RPI_SB_PROVISIONER_MANUFACTURING_DB>>), you can view and export the manufacturing data through the **Web UI**:
 
-To do so, you must use the *sqlite3* program:
+1. **Open your browser** and navigate to `http://localhost:3142`
+2. **Navigate to the Manufacturing Database section** to view all provisioned devices
+3. **Review device information** including serial numbers, board types, MAC addresses, and provisioning status
+4. **Export as CSV** using the built-in export function to create a comma-separated values file for use with other software
+
+==== Command Line Alternative
+
+You can also create a CSV file directly using the *sqlite3* program:
 
 ----
 $ sqlite3 ${RPI_SB_PROVISIONER_MANUFACTURING_DB} -cmd ".headers on" -cmd ".mode csv" -cmd ".output mfg_db.csv" "SELECT * FROM rpi_sb_provisioner;"

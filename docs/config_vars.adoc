@@ -10,7 +10,7 @@ This document describes the configuration variables used in /etc/rpi-sb-provisio
 === PROVISIONING_STYLE
 *Mandatory, with a default*
 
-Select the provisioning style you wish to use. Supported values are `secure-boot`, `fde-only` and `naked`.
+Select the provisioning style you wish to use. Supported values are `secure-boot`, `fde-only` and `naked`. For details on what each provisioning style does, see the <<../README.adoc#using-rpi-sb-provisioner,main documentation>>.
 
 If `PROVISIONING_STYLE` is not specified, it defaults to `secure-boot`.
 
@@ -89,6 +89,7 @@ This setting is typically configured through the firmware selection web interfac
 
 WARNING: Ensure the specified firmware file exists and is compatible with your target device family before provisioning.
 
+[#rpi_device_lock_jtag]
 === RPI_DEVICE_LOCK_JTAG
 *Optional*
 
@@ -105,12 +106,13 @@ Raspberry Pi devices that use an EEPROM as part of their boot flow can configure
 
 Set to any value to enable EEPROM write protection.
 
+[#rpi_sb_provisioner_manufacturing_db]
 === RPI_SB_PROVISIONER_MANUFACTURING_DB
 *Optional*
 
 Store manufacturing data in a sqlite3 database. This will include the board serial, board revision, the boot ROM version, the MAC address of the ethernet port, any set hash of the customer signing key, the JTAG lock state, the board attributes and the advanced boot flags.
 
-You must not specify the path of a database stored on a network drive or similar storage, as this mechanism is only safe to use on a single provisioning system. For merging the output with multiple provisioning systems, consider "Processing the manufacturing database" later in this document.
+You must not specify the path of a database stored on a network drive or similar storage, as this mechanism is only safe to use on a single provisioning system. For merging the output with multiple provisioning systems, consider <<../README.adoc#_processing_the_manufacturing_database,Processing the manufacturing database>> in the main documentation.
 
 Set to the path of a file to contain a SQLite database stored on local storage. The WebUI will create this file if it does not exist.
 

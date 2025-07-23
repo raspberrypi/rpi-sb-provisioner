@@ -1,0 +1,193 @@
+= Mass Provisioning Scaling Guidance
+:toc:
+:toc-placement: preamble
+
+This document provides guidance for scaling Raspberry Pi Secure Boot provisioning operations for mass deployment scenarios.
+
+== Overview
+
+The rpi-sb-provisioner system is designed to support efficient mass provisioning operations with proper scaling considerations. This guidance covers connection requirements, network topology, provisioning strategies, and performance characteristics to help operators maximize throughput while maintaining security and reliability.
+
+== Connection Requirements
+
+=== USB Connection (Mandatory)
+
+USB connectivity is **mandatory** for all provisioning operations as it provides:
+
+* **Secure Boot Enablement**: USB connection is the only supported method for configuring secure boot on Raspberry Pi devices
+* **System Bootstrapping**: Initial system configuration and image deployment requires USB connectivity
+* **Security Isolation**: USB provides a controlled, isolated communication channel for sensitive provisioning operations
+
+Each provisioning head requires a dedicated USB connection to the target Raspberry Pi device.
+
+=== Ethernet Connection (Optional)
+
+Ethernet connectivity is **optional** and provides **only one benefit**:
+
+* **Accelerated Image Transfer**: Can supplement USB for faster image transfer during provisioning
+
+**Note**: Ethernet connection does not provide any other provisioning benefits beyond accelerated image transfer.
+
+==== Network Requirements for Ethernet
+
+When utilizing Ethernet connectivity:
+
+* **DHCPv4 Support**: Network must provide automatic DHCPv4 address assignment
+* **Routing**: Network must be routable to the machine running rpi-sb-provisioner
+* **Firewall**: Ensure provisioning service ports are accessible (refer to API endpoints documentation)
+* **Bandwidth**: Sufficient bandwidth to support concurrent image transfers during provisioning
+
+== Provisioning Strategies
+
+=== Pipelined Provisioning (Recommended)
+
+**Pipelined provisioning** is the most efficient approach for mass operations:
+
+* **Continuous Flow**: Devices move through provisioning stages in sequence
+* **Parallel Processing**: Multiple devices at different provisioning stages simultaneously
+* **Resource Optimization**: Maximizes utilization of provisioning infrastructure
+* **Reduced Idle Time**: Minimizes operator and equipment downtime
+
+==== Practical Pipeline Operation
+
+In practice, pipelined provisioning works by **connecting devices in sequence** while earlier devices complete their provisioning automatically. The key insight is that device preparation time (unboxing, aligning jigs, cable management) often matches or exceeds the provisioning time for individual devices.
+
+**Typical Pipeline Flow (with 2.5-minute provisioning time):**
+. Connect Device 1 → provisioning begins automatically
+. While Device 1 provisions, prepare and connect Device 2 (~30 seconds preparation time)
+. While Devices 1 & 2 provision, prepare and connect Device 3
+. Continue this pattern through Device 5
+. **By the time Device 5 is connected (~2.5 minutes total), Device 1 is complete and ready for removal**
+
+This natural timing alignment means that once the pipeline is established, operators can maintain a steady rhythm of device preparation and connection without waiting for individual devices to complete. With optimal device preparation timing, the provisioning duration becomes the limiting factor rather than operator availability, maximizing both equipment utilization and throughput.
+
+=== Batch Provisioning (Less Efficient)
+
+**Batch provisioning** processes groups of devices simultaneously:
+
+* **Synchronous Processing**: All devices in batch must complete before next batch begins
+* **Resource Contention**: Higher peak resource usage during active phases
+* **Idle Periods**: Significant downtime between batches
+* **Scaling Limitations**: More difficult to scale beyond initial batch size
+
+== Performance Characteristics
+
+=== Provisioning Capacity
+
+Based on Raspberry Pi Ltd testing with a **2.6GB system image**:
+
+* **Provisioning Time**: Approximately **2.5 minutes per device** for a 2.6GB image
+* **Operator Capacity**: One operator can effectively service up to **5 provisioning heads**
+* **Image Size Impact**: Larger system images will increase provisioning time proportionally
+* **Full-Disk Encryption**: Provisioning FDE-enabled systems will be slower than naked provisioning (where no encryption is performed)
+* **Transfer vs. Write Performance**: Ethernet can accelerate image transfer time but cannot reduce the time required to write data to storage
+
+=== Throughput Optimization
+
+To maximize provisioning throughput:
+
+. **Optimize Image Size**: Minimize system image size while maintaining required functionality
+. **Parallel Operations**: Utilize multiple provisioning heads per operator
+. **Storage Performance**: Use high-speed storage (NVMe SSD) for image hosting
+. **Network Optimization**: Configure low-latency, high-bandwidth network infrastructure
+. **Process Standardization**: Develop standardized operator procedures and workflows
+
+== Scaling Recommendations
+
+=== Small Scale Operations (1-50 devices)
+
+* **Setup**: Single provisioning station with 2-3 heads
+* **Operators**: 1 operator
+* **Strategy**: Pipelined provisioning
+* **Expected Throughput**: ~24 devices per hour with optimal pipelined operation (2.5 min/device)
+* **Duration**: 1-2 days for complete deployment
+
+=== Medium Scale Operations (50-500 devices)
+
+* **Setup**: 2-3 provisioning stations with 3-5 heads each
+* **Operators**: 2-3 operators
+* **Strategy**: Pipelined provisioning with staggered start times
+* **Infrastructure**: Dedicated provisioning network segment
+* **Duration**: 1-2 weeks for complete deployment
+
+=== Large Scale Operations (500+ devices)
+
+* **Setup**: Multiple provisioning stations (5+ heads each)
+* **Operators**: 1 operator per 5 provisioning heads
+* **Strategy**: Coordinated pipelined provisioning across multiple stations
+* **Infrastructure**: 
+  - Dedicated provisioning network with redundancy
+  - Centralized image and configuration management
+  - Quality assurance checkpoints
+* **Monitoring**: Real-time provisioning status and error tracking
+* **Duration**: Varies based on scale and infrastructure
+
+== Infrastructure Considerations
+
+=== Hardware Requirements
+
+* **Provisioning Server**: High-performance Raspberry Pi system with adequate CPU, RAM, and storage
+  - **Platform Requirement**: rpi-sb-provisioner only supports running on Raspberry Pi hardware
+* **Network Infrastructure**: Gigabit Ethernet minimum, with appropriate switching capacity
+* **USB Infrastructure**: Powered USB hubs for multiple device connections
+* **Power Management**: Adequate power distribution for all connected devices
+* **Physical Layout**: Organized workspace with proper cable management
+
+=== USB Scaling Solutions
+
+For scaling USB connectivity in mass provisioning operations, the **official Raspberry Pi powered USB hub** is the recommended solution:
+
+* **Validated Hardware**: Officially tested and certified for Raspberry Pi device connectivity
+* **Reliable Power Delivery**: Provides consistent power to multiple connected devices
+* **Proven Performance**: Designed to handle the specific power and data requirements of Raspberry Pi provisioning
+* **Simplified Deployment**: Reduces complexity compared to generic USB hub solutions
+* **Support and Warranty**: Backed by official Raspberry Pi support channels
+
+When expanding provisioning capacity, use multiple official Raspberry Pi powered USB hubs rather than daisy-chaining or using untested hub solutions to ensure reliable operation and minimize connectivity issues.
+
+=== Quality Assurance
+
+* **Verification Procedures**: Automated testing of provisioned devices
+* **Error Handling**: Robust error detection and recovery procedures  
+* **Audit Trail**: Complete logging of all provisioning operations
+* **Batch Tracking**: Device serial number and configuration tracking
+
+== Troubleshooting Common Scaling Issues
+
+=== Performance Bottlenecks
+
+* **USB Bandwidth Saturation**: Connect both USB and Ethernet to target devices and allow Ethernet to perform accelerated image transfer while USB handles secure boot configuration. Note that Ethernet only accelerates image transfer time, not the time required to write data to storage
+* **Network Congestion**: Implement QoS policies or network segmentation
+* **Storage I/O Limits**: Upgrade to faster storage subsystem. Consider using NVMe SSD for image hosting
+* **Memory Constraints**: Consider using a Raspberry Pi device with the largest amount of RAM available
+
+=== Operational Challenges
+
+* **Device Detection Issues**: Check USB connections and power delivery
+* **Network Connectivity Problems**: Verify DHCP and routing configuration
+* **Image Corruption**: Verify image integrity using checksums - rpi-sb-provisioner includes a webUI that records the supplied image checksum for verification
+* **Process Synchronization**: Establish clear operator procedures and checkpoints
+
+== Security Considerations
+
+* **Network Isolation**: Use dedicated provisioning networks when possible
+* **Access Controls**: Implement appropriate authentication and authorization
+* **Audit Logging**: Maintain comprehensive logs of all provisioning activities
+* **Physical Security**: Ensure secure physical access to provisioning infrastructure
+* **Key Management**: Secure handling of cryptographic keys and certificates
+
+== Monitoring and Metrics
+
+Track key performance indicators:
+
+* **Provisioning Rate**: Devices provisioned per hour/day
+* **Error Rate**: Failed provisioning attempts and root causes
+* **Resource Utilization**: CPU, memory, network, and storage usage
+* **Operator Efficiency**: Time per device and process bottlenecks
+* **Quality Metrics**: Post-provisioning verification success rates
+
+== Conclusion
+
+Successful mass provisioning requires careful consideration of connection requirements, provisioning strategies, and infrastructure scaling. Pipelined provisioning with proper operator-to-head ratios provides optimal efficiency while maintaining security and quality standards.
+
+For specific implementation questions or advanced scaling scenarios, consult the API endpoints and configuration variable documentation for detailed technical requirements. 

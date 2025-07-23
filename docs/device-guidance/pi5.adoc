@@ -1,0 +1,48 @@
+= Raspberry Pi 5 Device Guidance
+
+== Connecting Raspberry Pi 5 to rpi-sb-provisioner
+
+=== Initial Connection - Entering RPIBOOT Mode
+
+To provision a Raspberry Pi 5 device, you must force it into RPIBOOT mode:
+
+1. **Hold the power button** on the Raspberry Pi 5 device
+2. **While continuing to hold the power button**, plug the USB-C cable into the device to connect it to your provisioning machine
+3. Keep holding the power button until the device is recognized by the provisioning system
+
+=== Re-connection Procedure
+
+After the initial connection, you will need to perform a re-connection procedure:
+
+1. **Monitor the device state** until you see the status "bootstrap-fastboot-initialisation-started"
+2. **Unplug the device** from the USB-C cable
+3. **Hold the power button** on the Raspberry Pi 5 device
+4. **While continuing to hold the power button**, re-plug the USB-C cable to reconnect the device
+5. Keep holding the power button until the device proceeds to the next phase
+
+=== Important Notes
+
+* Ensure you are using a high-quality USB-A to USB-C cable as specified in the main documentation
+* The power button must be held during both the initial connection and the re-connection procedure
+* Do not release the power button until you confirm the device has been recognized by the provisioning system
+* If the device fails to enter RPIBOOT mode, try using a different USB port on your host machine
+
+== Troubleshooting
+
+=== Device not entering RPIBOOT mode
+
+If your Raspberry Pi 5 device does not enter RPIBOOT mode:
+
+* Ensure you are holding the power button **before** connecting the USB cable
+* Try a shorter, higher quality USB-A to USB-C cable
+* Try a different USB port on your host machine
+* Ensure the provisioning machine has sufficient power supply capability
+
+=== Device not responding after re-connection
+
+If the device does not proceed after the re-connection step:
+
+* Verify that you observed the "bootstrap-fastboot-initialisation-started" state before disconnecting
+* Ensure you held the power button during the re-connection
+* Check the provisioning logs for any error messages
+* Try the complete procedure again from the beginning 
