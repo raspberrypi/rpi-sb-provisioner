@@ -5,6 +5,7 @@
 
 This document describes the API endpoints available in the provisioner-service. These endpoints can be used for integration with other systems, building custom dashboards, or automating operations.
 
+[#manufacturing-database-api]
 == Manufacturing Database API
 
 The Manufacturing Database API provides access to device provisioning data collected during the provisioning process. This API allows for integration with other systems and custom UIs.
@@ -70,7 +71,7 @@ The endpoint returns a JSON array where each element represents a provisioned de
 |processor|Processor type (e.g., "BCM2712")
 |memory|Device memory size (e.g., "2GB")
 |manufacturer|Device manufacturer
-|secure|Whether secure boot is enabled ("yes" or "no")
+|secure|Whether a device has been provisioned with a device unique identity
 |provision_ts|Timestamp of when the device was provisioned
 |===
 
@@ -118,7 +119,7 @@ On error, the endpoint returns a JSON object with error details:
 - This endpoint can be used for building custom dashboards or integrating with other monitoring systems.
 - The data is ordered by provision timestamp in descending order (newest first).
 - For large datasets, it is recommended to use pagination to improve performance.
-- The database path is configured using the `RPI_SB_PROVISIONER_MANUFACTURING_DB` setting as described in the configuration documentation.
+- The database path is configured using the <<config_vars.adoc#rpi_sb_provisioner_manufacturing_db,RPI_SB_PROVISIONER_MANUFACTURING_DB>> setting as described in the configuration documentation.
 
 == Devices API
 
@@ -513,6 +514,7 @@ If accessing an unauthorized service:
 - Access is restricted to services with approved prefixes for security
 - This endpoint is optimized for polling and provides lighter responses than the HTML view
 
+[#error-response-format]
 == Error Response Format
 
 All API endpoints follow a standard error response format:
