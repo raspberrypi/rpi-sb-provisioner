@@ -91,6 +91,7 @@ metadata_gather() {
         sqlite3 "${RPI_SB_PROVISIONER_MANUFACTURING_DB}" "PRAGMA journal_mode=WAL;" > /dev/null 2>&1
         
         # Define the schema for devices table
+        # Security tracking fields default to NULL to distinguish between not-applied vs unknown state
         EXPECTED_SCHEMA="id              integer primary key,
                     boardname       varchar(255)        not null,
                     serial          char(8)             not null,
@@ -105,6 +106,10 @@ metadata_gather() {
                     memory          varchar(255)        not null,
                     manufacturer    varchar(255)        not null,
                     secure          integer             not null,
+                    jtag_locked     integer             DEFAULT NULL,
+                    eeprom_write_protected integer      DEFAULT NULL,
+                    pubkey_programmed integer           DEFAULT NULL,
+                    signed_boot_enabled integer         DEFAULT NULL,
                     provision_ts    timestamp           default current_timestamp"
         
         # Check if the table exists
@@ -115,6 +120,41 @@ metadata_gather() {
             sqlite3 "${RPI_SB_PROVISIONER_MANUFACTURING_DB}" "CREATE TABLE devices($EXPECTED_SCHEMA);" > /dev/null 2>&1
         fi
         
+        # Determine security flags based on provisioning configuration
+        # JTAG lock status: 1 if enabled, 0 if explicitly disabled, NULL if not configured
+        JTAG_LOCKED_VALUE="NULL"
+        if [ -n "${RPI_DEVICE_LOCK_JTAG}" ]; then
+            JTAG_LOCKED_VALUE="1"
+        elif [ "${SECURE}" = "1" ]; then
+            # For secure provisioning, explicitly track that JTAG locking was not enabled
+            JTAG_LOCKED_VALUE="0"
+        fi
+        
+        # EEPROM write protection status: 1 if enabled, 0 if explicitly disabled, NULL if not configured  
+        EEPROM_WP_VALUE="NULL"
+        if [ -n "${RPI_DEVICE_EEPROM_WP_SET}" ]; then
+            EEPROM_WP_VALUE="1"
+        elif [ "${SECURE}" = "1" ]; then
+            # For secure provisioning, explicitly track that EEPROM WP was not enabled
+            EEPROM_WP_VALUE="0"
+        fi
+        
+        # Public key programming: 1 for secure provisioning, 0 for non-secure, NULL for unknown
+        PUBKEY_PROGRAMMED_VALUE="NULL"
+        if [ "${SECURE}" = "1" ]; then
+            PUBKEY_PROGRAMMED_VALUE="1"
+        elif [ "${SECURE}" = "0" ]; then
+            PUBKEY_PROGRAMMED_VALUE="0"
+        fi
+        
+        # Signed boot: 1 for secure provisioning, 0 for non-secure, NULL for unknown
+        SIGNED_BOOT_VALUE="NULL"
+        if [ "${SECURE}" = "1" ]; then
+            SIGNED_BOOT_VALUE="1"
+        elif [ "${SECURE}" = "0" ]; then
+            SIGNED_BOOT_VALUE="0"
+        fi
+
         # Insert new device data
         sqlite3 "${RPI_SB_PROVISIONER_MANUFACTURING_DB}" \
         "INSERT INTO devices(           \
@@ -130,7 +170,11 @@ metadata_gather() {
                     processor,                  \
                     memory,                     \
                     manufacturer,               \
-                    secure                      \
+                    secure,                     \
+                    jtag_locked,                \
+                    eeprom_write_protected,     \
+                    pubkey_programmed,          \
+                    signed_boot_enabled         \
                 ) VALUES (                      \
                     '${BOARD_STR}',               \
                     '${TARGET_DEVICE_SERIAL}',    \
@@ -144,7 +188,11 @@ metadata_gather() {
                     '${PROCESSOR_STR}',           \
                     '${MEMORY_STR}',              \
                     '${MANUFACTURER_STR}',        \
-                    '${SECURE}'                   \
+                    '${SECURE}',                  \
+                    ${JTAG_LOCKED_VALUE},         \
+                    ${EEPROM_WP_VALUE},           \
+                    ${PUBKEY_PROGRAMMED_VALUE},   \
+                    ${SIGNED_BOOT_VALUE}          \
         );" > /dev/null 2>&1
         announce_stop "Manufacturing Database Insertion"
     fi
