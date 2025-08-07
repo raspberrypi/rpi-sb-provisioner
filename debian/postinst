@@ -67,8 +67,8 @@ else
             CREATE TABLE devices_new($STATE_DB_SCHEMA);
             
             -- Copy data from old table to new table (handling all columns)
-            INSERT INTO devices_new($(echo $CURRENT_COLUMNS | sed 's/,$//'))
-            SELECT $(echo $CURRENT_COLUMNS | sed 's/,$//') 
+            INSERT INTO devices_new($(echo "$CURRENT_COLUMNS" | sed 's/,$//'))
+            SELECT $(echo "$CURRENT_COLUMNS" | sed 's/,$//') 
             FROM devices;
             
             -- Drop old table
@@ -95,6 +95,7 @@ fi
 
 # Define the expected schema for manufacturing.db devices table
 # secure is set to 1 by default, as any prior release of rpi-sb-provisioner will have only offered secure provisioning
+# Security tracking fields default to NULL to distinguish between not-applied vs unknown state
 MFG_DB_SCHEMA="id              integer primary key,
     boardname       varchar(255)        not null,
     serial          char(8)             not null,
@@ -109,6 +110,10 @@ MFG_DB_SCHEMA="id              integer primary key,
     memory          varchar(255)        not null,
     manufacturer    varchar(255)        not null,
     secure          integer             not null DEFAULT 1,
+    jtag_locked     integer             DEFAULT NULL,
+    eeprom_write_protected integer      DEFAULT NULL,
+    pubkey_programmed integer           DEFAULT NULL,
+    signed_boot_enabled integer         DEFAULT NULL,
     provision_ts    timestamp           default current_timestamp"
 
 # Ensure WAL journal mode
@@ -126,7 +131,7 @@ else
     CURRENT_COLUMNS=$(sqlite3 "$MFG_DB_PATH" "PRAGMA table_info(devices);" | awk -F'|' '{print $2}' | tr '\n' ',')
     
     # Check if any expected columns are missing
-    for COL in id boardname serial eth_mac wifi_mac bt_mac mmc_size mmc_cid rpi_duid board_revision processor memory manufacturer secure provision_ts; do
+    for COL in id boardname serial eth_mac wifi_mac bt_mac mmc_size mmc_cid rpi_duid board_revision processor memory manufacturer secure jtag_locked eeprom_write_protected pubkey_programmed signed_boot_enabled provision_ts; do
         if ! echo "$CURRENT_COLUMNS" | grep -q "$COL"; then
             echo "Migration needed: column $COL is missing from manufacturing.db devices table"
             
@@ -135,8 +140,8 @@ else
             CREATE TABLE devices_new($MFG_DB_SCHEMA);
             
             -- Copy data from old table to new table
-            INSERT INTO devices_new($(echo $CURRENT_COLUMNS | sed 's/,$//'))
-            SELECT $(echo $CURRENT_COLUMNS | sed 's/,$//') 
+            INSERT INTO devices_new($(echo "$CURRENT_COLUMNS" | sed 's/,$//'))
+            SELECT $(echo "$CURRENT_COLUMNS" | sed 's/,$//') 
             FROM devices;
             
             -- Drop old table
