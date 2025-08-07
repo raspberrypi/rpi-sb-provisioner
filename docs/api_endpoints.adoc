@@ -47,6 +47,10 @@ The endpoint returns a JSON array where each element represents a provisioned de
     "memory": "2GB",
     "manufacturer": "Sony UK",
     "secure": "yes",
+    "jtag_locked": "1",
+    "eeprom_write_protected": "1",
+    "pubkey_programmed": "1",
+    "signed_boot_enabled": "1",
     "provision_ts": "2025-04-28 13:53:28"
   },
   ...
@@ -72,6 +76,10 @@ The endpoint returns a JSON array where each element represents a provisioned de
 |memory|Device memory size (e.g., "2GB")
 |manufacturer|Device manufacturer
 |secure|Whether a device has been provisioned with a device unique identity
+|jtag_locked|JTAG debugging lock status (1=locked, 0=unlocked, null=unknown)
+|eeprom_write_protected|EEPROM write protection status (1=enabled, 0=disabled, null=unknown)
+|pubkey_programmed|Customer public key programming status (1=programmed, 0=not programmed, null=unknown)
+|signed_boot_enabled|Signed boot enablement status (1=enabled, 0=disabled, null=unknown)
 |provision_ts|Timestamp of when the device was provisioned
 |===
 
