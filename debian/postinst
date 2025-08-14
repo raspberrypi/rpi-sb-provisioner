@@ -114,6 +114,8 @@ MFG_DB_SCHEMA="id              integer primary key,
     eeprom_write_protected integer      DEFAULT NULL,
     pubkey_programmed integer           DEFAULT NULL,
     signed_boot_enabled integer         DEFAULT NULL,
+    os_image_filename varchar(255)      DEFAULT NULL,
+    os_image_sha256  char(64)           DEFAULT NULL,
     provision_ts    timestamp           default current_timestamp"
 
 # Ensure WAL journal mode
@@ -131,7 +133,7 @@ else
     CURRENT_COLUMNS=$(sqlite3 "$MFG_DB_PATH" "PRAGMA table_info(devices);" | awk -F'|' '{print $2}' | tr '\n' ',')
     
     # Check if any expected columns are missing
-    for COL in id boardname serial eth_mac wifi_mac bt_mac mmc_size mmc_cid rpi_duid board_revision processor memory manufacturer secure jtag_locked eeprom_write_protected pubkey_programmed signed_boot_enabled provision_ts; do
+    for COL in id boardname serial eth_mac wifi_mac bt_mac mmc_size mmc_cid rpi_duid board_revision processor memory manufacturer secure jtag_locked eeprom_write_protected pubkey_programmed signed_boot_enabled os_image_filename os_image_sha256 provision_ts; do
         if ! echo "$CURRENT_COLUMNS" | grep -q "$COL"; then
             echo "Migration needed: column $COL is missing from manufacturing.db devices table"
             

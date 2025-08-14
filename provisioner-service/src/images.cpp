@@ -467,6 +467,29 @@ namespace provisioner {
                         }
                         sha256Cache.insert_or_assign(imageName, result);
                         
+                        // Write/refresh sidecar file with SHA256 to optimize future reads
+                        try {
+                            std::filesystem::path sidecarPath(IMAGES_PATH);
+                            sidecarPath /= imageName;
+                            sidecarPath += ".sha256";
+                            std::ofstream sidecarFile(sidecarPath, std::ios::out | std::ios::trunc);
+                            if (sidecarFile.is_open()) {
+                                sidecarFile << sha256 << "\n";
+                                sidecarFile.close();
+                                AuditLog::logFileSystemAccess("WRITE", sidecarPath.string(), true, "", 
+                                    std::string("Wrote SHA256 sidecar for: ") + imageName);
+                            } else {
+                                AuditLog::logFileSystemAccess("WRITE", sidecarPath.string(), false, "", 
+                                    std::string("Failed to open SHA256 sidecar for writing: ") + imageName);
+                            }
+                        } catch (const std::filesystem::filesystem_error& e) {
+                            LOG_ERROR << "Failed to write SHA256 sidecar (filesystem) for " << imageName << ": " << e.what();
+                        } catch (const std::ios_base::failure& e) {
+                            LOG_ERROR << "Failed to write SHA256 sidecar (io) for " << imageName << ": " << e.what();
+                        } catch (const std::exception& e) {
+                            LOG_ERROR << "Failed to write SHA256 sidecar for " << imageName << ": " << e.what();
+                        }
+                        
                         // Log successful SHA256 calculation
                         AuditLog::logFileSystemAccess("SHA256_COMPLETE", imagePath.string(), true, "", 
                             "SHA256 calculated for: " + imageName + " = " + sha256);
@@ -474,24 +497,47 @@ namespace provisioner {
                         // Broadcast completion to WebSocket clients
                         SHA256WebSocketController::broadcastUpdate(imageName, result);
                     }
-                } catch (const std::exception& e) {
-                    // Update cache with error
+                } catch (const std::filesystem::filesystem_error& e) {
+                    // Update cache with more specific filesystem error
                     std::lock_guard<std::mutex> lock(sha256Cache_mutex);
-                    SHA256Result result(std::string("Error: ") + e.what(), SHA256Status::ERROR, false);
-                    // Preserve cancellation token from existing entry if it exists
+                    SHA256Result result(std::string("Filesystem error: ") + e.what(), SHA256Status::ERROR, false);
                     auto it = sha256Cache.find(imageName);
                     if (it != sha256Cache.end()) {
                         result.cancellation_token = it->second.cancellation_token;
                     }
                     sha256Cache.insert_or_assign(imageName, result);
-                    
-                    // Log SHA256 calculation error
+                    std::filesystem::path imagePath(IMAGES_PATH);
+                    imagePath /= imageName;
+                    AuditLog::logFileSystemAccess("SHA256_ERROR", imagePath.string(), false, "", 
+                        "SHA256 calculation filesystem error for: " + imageName + " - " + e.what());
+                    SHA256WebSocketController::broadcastUpdate(imageName, result);
+                } catch (const std::bad_alloc& e) {
+                    // Update cache with memory error
+                    std::lock_guard<std::mutex> lock(sha256Cache_mutex);
+                    SHA256Result result(std::string("Memory error: ") + e.what(), SHA256Status::ERROR, false);
+                    auto it = sha256Cache.find(imageName);
+                    if (it != sha256Cache.end()) {
+                        result.cancellation_token = it->second.cancellation_token;
+                    }
+                    sha256Cache.insert_or_assign(imageName, result);
+                    std::filesystem::path imagePath(IMAGES_PATH);
+                    imagePath /= imageName;
+                    AuditLog::logFileSystemAccess("SHA256_ERROR", imagePath.string(), false, "", 
+                        "SHA256 calculation memory error for: " + imageName + " - " + e.what());
+                    SHA256WebSocketController::broadcastUpdate(imageName, result);
+                } catch (const std::exception& e) {
+                    // General error fallback
+                    std::lock_guard<std::mutex> lock(sha256Cache_mutex);
+                    SHA256Result result(std::string("Error: ") + e.what(), SHA256Status::ERROR, false);
+                    auto it = sha256Cache.find(imageName);
+                    if (it != sha256Cache.end()) {
+                        result.cancellation_token = it->second.cancellation_token;
+                    }
+                    sha256Cache.insert_or_assign(imageName, result);
                     std::filesystem::path imagePath(IMAGES_PATH);
                     imagePath /= imageName;
                     AuditLog::logFileSystemAccess("SHA256_ERROR", imagePath.string(), false, "", 
                         "SHA256 calculation error for: " + imageName + " - " + e.what());
-                    
-                    // Broadcast error to WebSocket clients
                     SHA256WebSocketController::broadcastUpdate(imageName, result);
                 }
             }
@@ -551,6 +597,8 @@ namespace provisioner {
                     // Cap at reasonable maximum (120 minutes) for very large files
                     return std::min(estimatedMinutes, 120U);
                 }
+            } catch (const std::filesystem::filesystem_error& e) {
+                LOG_ERROR << "Filesystem error calculating timeout for file " << filename << ": " << e.what();
             } catch (const std::exception& e) {
                 LOG_ERROR << "Error calculating timeout for file " << filename << ": " << e.what();
             }
@@ -665,6 +713,8 @@ namespace provisioner {
                     requestSHA256Calculation(imageName);
                 }
             }
+        } catch (const std::filesystem::filesystem_error& e) {
+            LOG_ERROR << "Filesystem error scanning images directory for automatic SHA256 calculation: " << e.what();
         } catch (const std::exception& e) {
             LOG_ERROR << "Error scanning images directory for automatic SHA256 calculation: " << e.what();
         }
@@ -876,6 +926,18 @@ namespace provisioner {
                 unsigned int estimatedMinutes = static_cast<unsigned int>(std::ceil(estimatedSeconds / 60.0));
                 result["estimated_process_minutes"] = static_cast<Json::UInt>(estimatedMinutes);
                 
+            } catch (const std::filesystem::filesystem_error& e) {
+                LOG_ERROR << "Error getting metadata for " << imageName << ": " << e.what();
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Error retrieving image metadata",
+                    drogon::k500InternalServerError,
+                    "Metadata Error",
+                    "METADATA_ERROR",
+                    e.what()
+                );
+                callback(resp);
+                return;
             } catch (const std::exception& e) {
                 LOG_ERROR << "Error getting metadata for " << imageName << ": " << e.what();
                 auto resp = provisioner::utils::createErrorResponse(
@@ -910,21 +972,47 @@ namespace provisioner {
                     ImageInfo info;
                     info.name = imagePath.filename().string();
                     
-                    // Get SHA256 from cache if available
-                    {
-                        std::lock_guard<std::mutex> lock(sha256Cache_mutex);
-                        auto it = sha256Cache.find(info.name);
-                        if (it != sha256Cache.end()) {
-                            if (it->second.status == SHA256Status::COMPLETE) {
-                                info.sha256 = it->second.value;
-                            } else if (it->second.status == SHA256Status::PENDING) {
-                                info.sha256 = "Calculating...";
-                            } else {
-                                info.sha256 = "Error";
+                    // Prefer sidecar file if present; fall back to cache status
+                    try {
+                        std::filesystem::path sidecarPath = imagePath;
+                        sidecarPath += ".sha256";
+                        if (std::filesystem::exists(sidecarPath)) {
+                            std::ifstream in(sidecarPath);
+                            std::string line;
+                            if (in && std::getline(in, line)) {
+                                // Trim trailing whitespace
+                                while (!line.empty() && (line.back()==' ' || line.back()=='\t' || line.back()=='\n' || line.back()=='\r')) {
+                                    line.pop_back();
+                                }
+                                info.sha256 = line;
                             }
-                        } else {
-                            // Not in cache yet, calculation may still be pending
-                            info.sha256 = "Calculating...";
+                        }
+                    } catch (const std::filesystem::filesystem_error& e) {
+                        // Ignore filesystem errors while reading sidecar, but log at debug level
+                        LOG_DEBUG << "Ignoring sidecar filesystem read error for " << imagePath.filename().string() << ": " << e.what();
+                    } catch (const std::ios_base::failure& e) {
+                        LOG_DEBUG << "Ignoring sidecar IO error for " << imagePath.filename().string() << ": " << e.what();
+                    } catch (const std::exception& e) {
+                        LOG_DEBUG << "Ignoring sidecar generic read error for " << imagePath.filename().string() << ": " << e.what();
+                    }
+                    
+                    if (info.sha256.empty()) {
+                        // Get SHA256 from cache if available
+                        {
+                            std::lock_guard<std::mutex> lock(sha256Cache_mutex);
+                            auto it = sha256Cache.find(info.name);
+                            if (it != sha256Cache.end()) {
+                                if (it->second.status == SHA256Status::COMPLETE) {
+                                    info.sha256 = it->second.value;
+                                } else if (it->second.status == SHA256Status::PENDING) {
+                                    info.sha256 = "Calculating...";
+                                } else {
+                                    info.sha256 = "Error";
+                                }
+                            } else {
+                                // Not in cache yet, calculation may still be pending
+                                info.sha256 = "Calculating...";
+                            }
                         }
                     }
                     
@@ -1190,6 +1278,8 @@ namespace provisioner {
                 
                 result["sha256"] = "Calculating..."; // SHA256 calculation in progress
                 resp->setBody(result.toStyledString());
+            } catch (const std::filesystem::filesystem_error& e) {
+                LOG_ERROR << "Failed to save uploaded file (filesystem): " << e.what();
             } catch (const std::exception& e) {
                 LOG_ERROR << "Failed to save uploaded file: " << e.what();
                 

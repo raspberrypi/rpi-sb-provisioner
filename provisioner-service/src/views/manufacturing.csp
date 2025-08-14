@@ -289,6 +289,8 @@
                                 <th>EEPROM WP</th>
                                 <th>Pubkey Prog.</th>
                                 <th>Signed Boot</th>
+                                <th>OS Image Filename</th>
+                                <th>OS Image SHA256</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -317,13 +319,15 @@
                                 <td class="security-field">${formatSecurityField(device.eeprom_write_protected)}</td>
                                 <td class="security-field">${formatSecurityField(device.pubkey_programmed)}</td>
                                 <td class="security-field">${formatSecurityField(device.signed_boot_enabled)}</td>
+                                <td>${device.os_image_filename || ''}</td>
+                                <td style="font-family: monospace;">${device.os_image_sha256 || ''}</td>
                             </tr>
                         `;
                     });
                 } else {
                     tableHtml += `
                         <tr>
-                            <td colspan="19" class="no-devices">No manufacturing data available</td>
+                            <td colspan="21" class="no-devices">No manufacturing data available</td>
                         </tr>
                     `;
                 }

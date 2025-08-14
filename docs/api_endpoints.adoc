@@ -51,6 +51,8 @@ The endpoint returns a JSON array where each element represents a provisioned de
     "eeprom_write_protected": "1",
     "pubkey_programmed": "1",
     "signed_boot_enabled": "1",
+    "os_image_filename": "raspios-2025-04-01.img",
+    "os_image_sha256": "4f2d9c5b0e3b1d8a9c1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c",
     "provision_ts": "2025-04-28 13:53:28"
   },
   ...
