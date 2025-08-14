@@ -111,6 +111,8 @@ metadata_gather() {
                     eeprom_write_protected integer      DEFAULT NULL,
                     pubkey_programmed integer           DEFAULT NULL,
                     signed_boot_enabled integer         DEFAULT NULL,
+                    os_image_filename varchar(255)      DEFAULT NULL,
+                    os_image_sha256  char(64)           DEFAULT NULL,
                     provision_ts    timestamp           default current_timestamp"
         
         # Check if the table exists
@@ -156,6 +158,24 @@ metadata_gather() {
             SIGNED_BOOT_VALUE="0"
         fi
 
+	        # Determine OS image metadata if available
+	        OS_IMAGE_FILENAME=""
+	        OS_IMAGE_SHA256=""
+	        if [ -n "${GOLD_MASTER_OS_FILE}" ] && [ -f "${GOLD_MASTER_OS_FILE}" ]; then
+	            OS_IMAGE_FILENAME="$(basename -- "${GOLD_MASTER_OS_FILE}")"
+	            # Prefer sidecar file written by UI backend: <image>.sha256 (first token/line)
+	            if [ -f "${GOLD_MASTER_OS_FILE}.sha256" ]; then
+	                # Read first non-empty token from sidecar
+	                OS_IMAGE_SHA256="$(head -n1 "${GOLD_MASTER_OS_FILE}.sha256" | awk '{print $1}')"
+	            fi
+	            # Fallback to calculating if sidecar missing or empty
+	            if [ -z "${OS_IMAGE_SHA256}" ] && command -v sha256sum >/dev/null 2>&1; then
+	                OS_IMAGE_SHA256="$(sha256sum "${GOLD_MASTER_OS_FILE}" | awk '{print $1}')"
+	                # Best-effort: persist to sidecar for reuse by UI and future runs
+	                printf '%s\n' "${OS_IMAGE_SHA256}" > "${GOLD_MASTER_OS_FILE}.sha256" 2>/dev/null || true
+	            fi
+	        fi
+
         # Insert new device data
         sqlite3 "${RPI_SB_PROVISIONER_MANUFACTURING_DB}" \
         "INSERT INTO devices(           \
@@ -175,7 +195,9 @@ metadata_gather() {
                     jtag_locked,                \
                     eeprom_write_protected,     \
                     pubkey_programmed,          \
-                    signed_boot_enabled         \
+                    signed_boot_enabled,        \
+                    os_image_filename,          \
+                    os_image_sha256             \
                 ) VALUES (                      \
                     '${BOARD_STR}',               \
                     '${TARGET_DEVICE_SERIAL}',    \
@@ -193,7 +215,9 @@ metadata_gather() {
                     ${JTAG_LOCKED_VALUE},         \
                     ${EEPROM_WP_VALUE},           \
                     ${PUBKEY_PROGRAMMED_VALUE},   \
-                    ${SIGNED_BOOT_VALUE}          \
+                    ${SIGNED_BOOT_VALUE},         \
+                    '${OS_IMAGE_FILENAME}',       \
+                    '${OS_IMAGE_SHA256}'          \
         );" > /dev/null 2>&1
         announce_stop "Manufacturing Database Insertion"
     fi
