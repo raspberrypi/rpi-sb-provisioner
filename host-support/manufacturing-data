@@ -66,6 +66,7 @@ metadata_gather() {
         "0x3") MEMORY_STR="2GB" ;;
         "0x4") MEMORY_STR="4GB" ;;
         "0x5") MEMORY_STR="8GB" ;;
+        "0x6") MEMORY_STR="16GB" ;;
         *)
             MEMORY_STR="Unknown"
     esac
