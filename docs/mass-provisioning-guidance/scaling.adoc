@@ -16,7 +16,7 @@ USB connectivity is **mandatory** for all provisioning operations as it provides
 
 * **Secure Boot Enablement**: USB connection is the only supported method for configuring secure boot on Raspberry Pi devices
 * **System Bootstrapping**: Initial system configuration and image deployment requires USB connectivity
-* **Security Isolation**: USB provides a controlled, isolated communication channel for sensitive provisioning operations
+* **Security Isolation**: Point-to-point USB provides a controlled, isolated communication channel for sensitive provisioning operations
 
 Each provisioning head requires a dedicated USB connection to the target Raspberry Pi device.
 
@@ -32,7 +32,7 @@ Ethernet connectivity is **optional** and provides **only one benefit**:
 
 When utilizing Ethernet connectivity:
 
-* **DHCPv4 Support**: Network must provide automatic DHCPv4 address assignment
+* **DHCPv4/v6 Support**: Network must provide automatic DHCPv4/v6 address assignment
 * **Routing**: Network must be routable to the machine running rpi-sb-provisioner
 * **Firewall**: Ensure provisioning service ports are accessible (refer to API endpoints documentation)
 * **Bandwidth**: Sufficient bandwidth to support concurrent image transfers during provisioning
@@ -77,7 +77,7 @@ This natural timing alignment means that once the pipeline is established, opera
 Based on Raspberry Pi Ltd testing with a **2.6GB system image**:
 
 * **Provisioning Time**: Approximately **2.5 minutes per device** for a 2.6GB image
-* **Operator Capacity**: One operator can effectively service up to **5 provisioning heads**
+* **Operator Capacity**: One operator can effectively service up to **7 provisioning heads**
 * **Image Size Impact**: Larger system images will increase provisioning time proportionally
 * **Full-Disk Encryption**: Provisioning FDE-enabled systems will be slower than naked provisioning (where no encryption is performed)
 * **Transfer vs. Write Performance**: Ethernet can accelerate image transfer time but cannot reduce the time required to write data to storage
@@ -91,36 +91,6 @@ To maximize provisioning throughput:
 . **Storage Performance**: Use high-speed storage (NVMe SSD) for image hosting
 . **Network Optimization**: Configure low-latency, high-bandwidth network infrastructure
 . **Process Standardization**: Develop standardized operator procedures and workflows
-
-== Scaling Recommendations
-
-=== Small Scale Operations (1-50 devices)
-
-* **Setup**: Single provisioning station with 2-3 heads
-* **Operators**: 1 operator
-* **Strategy**: Pipelined provisioning
-* **Expected Throughput**: ~24 devices per hour with optimal pipelined operation (2.5 min/device)
-* **Duration**: 1-2 days for complete deployment
-
-=== Medium Scale Operations (50-500 devices)
-
-* **Setup**: 2-3 provisioning stations with 3-5 heads each
-* **Operators**: 2-3 operators
-* **Strategy**: Pipelined provisioning with staggered start times
-* **Infrastructure**: Dedicated provisioning network segment
-* **Duration**: 1-2 weeks for complete deployment
-
-=== Large Scale Operations (500+ devices)
-
-* **Setup**: Multiple provisioning stations (5+ heads each)
-* **Operators**: 1 operator per 5 provisioning heads
-* **Strategy**: Coordinated pipelined provisioning across multiple stations
-* **Infrastructure**: 
-  - Dedicated provisioning network with redundancy
-  - Centralized image and configuration management
-  - Quality assurance checkpoints
-* **Monitoring**: Real-time provisioning status and error tracking
-* **Duration**: Varies based on scale and infrastructure
 
 == Infrastructure Considerations
 
