@@ -110,6 +110,7 @@ metadata_gather() {
                     jtag_locked     integer             DEFAULT NULL,
                     eeprom_write_protected integer      DEFAULT NULL,
                     pubkey_programmed integer           DEFAULT NULL,
+                    devkey_revoked   integer           DEFAULT NULL,
                     signed_boot_enabled integer         DEFAULT NULL,
                     os_image_filename varchar(255)      DEFAULT NULL,
                     os_image_sha256  char(64)           DEFAULT NULL,
@@ -142,14 +143,42 @@ metadata_gather() {
             EEPROM_WP_VALUE="0"
         fi
         
-        # Public key programming: 1 for secure provisioning, 0 for non-secure, NULL for unknown
+        # Public key programming: read from fastboot metadata 'signed-otp'
+        # Map 'present' -> 1, 'not present' -> 0, common boolean forms as fallback, else NULL
         PUBKEY_PROGRAMMED_VALUE="NULL"
-        if [ "${SECURE}" = "1" ]; then
-            PUBKEY_PROGRAMMED_VALUE="1"
-        elif [ "${SECURE}" = "0" ]; then
-            PUBKEY_PROGRAMMED_VALUE="0"
+        SIGNED_OTP="$(metadata_get "signed-otp")"
+        if [ -n "${SIGNED_OTP}" ]; then
+            SIGNED_OTP_LC="$(printf "%s" "${SIGNED_OTP}" | tr '[:upper:]' '[:lower:]')"
+            case "${SIGNED_OTP_LC}" in
+                present|1|true|yes)
+                    PUBKEY_PROGRAMMED_VALUE="1"
+                    ;;
+                "not present"|notpresent|0|false|no)
+                    PUBKEY_PROGRAMMED_VALUE="0"
+                    ;;
+                *)
+                    : # leave as NULL
+                    ;;
+            esac
         fi
         
+        # Dev key revoked (signed-devkey): 'present' -> 1, 'not present' -> 0, else NULL
+        DEVKEY_REVOKED_VALUE="NULL"
+        SIGNED_DEVKEY="$(metadata_get "signed-devkey")"
+        if [ -n "${SIGNED_DEVKEY}" ]; then
+            SIGNED_DEVKEY_LC="$(printf "%s" "${SIGNED_DEVKEY}" | tr '[:upper:]' '[:lower:]')"
+            case "${SIGNED_DEVKEY_LC}" in
+                present)
+                    DEVKEY_REVOKED_VALUE="1"
+                    ;;
+                "not present"|notpresent)
+                    DEVKEY_REVOKED_VALUE="0"
+                    ;;
+                *)
+                    : ;;
+            esac
+        fi
+
         # Signed boot: 1 for secure provisioning, 0 for non-secure, NULL for unknown
         SIGNED_BOOT_VALUE="NULL"
         if [ "${SECURE}" = "1" ]; then
@@ -195,6 +224,7 @@ metadata_gather() {
                     jtag_locked,                \
                     eeprom_write_protected,     \
                     pubkey_programmed,          \
+                    devkey_revoked,             \
                     signed_boot_enabled,        \
                     os_image_filename,          \
                     os_image_sha256             \
@@ -215,6 +245,7 @@ metadata_gather() {
                     ${JTAG_LOCKED_VALUE},         \
                     ${EEPROM_WP_VALUE},           \
                     ${PUBKEY_PROGRAMMED_VALUE},   \
+                    ${DEVKEY_REVOKED_VALUE},      \
                     ${SIGNED_BOOT_VALUE},         \
                     '${OS_IMAGE_FILENAME}',       \
                     '${OS_IMAGE_SHA256}'          \
