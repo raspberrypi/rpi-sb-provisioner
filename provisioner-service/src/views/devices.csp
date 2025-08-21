@@ -1,145 +1,164 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Device List</title>
+    <title>USB Topology</title>
     <%view stylesheet %>
+    <style>
+        .topology-container { padding: 10px; }
+        .node { border: 1px solid #ccc; border-radius: 6px; padding: 8px 10px; margin: 6px; background: #fafafa; display: inline-block; min-width: 160px; }
+        .hub { background: #eef6ff; border-color: #9ec9ff; }
+        .device { background: #f7fff0; border-color: #bde6a1; }
+        .node .title { font-weight: bold; margin-bottom: 4px; }
+        .children { margin-left: 24px; border-left: 2px dashed #ddd; padding-left: 12px; }
+        .state-provisioning { box-shadow: 0 0 0 2px #ffd54f inset; }
+        .state-success { box-shadow: 0 0 0 2px #4caf50 inset; }
+        .state-error { box-shadow: 0 0 0 2px #f44336 inset; }
+        .meta { color: #555; font-size: 12px; }
+    </style>
+    <script>
+        let ws = null;
+        const elementsById = new Map();
+    
+        function makeNodeElement(node) {
+            const el = document.createElement('div');
+            el.className = 'node ' + (node.isHub ? 'hub' : 'device');
+            el.dataset.id = node.id;
+            const title = document.createElement('div');
+            title.className = 'title';
+            title.textContent = labelFor(node);
+            const meta = document.createElement('div');
+            meta.className = 'meta';
+            meta.textContent = metaFor(node);
+            const children = document.createElement('div');
+            children.className = 'children';
+            el.appendChild(title);
+            el.appendChild(meta);
+            el.appendChild(children);
+            applyStateClass(el, node.state);
+            return el;
+        }
+    
+        function applyStateClass(el, state) {
+            el.classList.remove('state-provisioning', 'state-success', 'state-error');
+            if (!state) return;
+            const s = state.toLowerCase();
+            if (s.includes('provision') || s.includes('pending')) el.classList.add('state-provisioning');
+            else if (s.includes('success') || s.includes('complete')) el.classList.add('state-success');
+            else if (s.includes('error') || s.includes('fail')) el.classList.add('state-error');
+        }
+    
+        function labelFor(n) {
+            if (n.id === 'server') return 'Provisioning Server';
+            if (n.serial) return `${n.serial}`;
+            if (n.vendor || n.product) return `${n.vendor || ''}:${n.product || ''} (${n.id})`;
+            return n.id;
+        }
+    
+        function metaFor(n) {
+            const parts = [];
+            if (n.state) parts.push(`state: ${n.state}`);
+            if (n.image) parts.push(`image: ${n.image}`);
+            if (n.ip) parts.push(`ip: ${n.ip}`);
+            return parts.join('  •  ');
+        }
+    
+        function ensureParentExists(parentId) {
+            if (!parentId || parentId === 'null') parentId = 'server';
+            if (elementsById.has(parentId)) return elementsById.get(parentId);
+            // Create server root if needed
+            if (parentId === 'server') {
+                const server = makeNodeElement({ id: 'server', isHub: true });
+                topologyRoot.innerHTML = '';
+                topologyRoot.appendChild(server);
+                elementsById.set('server', server);
+                return server;
+            }
+            // Fallback: attach to server until real parent appears
+            return ensureParentExists('server');
+        }
+    
+        function applyTopology(nodes) {
+            const seen = new Set();
+            // Sort by depth so parents tend to be created before children
+            nodes.sort((a,b) => (String(a.id).split('.').length) - (String(b.id).split('.').length));
+            for (const n of nodes) {
+                const id = String(n.id);
+                seen.add(id);
+                const parentId = n.parentId ? String(n.parentId) : 'server';
+                const parentEl = ensureParentExists(parentId);
+                const childrenEl = parentEl.querySelector(':scope > .children');
+                let el = elementsById.get(id);
+                if (!el) {
+                    el = makeNodeElement(n);
+                    elementsById.set(id, el);
+                    childrenEl.appendChild(el);
+                } else {
+                    // Minimal updates: only change when text differs
+                    const title = el.querySelector(':scope > .title');
+                    const newTitle = labelFor(n);
+                    if (title.textContent !== newTitle) title.textContent = newTitle;
+                    const meta = el.querySelector(':scope > .meta');
+                    const newMeta = metaFor(n);
+                    if (meta.textContent !== newMeta) meta.textContent = newMeta;
+                    const desiredClass = 'node ' + (n.isHub ? 'hub' : 'device');
+                    if (el.className.split(' ')[0] !== 'node' || (!el.classList.contains('hub') && n.isHub) || (!el.classList.contains('device') && !n.isHub)) {
+                        el.className = desiredClass;
+                    }
+                    applyStateClass(el, n.state);
+                    // Reparent only if needed
+                    if (el.parentElement && el.parentElement !== childrenEl) {
+                        childrenEl.appendChild(el);
+                    }
+                }
+            }
+            // Remove stale elements
+            for (const [id, el] of Array.from(elementsById.entries())) {
+                if (!seen.has(id) && id !== 'server') {
+                    el.remove();
+                    elementsById.delete(id);
+                }
+            }
+        }
+    
+        function initWebSocket() {
+            if (ws) try { ws.close(); } catch(e) {}
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const url = `${protocol}//${window.location.host}/ws/devices`;
+            ws = new WebSocket(url);
+            ws.onopen = () => { /* initial snapshot will be pushed by server */ };
+            ws.onmessage = (event) => {
+                try {
+                    const msg = JSON.parse(event.data);
+                    if (msg && msg.type === 'topology' && Array.isArray(msg.nodes)) {
+                        applyTopology(msg.nodes);
+                    }
+                } catch (e) {
+                    console.error('Invalid topology message', e);
+                }
+            };
+            ws.onclose = () => {
+                setTimeout(initWebSocket, 1000);
+            };
+            ws.onerror = () => {
+                try { ws.close(); } catch(e) {}
+            };
+        }
+    </script>
 </head>
 <body>
     <%view navbar %>
-
-    <%c++ 
-    bool hasWarning = false;
-    std::string warningMessage;
-    try {
-        warningMessage = @@.get<std::string>("warning");
-        hasWarning = !warningMessage.empty();
-    } catch(...) {
-        // No warning message found, ignore
-    }
     
-    if (hasWarning) { 
-    %>
-    <div class="warning-block">
-        [[warning]]
+    <h1>USB Topology</h1>
+    
+    <div class="topology-container">
+        <div id="topology-root"></div>
     </div>
-    <%c++ } %>
-    <h1>Device List</h1>
     
-    <%view auto_refresh_toggle %>
-    
-    <div id="device-table-container">
-        <table>
-            <thead>
-                <tr>
-                    <th>Serial Number</th>
-                    <th>Port</th>
-                    <th>IP Address</th>
-                    <th>State</th>
-                    <th>Image</th>
-                    <th>Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-            <%c++ 
-            auto devicesList = @@.get<std::vector<std::map<std::string, std::string>>>("devices");
-            if(devicesList.size() > 0) {
-            %>
-                <%c++ for(const auto& device : devicesList) { %>
-                    <tr>
-                        <td><%c++ $$ << device.at("serial"); %></td>
-                        <td><%c++ $$ << device.at("port"); %></td>
-                        <td><%c++ $$ << device.at("ip_address"); %></td>
-                        <td><%c++ $$ << device.at("state"); %></td>
-                        <td><%c++ $$ << device.at("image"); %></td>
-                        <td>
-                            <a href="/devices/<%c++ $$ << device.at("serial"); %>/log/provisioner" class="log-link">Provisioner Log</a><br>
-                            <a href="/devices/<%c++ $$ << device.at("serial"); %>/log/bootstrap" class="log-link">Bootstrap Log</a><br>
-                            <a href="/devices/<%c++ $$ << device.at("serial"); %>/log/triage" class="log-link">Triage Log</a>
-                        </td>
-                    </tr>
-                <%c++ } %>
-            <%c++ } else { %>
-                    <tr>
-                        <td colspan="6" class="no-devices">No devices available</td>
-                    </tr>
-            <%c++ } %>
-            </tbody>
-        </table>
-    </div>
-
     <script>
-        // Function to fetch and update the device table
-        async function refreshDeviceTable() {
-            try {
-                const response = await fetch('/devices', {
-                    headers: {
-                        'Accept': 'application/json'
-                    }
-                });
-                
-                if (!response.ok) {
-                    throw new Error('Failed to fetch devices');
-                }
-                
-                const data = await response.json();
-                
-                // Create a new table with the updated data
-                let tableHtml = `
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Serial Number</th>
-                                <th>Port</th>
-                                <th>IP Address</th>
-                                <th>State</th>
-                                <th>Image</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                `;
-                
-                if (data.devices && data.devices.length > 0) {
-                    data.devices.forEach(device => {
-                        tableHtml += `
-                            <tr>
-                                <td>${device.serial}</td>
-                                <td>${device.port}</td>
-                                <td>${device.ip_address || ''}</td>
-                                <td>${device.state}</td>
-                                <td>${device.image}</td>
-                                <td>
-                                    <a href="/devices/${device.serial}/log/provisioner" class="log-link">Provisioner Log</a><br>
-                                    <a href="/devices/${device.serial}/log/bootstrap" class="log-link">Bootstrap Log</a><br>
-                                    <a href="/devices/${device.serial}/log/triage" class="log-link">Triage Log</a>
-                                </td>
-                            </tr>
-                        `;
-                    });
-                } else {
-                    tableHtml += `
-                        <tr>
-                            <td colspan="6" class="no-devices">No devices available</td>
-                        </tr>
-                    `;
-                }
-                
-                tableHtml += `
-                        </tbody>
-                    </table>
-                `;
-                
-                tableContainer.innerHTML = tableHtml;
-            } catch (error) {
-                console.error('Error refreshing device table:', error);
-            }
-        }
-        
-        // Initialize the table container reference
-        const tableContainer = document.getElementById('device-table-container');
-        
-        // Initialize auto-refresh with the device table refresh function
-        initAutoRefresh(refreshDeviceTable);
+        const topologyRoot = document.getElementById('topology-root');
+        // Initialize with a server root to minimize layout shifts
+        applyTopology([{ id: 'server', isHub: true }]);
+        initWebSocket();
     </script>
 </body>
 </html> 
