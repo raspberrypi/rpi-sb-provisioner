@@ -1,3 +1,15 @@
+rpi-sb-provisioner (2.1.0) unstable; urgency=medium
+
+  * WebUI: Add new device status UI, based on USB topology
+
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Thu, 21 Aug 2025 16:45:00 +0100
+
+rpi-sb-provisioner (2.0.7) unstable; urgency=medium
+
+  * WebUI: Expand manufacturing DB API, table
+
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Thu, 21 Aug 2025 16:30:00 +0100
+
 rpi-sb-provisioner (2.0.6) unstable; urgency=medium
 
   * WebUI: Fixup SHA256 calculation cancellation

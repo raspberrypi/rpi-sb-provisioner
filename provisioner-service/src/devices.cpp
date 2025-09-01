@@ -15,13 +15,14 @@
 #include <atomic>
 #include <chrono>
 #include <algorithm>
+#include <cctype>
 #include "utils.h"
 #include "include/audit.h"
 
 using namespace drogon;
 
-// Forward declare internal snapshot function from this TU's anonymous namespace
-namespace { std::string topologySnapshotString(); }
+// Forward declare snapshot helper accessible to other scopes in this TU
+namespace provisioner { std::string getTopologySnapshotString(); }
 
 // WebSocket controller for device topology streaming
 class DevicesWebSocketController : public drogon::WebSocketController<DevicesWebSocketController> {
@@ -54,7 +55,7 @@ public:
             subscribers.push_back(wsConnPtr);
         }
         // Send initial snapshot
-        wsConnPtr->send(topologySnapshotString());
+        wsConnPtr->send(provisioner::getTopologySnapshotString());
     }
 
     void handleConnectionClosed(const drogon::WebSocketConnectionPtr& wsConnPtr) override {
@@ -70,8 +71,7 @@ public:
 std::vector<drogon::WebSocketConnectionPtr> DevicesWebSocketController::subscribers;
 std::mutex DevicesWebSocketController::subscribersMutex;
 
-// Forward declaration for snapshot helper
-namespace provisioner { std::string topologySnapshotString(); }
+// (removed incorrect forward declaration of anonymous-namespace function)
 
 namespace provisioner {
 
@@ -99,6 +99,8 @@ namespace provisioner {
         std::string state;
         std::string image;
         std::string ip;
+        int portCount{0};        // number of ports if hub (from maxchild)
+        bool isPlaceholder{false};
     };
 
     // Tracker state
@@ -108,6 +110,8 @@ namespace provisioner {
         std::mutex topologyMutex;
         // Map id -> node
         std::unordered_map<std::string, UsbNode> currentTopology;
+        // App start time in milliseconds since epoch; used to ignore stale DB rows
+        std::atomic<long long> appStartMs{0};
 
         std::string readFileTrimmed(const std::filesystem::path &p) {
             try {
@@ -157,39 +161,129 @@ namespace provisioner {
                 if (!entry.is_directory()) continue;
                 const std::string name = entry.path().filename().string();
                 if (name.find('-') == std::string::npos) continue; // skip non-device entries like usb1
+                const bool isInterface = (name.find(':') != std::string::npos);
                 const std::string id = baseDeviceDirName(name);
-                UsbNode node;
-                node.id = id;
-                node.parentId = computeParentId(id);
-                node.vendor = readFileTrimmed(entry.path()/"idVendor");
-                node.product = readFileTrimmed(entry.path()/"idProduct");
-                if (node.vendor.empty() && node.product.empty()) {
-                    // Some entries may not be real devices; skip if missing identifiers
-                    // but keep hubs if detectable
+
+                // Create or get existing node by base id
+                UsbNode &node = nodes[id];
+                if (node.id.empty()) {
+                    node.id = id;
+                    node.parentId = computeParentId(id);
                 }
-                node.serial = readFileTrimmed(entry.path()/"serial");
-                std::string bDeviceClass = readFileTrimmed(entry.path()/"bDeviceClass");
-                // 09 (hex) indicates hub
-                node.isHub = (bDeviceClass == "09" || bDeviceClass == "9" || bDeviceClass == "0x09");
-                nodes.insert_or_assign(node.id, node);
+
+                const std::filesystem::path baseDir = usbPath / id;
+
+                // Populate from device directory when available
+                if (!isInterface) {
+                    const std::string v = readFileTrimmed(entry.path()/"idVendor");
+                    const std::string p = readFileTrimmed(entry.path()/"idProduct");
+                    if (!v.empty()) node.vendor = v;
+                    if (!p.empty()) node.product = p;
+                    const std::string s = readFileTrimmed(entry.path()/"serial");
+                    if (!s.empty()) node.serial = s;
+                }
+
+                // Detect hubs via either device or interface class files
+                const std::string bDeviceClass = std::filesystem::exists(entry.path()/"bDeviceClass")
+                    ? readFileTrimmed(entry.path()/"bDeviceClass")
+                    : (std::filesystem::exists(baseDir/"bDeviceClass") ? readFileTrimmed(baseDir/"bDeviceClass") : "");
+                const std::string bInterfaceClass = std::filesystem::exists(entry.path()/"bInterfaceClass")
+                    ? readFileTrimmed(entry.path()/"bInterfaceClass")
+                    : (std::filesystem::exists(baseDir/"bInterfaceClass") ? readFileTrimmed(baseDir/"bInterfaceClass") : "");
+                if (bDeviceClass == "09" || bDeviceClass == "9" || bDeviceClass == "0x09" ||
+                    bInterfaceClass == "09" || bInterfaceClass == "9" || bInterfaceClass == "0x09") {
+                    node.isHub = true;
+                }
+
+                // Read maxchild from whichever location provides it
+                for (const auto &dir : {entry.path(), baseDir}) {
+                    std::error_code ec;
+                    const auto path = dir/"maxchild";
+                    if (std::filesystem::exists(path, ec)) {
+                        const std::string mc = readFileTrimmed(path);
+                        if (!mc.empty()) {
+                            try { node.portCount = std::max(node.portCount, std::stoi(mc)); } catch (...) {}
+                        }
+                    }
+                }
+
+                // On this platform, root hubs expose child ports as usbX-portN directories under the interface dir
+                if (isInterface && id.size() >= 2 && id.rfind("-0") == id.size() - 2) {
+                    for (const auto &child : std::filesystem::directory_iterator(entry.path())) {
+                        const std::string childName = child.path().filename().string();
+                        // Match pattern: usb<bus>-port<idx>
+                        auto dashPos = childName.find("-port");
+                        if (dashPos == std::string::npos) continue;
+                        // Extract trailing number after "-port"
+                        const std::string portStr = childName.substr(dashPos + 5);
+                        try {
+                            int portNum = std::stoi(portStr);
+                            if (portNum > node.portCount) node.portCount = portNum;
+                        } catch (...) {
+                            // ignore non-numeric suffixes
+                        }
+                    }
+                }
+            }
+
+            // Add placeholder entries for unconnected hub ports
+            std::vector<UsbNode> placeholders;
+            for (const auto &p : nodes) {
+                const UsbNode &hub = p.second;
+                if (!hub.isHub || hub.portCount <= 0) continue;
+                const bool isRootHub = (hub.id.size() >= 2 && hub.id.rfind("-0") == hub.id.size() - 2);
+                for (int i = 1; i <= hub.portCount; ++i) {
+                    std::string childId;
+                    std::string parentId;
+                    if (isRootHub) {
+                        // Root hub children use pattern "<bus>-<port>", and attach directly to server
+                        const std::string busPrefix = hub.id.substr(0, hub.id.size() - 2);
+                        childId = busPrefix + "-" + std::to_string(i);
+                        parentId = "server";
+                    } else {
+                        childId = hub.id + "." + std::to_string(i);
+                        parentId = hub.id;
+                    }
+                    if (nodes.find(childId) != nodes.end()) continue;
+                    UsbNode ph;
+                    ph.id = childId;
+                    ph.parentId = parentId;
+                    ph.isHub = false;
+                    // Leave vendor/product empty; UI will render as placeholder by id
+                    ph.serial = "";
+                    ph.state = "";
+                    ph.image = "";
+                    ph.ip = "";
+                    ph.isPlaceholder = true;
+                    placeholders.push_back(std::move(ph));
+                }
+            }
+            for (const auto &ph : placeholders) {
+                nodes.insert_or_assign(ph.id, ph);
             }
 
             return nodes;
         }
 
         void enrichWithProvisioningState(std::unordered_map<std::string, UsbNode> &nodes) {
+            // Build latest record per endpoint (descending ts ensures first seen is newest)
+            struct DbRecord { std::string serial, state, image, ip; };
+            std::unordered_map<std::string, DbRecord> latestByEndpoint;
+
             sqlite3* db;
             int rc = sqlite3_open("/srv/rpi-sb-provisioner/state.db", &db);
             if (rc) {
                 return;
             }
-            const char* sql = "SELECT serial, endpoint, state, image, ip_address FROM devices ORDER BY ts DESC";
+            const char* sql = "SELECT serial, endpoint, state, image, ip_address FROM devices WHERE ts >= ? ORDER BY ts DESC";
             sqlite3_stmt* stmt;
             rc = sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr);
             if (rc != SQLITE_OK) {
                 sqlite3_close(db);
                 return;
             }
+            // Bind application start time (milliseconds)
+            sqlite3_bind_int64(stmt, 1, static_cast<sqlite3_int64>(appStartMs.load()));
             while (sqlite3_step(stmt) == SQLITE_ROW) {
                 const unsigned char* serial = sqlite3_column_text(stmt, 0);
                 const unsigned char* endpoint = sqlite3_column_text(stmt, 1);
@@ -198,25 +292,56 @@ namespace provisioner {
                 const unsigned char* ip = sqlite3_column_text(stmt, 4);
                 if (!endpoint) continue;
                 std::string endpointStr = reinterpret_cast<const char*>(endpoint);
-                auto it = nodes.find(endpointStr);
-                if (it != nodes.end()) {
-                    // Only set if not already populated or to reflect latest row (desc order)
-                    it->second.serial = serial ? reinterpret_cast<const char*>(serial) : it->second.serial;
-                    it->second.state = state ? reinterpret_cast<const char*>(state) : it->second.state;
-                    it->second.image = image ? reinterpret_cast<const char*>(image) : it->second.image;
-                    it->second.ip = ip ? reinterpret_cast<const char*>(ip) : it->second.ip;
+                if (latestByEndpoint.find(endpointStr) == latestByEndpoint.end()) {
+                    latestByEndpoint.emplace(endpointStr, DbRecord{
+                        serial ? reinterpret_cast<const char*>(serial) : std::string{},
+                        state ? reinterpret_cast<const char*>(state) : std::string{},
+                        image ? reinterpret_cast<const char*>(image) : std::string{},
+                        ip ? reinterpret_cast<const char*>(ip) : std::string{}
+                    });
                 }
             }
             sqlite3_finalize(stmt);
             sqlite3_close(db);
+
+            // Apply only when: (1) port is connected (non-placeholder), (2) we have a latest record for this endpoint
+            for (const auto &p : latestByEndpoint) {
+                const std::string &endpoint = p.first;
+                const DbRecord &rec = p.second;
+                auto it = nodes.find(endpoint);
+                if (it == nodes.end()) continue; // endpoint not present in current topology
+                UsbNode &n = it->second;
+                if (n.isPlaceholder) continue; // not connected
+                if (n.isHub) continue; // never apply provisioning state to hubs
+                n.state = rec.state;
+                n.image = rec.image;
+                n.ip = rec.ip;
+            }
         }
 
-        Json::Value topologyToJson(const std::unordered_map<std::string, UsbNode> &nodes) {
+        int inferModelGeneration(const UsbNode &n) {
+            if (n.image.empty()) return 0;
+            std::string img = n.image;
+            std::transform(img.begin(), img.end(), img.begin(), [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+            if (img.find("2712") != std::string::npos || img.find("rpi5") != std::string::npos || img.find("pi5") != std::string::npos) return 5;
+            if (img.find("2711") != std::string::npos || img.find("rpi4") != std::string::npos || img.find("pi4") != std::string::npos) return 4;
+            return 0;
+        }
+
+        Json::Value topologyToJson(const std::unordered_map<std::string, UsbNode> &nodes,
+                                   const std::vector<std::string> &removed = {}) {
             Json::Value root;
             root["type"] = "topology";
             Json::Value arr(Json::arrayValue);
             for (const auto &p : nodes) {
                 const UsbNode &n = p.second;
+                // Hide root hub interface nodes (e.g., "1-0", "2-0"); we only show their ports as children of server
+                if (n.isHub) {
+                    const std::string &nid = n.id;
+                    if (nid.size() >= 2 && nid.rfind("-0") == nid.size() - 2) {
+                        continue;
+                    }
+                }
                 Json::Value j;
                 j["id"] = n.id;
                 if (!n.parentId.empty()) j["parentId"] = n.parentId; else j["parentId"] = Json::nullValue;
@@ -227,9 +352,17 @@ namespace provisioner {
                 if (!n.state.empty()) j["state"] = n.state;
                 if (!n.image.empty()) j["image"] = n.image;
                 if (!n.ip.empty()) j["ip"] = n.ip;
+                if (n.isPlaceholder) j["placeholder"] = true;
+                int gen = inferModelGeneration(n);
+                if (gen > 0) j["modelGen"] = gen;
                 arr.append(j);
             }
             root["nodes"] = arr;
+            if (!removed.empty()) {
+                Json::Value r(Json::arrayValue);
+                for (const auto &id : removed) r.append(id);
+                root["removed"] = r;
+            }
             root["timestamp"] = static_cast<Json::UInt64>(std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now().time_since_epoch()).count());
             return root;
@@ -249,6 +382,7 @@ namespace provisioner {
                 enrichWithProvisioningState(newMap);
 
                 bool changed = false;
+                std::vector<std::string> removed;
                 {
                     std::lock_guard<std::mutex> lock(topologyMutex);
                     // Simple change detection by size and a few key fields; fallback to full JSON compare
@@ -266,12 +400,20 @@ namespace provisioner {
                         }
                     }
                     if (changed) {
-                        currentTopology = std::move(newMap);
+                        // Compute removed BEFORE updating currentTopology
+                        for (const auto &p : currentTopology) {
+                            if (p.first == "server") continue;
+                            if (newMap.find(p.first) == newMap.end()) removed.push_back(p.first);
+                        }
+                        // Update current topology after computing removed
+                        currentTopology = newMap; // copy to keep newMap for message payload
                     }
                 }
 
                 if (changed) {
-                    std::string msg = topologySnapshotString();
+                    Json::FastWriter w;
+                    // Use the updated currentTopology as the payload, along with removed ids
+                    std::string msg = w.write(topologyToJson(currentTopology, removed));
                     DevicesWebSocketController::broadcast(msg);
                 }
 
@@ -282,12 +424,19 @@ namespace provisioner {
             LOG_INFO << "Topology worker stopped";
         }
     }
+    
+    // Provide a wrapper visible from outside the anonymous namespace
+    std::string getTopologySnapshotString() {
+        return topologySnapshotString();
     }
 
     Devices::Devices() 
         :
         systemd_bus(nullptr, sd_bus_unref)
     {
+        // Record app start time for gating enrichment to contemporaneous records
+        appStartMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
         sd_bus* bus = nullptr;
         int ret = sd_bus_default_system(&bus);
         if (ret < 0) {
@@ -531,7 +680,7 @@ namespace provisioner {
                 // Read log files
                 std::string provisioner_log, bootstrap_log, triage_log;
                 
-                std::string logPath = "/var/log/rpi-sb-provisioner/" + utils::sanitize_path_component(device.serial) + "/provisioner.log";
+                std::string logPath = "/var/log/rpi-sb-provisioner/" + provisioner::utils::sanitize_path_component(device.serial) + "/provisioner.log";
                 std::ifstream provisionerFile(logPath);
                 if (provisionerFile.is_open()) {
                     // Log file access to audit log
@@ -545,7 +694,7 @@ namespace provisioner {
                     AuditLog::logFileSystemAccess("READ", logPath, false);
                 }
 
-                logPath = "/var/log/rpi-sb-provisioner/" + utils::sanitize_path_component(device.serial) + "/bootstrap.log";
+                logPath = "/var/log/rpi-sb-provisioner/" + provisioner::utils::sanitize_path_component(device.serial) + "/bootstrap.log";
                 std::ifstream bootstrapFile(logPath);
                 if (bootstrapFile.is_open()) {
                     // Log file access to audit log
@@ -559,7 +708,7 @@ namespace provisioner {
                     AuditLog::logFileSystemAccess("READ", logPath, false);
                 }
 
-                logPath = "/var/log/rpi-sb-provisioner/" + utils::sanitize_path_component(device.serial) + "/triage.log";
+                logPath = "/var/log/rpi-sb-provisioner/" + provisioner::utils::sanitize_path_component(device.serial) + "/triage.log";
                 std::ifstream triageFile(logPath);
                 if (triageFile.is_open()) {
                     // Log file access to audit log
@@ -616,7 +765,7 @@ namespace provisioner {
                 return;
             }
 
-            std::string logPath = "/var/log/rpi-sb-provisioner/" + utils::sanitize_path_component(serialno) + "/provisioner.log";
+            std::string logPath = "/var/log/rpi-sb-provisioner/" + provisioner::utils::sanitize_path_component(serialno) + "/provisioner.log";
             LOG_INFO << "Attempting to open log file at: " << logPath;
             
             std::ifstream logFile(logPath);
@@ -666,7 +815,7 @@ namespace provisioner {
                 return;
             }
 
-            std::string logPath = "/var/log/rpi-sb-provisioner/" + utils::sanitize_path_component(serialno) + "/bootstrap.log";
+            std::string logPath = "/var/log/rpi-sb-provisioner/" + provisioner::utils::sanitize_path_component(serialno) + "/bootstrap.log";
             LOG_INFO << "Attempting to open log file at: " << logPath;
             
             std::ifstream logFile(logPath);
@@ -710,7 +859,7 @@ namespace provisioner {
                 return;
             }
 
-            std::string logPath = "/var/log/rpi-sb-provisioner/" + utils::sanitize_path_component(serialno) + "/triage.log";
+            std::string logPath = "/var/log/rpi-sb-provisioner/" + provisioner::utils::sanitize_path_component(serialno) + "/triage.log";
             LOG_INFO << "Attempting to open log file at: " << logPath;
             
             std::ifstream logFile(logPath);
@@ -754,7 +903,7 @@ namespace provisioner {
                 return;
             }
 
-            std::string keyPath = "/var/log/rpi-sb-provisioner/" + utils::sanitize_path_component(serialno) + "/keypair/" + utils::sanitize_path_component(serialno) + ".pub";
+            std::string keyPath = "/var/log/rpi-sb-provisioner/" + provisioner::utils::sanitize_path_component(serialno) + "/keypair/" + provisioner::utils::sanitize_path_component(serialno) + ".pub";
             std::ifstream keyFile(keyPath);
             if (!keyFile.is_open()) {
                 auto resp = provisioner::utils::createErrorResponse(
@@ -794,7 +943,7 @@ namespace provisioner {
                 return;
             }
 
-            std::string keyPath = "/var/log/rpi-sb-provisioner/" + utils::sanitize_path_component(serialno) + "/keypair/" + utils::sanitize_path_component(serialno) + ".der";
+            std::string keyPath = "/var/log/rpi-sb-provisioner/" + provisioner::utils::sanitize_path_component(serialno) + "/keypair/" + provisioner::utils::sanitize_path_component(serialno) + ".der";
             std::ifstream keyFile(keyPath);
             if (!keyFile.is_open()) {
                 auto resp = provisioner::utils::createErrorResponse(
