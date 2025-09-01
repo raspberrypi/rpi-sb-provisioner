@@ -14,6 +14,9 @@
         .state-success { box-shadow: 0 0 0 2px #4caf50 inset; }
         .state-error { box-shadow: 0 0 0 2px #f44336 inset; }
         .meta { color: #555; font-size: 12px; }
+        .badge { display: inline-block; font-weight: 700; font-size: 14px; line-height: 1; padding: 2px 6px; border-radius: 10px; margin-left: 6px; }
+        .badge-gen { color: #fff; background: #d32f2f; }
+        .badge-empty { color: #fff; background: #9e9e9e; }
     </style>
     <script>
         let ws = null;
@@ -25,7 +28,15 @@
             el.dataset.id = node.id;
             const title = document.createElement('div');
             title.className = 'title';
-            title.textContent = labelFor(node);
+            const baseLabel = labelFor(node);
+            title.textContent = baseLabel;
+            const badge = document.createElement('span');
+            const b = computeBadge(node);
+            if (b) {
+                badge.className = 'badge ' + b.className;
+                badge.textContent = b.text;
+                title.appendChild(badge);
+            }
             const meta = document.createElement('div');
             meta.className = 'meta';
             meta.textContent = metaFor(node);
@@ -38,6 +49,143 @@
             return el;
         }
     
+        // --- Topology normalization helpers (UI-only) ---
+        function parseBusAndChain(id) {
+            // Returns { bus: '1', chain: '1.2.3' } or null
+            const m = String(id).match(/^(\d+)-([0-9]+(?:\.[0-9]+)*)$/);
+            if (!m) return null;
+            return { bus: m[1], chain: m[2] };
+        }
+
+        function parseRootPort(id) {
+            // Returns numeric string for top-level root port (no dot), else null
+            const m = String(id).match(/^(\d+)-([0-9]+)$/);
+            return m ? m[2] : null;
+        }
+
+        function parseBus(id) {
+            const m = String(id).match(/^(\d+)-/);
+            return m ? parseInt(m[1], 10) : NaN;
+        }
+
+        function ensureRootPortGroup(portIdx) {
+            const groupId = `rootport-${portIdx}`;
+            if (elementsById.has(groupId)) return elementsById.get(groupId);
+            const el = document.createElement('div');
+            el.className = 'node hub';
+            el.dataset.id = groupId;
+            const title = document.createElement('div');
+            title.className = 'title';
+            title.textContent = `Root Port ${portIdx}`;
+            const meta = document.createElement('div');
+            meta.className = 'meta';
+            meta.textContent = '';
+            const children = document.createElement('div');
+            children.className = 'children';
+            el.appendChild(title);
+            el.appendChild(meta);
+            el.appendChild(children);
+            const serverEl = ensureParentExists('server');
+            serverEl.querySelector('.children').appendChild(el);
+            elementsById.set(groupId, el);
+            return el;
+        }
+
+        function ensureRootPortGroupUnder(rootEl, portIdx) {
+            const tier = rootEl && rootEl.dataset && rootEl.dataset.id === 'usb3-root' ? 'ss' : 'hs';
+            const groupId = `rootport-${tier}-${portIdx}`;
+            if (elementsById.has(groupId)) return elementsById.get(groupId);
+            const el = document.createElement('div');
+            el.className = 'node hub';
+            el.dataset.id = groupId;
+            const title = document.createElement('div');
+            title.className = 'title';
+            title.textContent = `Root Port ${portIdx}`;
+            const meta = document.createElement('div');
+            meta.className = 'meta';
+            meta.textContent = '';
+            const children = document.createElement('div');
+            children.className = 'children';
+            el.appendChild(title);
+            el.appendChild(meta);
+            el.appendChild(children);
+            rootEl.querySelector('.children').appendChild(el);
+            elementsById.set(groupId, el);
+            return el;
+        }
+
+        function ensureRootTier(tier) {
+            const id = tier === 'ss' ? 'usb3-root' : 'usb2-root';
+            if (elementsById.has(id)) return elementsById.get(id);
+            const el = document.createElement('div');
+            el.className = 'node hub';
+            el.dataset.id = id;
+            const title = document.createElement('div');
+            title.className = 'title';
+            title.textContent = tier === 'ss' ? 'USB 3 Root' : 'USB 2 Root';
+            const meta = document.createElement('div');
+            meta.className = 'meta';
+            meta.textContent = '';
+            const children = document.createElement('div');
+            children.className = 'children';
+            el.appendChild(title);
+            el.appendChild(meta);
+            el.appendChild(children);
+            const serverEl = ensureParentExists('server');
+            serverEl.querySelector('.children').appendChild(el);
+            elementsById.set(id, el);
+            return el;
+        }
+
+        function busTierForId(id) {
+            const m = String(id).match(/^(\d+)-/);
+            if (!m) return null;
+            const bus = parseInt(m[1], 10);
+            // On Pi 5, buses 3/4 are SuperSpeed; 1/2 are HighSpeed
+            if (bus === 3 || bus === 4) return 'ss';
+            if (bus === 1 || bus === 2) return 'hs';
+            return null;
+        }
+
+        function buildCanonicalRootHubMap(nodes) {
+            // Only coalesce companion roothubs for USB 3 (SS) tier; keep both HS ports visible
+            const canonicalByPort = new Map(); // portIdx -> canonicalRootId like '4-1'
+            for (const n of nodes) {
+                if (!n || !n.isHub) continue;
+                const pid = n.parentId ? String(n.parentId) : 'server';
+                const rootPort = parseRootPort(String(n.id));
+                if (pid !== 'server' || !rootPort) continue;
+                const tier = busTierForId(String(n.id));
+                if (tier !== 'ss') continue; // no coalescing for HS (USB 2)
+                const { bus } = parseBusAndChain(String(n.id));
+                const current = canonicalByPort.get(rootPort);
+                if (!current) {
+                    canonicalByPort.set(rootPort, String(n.id));
+                } else {
+                    // Prefer higher bus number numerically (e.g., bus 4 over 3)
+                    const existingBus = parseInt(current.split('-')[0], 10);
+                    const newBus = parseInt(bus, 10);
+                    if (newBus > existingBus) canonicalByPort.set(rootPort, String(n.id));
+                }
+            }
+            return canonicalByPort;
+        }
+
+        function canonicalizeIdByRoot(id, canonicalByPort) {
+            // Coalesce by root port: map any id starting with '<bus>-<port>'
+            // to the canonical SuperSpeed root for that port when available.
+            // This hides HS root placeholders and re-parents HS-only children
+            // under the SS "Root Port n" group without losing visibility.
+            const m = String(id).match(/^(\d+)-([0-9]+)(\..*)?$/);
+            if (!m) return String(id);
+            const port = m[2];
+            const rest = m[3] || '';
+            const canonicalRoot = canonicalByPort.get(port);
+            if (!canonicalRoot) return String(id);
+            const canonicalPrefix = canonicalRoot; // like '2-1'
+            return canonicalPrefix + rest;
+        }
+
         function applyStateClass(el, state) {
             el.classList.remove('state-provisioning', 'state-success', 'state-error');
             if (!state) return;
@@ -49,14 +197,45 @@
     
         function labelFor(n) {
             if (n.id === 'server') return 'Provisioning Server';
+            if (String(n.id).startsWith('rootport-')) {
+                const parts = String(n.id).split('-');
+                const idx = parts[parts.length - 1];
+                return `Root Port ${idx}`;
+            }
+            const idStr = String(n.id);
+            // Annotate hubs to avoid confusing vendor/serial strings
+            if (n.isHub) {
+                if (n.serial) return `${n.serial} (USB Hub)`;
+                if (n.vendor || n.product) return `${n.vendor || ''}:${n.product || ''} (USB Hub) (${idStr})`;
+                return `${idStr} (USB Hub)`;
+            }
             if (n.serial) return `${n.serial}`;
-            if (n.vendor || n.product) return `${n.vendor || ''}:${n.product || ''} (${n.id})`;
-            return n.id;
+            // Placeholder if vendor/product missing: show port number (supports nested "." and top-level "-")
+            if (n.vendor || n.product) return `${n.vendor || ''}:${n.product || ''} (${idStr})`;
+            let portNum = '';
+            const dotParts = idStr.split('.');
+            if (dotParts.length > 1) {
+                portNum = dotParts[dotParts.length - 1];
+            } else {
+                const dashIdx = idStr.lastIndexOf('-');
+                if (dashIdx !== -1) portNum = idStr.substring(dashIdx + 1);
+            }
+            if (portNum && /^\d+$/.test(portNum)) return `Port ${portNum} (empty)`;
+            return idStr;
         }
     
+        function computeBadge(n) {
+            if (n.placeholder) return { className: 'badge-empty', text: '?' };
+            if (n.modelGen === 5) return { className: 'badge-gen', text: '5' };
+            if (n.modelGen === 4) return { className: 'badge-gen', text: '4' };
+            // Connected device, model unknown yet (e.g., 2710 or earlier): show red '?'
+            if (!n.isHub) return { className: 'badge-gen', text: '?' };
+            return null;
+        }
+
         function metaFor(n) {
             const parts = [];
-            if (n.state) parts.push(`state: ${n.state}`);
+            if (!n.isHub && n.state) parts.push(`state: ${n.state}`);
             if (n.image) parts.push(`image: ${n.image}`);
             if (n.ip) parts.push(`ip: ${n.ip}`);
             return parts.join('  •  ');
@@ -67,6 +246,7 @@
             if (elementsById.has(parentId)) return elementsById.get(parentId);
             // Create server root if needed
             if (parentId === 'server') {
+                console.log('ensureParentExists: creating server root');
                 const server = makeNodeElement({ id: 'server', isHub: true });
                 topologyRoot.innerHTML = '';
                 topologyRoot.appendChild(server);
@@ -74,30 +254,97 @@
                 return server;
             }
             // Fallback: attach to server until real parent appears
+            console.warn('ensureParentExists: fallback to server for parent', parentId);
             return ensureParentExists('server');
         }
     
         function applyTopology(nodes) {
+            try { console.log('applyTopology: received nodes', Array.isArray(nodes) ? nodes.length : nodes); } catch(e) {}
             const seen = new Set();
-            // Sort by depth so parents tend to be created before children
-            nodes.sort((a,b) => (String(a.id).split('.').length) - (String(b.id).split('.').length));
+            // Build per-root canonical mapping so companion hubs (e.g., buses 3/4) are coalesced
+            const canonicalByPort = buildCanonicalRootHubMap(nodes);
+            const nodeIdSet = new Set(nodes.map(n => String(n.id)));
+            // Pre-create tier containers and at least 2 root-port groups per tier
+            const portsByTier = { hs: new Set(), ss: new Set() };
+            const hsBusSet = new Set();
             for (const n of nodes) {
                 const id = String(n.id);
-                seen.add(id);
                 const parentId = n.parentId ? String(n.parentId) : 'server';
-                const parentEl = ensureParentExists(parentId);
-                const childrenEl = parentEl.querySelector(':scope > .children');
+                const port = parseRootPort(id);
+                if (parentId === 'server' && port) {
+                    const tier = busTierForId(id);
+                    if (tier === 'ss') {
+                        portsByTier.ss.add(port);
+                    } else if (tier === 'hs') {
+                        // Hide HS root groups that are fully aliased to SS companions
+                        if (!canonicalByPort.has(port)) {
+                            portsByTier.hs.add(port);
+                            hsBusSet.add(parseBus(id));
+                        }
+                    }
+                }
+            }
+            // Stable HS bus -> ordinal mapping (e.g., bus1 => 1, bus2 => 2)
+            const hsBusOrder = Array.from(hsBusSet).filter(x => !isNaN(x)).sort((a,b)=>a-b);
+            const hsBusToOrdinal = new Map();
+            for (let i=0;i<hsBusOrder.length;i++) hsBusToOrdinal.set(hsBusOrder[i], i+1);
+            // Only create HS groups for ports we actually intend to show
+            const desiredMaxHs = Math.max(...Array.from(portsByTier.hs).map(p => parseInt(p, 10)).concat([0]));
+            const desiredMaxSs = Math.max(2, ...Array.from(portsByTier.ss).map(p => parseInt(p, 10)).concat([0]));
+            const hsTierEl = ensureRootTier('hs');
+            for (let i = 1; i <= desiredMaxHs; i++) ensureRootPortGroupUnder(hsTierEl, i);
+            const ssTierEl = ensureRootTier('ss');
+            for (let i = 1; i <= desiredMaxSs; i++) ensureRootPortGroupUnder(ssTierEl, i);
+            // Sort by parent depth and id to ensure stable parent-before-child ordering
+            nodes.sort((a,b) => {
+                const ad = String(a.parentId || 'server').split('.').length;
+                const bd = String(b.parentId || 'server').split('.').length;
+                if (ad !== bd) return ad - bd;
+                return String(a.id).localeCompare(String(b.id));
+            });
+            for (const n of nodes) {
+                const id = String(n.id);
+                if (id === 'server') { seen.add('server'); continue; }
+                // Drop non-canonical duplicates when a canonicalized id also exists
+                const canonicalId = canonicalizeIdByRoot(id, canonicalByPort);
+                if (canonicalId !== id && nodeIdSet.has(canonicalId)) {
+                    try { console.log('applyTopology: drop companion duplicate', id, '→', canonicalId); } catch(e) {}
+                    continue;
+                }
+                seen.add(id);
+                let parentId = n.parentId ? String(n.parentId) : 'server';
+                // Re-map parent to canonical so children of hidden companion hubs attach correctly
+                parentId = canonicalizeIdByRoot(parentId, canonicalByPort);
+                try { console.debug('applyTopology: node', { id, parentId, isHub: !!n.isHub, placeholder: !!n.placeholder, modelGen: n.modelGen }); } catch(e) {}
+                // For direct root-port items, group under USB tier then "Root Port <n>"
+                let parentEl;
+                const maybeRootPort = parseRootPort(id);
+                if (parentId === 'server' && maybeRootPort) {
+                    const tier = busTierForId(id) || 'hs';
+                    const tierEl = ensureRootTier(tier === 'ss' ? 'ss' : 'hs');
+                    let groupIdx = maybeRootPort;
+                    if (tier !== 'ss') {
+                        const busNum = parseBus(id);
+                        const ord = hsBusToOrdinal.get(busNum);
+                        groupIdx = ord || (busNum === 2 ? 2 : 1); // fallback stable mapping
+                    }
+                    parentEl = ensureRootPortGroupUnder(tierEl, groupIdx);
+                } else {
+                    parentEl = ensureParentExists(parentId);
+                }
+                const childrenEl = parentEl.querySelector('.children');
                 let el = elementsById.get(id);
                 if (!el) {
                     el = makeNodeElement(n);
+                    try { console.log('applyTopology: create element', id, 'under', parentId); } catch(e) {}
                     elementsById.set(id, el);
                     childrenEl.appendChild(el);
                 } else {
                     // Minimal updates: only change when text differs
-                    const title = el.querySelector(':scope > .title');
+                    const title = el.querySelector('.title');
                     const newTitle = labelFor(n);
                     if (title.textContent !== newTitle) title.textContent = newTitle;
-                    const meta = el.querySelector(':scope > .meta');
+                    const meta = el.querySelector('.meta');
                     const newMeta = metaFor(n);
                     if (meta.textContent !== newMeta) meta.textContent = newMeta;
                     const desiredClass = 'node ' + (n.isHub ? 'hub' : 'device');
@@ -107,17 +354,15 @@
                     applyStateClass(el, n.state);
                     // Reparent only if needed
                     if (el.parentElement && el.parentElement !== childrenEl) {
+                        try { console.log('applyTopology: reparent', id, 'to parent', parentId); } catch(e) {}
                         childrenEl.appendChild(el);
                     }
                 }
             }
-            // Remove stale elements
-            for (const [id, el] of Array.from(elementsById.entries())) {
-                if (!seen.has(id) && id !== 'server') {
-                    el.remove();
-                    elementsById.delete(id);
-                }
-            }
+            // Do not remove unseen elements blindly. Only the backend should decide removals.
+            // This avoids pruning placeholders or briefly missing nodes during enumeration.
+            // If we add explicit removal messages in the future, handle them here.
+            try { console.debug('applyTopology: pruning disabled; unseen nodes retained this tick'); } catch(e) {}
         }
     
         function initWebSocket() {
@@ -130,7 +375,21 @@
                 try {
                     const msg = JSON.parse(event.data);
                     if (msg && msg.type === 'topology' && Array.isArray(msg.nodes)) {
+                        try { console.log('ws: topology message nodes', msg.nodes.length, 'removed', Array.isArray(msg.removed) ? msg.removed.length : 0); } catch(e) {}
+                        // Apply updates first
                         applyTopology(msg.nodes);
+                        // Then process removals explicitly from backend
+                        if (Array.isArray(msg.removed)) {
+                            for (const id of msg.removed) {
+                                if (id === 'server') continue;
+                                const el = elementsById.get(String(id));
+                                if (el) {
+                                    try { console.log('ws: remove node from backend', id); } catch(e) {}
+                                    el.remove();
+                                    elementsById.delete(String(id));
+                                }
+                            }
+                        }
                     }
                 } catch (e) {
                     console.error('Invalid topology message', e);
