@@ -146,7 +146,7 @@ metadata_gather() {
         # Public key programming: read from fastboot metadata 'signed-otp'
         # Map 'present' -> 1, 'not present' -> 0, common boolean forms as fallback, else NULL
         PUBKEY_PROGRAMMED_VALUE="NULL"
-        SIGNED_OTP="$(metadata_get "signed-otp")"
+        SIGNED_OTP="$(metadata_get "secure-otp")"
         if [ -n "${SIGNED_OTP}" ]; then
             SIGNED_OTP_LC="$(printf "%s" "${SIGNED_OTP}" | tr '[:upper:]' '[:lower:]')"
             case "${SIGNED_OTP_LC}" in
@@ -164,7 +164,7 @@ metadata_gather() {
         
         # Dev key revoked (signed-devkey): 'present' -> 1, 'not present' -> 0, else NULL
         DEVKEY_REVOKED_VALUE="NULL"
-        SIGNED_DEVKEY="$(metadata_get "signed-devkey")"
+        SIGNED_DEVKEY="$(metadata_get "secure-devkey")"
         if [ -n "${SIGNED_DEVKEY}" ]; then
             SIGNED_DEVKEY_LC="$(printf "%s" "${SIGNED_DEVKEY}" | tr '[:upper:]' '[:lower:]')"
             case "${SIGNED_DEVKEY_LC}" in
