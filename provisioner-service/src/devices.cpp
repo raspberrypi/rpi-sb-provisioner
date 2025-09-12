@@ -93,12 +93,14 @@ namespace provisioner {
         std::string parentId;    // parent path id or empty for root
         std::string vendor;      // idVendor
         std::string product;     // idProduct
+        std::string productName; // textual product name (e.g., BCM2712 Boot)
         std::string serial;      // serial (if available)
         bool isHub{false};
         // Optional provisioning info
         std::string state;
         std::string image;
         std::string ip;
+        std::string model;       // device model/type (e.g., CM5, 4B, Zero 2 W)
         int portCount{0};        // number of ports if hub (from maxchild)
         bool isPlaceholder{false};
     };
@@ -179,6 +181,10 @@ namespace provisioner {
                     const std::string p = readFileTrimmed(entry.path()/"idProduct");
                     if (!v.empty()) node.vendor = v;
                     if (!p.empty()) node.product = p;
+                    const std::string pn = readFileTrimmed(entry.path()/"product");
+                    if (!pn.empty()) node.productName = pn;
+                    // Default model hint from product name; refined later by manufacturing data
+                    if (node.model.empty() && !pn.empty()) node.model = pn;
                     const std::string s = readFileTrimmed(entry.path()/"serial");
                     if (!s.empty()) node.serial = s;
                 }
@@ -269,6 +275,9 @@ namespace provisioner {
             // Build latest record per endpoint (descending ts ensures first seen is newest)
             struct DbRecord { std::string serial, state, image, ip; };
             std::unordered_map<std::string, DbRecord> latestByEndpoint;
+            // Also capture latest manufacturing info by serial (boardname/processor)
+            struct MfgRecord { std::string boardname, processor; };
+            std::unordered_map<std::string, MfgRecord> latestMfgBySerial;
 
             sqlite3* db;
             int rc = sqlite3_open("/srv/rpi-sb-provisioner/state.db", &db);
@@ -304,6 +313,34 @@ namespace provisioner {
             sqlite3_finalize(stmt);
             sqlite3_close(db);
 
+            // Read manufacturing database if present for device-type inference
+            {
+                sqlite3* mdb = nullptr;
+                int rc2 = sqlite3_open("/srv/rpi-sb-provisioner/manufacturing.db", &mdb);
+                if (rc2 == SQLITE_OK) {
+                    const char* msql = "SELECT serial, boardname, processor FROM devices ORDER BY provision_ts DESC";
+                    sqlite3_stmt* mstmt = nullptr;
+                    rc2 = sqlite3_prepare_v2(mdb, msql, -1, &mstmt, nullptr);
+                    if (rc2 == SQLITE_OK) {
+                        while (sqlite3_step(mstmt) == SQLITE_ROW) {
+                            const unsigned char* serial = sqlite3_column_text(mstmt, 0);
+                            const unsigned char* boardname = sqlite3_column_text(mstmt, 1);
+                            const unsigned char* processor = sqlite3_column_text(mstmt, 2);
+                            if (!serial) continue;
+                            std::string s = reinterpret_cast<const char*>(serial);
+                            if (latestMfgBySerial.find(s) == latestMfgBySerial.end()) {
+                                latestMfgBySerial.emplace(s, MfgRecord{
+                                    boardname ? reinterpret_cast<const char*>(boardname) : std::string{},
+                                    processor ? reinterpret_cast<const char*>(processor) : std::string{}
+                                });
+                            }
+                        }
+                    }
+                    if (mstmt) sqlite3_finalize(mstmt);
+                    sqlite3_close(mdb);
+                }
+            }
+
             // Apply only when: (1) port is connected (non-placeholder), (2) we have a latest record for this endpoint
             for (const auto &p : latestByEndpoint) {
                 const std::string &endpoint = p.first;
@@ -314,17 +351,66 @@ namespace provisioner {
                 if (n.isPlaceholder) continue; // not connected
                 if (n.isHub) continue; // never apply provisioning state to hubs
                 n.state = rec.state;
-                n.image = rec.image;
+                // Do not clobber existing non-empty image (used for model inference) with empty DB values
+                if (!rec.image.empty()) {
+                    n.image = rec.image;
+                }
                 n.ip = rec.ip;
+                // If we also have a manufacturing record for this device by serial, use it to annotate image/model
+                if (!n.serial.empty()) {
+                    auto mit = latestMfgBySerial.find(n.serial);
+                    if (mit != latestMfgBySerial.end()) {
+                        const auto &mr = mit->second;
+                        // Prefer model from manufacturing boardname (e.g., CM5, 4B)
+                        if (!mr.boardname.empty()) n.model = mr.boardname;
+                        else if (!mr.processor.empty() && n.model.empty()) n.model = mr.processor;
+                        // Keep image for OS image name only; if image was being used as model before, do not overwrite unless set
+                        if (n.image.empty() && !mr.boardname.empty()) n.image = n.image; // no-op placeholder to emphasize separation
+                    }
+                }
             }
         }
 
         int inferModelGeneration(const UsbNode &n) {
-            if (n.image.empty()) return 0;
-            std::string img = n.image;
-            std::transform(img.begin(), img.end(), img.begin(), [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
-            if (img.find("2712") != std::string::npos || img.find("rpi5") != std::string::npos || img.find("pi5") != std::string::npos) return 5;
-            if (img.find("2711") != std::string::npos || img.find("rpi4") != std::string::npos || img.find("pi4") != std::string::npos) return 4;
+            // Prefer explicit image tag if available
+            if (!n.model.empty()) {
+                std::string img = n.model;
+                std::transform(img.begin(), img.end(), img.begin(), [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+                if (img.find("2712") != std::string::npos ||
+                    img.find("rpi5") != std::string::npos ||
+                    img.find("pi5") != std::string::npos ||
+                    img.find("cm5") != std::string::npos ||
+                    img.find("compute module 5") != std::string::npos)
+                {
+                    return 5;
+                }
+                if (img.find("2711") != std::string::npos ||
+                    img.find("rpi4") != std::string::npos ||
+                    img.find("pi4") != std::string::npos ||
+                    img.find("cm4") != std::string::npos ||
+                    img.find("compute module 4") != std::string::npos ||
+                    img.find("pi 400") != std::string::npos)
+                {
+                    return 4;
+                }
+            }
+            if (!n.image.empty()) {
+                std::string img = n.image;
+                std::transform(img.begin(), img.end(), img.begin(), [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+                if (img.find("2712") != std::string::npos || img.find("rpi5") != std::string::npos || img.find("pi5") != std::string::npos) return 5;
+                if (img.find("2711") != std::string::npos || img.find("rpi4") != std::string::npos || img.find("pi4") != std::string::npos) return 4;
+            }
+            // Fall back to USB product name (e.g., "BCM2712 Boot") seen at connect time
+            if (!n.productName.empty()) {
+                std::string pn = n.productName;
+                std::transform(pn.begin(), pn.end(), pn.begin(), [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+                if (pn.find("2712") != std::string::npos) return 5;
+                if (pn.find("2711") != std::string::npos) return 4;
+            }
+            // Fall back to endpoint-derived hints: if image was populated from manufacturing processor earlier
+            if (n.image.empty() && !n.product.empty()) {
+                // In some flows we set image to BCM2711/BCM2712 in enrichment; if not present at call time, skip.
+            }
             return 0;
         }
 
@@ -348,9 +434,11 @@ namespace provisioner {
                 j["isHub"] = n.isHub;
                 if (!n.vendor.empty()) j["vendor"] = n.vendor;
                 if (!n.product.empty()) j["product"] = n.product;
+                if (!n.productName.empty()) j["productName"] = n.productName;
                 if (!n.serial.empty()) j["serial"] = n.serial;
                 if (!n.state.empty()) j["state"] = n.state;
                 if (!n.image.empty()) j["image"] = n.image;
+                if (!n.model.empty()) j["model"] = n.model;
                 if (!n.ip.empty()) j["ip"] = n.ip;
                 if (n.isPlaceholder) j["placeholder"] = true;
                 int gen = inferModelGeneration(n);
