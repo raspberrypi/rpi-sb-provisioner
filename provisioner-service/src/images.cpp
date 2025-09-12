@@ -112,6 +112,17 @@ public:
             if (request.isMember("action") && request["action"].asString() == "get_sha256" && 
                 request.isMember("image_name")) {
                 std::string imageName = request["image_name"].asString();
+                // Refuse sidecar requests up-front
+                try {
+                    if (std::filesystem::path(imageName).extension() == ".sha256") {
+                        Json::Value response;
+                        response["image_name"] = imageName;
+                        response["status"] = "error";
+                        response["error"] = "Refused: .sha256 sidecar files are not hashable";
+                        wsConnPtr->send(response.toStyledString());
+                        return;
+                    }
+                } catch (...) {}
                 
                 // Register this connection as interested in this image
                 {
@@ -569,6 +580,22 @@ namespace provisioner {
     
     // Request a SHA256 calculation
     void requestSHA256Calculation(const std::string& imageName) {
+        // Reject hashing for sidecar checksum files and notify listeners if any
+        try {
+            if (std::filesystem::path(imageName).extension() == ".sha256") {
+                std::lock_guard<std::mutex> lock(SHA256WebSocketController::connectionsMutex);
+                auto it = SHA256WebSocketController::activeConnections.find(imageName);
+                if (it != SHA256WebSocketController::activeConnections.end()) {
+                    Json::Value response;
+                    response["image_name"] = imageName;
+                    response["status"] = "error";
+                    response["error"] = "Refused: .sha256 sidecar files are not hashable";
+                    const std::string msg = response.toStyledString();
+                    for (auto &conn : it->second) { if (conn && conn->connected()) conn->send(msg); }
+                }
+                return;
+            }
+        } catch (...) { /* ignore */ }
         bool needsCalculation = false;
         
         // Get file size to calculate appropriate timeout
@@ -708,6 +735,10 @@ namespace provisioner {
         try {
             for (const auto& entry : std::filesystem::directory_iterator(IMAGES_PATH)) {
                 if (entry.is_regular_file()) {
+                    // Skip .sha256 sidecar files
+                    if (entry.path().extension() == ".sha256") {
+                        continue;
+                    }
                     std::string imageName = entry.path().filename().string();
                     LOG_INFO << "Queuing SHA256 calculation for existing image: " << imageName;
                     requestSHA256Calculation(imageName);
@@ -782,6 +813,11 @@ namespace provisioner {
                                 filePath /= filename;
                                 
                                 if (std::filesystem::exists(filePath) && std::filesystem::is_regular_file(filePath)) {
+                                    // Skip sidecar checksum files
+                                    if (filePath.extension() == ".sha256") {
+                                        i += EVENT_SIZE + event->len;
+                                        continue;
+                                    }
                                     LOG_INFO << "Queuing SHA256 calculation for new image: " << filename;
                                     requestSHA256Calculation(filename);
                                 }
@@ -969,6 +1005,10 @@ namespace provisioner {
                 LOG_INFO << "Found entry: " << entry.path().string();
                 if (entry.is_regular_file()) {
                     std::filesystem::path imagePath = entry.path();
+                    // Skip SHA256 sidecar files from the listing
+                    if (imagePath.extension() == ".sha256") {
+                        continue;
+                    }
                     ImageInfo info;
                     info.name = imagePath.filename().string();
                     

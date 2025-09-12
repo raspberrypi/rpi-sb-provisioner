@@ -17,6 +17,20 @@
         .badge { display: inline-block; font-weight: 700; font-size: 14px; line-height: 1; padding: 2px 6px; border-radius: 10px; margin-left: 6px; }
         .badge-gen { color: #fff; background: #d32f2f; }
         .badge-empty { color: #fff; background: #9e9e9e; }
+        /* Tabs and relational (mind map) view styling */
+        .view-tabs { margin: 12px 0 8px; display: flex; gap: 8px; }
+        .view-tab { border: 1px solid #9ec9ff; background: #eef6ff; color: #0b3d91; padding: 6px 10px; border-radius: 14px; font-weight: 600; cursor: pointer; }
+        .view-tab.active { background: #0b69ff; color: #fff; border-color: #0b69ff; }
+        .view-container { display: none; }
+        .view-container.active { display: block; }
+        .mindmap-container { padding: 4px; }
+        .mindmap-container svg { width: 100%; height: 70vh; display: block; }
+        .mm-node-label { font: 12px sans-serif; dominant-baseline: middle; text-anchor: middle; }
+        .mm-node-circle { fill: #eef6ff; stroke: #9ec9ff; stroke-width: 2; }
+        .mm-node-circle.device { fill: #f7fff0; stroke: #bde6a1; }
+        .mm-link { stroke: #bbb; stroke-width: 2; fill: none; }
+        .mm-watermark { font-family: sans-serif; font-weight: 900; opacity: 0.14; fill: #d32f2f; pointer-events: none; text-anchor: middle; dominant-baseline: middle; }
+        .mm-state-text { font: 12px sans-serif; fill: #555; text-anchor: middle; dominant-baseline: hanging; pointer-events: none; }
     </style>
     <script>
         let ws = null;
@@ -148,25 +162,41 @@
         }
 
         function buildCanonicalRootHubMap(nodes) {
-            // Only coalesce companion roothubs for USB 3 (SS) tier; keep both HS ports visible
+            // Coalesce by root port. Prefer an SS roothub when present; if not, pick one HS roothub.
             const canonicalByPort = new Map(); // portIdx -> canonicalRootId like '4-1'
+            const hsFallbackByPort = new Map(); // portIdx -> chosen HS root id
             for (const n of nodes) {
                 if (!n || !n.isHub) continue;
                 const pid = n.parentId ? String(n.parentId) : 'server';
                 const rootPort = parseRootPort(String(n.id));
                 if (pid !== 'server' || !rootPort) continue;
                 const tier = busTierForId(String(n.id));
-                if (tier !== 'ss') continue; // no coalescing for HS (USB 2)
-                const { bus } = parseBusAndChain(String(n.id));
-                const current = canonicalByPort.get(rootPort);
-                if (!current) {
-                    canonicalByPort.set(rootPort, String(n.id));
-                } else {
-                    // Prefer higher bus number numerically (e.g., bus 4 over 3)
-                    const existingBus = parseInt(current.split('-')[0], 10);
-                    const newBus = parseInt(bus, 10);
-                    if (newBus > existingBus) canonicalByPort.set(rootPort, String(n.id));
+                const { bus } = parseBusAndChain(String(n.id)) || {};
+                if (tier === 'ss') {
+                    const current = canonicalByPort.get(rootPort);
+                    if (!current) {
+                        canonicalByPort.set(rootPort, String(n.id));
+                    } else {
+                        // Prefer higher SS bus number (e.g., 4 over 3)
+                        const existingBus = parseInt(current.split('-')[0], 10);
+                        const newBus = parseInt(bus, 10);
+                        if (newBus > existingBus) canonicalByPort.set(rootPort, String(n.id));
+                    }
+                } else if (tier === 'hs') {
+                    const currentHs = hsFallbackByPort.get(rootPort);
+                    if (!currentHs) {
+                        hsFallbackByPort.set(rootPort, String(n.id));
+                    } else {
+                        // Prefer lower HS bus number for stability
+                        const existingBus = parseInt(currentHs.split('-')[0], 10);
+                        const newBus = parseInt(bus, 10);
+                        if (newBus < existingBus) hsFallbackByPort.set(rootPort, String(n.id));
+                    }
                 }
+            }
+            // Fill gaps with HS fallback when no SS canonical exists
+            for (const [port, hsId] of hsFallbackByPort.entries()) {
+                if (!canonicalByPort.has(port)) canonicalByPort.set(port, hsId);
             }
             return canonicalByPort;
         }
@@ -233,10 +263,140 @@
             return null;
         }
 
+        // --- Relational (mind map) view module ---
+        const MindMap = (() => {
+            function generationText(n) {
+                if (!n) return '';
+                if (n.modelGen === 5) return '5';
+                if (n.modelGen === 4) return '4';
+                return '';
+            }
+            function labelForMm(n) {
+                if (!n) return '';
+                if (n.id === 'server') return 'Provisioning Server';
+                if (n.isHub) return 'USB Hub';
+                if (n.serial) return n.serial;
+                if (n.vendor || n.product) return (n.vendor||'') + ':' + (n.product||'');
+                const idStr = String(n.id||'');
+                let portNum = '';
+                const dotParts = idStr.split('.');
+                if (dotParts.length > 1) portNum = dotParts[dotParts.length - 1];
+                else {
+                    const dashIdx = idStr.lastIndexOf('-');
+                    if (dashIdx !== -1) portNum = idStr.substring(dashIdx + 1);
+                }
+                if (portNum && /^\d+$/.test(portNum)) return `Port ${portNum}`;
+                return 'Port';
+            }
+            function polarToCartesian(cx, cy, r, a) { return { x: cx + r*Math.cos(a), y: cy + r*Math.sin(a) }; }
+
+            function drawLink(svg, x1, y1, x2, y2) {
+                const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+                path.setAttribute('d', `M ${x1} ${y1} Q ${mx} ${my} ${x2} ${y2}`);
+                path.setAttribute('class', 'mm-link');
+                svg.appendChild(path);
+            }
+            function drawNode(svg, x, y, n, isHub, statePos, metrics) {
+                const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+                const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                const radius = (n && n.id === 'server') ? metrics.serverR : (isHub ? metrics.hubR : metrics.deviceR);
+                circle.setAttribute('cx', x); circle.setAttribute('cy', y); circle.setAttribute('r', radius);
+                circle.setAttribute('class', 'mm-node-circle' + (n && !n.isHub ? ' device' : ''));
+                g.appendChild(circle);
+
+                const genTxt = generationText(n||{});
+                if (!isHub && genTxt) {
+                    const wm = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                    wm.setAttribute('x', x); wm.setAttribute('y', y + 2);
+                    wm.setAttribute('class', 'mm-watermark');
+                    const len = String(genTxt).length;
+                    const fontSize = (len <= 2 ? 28 : (len <= 4 ? 16 : 12)) * (metrics.watermarkMul||1);
+                    wm.setAttribute('font-size', String(fontSize));
+                    wm.textContent = genTxt; g.appendChild(wm);
+                }
+
+                const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                t.setAttribute('x', x); t.setAttribute('y', y); t.setAttribute('class', 'mm-node-label');
+                t.setAttribute('font-size', String(metrics.labelFont));
+                t.textContent = labelForMm(n||{}); g.appendChild(t);
+
+                if (!isHub && n && n.state) {
+                    const st = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                    st.setAttribute('x', x);
+                    st.setAttribute('y', statePos === 'above' ? (y - (metrics.deviceR + 12)) : (y + (metrics.deviceR + 12)));
+                    st.setAttribute('class', 'mm-state-text'); st.setAttribute('font-size', String(metrics.stateFont));
+                    st.textContent = String(n.state); g.appendChild(st);
+                }
+
+                svg.appendChild(g);
+            }
+
+            function render(nodes, svg) {
+                while (svg.firstChild) svg.removeChild(svg.firstChild);
+                const width = svg.clientWidth || svg.parentElement.clientWidth;
+                const height = svg.clientHeight || 600;
+                const cx = width/2, cy = Math.max(height/2, 250);
+
+                // Canonical roots and top-level hubs
+                const canonicalByPort = buildCanonicalRootHubMap(nodes);
+                const emitted = new Set();
+                const topLevelHubs = [];
+                for (const n of nodes) {
+                    if (!n || !n.isHub) continue;
+                    const pid = String(n.parentId||'server');
+                    if (pid !== 'server' || !/^\d+-\d+$/.test(String(n.id))) continue;
+                    const cid = canonicalizeIdByRoot(String(n.id), canonicalByPort);
+                    if (emitted.has(cid)) continue; emitted.add(cid);
+                    topLevelHubs.push(Object.assign({}, n, { id: cid }));
+                }
+
+                // Count visible things for scaling
+                const direct = nodes.filter(d => !d.isHub && String(d.parentId||'server') === 'server' && /^\d+-\d+$/.test(String(d.id)) && !d.placeholder)
+                                    .map(d => Object.assign({}, d, { id: canonicalizeIdByRoot(String(d.id), canonicalByPort) }));
+                const uniqueDirect = Array.from(new Map(direct.map(d => [parseRootPort(String(d.id)), d])).values());
+                let portsTotal = 0; topLevelHubs.forEach(h => { const prefix = String(h.id)+'.'; portsTotal += nodes.filter(m => String(m.id).startsWith(prefix)).length; });
+                const visibleCount = 1 + topLevelHubs.length + uniqueDirect.length + portsTotal;
+                const scale = visibleCount <= 2 ? 1.8 : visibleCount <= 4 ? 1.5 : visibleCount <= 8 ? 1.2 : 1.0;
+                const ringScale = scale > 1 ? Math.max(0.8, 1 - (scale - 1) * 0.3) : 1;
+                const metrics = { deviceR: 34*scale, hubR: 34*scale, serverR: 36*scale, labelFont: 12*scale, stateFont: 12*scale, watermarkMul: scale };
+
+                // Hubs around server
+                const hubRadius = 170*ringScale; const hubAngleStep = topLevelHubs.length ? (2*Math.PI/topLevelHubs.length) : (2*Math.PI);
+                const hubPos = new Map();
+                topLevelHubs.forEach((h,i) => { const ang = i*hubAngleStep - Math.PI/2; const p = polarToCartesian(cx, cy, hubRadius, ang); hubPos.set(String(h.id), {x:p.x,y:p.y,angle:ang}); });
+
+                // Ports around hubs
+                topLevelHubs.forEach(h => {
+                    const base = hubPos.get(String(h.id)); if (!base) return; const prefix = String(h.id)+'.';
+                    const children = nodes.filter(m => String(m.id).startsWith(prefix)).map(m => Object.assign({}, m, { id: canonicalizeIdByRoot(String(m.id), canonicalByPort) })).sort((a,b)=>String(a.id).localeCompare(String(b.id)));
+                    const ports = children.length ? children : []; const pr = 110*ringScale; const step = ports.length ? (2*Math.PI/ports.length) : (Math.PI/2);
+                    const start = (base.angle + Math.PI) + step/2;
+                    ports.forEach((pnode, idx) => { const a = start + idx*step; const pt = polarToCartesian(base.x, base.y, pr, a); drawLink(svg, base.x, base.y, pt.x, pt.y); const pos = (base.y > pt.y) ? 'above' : 'below'; drawNode(svg, pt.x, pt.y, pnode, false, pos, metrics); });
+                });
+
+                // Direct devices around server
+                const ddRadius = 170*ringScale; const dd = uniqueDirect; const ddStep = dd.length ? (2*Math.PI/dd.length) : 0;
+                dd.forEach((d,i)=>{ const ang = i*ddStep - Math.PI/2; const p = polarToCartesian(cx, cy, ddRadius, ang); drawLink(svg, cx, cy, p.x, p.y); const pos = (cy > p.y) ? 'above' : 'below'; drawNode(svg, p.x, p.y, d, false, pos, metrics); });
+
+                // Draw hubs and server last for correct z-order
+                topLevelHubs.forEach(h => { const b = hubPos.get(String(h.id)); if (!b) return; drawLink(svg, cx, cy, b.x, b.y); drawNode(svg, b.x, b.y, h, true, null, metrics); });
+                drawNode(svg, cx, cy, { id: 'server', isHub: true }, true, null, metrics);
+            }
+
+            function init() {
+                const svg = document.getElementById('mm-svg');
+                render([{ id: 'server', isHub: true }], svg);
+                return (nodes) => render(nodes, svg);
+            }
+            return { init };
+        })();
+
         function metaFor(n) {
             const parts = [];
             if (!n.isHub && n.state) parts.push(`state: ${n.state}`);
-            if (n.image) parts.push(`image: ${n.image}`);
+            if (n.model) parts.push(`model: ${n.model}`);
+            else if (n.image) parts.push(`image: ${n.image}`);
             if (n.ip) parts.push(`ip: ${n.ip}`);
             return parts.join('  •  ');
         }
@@ -261,6 +421,7 @@
         function applyTopology(nodes) {
             try { console.log('applyTopology: received nodes', Array.isArray(nodes) ? nodes.length : nodes); } catch(e) {}
             const seen = new Set();
+            const emittedIds = new Set(); // ids after canonicalization to avoid duplicates
             // Build per-root canonical mapping so companion hubs (e.g., buses 3/4) are coalesced
             const canonicalByPort = buildCanonicalRootHubMap(nodes);
             const nodeIdSet = new Set(nodes.map(n => String(n.id)));
@@ -303,14 +464,15 @@
                 return String(a.id).localeCompare(String(b.id));
             });
             for (const n of nodes) {
-                const id = String(n.id);
-                if (id === 'server') { seen.add('server'); continue; }
-                // Drop non-canonical duplicates when a canonicalized id also exists
-                const canonicalId = canonicalizeIdByRoot(id, canonicalByPort);
-                if (canonicalId !== id && nodeIdSet.has(canonicalId)) {
-                    try { console.log('applyTopology: drop companion duplicate', id, '→', canonicalId); } catch(e) {}
+                const rawId = String(n.id);
+                if (rawId === 'server') { seen.add('server'); continue; }
+                // Canonicalize id by root-port; drop if it maps to an already-present id
+                const canonicalId = canonicalizeIdByRoot(rawId, canonicalByPort);
+                if (canonicalId !== rawId && (nodeIdSet.has(canonicalId) || emittedIds.has(canonicalId))) {
+                    try { console.log('applyTopology: drop companion duplicate', rawId, '→', canonicalId); } catch(e) {}
                     continue;
                 }
+                const id = canonicalId; // use canonical id for rendering and grouping
                 seen.add(id);
                 let parentId = n.parentId ? String(n.parentId) : 'server';
                 // Re-map parent to canonical so children of hidden companion hubs attach correctly
@@ -358,6 +520,7 @@
                         childrenEl.appendChild(el);
                     }
                 }
+                emittedIds.add(id);
             }
             // Do not remove unseen elements blindly. Only the backend should decide removals.
             // This avoids pruning placeholders or briefly missing nodes during enumeration.
@@ -378,6 +541,8 @@
                         try { console.log('ws: topology message nodes', msg.nodes.length, 'removed', Array.isArray(msg.removed) ? msg.removed.length : 0); } catch(e) {}
                         // Apply updates first
                         applyTopology(msg.nodes);
+                        // Also update relational view if active
+                        if (window.__mmApply) { try { window.__mmApply(msg.nodes); } catch(e) {} }
                         // Then process removals explicitly from backend
                         if (Array.isArray(msg.removed)) {
                             for (const id of msg.removed) {
@@ -407,16 +572,37 @@
 <body>
     <%view navbar %>
     
-    <h1>USB Topology</h1>
-    
-    <div class="topology-container">
-        <div id="topology-root"></div>
+    <h1>Devices</h1>
+    <div class="view-tabs">
+        <button id="tab-rel" class="view-tab active">Relational</button>
+        <button id="tab-topo" class="view-tab">Detail</button>
+    </div>
+    <div id="rel-view" class="view-container active">
+        <div class="mindmap-container"><svg id="mm-svg"></svg></div>
+    </div>
+    <div id="topo-view" class="view-container">
+        <div class="topology-container">
+            <div id="topology-root"></div>
+        </div>
     </div>
     
     <script>
         const topologyRoot = document.getElementById('topology-root');
         // Initialize with a server root to minimize layout shifts
         applyTopology([{ id: 'server', isHub: true }]);
+        // Initialize full relational view
+        window.__mmApply = MindMap.init();
+        // Tabs
+        const tabRel = document.getElementById('tab-rel');
+        const tabTopo = document.getElementById('tab-topo');
+        const relView = document.getElementById('rel-view');
+        const topoView = document.getElementById('topo-view');
+        function setActive(which){
+            if (which==='rel'){ tabRel.classList.add('active'); tabTopo.classList.remove('active'); relView.classList.add('active'); topoView.classList.remove('active'); }
+            else { tabTopo.classList.add('active'); tabRel.classList.remove('active'); topoView.classList.add('active'); relView.classList.remove('active'); }
+        }
+        tabRel.addEventListener('click', ()=>setActive('rel'));
+        tabTopo.addEventListener('click', ()=>setActive('topo'));
         initWebSocket();
     </script>
 </body>
