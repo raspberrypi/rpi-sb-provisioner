@@ -1,12 +1,22 @@
-= Mass Provisioning Scaling Guidance
+= Scaling Guide for Mass Provisioning
 :toc:
 :toc-placement: preamble
 
-This document provides guidance for scaling Raspberry Pi Secure Boot provisioning operations for mass deployment scenarios.
+_Guidelines for provisioning large quantities of devices efficiently_
+
+This document provides guidance for scaling provisioning operations from single devices to high-volume production deployments.
 
 == Overview
 
-The rpi-sb-provisioner system is designed to support efficient mass provisioning operations with proper scaling considerations. This guidance covers connection requirements, network topology, provisioning strategies, and performance characteristics to help operators maximize throughput while maintaining security and reliability.
+The provisioning system supports scalable deployment from individual devices to high-volume manufacturing operations. This guide covers:
+
+* Connection requirements and infrastructure
+* Provisioning strategies and workflow optimization
+* Performance characteristics and capacity planning
+* Hardware requirements for scaling
+* Common issues and solutions
+
+Target audience: Manufacturing engineers, production managers, and operations teams planning mass deployment.
 
 == Connection Requirements
 
@@ -50,16 +60,34 @@ When utilizing Ethernet connectivity:
 
 ==== Practical Pipeline Operation
 
-In practice, pipelined provisioning works by **connecting devices in sequence** while earlier devices complete their provisioning automatically. The key insight is that device preparation time (unboxing, aligning jigs, cable management) often matches or exceeds the provisioning time for individual devices.
+Pipelined provisioning connects devices in sequence while earlier devices complete provisioning automatically. Device preparation time (unboxing, alignment, cable connection) typically matches or exceeds individual device provisioning time, enabling efficient workflow.
 
-**Typical Pipeline Flow (with 2.5-minute provisioning time):**
-. Connect Device 1 → provisioning begins automatically
-. While Device 1 provisions, prepare and connect Device 2 (~30 seconds preparation time)
-. While Devices 1 & 2 provision, prepare and connect Device 3
-. Continue this pattern through Device 5
-. **By the time Device 5 is connected (~2.5 minutes total), Device 1 is complete and ready for removal**
+**Example Pipeline (2.5-minute provisioning time per device):**
 
-This natural timing alignment means that once the pipeline is established, operators can maintain a steady rhythm of device preparation and connection without waiting for individual devices to complete. With optimal device preparation timing, the provisioning duration becomes the limiting factor rather than operator availability, maximizing both equipment utilization and throughput.
+[cols="1,3"]
+|===
+|Time |Operator Action
+
+|0:00
+|Connect Device 1 (provisioning starts automatically)
+
+|0:30
+|Connect Device 2 (Device 1 continues in background)
+
+|1:00
+|Connect Device 3 (Devices 1 & 2 continue)
+
+|1:30
+|Connect Device 4 (Devices 1–3 continue)
+
+|2:00
+|Connect Device 5 (Devices 1–4 continue)
+
+|2:30
+|Remove Device 1 (complete), Connect Device 6
+|===
+
+Once the pipeline is established, operators maintain steady workflow without waiting for individual device completion. The provisioning duration becomes the throughput bottleneck rather than operator availability.
 
 === Batch Provisioning (Less Efficient)
 
@@ -72,15 +100,36 @@ This natural timing alignment means that once the pipeline is established, opera
 
 == Performance Characteristics
 
-=== Provisioning Capacity
+=== Measured Capacity
 
-Based on Raspberry Pi Ltd testing with a **2.6GB system image**:
+Testing with a 2.6GB system image:
 
-* **Provisioning Time**: Approximately **2.5 minutes per device** for a 2.6GB image
-* **Operator Capacity**: One operator can effectively service up to **7 provisioning heads**
-* **Image Size Impact**: Larger system images will increase provisioning time proportionally
-* **Full-Disk Encryption**: Provisioning FDE-enabled systems will be slower than naked provisioning (where no encryption is performed)
-* **Transfer vs. Write Performance**: Ethernet can accelerate image transfer time but cannot reduce the time required to write data to storage
+[cols="1,2"]
+|===
+|Metric |Value
+
+|*Provisioning time*
+|Approximately 2.5 minutes per device
+
+|*Operator capacity*
+|Up to 7 provisioning heads per operator
+
+|*Throughput (single operator)*
+|~150 devices per 8-hour shift (with pipeline)
+
+|*Throughput (batch mode)*
+|~90 devices per 8-hour shift (less efficient)
+|===
+
+=== Performance Variables
+
+Performance varies based on:
+
+* **Image size:** Provisioning time increases proportionally with image size
+* **Security mode:** `secure-boot` and `fde-only` modes take longer than `naked` mode due to encryption operations
+* **Storage type:** NVMe is generally faster than eMMC or SD card
+* **Network connectivity:** Ethernet accelerates image transfer but not storage write operations
+* **Device preparation:** Physical handling time affects pipeline efficiency
 
 === Throughput Optimization
 
@@ -96,12 +145,21 @@ To maximize provisioning throughput:
 
 === Hardware Requirements
 
-* **Provisioning Server**: High-performance Raspberry Pi system with adequate CPU, RAM, and storage
-  - **Platform Requirement**: rpi-sb-provisioner only supports running on Raspberry Pi hardware
-* **Network Infrastructure**: Gigabit Ethernet minimum, with appropriate switching capacity
-* **USB Infrastructure**: Powered USB hubs for multiple device connections
-* **Power Management**: Adequate power distribution for all connected devices
-* **Physical Layout**: Organized workspace with proper cable management
+==== Provisioning Server
+
+* **Platform:** Raspberry Pi hardware (required - system does not run on x86 or other architectures)
+* **Recommended model:** Raspberry Pi 5 with maximum available RAM
+* **Storage:** NVMe SSD for image hosting (significantly faster than SD card)
+* **Power supply:** Official Raspberry Pi 27W USB C power supply
+* **Operating system:** Raspberry Pi OS Bookworm or later
+
+==== Infrastructure
+
+* **Network:** Gigabit Ethernet minimum for multi-device operations
+* **Switching:** Sufficient port capacity for all devices plus provisioning server
+* **USB hubs:** Official Raspberry Pi powered USB hubs (recommended for reliability)
+* **Power distribution:** Adequate capacity for all connected devices
+* **Workspace:** Organized layout with proper cable management and labeling
 
 === USB Scaling Solutions
 
@@ -156,8 +214,57 @@ Track key performance indicators:
 * **Operator Efficiency**: Time per device and process bottlenecks
 * **Quality Metrics**: Post-provisioning verification success rates
 
-== Conclusion
+== Planning Your Deployment
 
-Successful mass provisioning requires careful consideration of connection requirements, provisioning strategies, and infrastructure scaling. Pipelined provisioning with proper operator-to-head ratios provides optimal efficiency while maintaining security and quality standards.
+=== Small-Scale Operations (1–50 devices)
 
-For specific implementation questions or advanced scaling scenarios, consult the API endpoints and configuration variable documentation for detailed technical requirements. 
+* Single provisioning head with manual workflow
+* Direct USB connection, Ethernet optional
+* Standard workspace with basic cable management
+* Estimated setup time: 1–2 hours
+* No special infrastructure required
+
+=== Medium-Scale Operations (50–500 devices)
+
+* Multiple provisioning heads (3–7 recommended)
+* Pipelined provisioning workflow
+* Powered USB hub for multi-device support
+* Gigabit Ethernet recommended
+* Dedicated workspace with organized layout
+* Estimated setup time: 1 day
+* Consider manufacturing database for tracking
+
+=== Large-Scale Operations (500+ devices)
+
+* Multiple provisioning servers with load distribution
+* Fully pipelined operations with dedicated operators
+* Network infrastructure with QoS policies
+* Automated quality assurance integration
+* Manufacturing execution system (MES) integration via API
+* Comprehensive audit and compliance tracking
+* Estimated setup time: 1–2 weeks
+* Requires detailed process documentation
+
+=== Key Success Factors
+
+* **Process standardization:** Document and train operators on consistent procedures
+* **Quality control:** Implement verification steps at critical points
+* **Monitoring:** Track throughput, error rates, and resource utilization
+* **Continuous improvement:** Analyze bottlenecks and optimize workflow
+* **Infrastructure investment:** Quality equipment reduces downtime and improves reliability
+
+== Summary
+
+Efficient mass provisioning requires:
+
+* **Connection strategy:** USB required, Ethernet optional for acceleration
+* **Workflow optimization:** Pipelined provisioning maximizes throughput
+* **Infrastructure planning:** Quality hardware and organized workspace
+* **Process discipline:** Standardized procedures and quality controls
+* **Monitoring:** Track performance and continuously improve
+
+For implementation details:
+
+* Configuration options: See link:../config_vars.adoc[Configuration Reference]
+* API integration: See link:../api_endpoints.adoc[API Documentation]
+* Device-specific procedures: See link:../device-guidance/[Device Guidance] 

@@ -15,7 +15,7 @@ This configuration is permanent and stored in the device EEPROM.
 
 == Step-by-Step Guide
 
-=== Part 1: One-Time GPIO Configuration
+=== Part 1: One-time GPIO configuration
 
 Before provisioning, configure the device to use GPIO pin 8 for RPIBOOT mode.
 
@@ -70,7 +70,7 @@ After GPIO 8 configuration is complete, the device can be provisioned.
 *Required materials:*
 
 * One jumper wire
-* One USB-A to USB-C cable
+* One USB A to USB C cable
 
 *Connection procedure:*
 
