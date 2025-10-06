@@ -1016,7 +1016,44 @@ namespace provisioner {
 
         app.registerHandler("/devices/{serialno}/key/private", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback, const std::string &serialno) {
             auto resp = HttpResponse::newHttpResponse();
-            LOG_INFO << "Private key request for serial: '" << serialno << "'";
+            LOG_WARN << "SECURITY: Private key download request for serial: '" << serialno << "' from " << AuditLog::getClientIP(req);
+            
+            // SECURITY CHECK: This endpoint is disabled by default for security reasons
+            // Private keys should NEVER be exposed via HTTP in production environments
+            auto privateKeyAccessEnabled = provisioner::utils::getConfigValue("RPI_SB_PROVISIONER_ENABLE_PRIVATE_KEY_API");
+            if (!privateKeyAccessEnabled || *privateKeyAccessEnabled != "true") {
+                LOG_ERROR << "SECURITY: Private key API access denied - endpoint is disabled. "
+                          << "Set RPI_SB_PROVISIONER_ENABLE_PRIVATE_KEY_API=true in /etc/rpi-sb-provisioner/config to enable this DANGEROUS endpoint.";
+                
+                // Add audit log entry for denied access attempt
+                AuditLog::logHandlerAccess(req, "/devices/" + serialno + "/key/private");
+                AuditLog::logFileSystemAccess("DENIED_PRIVATE_KEY_ACCESS", 
+                    "/var/log/rpi-sb-provisioner/" + serialno + "/keypair/" + serialno + ".der", 
+                    false, 
+                    "", 
+                    "Private key API is disabled for security. Client IP: " + AuditLog::getClientIP(req));
+                
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Private key download API is disabled for security reasons. "
+                    "This endpoint must be explicitly enabled in configuration: "
+                    "Set RPI_SB_PROVISIONER_ENABLE_PRIVATE_KEY_API=true in /etc/rpi-sb-provisioner/config. "
+                    "WARNING: Enabling this endpoint exposes device private keys via HTTP and should only be done in secure, isolated networks.",
+                    drogon::k403Forbidden,
+                    "Endpoint Disabled",
+                    "PRIVATE_KEY_API_DISABLED",
+                    "This is a security feature. Private keys are cryptographic secrets that should not be transmitted over HTTP."
+                );
+                callback(resp);
+                return;
+            }
+            
+            // Log that this dangerous endpoint is enabled and being used
+            LOG_WARN << "SECURITY WARNING: Private key API is ENABLED and being accessed. "
+                     << "This is a security risk. Private keys are being transmitted over HTTP.";
+            
+            // Add audit log entry for handler access
+            AuditLog::logHandlerAccess(req, "/devices/" + serialno + "/key/private");
             
             if (serialno.empty()) {
                 LOG_ERROR << "Empty serial number in request";
@@ -1034,6 +1071,10 @@ namespace provisioner {
             std::string keyPath = "/var/log/rpi-sb-provisioner/" + provisioner::utils::sanitize_path_component(serialno) + "/keypair/" + provisioner::utils::sanitize_path_component(serialno) + ".der";
             std::ifstream keyFile(keyPath);
             if (!keyFile.is_open()) {
+                // Log failed file access to audit log
+                AuditLog::logFileSystemAccess("READ_PRIVATE_KEY", keyPath, false, "", 
+                    "Private key file not found for serial: " + serialno + ", Client IP: " + AuditLog::getClientIP(req));
+                
                 auto resp = provisioner::utils::createErrorResponse(
                     req,
                     "Private key file not found",
@@ -1045,6 +1086,16 @@ namespace provisioner {
                 callback(resp);
                 return;
             }
+
+            // CRITICAL SECURITY LOG: Private key is being transmitted
+            LOG_WARN << "SECURITY ALERT: Private key for device " << serialno 
+                     << " is being transmitted to " << AuditLog::getClientIP(req);
+            
+            // Log successful private key access to audit log
+            AuditLog::logFileSystemAccess("READ_PRIVATE_KEY", keyPath, true, "", 
+                "CRITICAL: Private key transmitted for serial: " + serialno + 
+                ", Client IP: " + AuditLog::getClientIP(req) + 
+                ", User-Agent: " + req->getHeader("User-Agent"));
 
             std::stringstream buffer;
             buffer << keyFile.rdbuf();
