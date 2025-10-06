@@ -37,3 +37,4 @@ Most endpoints support content negotiation through the `Accept` header:
 
 If no `Accept` header is provided or if it doesn't contain a supported MIME type, the API defaults to returning JSON responses.
 
+

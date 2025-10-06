@@ -207,3 +207,4 @@ HTTP 200 OK with no body on success.
 - Deleting an image will cancel any ongoing SHA256 calculation
 - Both the image file and its .sha256 sidecar file are removed
 
+

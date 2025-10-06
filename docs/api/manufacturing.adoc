@@ -125,3 +125,4 @@ On error, the endpoint returns a JSON object with error details:
 - For large datasets, it is recommended to use pagination to improve performance.
 - The database path is configured using the <<config_vars.adoc#rpi_sb_provisioner_manufacturing_db,RPI_SB_PROVISIONER_MANUFACTURING_DB>> setting as described in the configuration documentation.
 
+
