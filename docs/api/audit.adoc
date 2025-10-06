@@ -64,3 +64,4 @@ The Audit Log API provides access to security audit logs that track all system a
 - Logs are stored in SQLite database at `/srv/rpi-sb-provisioner/audit.db`
 - Database has restricted permissions (0640)
 
+

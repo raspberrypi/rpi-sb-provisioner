@@ -105,3 +105,4 @@ Error:
 - Calculations are automatically cancelled when no clients are listening
 - SHA256 sidecar files (.sha256) are not hashable and will return an error
 
+

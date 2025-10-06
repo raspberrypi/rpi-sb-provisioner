@@ -75,3 +75,4 @@ If QR code parameter is missing:
 - This endpoint is particularly useful for integration with barcode scanners or mobile applications.
 - The QR code value is checked against the `rpi_duid` field in the manufacturing database.
 
+
