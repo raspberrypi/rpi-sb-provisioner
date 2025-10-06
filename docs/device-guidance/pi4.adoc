@@ -1,100 +1,186 @@
-= Raspberry Pi 4 Device Guidance
+= Raspberry Pi 4 Connection Guide
 
-== Connecting Raspberry Pi 4 to rpi-sb-provisioner
+_How to prepare Raspberry Pi 4 devices for provisioning_
 
-=== Prerequisites - GPIO Configuration
+== Overview
 
-Unlike Raspberry Pi 5, the Raspberry Pi 4 does not have a built-in power button to force RPIBOOT mode. Before attempting to use rpi-sb-provisioner with a Raspberry Pi 4 device, you must first configure the nRPIBOOT GPIO pin.
+Raspberry Pi 4 differs from Raspberry Pi 5 in its boot mode entry method:
 
-**Recommended GPIO**: GPIO 8
+* Raspberry Pi 5 has a built-in power button
+* Raspberry Pi 4 requires GPIO configuration
 
-=== Step 1 - Configure nRPIBOOT GPIO using recovery.bin
+Each Raspberry Pi 4 device requires one-time GPIO configuration before it can be provisioned.
 
-Before provisioning, you must assign the nRPIBOOT function to a specific GPIO pin using recovery.bin:
+This configuration is permanent and stored in the device EEPROM.
 
-1. **Download and prepare recovery.bin** following the instructions at https://github.com/raspberrypi/usbboot/tree/master/secure-boot-recovery#step-2---select-the-nrpiboot-gpio[GitHub usbboot secure-boot-recovery documentation]
-2. **Configure GPIO 8** as the nRPIBOOT pin using the recovery.bin process
-3. **Verify the configuration** has been applied to the device EEPROM (see <<verifying-gpio-8-configuration,Verifying GPIO 8 Configuration>> below)
+== Step-by-Step Guide
 
-This configuration step only needs to be performed **once per device** and will persist in the device EEPROM.
+=== Part 1: One-Time GPIO Configuration
 
-=== Step 2 - Provisioning Connection
+Before provisioning, configure the device to use GPIO pin 8 for RPIBOOT mode.
 
-To provision a Raspberry Pi 4 device after GPIO configuration:
+*Requirements:*
 
-1. **Prepare a jumper wire or connection** to short GPIO 8 to ground
-2. **Connect GPIO 8 to ground** (GND pin) on the Raspberry Pi 4
-3. **While maintaining the GPIO 8 to ground connection**, plug the USB cable into the device to connect it to your provisioning machine
-4. **Keep the GPIO connection in place throughout the entire provisioning process**
+* Raspberry Pi 4 device
+* SD card with Raspberry Pi OS
+* `recovery.bin` tool
 
-Unlike Raspberry Pi 5, **no re-connection procedure is required** - the device will proceed through all provisioning phases automatically while the GPIO remains connected to ground.
+*Procedure:*
 
-=== Important Notes
+1. Follow the official instructions at: +
+https://github.com/raspberrypi/usbboot/tree/master/secure-boot-recovery#step-2---select-the-nrpiboot-gpio
 
-* **One-time setup**: The GPIO configuration using recovery.bin only needs to be done once per device
-* **GPIO 8 recommended**: We recommend using GPIO 8 for consistency, as referenced in the https://github.com/raspberrypi/usbboot/tree/master/secure-boot-recovery#step-2---select-the-nrpiboot-gpio[usbboot documentation]
-* **Maintain connection**: The GPIO 8 to ground connection must be maintained throughout the entire provisioning process
-* **No re-plug required**: Unlike Raspberry Pi 5, no disconnection and re-connection is needed
-* **Cable quality**: Ensure you are using a high-quality USB cable as specified in the main documentation
-* **Complete process**: Do not release the GPIO connection until provisioning is fully complete
+2. Use the `recovery.bin` tool to configure GPIO 8 as the RPIBOOT pin
 
-[#verifying-gpio-8-configuration]
-== Verifying GPIO 8 Configuration
+3. Verify the configuration (see verification procedure below)
 
-To verify that GPIO 8 has been successfully assigned as the nRPIBOOT pin:
+This configuration persists permanently in the device EEPROM and does not need to be repeated.
 
-1. **Boot the device normally** (without shorting any GPIO pins)
-2. **Run the following command** to read the current EEPROM configuration:
+*Recommended GPIO Pin:* GPIO 8
+
+=== Part 2: Verifying GPIO Configuration
+
+After GPIO configuration, verify the settings were applied correctly.
+
+*Verification procedure:*
+
+1. Boot the Raspberry Pi 4 normally with an SD card containing Raspberry Pi OS
+
+2. Open a terminal and execute:
 +
 ----
-$ sudo rpi-eeprom-config
+sudo rpi-eeprom-config
 ----
 
-3. **Look for the GPIO configuration** in the output. You should see a line similar to:
+3. Verify the output contains:
 +
 ----
 WAKE_ON_GPIO=1
 GPIO_EXPANDER_CFG=0x00000008
 ----
+
+If these lines are present, the configuration is correct and the device is ready for provisioning.
+
+If these lines are not present, repeat the recovery.bin configuration procedure.
+
+=== Part 3: Provisioning Connection Procedure
+
+After GPIO 8 configuration is complete, the device can be provisioned.
+
+*Required materials:*
+
+* One jumper wire
+* One USB-A to USB-C cable
+
+*Connection procedure:*
+
+1. Connect *GPIO 8* to *GND* (ground) on the Raspberry Pi 4 using the jumper wire
 +
-Or other GPIO-related configuration entries that indicate GPIO 8 has been configured for nRPIBOOT functionality.
+This activates RPIBOOT mode.
 
-4. **Alternative verification**: You can also extract the full EEPROM image and inspect it:
-+
+2. While maintaining the GPIO 8 to GND connection, connect the USB cable from your provisioning computer to the Raspberry Pi 4
+
+3. Maintain the jumper wire connection throughout the entire provisioning process
+
+4. Provisioning will begin automatically
+
+*Note:* Unlike Raspberry Pi 5, no disconnection and reconnection is required. The device will complete all provisioning phases while the jumper remains in place.
+
+=== Determining Completion
+
+Monitor the device LEDs during provisioning:
+
+* *Both LEDs off* = Provisioning is complete
+* The jumper wire can now be removed
+* The USB cable can be disconnected
+* The device is ready for deployment
+
+== Important Points To Remember
+
+[cols="1,2"]
+|===
+|Point |Explanation
+
+|*One-time setup*
+|The GPIO configuration only needs to be done once per device. It is permanent.
+
+|*GPIO 8 recommended*
+|Use GPIO 8 for consistency. Other GPIO pins can work but GPIO 8 is the standard.
+
+|*Keep jumper connected*
+|Do not remove the jumper wire during provisioning. Leave it connected until both LEDs are off.
+
+|*No re-connection needed*
+|Unlike Raspberry Pi 5, you do not need to unplug and re-plug the device during provisioning.
+
+|*Good cables matter*
+|Use a high-quality USB cable. Poor cables cause connection problems.
+|===
+
+== Troubleshooting Raspberry Pi 4
+
+=== Problem: GPIO Configuration Did Not Work
+
+*Symptoms:* When you run `sudo rpi-eeprom-config`, you do not see the GPIO settings.
+
+*Solutions:*
+
+* Follow the official recovery.bin instructions carefully: +
+https://github.com/raspberrypi/usbboot/tree/master/secure-boot-recovery#step-2---select-the-nrpiboot-gpio
+* Make sure you used the correct recovery.bin file for your device
+* Try the configuration process again
+* Boot the device and verify again with `sudo rpi-eeprom-config`
+
+*Advanced check:*
+
+You can also extract and inspect the full EEPROM:
+
 ----
-$ sudo rpi-eeprom-config --out /tmp/current-eeprom.bin
-$ rpi-eeprom-config /tmp/current-eeprom.bin
+sudo rpi-eeprom-config --out /tmp/current-eeprom.bin
+rpi-eeprom-config /tmp/current-eeprom.bin
 ----
 
-If the GPIO configuration is not present or incorrect, you will need to repeat the recovery.bin process to properly configure GPIO 8.
+=== Problem: Device Not Entering RPIBOOT Mode
 
-== Troubleshooting
+*Symptoms:* You connect GPIO 8 to ground and plug in the USB cable, but nothing happens.
 
-=== GPIO Configuration Issues
+*Solutions:*
 
-If you encounter issues with the initial GPIO configuration:
+* *Check GPIO configuration first:* Use the verification steps above to confirm GPIO 8 was configured correctly
+* *Check the physical connection:* Make sure the jumper wire connects GPIO 8 to a ground (GND) pin
+* *Try a different USB cable:* Use a shorter, high-quality cable
+* *Try a different USB port:* Some USB ports provide better power
+* *Check your provisioning computer:* Make sure it has enough power
+* *Try a different GPIO:* If GPIO 8 is not working, you can configure a different GPIO pin (but GPIO 8 is recommended)
 
-* **Follow official documentation**: Refer to the complete instructions at https://github.com/raspberrypi/usbboot/tree/master/secure-boot-recovery#step-2---select-the-nrpiboot-gpio[GitHub usbboot documentation]
-* **Verify EEPROM update**: Use the verification commands above (`sudo rpi-eeprom-config`) to confirm the GPIO configuration was successfully written to EEPROM
-* **Check for configuration entries**: Look for `WAKE_ON_GPIO=1` and `GPIO_EXPANDER_CFG` entries in the EEPROM output
-* **Repeat recovery.bin process**: If verification shows incorrect or missing GPIO configuration, repeat the recovery.bin configuration process
-* **Try alternative GPIO**: Consider using a different GPIO pin if GPIO 8 is not accessible on your setup
+=== Problem: Provisioning Stops or Hangs
 
-=== Device not entering RPIBOOT mode
+*Symptoms:* The device starts provisioning but does not finish.
 
-If your Raspberry Pi 4 device does not enter RPIBOOT mode:
+*Solutions:*
 
-* **Verify GPIO configuration**: Use the verification steps above to confirm GPIO 8 was successfully configured as nRPIBOOT
-* **Check physical connection**: Verify GPIO 8 is properly connected to a ground (GND) pin
-* **Try different GPIO**: If GPIO 8 doesn't work, try configuring and using a different GPIO pin
-* **Cable and port**: Try a shorter, higher quality USB cable and different USB port on your host machine
-* **Power supply**: Ensure the provisioning machine has sufficient power supply capability
+* *Keep the jumper wire connected:* Do not remove the GPIO 8 to ground connection during provisioning
+* *Check the logs:* See the main troubleshooting section in the README
+* *Verify the device was recognized:* Check that the provisioning system detected the device
+* *Try again:* Disconnect everything, reconnect the jumper wire securely, and try again
 
-=== Device not proceeding through provisioning
+== Summary
 
-If the device does not proceed through the provisioning phases:
+*Before first use:*
 
-* **Maintain GPIO connection**: Ensure GPIO 8 to ground connection is maintained throughout the entire process
-* **Check provisioning logs**: Review logs for any error messages
-* **Verify device recognition**: Confirm the device was initially recognized by the provisioning system
-* **Restart procedure**: Disconnect the device, ensure GPIO connection is secure, and try again 
+* Configure GPIO 8 using recovery.bin (once per device, permanent)
+* Verify with `sudo rpi-eeprom-config`
+
+*For each provisioning:*
+
+* Connect GPIO 8 to GND with jumper wire
+* Keep jumper wire connected
+* Plug in USB cable
+* Wait for both LEDs to turn off
+* Remove jumper wire and disconnect
+
+*Remember:*
+
+* No disconnection/reconnection needed (unlike Pi 5)
+* Use good quality USB cables
+* Keep jumper wire in place until complete 

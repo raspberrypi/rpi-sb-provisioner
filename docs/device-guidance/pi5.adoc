@@ -1,48 +1,135 @@
-= Raspberry Pi 5 Device Guidance
+= Raspberry Pi 5 Connection Guide
 
-== Connecting Raspberry Pi 5 to rpi-sb-provisioner
+_How to prepare Raspberry Pi 5 devices for provisioning_
 
-=== Initial Connection - Entering RPIBOOT Mode
+== Overview
 
-To provision a Raspberry Pi 5 device, you must force it into RPIBOOT mode:
+Raspberry Pi 5 has a built-in power button. Unlike Raspberry Pi 4, no GPIO configuration is required.
 
-1. **Hold the power button** on the Raspberry Pi 5 device
-2. **While continuing to hold the power button**, plug the USB-C cable into the device to connect it to your provisioning machine
-3. Keep holding the power button until the device is recognized by the provisioning system
+The connection process requires holding the power button at specific times during the procedure.
 
-=== Re-connection Procedure
+== What You Need
 
-After the initial connection, you will need to perform a re-connection procedure:
+* One USB-A to USB-C cable (high quality)
+* Your Raspberry Pi 5 device
 
-1. **Monitor the device state** until you see the status "bootstrap-fastboot-initialisation-started"
-2. **Unplug the device** from the USB-C cable
-3. **Hold the power button** on the Raspberry Pi 5 device
-4. **While continuing to hold the power button**, re-plug the USB-C cable to reconnect the device
-5. Keep holding the power button until the device proceeds to the next phase
+== The Connection Process
 
-=== Important Notes
+Raspberry Pi 5 requires a *two-step* connection process:
 
-* Ensure you are using a high-quality USB-A to USB-C cable as specified in the main documentation
-* The power button must be held during both the initial connection and the re-connection procedure
-* Do not release the power button until you confirm the device has been recognized by the provisioning system
-* If the device fails to enter RPIBOOT mode, try using a different USB port on your host machine
+=== Step 1: Initial Connection
 
-== Troubleshooting
+1. *Hold down the power button* on the Raspberry Pi 5
 
-=== Device not entering RPIBOOT mode
+2. *While holding the button*, plug the USB-C cable from your provisioning computer into the Raspberry Pi 5
 
-If your Raspberry Pi 5 device does not enter RPIBOOT mode:
+3. *Keep holding the power button* until the provisioning system recognizes the device
++
+You will see this in the web interface or system logs.
 
-* Ensure you are holding the power button **before** connecting the USB cable
-* Try a shorter, higher quality USB-A to USB-C cable
-* Try a different USB port on your host machine
-* Ensure the provisioning machine has sufficient power supply capability
+4. *Release the button*
 
-=== Device not responding after re-connection
+The device will start the bootstrap phase.
 
-If the device does not proceed after the re-connection step:
+=== Step 2: Re-Connection
 
-* Verify that you observed the "bootstrap-fastboot-initialisation-started" state before disconnecting
-* Ensure you held the power button during the re-connection
-* Check the provisioning logs for any error messages
-* Try the complete procedure again from the beginning 
+After a few moments, you need to reconnect the device:
+
+1. *Watch the status* in the web interface (http://localhost:3142)
++
+Wait until you see the status: `bootstrap-fastboot-initialisation-started`
+
+2. *Unplug the USB-C cable* from the Raspberry Pi 5
+
+3. *Hold down the power button* on the Raspberry Pi 5
+
+4. *While holding the button*, plug the USB-C cable back into the Raspberry Pi 5
+
+5. *Keep holding the power button* until the device is recognized again
+
+6. *Release the button*
+
+The device will now continue through the provisioning phases automatically.
+
+=== When Is Provisioning Complete?
+
+Watch the LEDs on the Raspberry Pi 5:
+
+* *Both LEDs off* = Provisioning is complete
+* You can now disconnect the device
+* The device is ready to use
+
+== Important Points To Remember
+
+[cols="1,2"]
+|===
+|Point |Explanation
+
+|*Two connections required*
+|You must connect, disconnect, and reconnect the device during provisioning.
+
+|*Hold button before cable*
+|Always hold the power button BEFORE plugging in the cable.
+
+|*Watch for reconnection status*
+|Wait for `bootstrap-fastboot-initialisation-started` before unplugging.
+
+|*Good cables matter*
+|Use a high-quality USB-A to USB-C cable. Poor cables cause connection problems.
+
+|*Monitor in web interface*
+|The web interface at http://localhost:3142 shows you when to reconnect.
+|===
+
+== Troubleshooting Raspberry Pi 5
+
+=== Problem: Device Not Entering RPIBOOT Mode
+
+*Symptoms:* You hold the power button and connect the cable, but nothing happens.
+
+*Solutions:*
+
+* *Hold button first:* Make sure you hold the power button BEFORE connecting the USB cable
+* *Try a better cable:* Use a shorter, high-quality USB-A to USB-C cable
+* *Try a different USB port:* Some USB ports work better than others
+* *Check power:* Make sure your provisioning computer has enough power
+* *Keep holding:* Hold the button until you see the device is recognized
+
+=== Problem: Device Not Responding After Re-Connection
+
+*Symptoms:* After the re-connection step, the device does not continue provisioning.
+
+*Solutions:*
+
+* *Check the status first:* Make sure you saw `bootstrap-fastboot-initialisation-started` before unplugging
+* *Hold button during reconnect:* You must hold the power button during the re-connection too
+* *Check the logs:* Look at the web interface or logs for error messages
+* *Start over:* Try the complete process again from Step 1
+
+=== Problem: Not Sure When To Reconnect
+
+*Symptoms:* You are not sure when to unplug and reconnect the device.
+
+*Solution:*
+
+* *Use the web interface:* Open http://localhost:3142 and go to the Services tab
+* *Watch for the status:* Wait until you see `bootstrap-fastboot-initialisation-started`
+* *Then reconnect:* When you see this status, follow the reconnection steps
+
+== Summary
+
+*Connection process:*
+
+1. Hold power button → Plug in cable → Release button
+2. Wait for `bootstrap-fastboot-initialisation-started` status
+3. Unplug cable
+4. Hold power button → Plug in cable → Release button
+5. Wait for both LEDs to turn off
+6. Provisioning complete
+
+*Remember:*
+
+* Always hold button before connecting cable
+* Watch web interface for reconnection timing
+* Use good quality cables
+* Both LEDs off = provisioning complete 
