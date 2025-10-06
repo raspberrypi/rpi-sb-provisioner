@@ -99,6 +99,8 @@ TARGET_DEVICE_SERIAL="$(udevadm info --name="$TARGET_DEVICE_PATH" --query=proper
 if [ -z "${TARGET_DEVICE_SERIAL}" ] || [ "${TARGET_DEVICE_SERIAL}" = "Broadcom" ]; then
     TARGET_DEVICE_SERIAL="${TARGET_DEVICE_PATH}"
     log "Using device path as serial: ${TARGET_DEVICE_SERIAL}"
+else
+    log "Using device serial: ${TARGET_DEVICE_SERIAL}"
 fi
 
 
@@ -351,6 +353,9 @@ getBootloaderUpdateVersion() {
    if [ -f "${latest}" ]; then
       BOOTLOADER_UPDATE_VERSION=$(strings "${latest}" | grep BUILD_TIMESTAMP | sed 's/.*=//g')
       BOOTLOADER_UPDATE_IMAGE="${latest}"
+   else
+      log "Warning: No firmware image found in ${FIRMWARE_IMAGE_DIR}/ matching size ${EEPROM_SIZE}c"
+      log "BOOTLOADER_UPDATE_IMAGE will remain unset - may cause issues if EEPROM update is required"
    fi
 }
 
@@ -436,8 +441,13 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                     BOOTCODE_BINARY_IMAGE="${FIRMWARE_IMAGE_DIR}/recovery.bin"
                     BOOTCODE_FLASHING_NAME="${SECURE_BOOTLOADER_DIRECTORY}/bootcode5.bin"
                     rpi-sign-bootcode --debug -c 2712 -i "${BOOTCODE_BINARY_IMAGE}" -o "${BOOTCODE_FLASHING_NAME}" -k "${CUSTOMER_KEY_FILE_PEM}" -v 0 -n 16
+                else
+                    log "Warning: Special re-provisioning only supported on Pi 5 (2712), skipping for device family ${TARGET_DEVICE_FAMILY}"
                 fi
             else
+                log "Normal provisioning mode (reusing cached bootloader)"
+            fi
+            if [ ! -f "/etc/rpi-sb-provisioner/special-reprovision-device/${TARGET_DEVICE_SERIAL}" ]; then
                 # Normal case: reuse cached bootcode
                 case ${TARGET_DEVICE_FAMILY} in
                     2712)
@@ -458,7 +468,9 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
             announce_start "Setting up the environment for a signed-boot capable device"
             if [ -z "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" ]; then
                 RPI_DEVICE_BOOTLOADER_CONFIG_FILE=/var/lib/rpi-sb-provisioner/bootloader.secure
-                log "Using secure bootloader config file: ${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
+                log "Using default secure bootloader config file: ${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
+            else
+                log "Using pre-configured bootloader config: ${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
             fi
 
             SOURCE_EEPROM_IMAGE=
@@ -510,6 +522,8 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                         update_eeprom "${SOURCE_EEPROM_IMAGE}" "${DESTINATION_EEPROM_IMAGE}" "${CUSTOMER_KEY_FILE_PEM}" "${CUSTOMER_PUBLIC_KEY_FILE}"
                         rpi-eeprom-digest -i "${DESTINATION_EEPROM_IMAGE}" -o "${DESTINATION_EEPROM_SIGNATURE}" -k "${CUSTOMER_KEY_FILE_PEM}"
                     fi
+                else
+                    log "Using existing EEPROM signature: ${DESTINATION_EEPROM_SIGNATURE}"
                 fi
 
                 # This directive informs the bootloader to write the public key into OTP
@@ -533,7 +547,11 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                         # Additionally, this only works on Raspberry Pi 5-family devices.
                         log "Re-signing bootcode for special re-provisioning case"
                         rpi-sign-bootcode --debug -c 2712 -i "${BOOTCODE_BINARY_IMAGE}" -o "${BOOTCODE_FLASHING_NAME}" -k "${CUSTOMER_KEY_FILE_PEM}" -v 0 -n 16
+                    else
+                        log "Warning: Special re-provisioning only supported on Pi 5 (2712), skipping for device family ${TARGET_DEVICE_FAMILY}"
                     fi
+                else
+                    log "Normal provisioning mode (not re-provisioning)"
                 fi
                 [ ! -f "/etc/rpi-sb-provisioner/special-skip-eeprom/${TARGET_DEVICE_SERIAL}" ] && timeout_fatal rpiboot -d "${SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
             else
@@ -582,7 +600,9 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                     announce_start "Setting up EEPROM update for non-secure-boot device"
                     if [ -z "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" ]; then
                         RPI_DEVICE_BOOTLOADER_CONFIG_FILE=/var/lib/rpi-sb-provisioner/bootloader.naked
-                        log "Using naked bootloader config file: ${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
+                        log "Using default naked bootloader config file: ${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
+                    else
+                        log "Using pre-configured bootloader config: ${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
                     fi
                     
                     SOURCE_EEPROM_IMAGE=
@@ -634,6 +654,8 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                             log "Creating unsigned pieeprom.sig using rpi-eeprom-digest"
                             rpi-eeprom-digest -i "${DESTINATION_EEPROM_IMAGE}" -o "${DESTINATION_EEPROM_SIGNATURE}"
                         fi
+                    else
+                        log "Using existing EEPROM signature: ${DESTINATION_EEPROM_SIGNATURE}"
                     fi
                     
                     # Simple recovery config to update EEPROM and reboot
@@ -642,6 +664,8 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                     log "Updating EEPROM to latest version"
                     [ ! -f "/etc/rpi-sb-provisioner/special-skip-eeprom/${TARGET_DEVICE_SERIAL}" ] && timeout_fatal rpiboot -d "${NON_SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
                     log "EEPROM update completed. Device rebooted."
+                else
+                    log "Reusing existing non-secure bootloader configuration"
                 fi
                 
                 # Prepare fastboot files
@@ -675,6 +699,9 @@ if [ -n "${TARGET_DEVICE_SERIAL}" ]; then
         mv "${early_log_dir}/metadata" "${target_log_dir}/metadata"
     fi
     mv "${early_log_dir}/bootstrap.log" "${target_log_dir}/bootstrap.log"
+else
+    log "Warning: TARGET_DEVICE_SERIAL is empty, logs will remain in ${EARLY_LOG_DIRECTORY}"
+    echo "[$(date +"%Y-%m-%d %H:%M:%S.$(date +%N | cut -c1-3)")] Warning: TARGET_DEVICE_SERIAL is empty, logs will remain in ${EARLY_LOG_DIRECTORY}" >> "${EARLY_LOG_DIRECTORY}/bootstrap.log"
 fi
 
 announce_stop "fastboot initialisation"
