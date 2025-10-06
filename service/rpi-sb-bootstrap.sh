@@ -432,16 +432,6 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
         SECURE_BOOTLOADER_DIRECTORY="${RPI_SB_WORKDIR}/secure-bootloader/"
         mkdir -p "${SECURE_BOOTLOADER_DIRECTORY}"
         if [ -f "${SECURE_BOOTLOADER_DIRECTORY}/config.txt" ]; then
-            case ${TARGET_DEVICE_FAMILY} in
-                2712)
-                    BOOTCODE_BINARY_IMAGE="${SECURE_BOOTLOADER_DIRECTORY}/bootcode5.bin"
-                    BOOTCODE_FLASHING_NAME="${SECURE_BOOTLOADER_DIRECTORY}/bootcode5.bin"
-                    ;;
-                2711)
-                    BOOTCODE_BINARY_IMAGE="${SECURE_BOOTLOADER_DIRECTORY}/bootcode4.bin"
-                    BOOTCODE_FLASHING_NAME="${SECURE_BOOTLOADER_DIRECTORY}/bootcode4.bin"
-                    ;;
-            esac
             log "Secure bootloader directory already exists, skipping setup"
             if [ -f "/etc/rpi-sb-provisioner/special-reprovision-device/${TARGET_DEVICE_SERIAL}" ]; then
                 # This only makes sense if you're re-provisioning a device that's already been provisioned.
@@ -453,8 +443,25 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                         die "No customer key file to use for re-provisioning. Aborting."
                     fi
                     log "Re-signing bootcode for special re-provisioning case"
+                    # For special reprovision, use the original firmware recovery.bin as source, not the cached signed bootcode
+                    BCM_CHIP=2712
+                    FIRMWARE_IMAGE_DIR="${FIRMWARE_ROOT}-${BCM_CHIP}/${FIRMWARE_RELEASE_STATUS}"
+                    BOOTCODE_BINARY_IMAGE="${FIRMWARE_IMAGE_DIR}/recovery.bin"
+                    BOOTCODE_FLASHING_NAME="${SECURE_BOOTLOADER_DIRECTORY}/bootcode5.bin"
                     rpi-sign-bootcode --debug -c 2712 -i "${BOOTCODE_BINARY_IMAGE}" -o "${BOOTCODE_FLASHING_NAME}" -k "${CUSTOMER_KEY_FILE_PEM}" -v 0 -n 16
                 fi
+            else
+                # Normal case: reuse cached bootcode
+                case ${TARGET_DEVICE_FAMILY} in
+                    2712)
+                        BOOTCODE_BINARY_IMAGE="${SECURE_BOOTLOADER_DIRECTORY}/bootcode5.bin"
+                        BOOTCODE_FLASHING_NAME="${SECURE_BOOTLOADER_DIRECTORY}/bootcode5.bin"
+                        ;;
+                    2711)
+                        BOOTCODE_BINARY_IMAGE="${SECURE_BOOTLOADER_DIRECTORY}/bootcode4.bin"
+                        BOOTCODE_FLASHING_NAME="${SECURE_BOOTLOADER_DIRECTORY}/bootcode4.bin"
+                        ;;
+                esac
             fi
             [ ! -f "/etc/rpi-sb-provisioner/special-skip-eeprom/${TARGET_DEVICE_SERIAL}" ] && timeout_fatal rpiboot -d "${SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
         else
