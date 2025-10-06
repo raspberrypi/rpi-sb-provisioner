@@ -26,6 +26,53 @@
             margin-top: 20px;
             display: inline-block;
         }
+        .controls-container {
+            margin-top: 15px;
+            margin-bottom: 15px;
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .control-group {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .control-group label {
+            font-weight: bold;
+        }
+        .control-group select,
+        .control-group input {
+            padding: 5px 10px;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+        }
+        .pagination-container {
+            margin-top: 15px;
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            justify-content: center;
+        }
+        .pagination-button {
+            padding: 8px 16px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        .pagination-button:hover:not(:disabled) {
+            background-color: #0056b3;
+        }
+        .pagination-button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        .pagination-info {
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
@@ -36,6 +83,37 @@
     <a href="/services" class="back-link">← Back to Services</a>
     
     <%view auto_refresh_toggle %>
+    
+    <div class="controls-container">
+        <div class="control-group">
+            <label for="orderSelect">Order:</label>
+            <select id="orderSelect">
+                <option value="desc" <%c++ if(@@.get<std::string>("order") == "desc") $$ << "selected"; %>>Newest First</option>
+                <option value="asc" <%c++ if(@@.get<std::string>("order") == "asc") $$ << "selected"; %>>Oldest First</option>
+            </select>
+        </div>
+        <div class="control-group">
+            <label for="pageSizeSelect">Page Size:</label>
+            <select id="pageSizeSelect">
+                <option value="25" <%c++ if(@@.get<int>("page_size") == 25) $$ << "selected"; %>>25</option>
+                <option value="50" <%c++ if(@@.get<int>("page_size") == 50) $$ << "selected"; %>>50</option>
+                <option value="100" <%c++ if(@@.get<int>("page_size") == 100) $$ << "selected"; %>>100</option>
+                <option value="200" <%c++ if(@@.get<int>("page_size") == 200) $$ << "selected"; %>>200</option>
+            </select>
+        </div>
+    </div>
+    
+    <div class="pagination-container">
+        <button class="pagination-button" id="firstPageBtn">First</button>
+        <button class="pagination-button" id="prevPageBtn">Previous</button>
+        <span class="pagination-info">
+            Page <span id="currentPage"><%c++ $$ << @@.get<int>("page"); %></span> 
+            of <span id="totalPages"><%c++ $$ << @@.get<int>("total_pages"); %></span>
+            (<span id="totalEntries"><%c++ $$ << @@.get<int>("total_entries"); %></span> total entries)
+        </span>
+        <button class="pagination-button" id="nextPageBtn">Next</button>
+        <button class="pagination-button" id="lastPageBtn">Last</button>
+    </div>
     
     <div class="log-container" id="logContainer">
     <%c++ 
@@ -62,10 +140,31 @@
             
             // UI elements
             const logContainer = document.getElementById('logContainer');
+            const orderSelect = document.getElementById('orderSelect');
+            const pageSizeSelect = document.getElementById('pageSizeSelect');
+            const firstPageBtn = document.getElementById('firstPageBtn');
+            const prevPageBtn = document.getElementById('prevPageBtn');
+            const nextPageBtn = document.getElementById('nextPageBtn');
+            const lastPageBtn = document.getElementById('lastPageBtn');
+            const currentPageSpan = document.getElementById('currentPage');
+            const totalPagesSpan = document.getElementById('totalPages');
+            const totalEntriesSpan = document.getElementById('totalEntries');
+            
+            // State variables
+            let currentPage = parseInt(currentPageSpan.textContent) || 1;
+            let totalPages = parseInt(totalPagesSpan.textContent) || 1;
+            let pageSize = parseInt(pageSizeSelect.value);
+            let order = orderSelect.value;
             
             // Function to fetch logs via API
             function fetchLogs() {
-                fetch('/api/v2/service-log/' + serviceName, {
+                const params = new URLSearchParams({
+                    page: currentPage,
+                    page_size: pageSize,
+                    order: order
+                });
+                
+                fetch('/api/v2/service-log/' + serviceName + '?' + params.toString(), {
                     headers: {
                         'Accept': 'application/json'
                     }
@@ -73,10 +172,27 @@
                 .then(response => response.json())
                 .then(data => {
                     updateLogContainer(data.logs);
+                    updatePaginationInfo(data);
                 })
                 .catch(error => {
                     console.error('Error fetching logs:', error);
                 });
+            }
+            
+            // Function to update pagination info
+            function updatePaginationInfo(data) {
+                currentPage = data.page;
+                totalPages = data.total_pages || 1;
+                
+                currentPageSpan.textContent = currentPage;
+                totalPagesSpan.textContent = totalPages;
+                totalEntriesSpan.textContent = data.total_entries || 0;
+                
+                // Update button states
+                firstPageBtn.disabled = currentPage <= 1;
+                prevPageBtn.disabled = currentPage <= 1;
+                nextPageBtn.disabled = currentPage >= totalPages;
+                lastPageBtn.disabled = currentPage >= totalPages;
             }
             
             // Function to update the log container
@@ -121,7 +237,51 @@
                 logContainer.scrollTop = logContainer.scrollHeight;
             }
             
-            // Instead, scroll to top on initial load
+            // Event listeners for controls
+            orderSelect.addEventListener('change', function() {
+                order = this.value;
+                currentPage = 1; // Reset to first page when order changes
+                fetchLogs();
+            });
+            
+            pageSizeSelect.addEventListener('change', function() {
+                pageSize = parseInt(this.value);
+                currentPage = 1; // Reset to first page when page size changes
+                fetchLogs();
+            });
+            
+            firstPageBtn.addEventListener('click', function() {
+                currentPage = 1;
+                fetchLogs();
+            });
+            
+            prevPageBtn.addEventListener('click', function() {
+                if (currentPage > 1) {
+                    currentPage--;
+                    fetchLogs();
+                }
+            });
+            
+            nextPageBtn.addEventListener('click', function() {
+                if (currentPage < totalPages) {
+                    currentPage++;
+                    fetchLogs();
+                }
+            });
+            
+            lastPageBtn.addEventListener('click', function() {
+                currentPage = totalPages;
+                fetchLogs();
+            });
+            
+            // Initialize button states on load
+            updatePaginationInfo({
+                page: currentPage,
+                total_pages: totalPages,
+                total_entries: parseInt(totalEntriesSpan.textContent) || 0
+            });
+            
+            // Scroll to top on initial load
             logContainer.scrollTop = 0;
             
             // Initialize auto-refresh with the log fetch function
