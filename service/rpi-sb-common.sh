@@ -193,9 +193,9 @@ run_customisation_script() {
         # Temporarily disable error exit to prevent script failures from aborting the provisioning process
         # Save current error exit setting and disable it
         ERROR_EXIT_WAS_SET=0
-        if [ -o errexit ]; then
-            ERROR_EXIT_WAS_SET=1
-        fi
+        case $- in
+            *e*) ERROR_EXIT_WAS_SET=1 ;;
+        esac
         set +e
         # Handle different stages with appropriate parameters
         if [ "${STAGE_NAME}" = "post-flash" ]; then

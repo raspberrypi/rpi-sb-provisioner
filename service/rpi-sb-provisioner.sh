@@ -48,7 +48,7 @@ die() {
 }
 
 simg_expanded_size() {
-    echo "$(($(simg_dump "$1" | sed -E 's/.*?Total of ([0-9]+) ([0-9]+)-byte .*/\1 * \2/')))"
+    echo "$(($(simg_dump "$1" | sed -E 's/.*Total of ([0-9]+) ([0-9]+)-byte .*/\1 * \2/')))"
 }
 
 log() {
@@ -441,7 +441,7 @@ augment_initramfs() {
     cd -
 
     # Generate depmod information
-    for kernel in $(find "${initramfs_dir}usr/lib/modules" -mindepth 1 -maxdepth 1 -type d -printf '%f\n'); do
+    find "${initramfs_dir}usr/lib/modules" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | while read -r kernel; do
         depmod --basedir "${initramfs_dir}" "${kernel}"
     done
 
