@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="900" height="650" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      .title { font: bold 18px sans-serif; }
+      .stage-title { font: bold 14px sans-serif; fill: #fff; }
+      .stage-text { font: 12px sans-serif; fill: #fff; }
+      .stage-box { stroke-width: 2; rx: 5; }
+      .stage1 { fill: #757575; stroke: #424242; }
+      .stage2 { fill: #757575; stroke: #424242; }
+      .stage3 { fill: #F57C00; stroke: #E65100; }
+      .stage4 { fill: #C62828; stroke: #B71C1C; }
+      .note { fill: #ff9800; font: bold 12px sans-serif; }
+    </style>
+    <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto">
+      <polygon points="0 0, 10 5, 0 10" fill="#333" />
+    </marker>
+  </defs>
+  
+  <!-- Title -->
+  <text x="450" y="30" class="title" text-anchor="middle">Full Disk Encryption (FDE) Boot Chain</text>
+  <text x="450" y="50" style="font: 14px sans-serif; fill: #666;" text-anchor="middle">Device Powers On</text>
+  
+  <!-- Stage 1: Boot ROM -->
+  <rect x="50" y="80" width="800" height="100" class="stage-box stage1"/>
+  <text x="70" y="105" class="stage-title">1. Boot ROM</text>
+  <text x="90" y="130" class="stage-text">• Reads Raspberry Pi Ltd retail key hash from OTP memory</text>
+  <text x="90" y="150" class="stage-text">• Verifies EEPROM bootloader signature</text>
+  <rect x="650" y="90" width="180" height="25" fill="#4CAF50" rx="3"/>
+  <text x="740" y="108" style="font: bold 12px sans-serif; fill: #fff;" text-anchor="middle">✓ RPi Retail Key</text>
+  
+  <!-- Arrow 1 -->
+  <line x1="450" y1="180" x2="450" y2="220" stroke="#333" stroke-width="3" marker-end="url(#arrowhead)"/>
+  <text x="470" y="205" style="font: 13px sans-serif; fill: #333; font-weight: bold;" text-anchor="start">Signature Valid?</text>
+  
+  <!-- Stage 2: EEPROM Bootloader -->
+  <rect x="50" y="230" width="800" height="120" class="stage-box stage2"/>
+  <text x="70" y="255" class="stage-title">2. EEPROM Bootloader</text>
+  <text x="90" y="280" class="stage-text">• Signed with Raspberry Pi Ltd retail key</text>
+  <text x="90" y="300" class="stage-text">• Any official Raspberry Pi firmware can be substituted</text>
+  <text x="90" y="320" class="stage-text">• Mounts boot.img WITHOUT signature verification (no boot.sig)</text>
+  <rect x="650" y="240" width="180" height="25" fill="#4CAF50" rx="3"/>
+  <text x="740" y="258" style="font: bold 12px sans-serif; fill: #fff;" text-anchor="middle">✓ RPi Retail Key</text>
+  
+  <!-- Arrow 2 -->
+  <line x1="450" y1="350" x2="450" y2="390" stroke="#333" stroke-width="3" marker-end="url(#arrowhead)"/>
+  <text x="470" y="375" style="font: 13px sans-serif; fill: #333; font-weight: bold;" text-anchor="start">Load without verification</text>
+  
+  <!-- Stage 3: Pre-boot Auth Environment -->
+  <rect x="50" y="400" width="800" height="140" class="stage-box stage3"/>
+  <text x="70" y="425" class="stage-title">3. Pre-boot Authentication Environment (inside unverified boot.img)</text>
+  <text x="90" y="450" class="stage-text">• No signature verification (boot.sig absent)</text>
+  <text x="90" y="470" class="stage-text">• Retrieves device-unique decryption key from OTP memory</text>
+  <text x="90" y="490" class="stage-text">• Unlocks LUKS2 encrypted container</text>
+  <text x="90" y="510" class="stage-text">• Performs pivot_root to encrypted rootfs</text>
+  <rect x="650" y="410" width="180" height="25" fill="#ff5722" rx="3"/>
+  <text x="740" y="428" style="font: bold 12px sans-serif; fill: #fff;" text-anchor="middle">✗ Not Authenticated</text>
+  
+  <!-- Arrow 3 -->
+  <line x1="450" y1="540" x2="450" y2="580" stroke="#333" stroke-width="3" marker-end="url(#arrowhead)"/>
+  
+  <!-- Stage 4: Custom OS -->
+  <rect x="50" y="590" width="800" height="50" class="stage-box stage4"/>
+  <text x="70" y="615" class="stage-title">4. Your Custom Operating System (encrypted)</text>
+  
+  <!-- Summary box -->
+  <rect x="50" y="655" width="800" height="25" fill="#fff3e0" stroke="#ff9800" stroke-width="2" rx="3"/>
+  <text x="450" y="673" style="font: bold 13px sans-serif; fill: #333;" text-anchor="middle">Encryption: ✓ Yes  |  EEPROM Auth: ✓ RPi Retail  |  Pre-boot Auth: ✗ No</text>
+</svg>
