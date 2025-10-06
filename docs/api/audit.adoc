@@ -1,0 +1,66 @@
+= Audit Log API
+
+The Audit Log API provides access to security audit logs that track all system access and operations.
+
+== /auditlog
+
+*HTTP Method:* GET
+
+*Description:* Retrieves audit log entries with optional filtering.
+
+*Parameters:*
+
+[options="header"]
+|===
+|Parameter|Type|Required|Default|Description
+|event_type|String|No|All|Filter by event type (HANDLER_ACCESS, FILE_ACCESS, SYSTEMD_LOG_ACCESS)
+|start_date|String|No|None|Filter entries after this date (YYYY-MM-DD HH:MM:SS)
+|end_date|String|No|None|Filter entries before this date (YYYY-MM-DD HH:MM:SS)
+|limit|String|No|100|Maximum number of entries to return
+|===
+
+*Response Format:*
+
+[source,json]
+----
+{
+  "audit_entries": [
+    {
+      "id": "123",
+      "timestamp": "2025-01-25 14:30:45",
+      "event_type": "HANDLER_ACCESS",
+      "client_ip": "192.168.1.100",
+      "user_agent": "Mozilla/5.0...",
+      "handler_path": "/api/v2/manufacturing"
+    },
+    {
+      "id": "124",
+      "timestamp": "2025-01-25 14:31:02",
+      "event_type": "FILE_ACCESS",
+      "operation": "DELETE",
+      "target_path": "/srv/rpi-sb-provisioner/images/old-image.img",
+      "success": "Yes",
+      "additional_info": "Image file deleted"
+    }
+  ],
+  "count": 2
+}
+----
+
+*Event Types:*
+
+[options="header"]
+|===
+|Event Type|Description
+|HANDLER_ACCESS|HTTP endpoint access
+|FILE_ACCESS|File system operations (read, write, delete, chmod, etc.)
+|SYSTEMD_LOG_ACCESS|Access to systemd service logs
+|===
+
+*Notes:*
+
+- All API access and sensitive operations are automatically logged
+- Audit logs include client IP, user agent, and timestamps
+- Logs are stored in SQLite database at `/srv/rpi-sb-provisioner/audit.db`
+- Database has restricted permissions (0640)
+

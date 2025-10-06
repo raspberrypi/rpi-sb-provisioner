@@ -1,0 +1,303 @@
+= Devices API
+
+The Devices API provides access to information about devices being provisioned, their logs, and associated cryptographic keys.
+
+== /devices
+
+*HTTP Method:* GET
+
+*Description:* Returns a list of all devices currently being provisioned or previously provisioned by the system.
+
+*Parameters:* None
+
+*Response Format:*
+
+The endpoint returns a JSON object containing an array of devices:
+
+[source,json]
+----
+{
+  "devices": [
+    {
+      "serial": "10000000abcdef",
+      "port": "usb:1-1.4",
+      "ip_address": "192.168.1.100",
+      "state": "provisioning",
+      "image": "raspios-trixie.img"
+    },
+    ...
+  ]
+}
+----
+
+*Field Descriptions:*
+
+[options="header"]
+|===
+|Field|Description
+|serial|Device serial number
+|port|USB endpoint or port identifier
+|ip_address|IP address assigned to the device during provisioning
+|state|Current state of the device (e.g., "bootstrap", "triage", "provisioning", "complete")
+|image|OS image being provisioned to the device
+|===
+
+== /devices/{serialno}
+
+*HTTP Method:* GET
+
+*Description:* Returns detailed information about a specific device identified by its serial number.
+
+*Path Parameters:*
+
+[options="header"]
+|===
+|Parameter|Type|Required|Description
+|serialno|String|Yes|Serial number of the device
+|===
+
+*Response Format:*
+
+The endpoint returns a JSON object with device details:
+
+[source,json]
+----
+{
+  "serial": "10000000abcdef",
+  "port": "usb:1-1.4",
+  "state": "provisioning"
+}
+----
+
+*Error Responses:*
+
+If the device is not found:
+
+[source,json]
+----
+{
+  "error": {
+    "status": 400,
+    "title": "Device Not Found",
+    "code": "DEVICE_NOT_FOUND",
+    "detail": "Requested serial: 10000000abcdef"
+  }
+}
+----
+
+== Device Log Endpoints
+
+=== /devices/{serialno}/log/provisioner
+
+*HTTP Method:* GET
+
+*Description:* Returns the provisioner log file for a specific device.
+
+*Path Parameters:*
+
+[options="header"]
+|===
+|Parameter|Type|Required|Description
+|serialno|String|Yes|Serial number of the device
+|===
+
+*Response Format:*
+
+Plain text log file content.
+
+*Error Responses:*
+
+If the log file is not found:
+
+[source,json]
+----
+{
+  "error": {
+    "status": 400,
+    "title": "Log Not Found",
+    "code": "LOG_NOT_FOUND",
+    "detail": "Attempted path: /var/log/rpi-sb-provisioner/{serialno}/provisioner.log"
+  }
+}
+----
+
+=== /devices/{serialno}/log/bootstrap
+
+*HTTP Method:* GET
+
+*Description:* Returns the bootstrap log file for a specific device.
+
+*Path Parameters:*
+
+[options="header"]
+|===
+|Parameter|Type|Required|Description
+|serialno|String|Yes|Serial number of the device
+|===
+
+*Response Format:*
+
+Plain text log file content.
+
+=== /devices/{serialno}/log/triage
+
+*HTTP Method:* GET
+
+*Description:* Returns the triage log file for a specific device.
+
+*Path Parameters:*
+
+[options="header"]
+|===
+|Parameter|Type|Required|Description
+|serialno|String|Yes|Serial number of the device
+|===
+
+*Response Format:*
+
+Plain text log file content.
+
+== Device Key Endpoints
+
+=== /devices/{serialno}/key/public
+
+*HTTP Method:* GET
+
+*Description:* Downloads the public key file for a specific device.
+
+*Path Parameters:*
+
+[options="header"]
+|===
+|Parameter|Type|Required|Description
+|serialno|String|Yes|Serial number of the device
+|===
+
+*Response Format:*
+
+Binary file (Content-Type: application/octet-stream) containing the device's public key.
+
+*Error Responses:*
+
+If the key file is not found:
+
+[source,json]
+----
+{
+  "error": {
+    "status": 400,
+    "title": "Key Not Found",
+    "code": "KEY_NOT_FOUND",
+    "detail": "Attempted path: /var/log/rpi-sb-provisioner/{serialno}/keypair/{serialno}.pub"
+  }
+}
+----
+
+=== /devices/{serialno}/key/private
+
+[CAUTION]
+====
+*SECURITY-CRITICAL ENDPOINT - DISABLED BY DEFAULT*
+
+This endpoint exposes device private keys via HTTP and is **DISABLED by default** for security reasons. Private keys are cryptographic secrets that should never be transmitted over insecure channels.
+====
+
+*HTTP Method:* GET
+
+*Description:* Downloads the private key file for a specific device in DER format.
+
+*Security Configuration:*
+
+This endpoint is **disabled by default** and requires explicit configuration to enable:
+
+. Edit `/etc/rpi-sb-provisioner/config`
+. Add the following line:
++
+[source,bash]
+----
+RPI_SB_PROVISIONER_ENABLE_PRIVATE_KEY_API=true
+----
+. Restart the provisioner service
+. **WARNING:** Only enable in secure, isolated networks
+
+*Path Parameters:*
+
+[options="header"]
+|===
+|Parameter|Type|Required|Description
+|serialno|String|Yes|Serial number of the device
+|===
+
+*Response Format:*
+
+Binary file (Content-Type: application/octet-stream) containing the device's private key in DER format.
+
+*Error Responses:*
+
+If the endpoint is disabled (default):
+
+[source,json]
+----
+{
+  "error": {
+    "status": 403,
+    "title": "Endpoint Disabled",
+    "code": "PRIVATE_KEY_API_DISABLED",
+    "detail": "Private key download API is disabled for security reasons. This endpoint must be explicitly enabled in configuration: Set RPI_SB_PROVISIONER_ENABLE_PRIVATE_KEY_API=true in /etc/rpi-sb-provisioner/config. WARNING: Enabling this endpoint exposes device private keys via HTTP and should only be done in secure, isolated networks.",
+    "additional": "This is a security feature. Private keys are cryptographic secrets that should not be transmitted over HTTP."
+  }
+}
+----
+
+If the key file is not found:
+
+[source,json]
+----
+{
+  "error": {
+    "status": 400,
+    "title": "Key Not Found",
+    "code": "KEY_NOT_FOUND",
+    "detail": "Attempted path: /var/log/rpi-sb-provisioner/{serialno}/keypair/{serialno}.der"
+  }
+}
+----
+
+*Security Notes:*
+
+[IMPORTANT]
+====
+**This endpoint presents significant security risks:**
+
+* Private keys are cryptographic secrets that provide complete control over device identity
+* Transmitting private keys over HTTP is inherently insecure, even on "private" networks
+* All access attempts (successful and failed) are logged to the audit log
+* Each private key download generates WARNING level logs
+* Consider using physical media (USB drive) or secure file transfer methods instead
+
+**Only enable this endpoint if:**
+
+* You are in a completely isolated test/development environment
+* You have no other means of retrieving the keys
+* You understand and accept the security implications
+* You can monitor the audit logs for unauthorized access
+====
+
+*Audit Logging:*
+
+All activity on this endpoint is heavily audited:
+
+- Denied access attempts are logged with client IP address
+- Successful downloads are logged as CRITICAL security events
+- Logs include client IP, User-Agent, and serial number
+- All events appear in `/srv/rpi-sb-provisioner/audit.db`
+
+*Alternatives to Consider:*
+
+Instead of using this endpoint, consider:
+
+1. **Physical retrieval:** Access keys directly from `/var/log/rpi-sb-provisioner/{serialno}/keypair/` on the server
+2. **Secure file transfer:** Use `scp` or `sftp` over SSH
+3. **Out-of-band delivery:** Deliver keys via secure USB drive
+4. **Key management system:** Integrate with a proper secrets management solution
+

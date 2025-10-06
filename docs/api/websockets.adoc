@@ -1,0 +1,107 @@
+= WebSocket APIs
+
+WebSocket endpoints provide real-time updates for long-running operations and dynamic data.
+
+== /ws/devices
+
+*Protocol:* WebSocket
+
+*Description:* Provides real-time updates on device topology, including USB connections, provisioning status, and device states.
+
+*Message Format:*
+
+Server sends JSON messages with current topology:
+
+[source,json]
+----
+{
+  "type": "topology",
+  "timestamp": 1706191845000,
+  "nodes": [
+    {
+      "id": "1-1.4",
+      "parentId": "server",
+      "isHub": false,
+      "vendor": "0a5c",
+      "product": "2712",
+      "productName": "BCM2712 Boot",
+      "serial": "c561b701c85be8ea",
+      "state": "provisioning",
+      "image": "raspios-2025-04-01.img",
+      "model": "CM5",
+      "ip": "192.168.1.100",
+      "modelGen": 5
+    }
+  ],
+  "removed": ["1-1.3"]
+}
+----
+
+*Notes:*
+
+- Automatically sends topology snapshot on connection
+- Broadcasts updates when devices connect/disconnect or state changes
+- Includes placeholder nodes for empty hub ports
+- The `removed` array lists device IDs that were disconnected
+
+== /ws/sha256
+
+*Protocol:* WebSocket
+
+*Description:* Provides real-time progress updates for SHA256 hash calculations of image files.
+
+*Client Messages:*
+
+Request SHA256 calculation:
+
+[source,json]
+----
+{
+  "action": "get_sha256",
+  "image_name": "raspios-2025-04-01.img"
+}
+----
+
+*Server Messages:*
+
+Progress update:
+
+[source,json]
+----
+{
+  "image_name": "raspios-2025-04-01.img",
+  "status": "pending",
+  "progress": 0.45,
+  "progress_percent": 45
+}
+----
+
+Complete:
+
+[source,json]
+----
+{
+  "image_name": "raspios-2025-04-01.img",
+  "status": "complete",
+  "sha256": "abc123def456..."
+}
+----
+
+Error:
+
+[source,json]
+----
+{
+  "image_name": "raspios-2025-04-01.img",
+  "status": "error",
+  "error": "Failed to read file"
+}
+----
+
+*Notes:*
+
+- Multiple clients can subscribe to the same image calculation
+- Progress updates are sent approximately every 5% of completion
+- Calculations are automatically cancelled when no clients are listening
+- SHA256 sidecar files (.sha256) are not hashable and will return an error
+
