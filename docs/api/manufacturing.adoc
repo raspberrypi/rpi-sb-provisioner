@@ -1,0 +1,127 @@
+[#manufacturing-database-api]
+= Manufacturing Database API
+
+The Manufacturing Database API provides access to device provisioning data collected during the provisioning process. This API allows for integration with other systems and custom UIs.
+
+== /api/v2/manufacturing
+
+*HTTP Method:* GET
+
+*Description:* Returns manufacturing database records in JSON format, with optional range support.
+
+*Parameters:*
+
+[options="header"]
+|===
+|Parameter|Type|Required|Description
+|offset|Integer|No|Number of records to skip (default: 0)
+|limit|Integer|No|Maximum number of records to return. If not specified or less than 1, returns all records
+|===
+
+*Response Format:*
+
+The endpoint returns a JSON array where each element represents a provisioned device with the following information:
+
+[source,json]
+----
+[
+  {
+    "id": 1,
+    "boardname": "CM5",
+    "serial": "c561b701c85be8ea",
+    "eth_mac": "2c:cf:67:bd:78:4f",
+    "wifi_mac": "00:00:00:00:00:00",
+    "bt_mac": "00:00:00:00:00:00",
+    "mmc_size": 15634268160,
+    "mmc_cid": "150100414a5444345206c9e4baeeba00",
+    "rpi_duid": "0000911043955412",
+    "board_revision": "0x0",
+    "processor": "BCM2712",
+    "memory": "2GB",
+    "manufacturer": "Sony UK",
+    "secure": "yes",
+    "jtag_locked": "1",
+    "eeprom_write_protected": "1",
+    "pubkey_programmed": "1",
+    "devkey_revoked": "0",
+    "signed_boot_enabled": "1",
+    "os_image_filename": "raspios-2025-04-01.img",
+    "os_image_sha256": "4f2d9c5b0e3b1d8a9c1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c",
+    "provision_ts": "2025-04-28 13:53:28"
+  },
+  ...
+]
+----
+
+*Field Descriptions:*
+
+[options="header"]
+|===
+|Field|Description
+|id|Unique identifier in the database
+|boardname|Type of Raspberry Pi board (e.g., "CM5", "RPi5")
+|serial|Device serial number
+|eth_mac|Ethernet MAC address
+|wifi_mac|WiFi MAC address (if applicable)
+|bt_mac|Bluetooth MAC address (if applicable)
+|mmc_size|Storage size in bytes
+|mmc_cid|MMC Card ID
+|rpi_duid|Raspberry Pi Device Unique Identifier
+|board_revision|Board revision code
+|processor|Processor type (e.g., "BCM2712")
+|memory|Device memory size (e.g., "2GB")
+|manufacturer|Device manufacturer
+|secure|Whether a device has been provisioned with a device unique identity
+|jtag_locked|JTAG debugging lock status (1=locked, 0=unlocked, null=unknown)
+|eeprom_write_protected|EEPROM write protection status (1=enabled, 0=disabled, null=unknown)
+|pubkey_programmed|Customer public key programming status (1=programmed, 0=not programmed, null=unknown)
+|signed_boot_enabled|Signed boot enablement status (1=enabled, 0=disabled, null=unknown)
+|provision_ts|Timestamp of when the device was provisioned
+|===
+
+*Example Usage:*
+
+To retrieve the first 10 provisioned devices:
+
+[source,bash]
+----
+curl http://localhost:3142/api/v2/manufacturing?limit=10
+----
+
+To retrieve 20 devices after skipping the first 10:
+
+[source,bash]
+----
+curl http://localhost:3142/api/v2/manufacturing?offset=10&limit=20
+----
+
+To retrieve all devices:
+
+[source,bash]
+----
+curl http://localhost:3142/api/v2/manufacturing
+----
+
+*Error Responses:*
+
+On error, the endpoint returns a JSON object with error details:
+
+[source,json]
+----
+{
+  "error": {
+    "status": 500,
+    "title": "Database Error",
+    "code": "DB_ERROR",
+    "detail": "Failed to retrieve manufacturing database data"
+  }
+}
+----
+
+*Notes:*
+
+- This endpoint can be used for building custom dashboards or integrating with other monitoring systems.
+- The data is ordered by provision timestamp in descending order (newest first).
+- For large datasets, it is recommended to use pagination to improve performance.
+- The database path is configured using the <<config_vars.adoc#rpi_sb_provisioner_manufacturing_db,RPI_SB_PROVISIONER_MANUFACTURING_DB>> setting as described in the configuration documentation.
+

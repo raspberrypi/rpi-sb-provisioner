@@ -1,0 +1,209 @@
+= Images API
+
+The Images API provides complete management of OS images used for device provisioning, including upload, download, metadata retrieval, and SHA256 hash calculation.
+
+== /get-images
+
+*HTTP Method:* GET
+
+*Description:* Lists all available OS images in the system.
+
+*Parameters:* None
+
+*Response Format:*
+
+[source,json]
+----
+[
+  {
+    "name": "raspios-2025-04-01.img",
+    "sha256": "abc123..."
+  },
+  {
+    "name": "raspios-2025-03-15.img",
+    "sha256": "Calculating..."
+  }
+]
+----
+
+*Field Descriptions:*
+
+[options="header"]
+|===
+|Field|Description
+|name|Filename of the image
+|sha256|SHA256 hash of the image (or status: "Calculating...", "Error")
+|===
+
+*Notes:*
+
+- SHA256 hashes are calculated asynchronously in the background
+- Images with "Calculating..." status will have their hash computed automatically
+- .sha256 sidecar files are not included in the listing
+
+== /get-image-metadata
+
+*HTTP Method:* GET
+
+*Description:* Retrieves detailed metadata for a specific image.
+
+*Parameters:*
+
+[options="header"]
+|===
+|Parameter|Type|Required|Description
+|name|String|Yes|Filename of the image
+|===
+
+*Response Format:*
+
+[source,json]
+----
+{
+  "name": "raspios-2025-04-01.img",
+  "size_bytes": 4294967296,
+  "size_mb": 4096.0,
+  "size_formatted": "4.00 GB",
+  "last_modified": "2025-04-01 10:30:45",
+  "estimated_process_minutes": 103
+}
+----
+
+*Field Descriptions:*
+
+[options="header"]
+|===
+|Field|Description
+|name|Filename of the image
+|size_bytes|File size in bytes
+|size_mb|File size in megabytes
+|size_formatted|Human-readable file size
+|last_modified|Last modification timestamp
+|estimated_process_minutes|Estimated time to process this image (based on 40MB/s)
+|===
+
+== /get-image-sha256
+
+*HTTP Method:* GET
+
+*Description:* Retrieves or initiates SHA256 hash calculation for a specific image.
+
+*Parameters:*
+
+[options="header"]
+|===
+|Parameter|Type|Required|Description
+|name|String|Yes|Filename of the image
+|===
+
+*Response Format:*
+
+When calculation is complete:
+
+[source,json]
+----
+{
+  "sha256": "abc123def456...",
+  "status": "complete"
+}
+----
+
+When calculation is in progress:
+
+[source,json]
+----
+{
+  "sha256": "Calculating...",
+  "status": "pending",
+  "message": "SHA256 calculation is in progress.",
+  "progress": 0.45,
+  "progress_percent": 45
+}
+----
+
+*Notes:*
+
+- If the hash is not cached, this endpoint will initiate background calculation
+- Use WebSocket endpoint `/ws/sha256` for real-time progress updates
+- SHA256 results are cached and stored in sidecar files (.sha256)
+
+== /upload-image
+
+*HTTP Method:* POST
+
+*Description:* Uploads a new OS image file to the system.
+
+*Request Format:*
+
+Multipart form data with the image file.
+
+*Response Format:*
+
+[source,json]
+----
+{
+  "success": true,
+  "message": "File uploaded successfully",
+  "filename": "raspios-2025-04-01.img",
+  "renamed": false,
+  "sha256": "Calculating..."
+}
+----
+
+If a file with the same name exists, it will be automatically renamed:
+
+[source,json]
+----
+{
+  "success": true,
+  "message": "File uploaded successfully (renamed to avoid conflict)",
+  "original_filename": "raspios.img",
+  "filename": "raspios_1.img",
+  "renamed": true,
+  "sha256": "Calculating..."
+}
+----
+
+*Notes:*
+
+- Files are automatically renamed if a conflict is detected
+- SHA256 calculation begins automatically after upload
+- Supports very large image files (multi-GB)
+
+== /delete-image
+
+*HTTP Method:* POST
+
+*Description:* Deletes an OS image file from the system.
+
+*Parameters:*
+
+[options="header"]
+|===
+|Parameter|Type|Required|Description
+|name|String|Yes|Filename of the image to delete
+|===
+
+*Response Format:*
+
+HTTP 200 OK with no body on success.
+
+*Error Responses:*
+
+[source,json]
+----
+{
+  "error": {
+    "status": 400,
+    "title": "Image Not Found",
+    "code": "IMAGE_NOT_FOUND",
+    "detail": "Requested image: raspios-2025-04-01.img"
+  }
+}
+----
+
+*Notes:*
+
+- Deleting an image will cancel any ongoing SHA256 calculation
+- Both the image file and its .sha256 sidecar file are removed
+

@@ -1,0 +1,174 @@
+= Configuration API
+
+The Configuration API provides endpoints for managing system configuration options, firmware selection, and working directory management.
+
+== /options/get
+
+*HTTP Method:* GET
+
+*Description:* Retrieves all current configuration values.
+
+*Parameters:* None
+
+*Response Format:*
+
+[source,json]
+----
+{
+  "GOLD_MASTER_OS_FILE": "/srv/rpi-sb-provisioner/images/raspios-2025-04-01.img",
+  "RPI_SB_WORKDIR": "/srv/rpi-sb-provisioner/work",
+  "RPI_SB_PROVISIONER_MANUFACTURING_DB": "/srv/rpi-sb-provisioner/manufacturing.db",
+  "RPI_DEVICE_FAMILY": "5",
+  "RPI_DEVICE_FIRMWARE_FILE": "/lib/firmware/raspberrypi/bootloader-2712/default/pieeprom-2025-01-17.bin"
+}
+----
+
+*Notes:*
+
+- Returns all configuration key-value pairs from `/etc/rpi-sb-provisioner/config`
+- Configuration values control provisioning behavior
+
+== /options/set
+
+*HTTP Method:* POST
+
+*Description:* Updates one or more configuration values.
+
+*Request Format:*
+
+[source,json]
+----
+{
+  "GOLD_MASTER_OS_FILE": "/srv/rpi-sb-provisioner/images/new-image.img",
+  "RPI_DEVICE_FAMILY": "5"
+}
+----
+
+*Response Format:*
+
+HTTP 200 OK with no body on success.
+
+*Error Responses:*
+
+[source,json]
+----
+{
+  "error": {
+    "status": 500,
+    "title": "Config Error",
+    "code": "CONFIG_WRITE_ERROR",
+    "detail": "Failed to write configuration file"
+  }
+}
+----
+
+*Notes:*
+
+- Merges provided values with existing configuration
+- Automatically creates manufacturing database file if path is set and file doesn't exist
+- Clears working directory contents if `RPI_SB_WORKDIR` is modified
+
+== /options/clear-workdir
+
+*HTTP Method:* POST
+
+*Description:* Clears all contents of the working directory specified in `RPI_SB_WORKDIR` configuration.
+
+*Parameters:* None
+
+*Response Format:*
+
+HTTP 200 OK with no body on success.
+
+*Notes:*
+
+- Useful when switching OS images or resetting provisioning state
+- Does not delete the working directory itself, only its contents
+- Safe to call even if directory doesn't exist
+
+== Firmware Management
+
+=== /options/firmware
+
+*HTTP Method:* GET
+
+*Description:* Lists available firmware versions for the configured device family.
+
+*Parameters:* None
+
+*Response Format:*
+
+Returns HTML view with firmware list, release notes, and selection interface.
+
+*Notes:*
+
+- Scans `/lib/firmware/raspberrypi/bootloader-{chip}/` for available firmware
+- Automatically groups firmware by version across release channels
+- Shows firmware from default, latest, beta, stable, and critical channels
+
+=== /options/firmware/set
+
+*HTTP Method:* POST
+
+*Description:* Sets the selected firmware file for device provisioning.
+
+*Request Format:*
+
+[source,json]
+----
+{
+  "firmware_path": "/lib/firmware/raspberrypi/bootloader-2712/default/pieeprom-2025-01-17.bin"
+}
+----
+
+*Response Format:*
+
+HTTP 200 OK with no body on success.
+
+*Error Responses:*
+
+[source,json]
+----
+{
+  "error": {
+    "status": 400,
+    "title": "Invalid Request",
+    "code": "FIRMWARE_NOT_FOUND",
+    "detail": "Selected firmware file does not exist"
+  }
+}
+----
+
+=== /options/firmware/notes/{version}
+
+*HTTP Method:* GET
+
+*Description:* Retrieves release notes for a specific firmware version.
+
+*Path Parameters:*
+
+[options="header"]
+|===
+|Parameter|Type|Required|Description
+|version|String|Yes|Firmware version in YYYY-MM-DD format
+|===
+
+*Response Format:*
+
+[source,json]
+----
+{
+  "version": "2025-01-17",
+  "notes": "## 2025-01-17: Description\n\n* Feature 1\n* Bug fix 2\n"
+}
+----
+
+*Error Responses:*
+
+[source,json]
+----
+{
+  "error": "No release notes found for version 2025-01-17"
+}
+----
+

@@ -1,0 +1,39 @@
+[#error-response-format]
+= Error Response Format
+
+All API endpoints follow a standard error response format:
+
+[source,json]
+----
+{
+  "error": {
+    "status": 400,
+    "title": "Error Title",
+    "code": "ERROR_CODE",
+    "detail": "Detailed error message",
+    "additional": "Optional additional information"
+  }
+}
+----
+
+*Field Descriptions:*
+
+[options="header"]
+|===
+|Field|Description
+|status|HTTP status code
+|title|Brief error title
+|code|Machine-readable error code
+|detail|Human-readable error description
+|additional|Optional additional context information (not always present)
+|===
+
+== Content Negotiation
+
+Most endpoints support content negotiation through the `Accept` header:
+
+- `Accept: application/json` - Returns JSON response
+- `Accept: text/html` - Returns HTML view when available
+
+If no `Accept` header is provided or if it doesn't contain a supported MIME type, the API defaults to returning JSON responses.
+

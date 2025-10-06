@@ -1,0 +1,160 @@
+= Services API
+
+The Services API provides access to information about provisioning services running on the system. These endpoints allow monitoring of service states and retrieving service logs.
+
+== /api/v2/services
+
+*HTTP Method:* GET
+
+*Description:* Returns information about all provisioning services discovered on the system. This includes both currently active services and previously run services found in the systemd journal.
+
+*Parameters:* None
+
+*Response Format:*
+
+The endpoint returns a JSON object containing an array of services:
+
+[source,json]
+----
+{
+  "services": [
+    {
+      "name": "rpi-sb-provisioner@",
+      "status": "exited",
+      "active": "inactive",
+      "instance": "10000000abcdef",
+      "base_name": "rpi-sb-provisioner",
+      "full_name": "rpi-sb-provisioner@10000000abcdef.service"
+    },
+    {
+      "name": "rpi-naked-provisioner",
+      "status": "running",
+      "active": "active",
+      "instance": "",
+      "base_name": "rpi-naked-provisioner",
+      "full_name": "rpi-naked-provisioner.service"
+    }
+  ]
+}
+----
+
+*Field Descriptions:*
+
+[options="header"]
+|===
+|Field|Description
+|name|Service name, including @ symbol for instance services
+|status|Current sub-state of the service (e.g., "running", "exited", "failed")
+|active|Current active state of the service (e.g., "active", "inactive", "failed")
+|instance|Instance parameter for template services (empty for non-template services)
+|base_name|Base service name without @ symbol or instance parameter
+|full_name|Complete systemd unit name including .service suffix
+|===
+
+*Notes:*
+
+- Services are returned in reverse chronological order (most recently active first)
+- The API discovers services from the systemd journal, so it includes both currently running and previously executed services
+- Only services with names matching "rpi-sb-*", "rpi-naked-*", or "rpi-fde-*" patterns are included
+- Services with "rpi-provisioner-ui" in the name are excluded from results
+
+== /api/v2/service-log/{name}
+
+*HTTP Method:* GET
+
+*Description:* Returns log entries for a specific provisioning service with support for pagination and ordering. This endpoint provides detailed logging information for monitoring service execution.
+
+*Path Parameters:*
+
+[options="header"]
+|===
+|Parameter|Type|Required|Description
+|name|String|Yes|Name of the service to retrieve logs for (must start with rpi-sb-, rpi-naked-, or rpi-fde-)
+|===
+
+*Query Parameters:*
+
+[options="header"]
+|===
+|Parameter|Type|Required|Default|Description
+|page|Integer|No|1|Page number to retrieve (must be >= 1)
+|page_size|Integer|No|50|Number of log entries per page (min: 1, max: 500)
+|order|String|No|desc|Order of log entries: "desc" (newest first) or "asc" (oldest first)
+|===
+
+*Response Format:*
+
+The endpoint returns a JSON object with log entries and pagination metadata:
+
+[source,json]
+----
+{
+  "logs": [
+    "2025-01-25 14:30:47 Baz",
+    "2025-01-25 14:30:46 Bar",
+    "2025-01-25 14:30:45 Foo"
+  ],
+  "service_name": "rpi-sb-provisioner@10000000abcdef.service",
+  "page": 1,
+  "page_size": 50,
+  "total_entries": 150,
+  "total_pages": 3,
+  "order": "desc"
+}
+----
+
+*Field Descriptions:*
+
+[options="header"]
+|===
+|Field|Description
+|logs|Array of log entries, each containing timestamp and message
+|service_name|Name of the service the logs belong to
+|page|Current page number
+|page_size|Number of entries per page
+|total_entries|Total number of log entries available
+|total_pages|Total number of pages available
+|order|Current ordering: "desc" (newest first) or "asc" (oldest first)
+|===
+
+*Example Usage:*
+
+To retrieve the first page with default settings (50 newest entries):
+
+[source,bash]
+----
+curl http://localhost:3142/api/v2/service-log/rpi-sb-provisioner@10000000abcdef.service
+----
+
+To retrieve page 2 with 100 entries per page, oldest first:
+
+[source,bash]
+----
+curl "http://localhost:3142/api/v2/service-log/rpi-sb-provisioner@10000000abcdef.service?page=2&page_size=100&order=asc"
+----
+
+*Error Responses:*
+
+If accessing an unauthorized service:
+
+[source,json]
+----
+{
+  "error": {
+    "status": 403,
+    "title": "Unauthorized Service",
+    "code": "SERVICE_UNAUTHORIZED",
+    "detail": "Access denied: Only logs for rpi-sb, rpi-naked, and rpi-fde services are available",
+    "additional": "Requested service: invalid-service-name"
+  }
+}
+----
+
+*Notes:*
+
+- Default page size is 50 entries, maximum is 500
+- Log entries are returned in reverse chronological order (newest first) by default
+- Access is restricted to services with approved prefixes for security
+- Pagination metadata allows for efficient browsing of large log files
+- The `page_size` parameter is capped at 500 to prevent performance issues
+
