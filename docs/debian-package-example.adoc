@@ -1,0 +1,268 @@
+= Debian Package Example
+:toc:
+:toc-title: Contents
+
+_Example of generated Debian package structure and metadata_
+
+NOTE: The examples below use "Your Organization <ops@example.com>" as the maintainer. Configure your actual organization details in `/etc/rpi-sb-provisioner/bootimg-package-config`.
+
+== Package Metadata
+
+=== Control File
+
+The maintainer field is configurable via `/etc/rpi-sb-provisioner/bootimg-package-config`.
+
+[source]
+----
+Package: rpi-sb-boot-update
+Version: a3f5e8c9b2d1
+Section: admin
+Priority: optional
+Architecture: all
+Maintainer: Your Organization <ops@example.com>
+Description: Raspberry Pi Secure Boot Update
+ This package contains a signed boot.img and boot.sig for secure boot
+ enabled Raspberry Pi devices.
+ .
+ Source image: 2024-10-06-raspios-bookworm-arm64.img
+ Image SHA256: a3f5e8c9b2d1f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1
+ .
+ This package will overwrite existing boot.img and boot.sig files in
+ /boot/firmware to apply configuration changes or kernel updates while
+ preserving the existing root filesystem.
+----
+
+=== Changelog
+
+[source]
+----
+rpi-sb-boot-update (a3f5e8c9b2d1) stable; urgency=medium
+
+  * Secure boot image update generated from: 2024-10-06-raspios-bookworm-arm64.img
+  * Source image SHA256: a3f5e8c9b2d1f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1
+  * Generated on: Mon, 06 Oct 2025 22:30:15 +0000
+  * Device family: Pi 4
+
+ -- Your Organization <ops@example.com>  Mon, 06 Oct 2025 22:30:15 +0000
+----
+
+=== Package Contents
+
+[source]
+----
+rpi-sb-boot-update_a3f5e8c9b2d1_all.deb
+├── boot/
+│   └── firmware/
+│       ├── boot.img       # Signed boot image (FAT32 filesystem containing
+│       │                  # kernel, initramfs, config.txt, and other boot files)
+│       └── boot.sig       # RSA signature
+├── usr/
+│   └── share/
+│       └── doc/
+│           └── rpi-sb-boot-update/
+│               ├── changelog.Debian.gz
+│               └── copyright
+└── DEBIAN/
+    ├── control
+    └── postinst
+----
+
+*Note:* `config.txt` is embedded inside the `boot.img` filesystem image. The bootloader mounts `boot.img` and reads configuration from the `config.txt` contained within it.
+
+== Installation Example
+
+=== Installing the Package
+
+[source,bash]
+----
+$ sudo dpkg -i rpi-sb-boot-update_a3f5e8c9b2d1_all.deb
+Selecting previously unselected package rpi-sb-boot-update.
+(Reading database ... 123456 files and directories currently installed.)
+Preparing to unpack rpi-sb-boot-update_a3f5e8c9b2d1_all.deb ...
+Unpacking rpi-sb-boot-update (a3f5e8c9b2d1) ...
+Setting up rpi-sb-boot-update (a3f5e8c9b2d1) ...
+Secure boot files installed to /boot/firmware
+Reboot required for changes to take effect
+----
+
+=== Verifying Installation
+
+[source,bash]
+----
+$ dpkg -l rpi-sb-boot-update
+Desired=Unknown/Install/Remove/Purge/Hold
+| Status=Not/Inst/Conf-files/Unpacked/halF-conf/Half-inst/trig-aWait/Trig-pend
+|/ Err?=(none)/Reinst-required (Status,Err: uppercase=bad)
+||/ Name                Version         Architecture Description
++++-===================-===============-============-==================================
+ii  rpi-sb-boot-update  a3f5e8c9b2d1    all          Raspberry Pi Secure Boot Update
+
+$ dpkg -L rpi-sb-boot-update
+/.
+/boot
+/boot/firmware
+/boot/firmware/boot.img
+/boot/firmware/boot.sig
+/usr
+/usr/share
+/usr/share/doc
+/usr/share/doc/rpi-sb-boot-update
+/usr/share/doc/rpi-sb-boot-update/changelog.Debian.gz
+/usr/share/doc/rpi-sb-boot-update/copyright
+----
+
+=== Viewing Package Information
+
+[source,bash]
+----
+$ dpkg -s rpi-sb-boot-update
+Package: rpi-sb-boot-update
+Status: install ok installed
+Priority: optional
+Section: admin
+Installed-Size: 245678
+Maintainer: Your Organization <ops@example.com>
+Architecture: all
+Version: a3f5e8c9b2d1
+Description: Raspberry Pi Secure Boot Update
+ This package contains a signed boot.img and boot.sig for secure boot
+ enabled Raspberry Pi devices.
+ .
+ Source image: 2024-10-06-raspios-bookworm-arm64.img
+ Image SHA256: a3f5e8c9b2d1f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1
+ .
+ This package will overwrite existing boot.img and boot.sig files in
+ /boot/firmware to apply configuration changes or kernel updates while
+ preserving the existing root filesystem.
+
+$ zcat /usr/share/doc/rpi-sb-boot-update/changelog.Debian.gz
+rpi-sb-boot-update (a3f5e8c9b2d1) stable; urgency=medium
+
+  * Secure boot image update generated from: 2024-10-06-raspios-bookworm-arm64.img
+  * Source image SHA256: a3f5e8c9b2d1f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1
+  * Generated on: Mon, 06 Oct 2025 22:30:15 +0000
+  * Device family: Pi 4
+
+ -- Your Organization <ops@example.com>  Mon, 06 Oct 2025 22:30:15 +0000
+----
+
+*Note:* The maintainer information is configured in `/etc/rpi-sb-provisioner/bootimg-package-config`.
+
+== Upgrading Example
+
+When a new version is uploaded:
+
+[source,bash]
+----
+$ sudo dpkg -i rpi-sb-boot-update_b7c2a1f5e3d8_all.deb
+(Reading database ... 123456 files and directories currently installed.)
+Preparing to unpack rpi-sb-boot-update_b7c2a1f5e3d8_all.deb ...
+Unpacking rpi-sb-boot-update (b7c2a1f5e3d8) over (a3f5e8c9b2d1) ...
+Setting up rpi-sb-boot-update (b7c2a1f5e3d8) ...
+Secure boot files installed to /boot/firmware
+Reboot required for changes to take effect
+
+$ dpkg -l rpi-sb-boot-update
+ii  rpi-sb-boot-update  b7c2a1f5e3d8    all          Raspberry Pi Secure Boot Update
+----
+
+== Package Info File Example
+
+The generated package info file (`*.package-info.txt`) contains:
+
+[source]
+----
+Debian Package Information
+==========================
+
+Package: rpi-sb-boot-update
+Version: a3f5e8c9b2d1
+Architecture: all
+Filename: rpi-sb-boot-update_a3f5e8c9b2d1_all.deb
+
+Source Image: 2024-10-06-raspios-bookworm-arm64.img
+Image SHA256: a3f5e8c9b2d1f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1
+
+Installation:
+  sudo dpkg -i rpi-sb-boot-update_a3f5e8c9b2d1_all.deb
+
+Removal:
+  sudo dpkg -r rpi-sb-boot-update
+
+Contents:
+  /boot/firmware/boot.img (contains config.txt, kernel, initramfs, etc.)
+  /boot/firmware/boot.sig (RSA signature)
+
+Note: A reboot is required after installation for changes to take effect.
+      The config.txt is embedded inside boot.img and will be used after reboot.
+----
+
+== Integration with APT
+
+=== Repository Structure
+
+[source]
+----
+/var/www/html/apt/
+├── dists/
+│   └── stable/
+│       ├── Release
+│       └── main/
+│           └── binary-all/
+│               └── Packages.gz
+└── pool/
+    └── main/
+        ├── rpi-sb-boot-update_a3f5e8c9b2d1_all.deb
+        ├── rpi-sb-boot-update_b7c2a1f5e3d8_all.deb
+        └── rpi-sb-boot-update_c8d3b2e6f4a9_all.deb
+----
+
+=== Using APT
+
+[source,bash]
+----
+$ sudo apt update
+Hit:1 http://your-server/apt stable InRelease
+Reading package lists... Done
+
+$ apt policy rpi-sb-boot-update
+rpi-sb-boot-update:
+  Installed: a3f5e8c9b2d1
+  Candidate: c8d3b2e6f4a9
+  Version table:
+     c8d3b2e6f4a9 500
+        500 http://your-server/apt stable/main all Packages
+     b7c2a1f5e3d8 500
+        500 http://your-server/apt stable/main all Packages
+ *** a3f5e8c9b2d1 100
+        100 /var/lib/dpkg/status
+
+$ sudo apt upgrade rpi-sb-boot-update
+Reading package lists... Done
+Building dependency tree... Done
+The following packages will be upgraded:
+  rpi-sb-boot-update
+1 upgraded, 0 newly installed, 0 to remove and 0 not upgraded.
+Need to get 123 MB of archives.
+After this operation, 0 B of additional disk space will be used.
+Do you want to continue? [Y/n] y
+Get:1 http://your-server/apt stable/main all rpi-sb-boot-update all c8d3b2e6f4a9 [123 MB]
+Fetched 123 MB in 5s (24.6 MB/s)
+(Reading database ... 123456 files and directories currently installed.)
+Preparing to unpack .../rpi-sb-boot-update_c8d3b2e6f4a9_all.deb ...
+Unpacking rpi-sb-boot-update (c8d3b2e6f4a9) over (a3f5e8c9b2d1) ...
+Setting up rpi-sb-boot-update (c8d3b2e6f4a9) ...
+Secure boot files installed to /boot/firmware
+Reboot required for changes to take effect
+----
+
+== Notes
+
+* Package versions are deterministic - the same source image always produces the same package version
+* The version can be used to trace back to the exact source image via SHA256
+* Changelog provides human-readable information about the source image
+* All metadata is embedded in the package for traceability
+* `config.txt` is embedded inside the `boot.img` filesystem image, not installed as a separate file
+* The bootloader mounts `boot.img` and reads all boot files (including `config.txt`) from within it
+* This is the standard Raspberry Pi secure boot architecture - `boot.img` contains the entire pre-boot environment
+

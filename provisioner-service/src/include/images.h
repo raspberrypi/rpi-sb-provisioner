@@ -95,6 +95,12 @@ namespace provisioner {
     
     // Calculate SHA256 for all existing images at startup
     void calculateAllExistingSHA256();
+    
+    // Trigger boot.img generation for a newly uploaded image
+    void triggerBootImgGeneration(const std::string& imageName);
+    
+    // Request boot package status check (queues the request)
+    void requestBootPackageCheck(const std::string& imageName);
 
     struct ImageInfo {
         std::string name;

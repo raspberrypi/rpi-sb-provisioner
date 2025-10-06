@@ -227,3 +227,51 @@ Comments can be added to the file by starting a line with a `#` character.
 # This is a comment
 RPI_SB_PROVISIONER_MANUFACTURING_DB=/var/lib/rpi-sb-provisioner/manufacturing.db
 ----
+
+== Boot Image Package Configuration
+
+The boot image generator creates Debian packages for deploying boot updates to provisioned devices. Package metadata is configured in a separate file: `/etc/rpi-sb-provisioner/bootimg-package-config`
+
+=== RPI_SB_PACKAGE_MAINTAINER_NAME
+*Optional*
+
+The maintainer name to use in generated Debian packages.
+
+*Default:* `System Administrator` (if not set)
+
+*Example:*
+----
+RPI_SB_PACKAGE_MAINTAINER_NAME="Acme Corporation"
+----
+
+This value appears in the `Maintainer` field of the Debian package control file and changelog.
+
+=== RPI_SB_PACKAGE_MAINTAINER_EMAIL
+*Optional*
+
+The maintainer email address to use in generated Debian packages.
+
+*Default:* `root@<hostname>` (uses the provisioner server's hostname if not set)
+
+*Example:*
+----
+RPI_SB_PACKAGE_MAINTAINER_EMAIL="ops@acme.com"
+----
+
+This value is combined with `RPI_SB_PACKAGE_MAINTAINER_NAME` to form the full maintainer field in Debian packages.
+
+*Complete Example Configuration:*
+
+File: `/etc/rpi-sb-provisioner/bootimg-package-config`
+----
+# Debian package metadata for boot image updates
+RPI_SB_PACKAGE_MAINTAINER_NAME="Acme Corporation"
+RPI_SB_PACKAGE_MAINTAINER_EMAIL="ops@acme.com"
+----
+
+This will generate packages with:
+----
+Maintainer: Acme Corporation <ops@acme.com>
+----
+
+See link:boot-img-generator.adoc[Boot Image Generator Documentation] for more information about the automatic boot image generation feature.
