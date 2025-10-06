@@ -131,6 +131,71 @@ Set to the path of a directory to use, otherwise keys will be stored alongside p
 
 NOTE: These keys are sensitive key material, and you must ensure they are handled appropriately.
 
+[#rpi_sb_provisioner_enable_private_key_api]
+=== RPI_SB_PROVISIONER_ENABLE_PRIVATE_KEY_API
+*Optional - SECURITY CRITICAL*
+
+[CAUTION]
+====
+*DANGER: This setting controls a highly dangerous feature that should NEVER be enabled in production environments.*
+====
+
+Controls whether the HTTP API endpoint `/devices/{serialno}/key/private` is enabled. This endpoint allows downloading device private keys over HTTP.
+
+*Default:* `false` (endpoint is disabled)
+
+*Values:*
+
+* Not set or any value except `true`: Endpoint is **disabled** (secure default)
+* `true`: Endpoint is **enabled** (DANGEROUS - private keys can be downloaded via HTTP)
+
+*Security Implications:*
+
+When enabled, this setting allows device private keys to be retrieved via HTTP API calls. This presents severe security risks:
+
+* Private keys provide complete control over device cryptographic identity
+* Keys transmitted over HTTP (even on "private" networks) can be intercepted
+* Compromised keys allow impersonation and signature forgery
+* Keys cannot be revoked once compromised
+
+*Only enable this setting if:*
+
+* You are in a completely isolated development/test environment
+* The provisioning server is air-gapped from production networks
+* You have no alternative method to retrieve keys
+* You fully understand and accept the security implications
+* You can actively monitor audit logs for unauthorized access
+
+*Audit Logging:*
+
+When this endpoint is enabled and used:
+
+* All access attempts (successful and denied) are logged to the audit database
+* Each access generates WARNING level logs
+* Successful key downloads are logged as CRITICAL security events
+* Logs include client IP address, User-Agent, and serial numbers
+
+*Alternatives:*
+
+Instead of enabling this endpoint, consider:
+
+* Accessing keys directly from the filesystem: `/var/log/rpi-sb-provisioner/{serial}/keypair/`
+* Using secure file transfer over SSH (`scp` or `sftp`)
+* Delivering keys via physical media (USB drive)
+* Implementing a proper secrets management solution
+
+*Example Configuration:*
+
+To enable this endpoint (NOT RECOMMENDED):
+
+----
+# WARNING: Only enable in isolated test environments
+# This exposes device private keys via HTTP API
+RPI_SB_PROVISIONER_ENABLE_PRIVATE_KEY_API=true
+----
+
+WARNING: Raspberry Pi does not recommend enabling this setting under any circumstances in production environments. If you must retrieve keys programmatically, carefully consider the security implications.
+
 === RPI_SB_WORKDIR
 *Optional*
 
