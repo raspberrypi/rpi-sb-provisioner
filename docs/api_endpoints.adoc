@@ -386,22 +386,6 @@ If QR code parameter is missing:
 - This endpoint is particularly useful for integration with barcode scanners or mobile applications.
 - The QR code value is checked against the `rpi_duid` field in the manufacturing database.
 
-== Service Log API
-
-=== /api/v2/service-log/{name}
-
-*HTTP Method:* GET
-
-*Description:* Returns log entries for a specific service identified by its name. This endpoint is used for polling live updates of service logs, and will contain the greatest amount of detail we log.
-
-*Path Parameters:*
-
-[options="header"]
-|===
-|Parameter|Type|Required|Description
-|name|String|Yes|Name of the service to get logs for
-|=== 
-
 == Services API
 
 The Services API provides access to information about provisioning services running on the system. These endpoints allow monitoring of service states and retrieving service logs.
@@ -466,7 +450,7 @@ The endpoint returns a JSON object containing an array of services:
 
 *HTTP Method:* GET
 
-*Description:* Returns recent log entries for a specific provisioning service. This endpoint provides detailed logging information for monitoring service execution.
+*Description:* Returns log entries for a specific provisioning service with support for pagination and ordering. This endpoint provides detailed logging information for monitoring service execution.
 
 *Path Parameters:*
 
@@ -476,19 +460,34 @@ The endpoint returns a JSON object containing an array of services:
 |name|String|Yes|Name of the service to retrieve logs for (must start with rpi-sb-, rpi-naked-, or rpi-fde-)
 |===
 
+*Query Parameters:*
+
+[options="header"]
+|===
+|Parameter|Type|Required|Default|Description
+|page|Integer|No|1|Page number to retrieve (must be >= 1)
+|page_size|Integer|No|50|Number of log entries per page (min: 1, max: 500)
+|order|String|No|desc|Order of log entries: "desc" (newest first) or "asc" (oldest first)
+|===
+
 *Response Format:*
 
-The endpoint returns a JSON object with log entries:
+The endpoint returns a JSON object with log entries and pagination metadata:
 
 [source,json]
 ----
 {
   "logs": [
-    "2025-01-25 14:30:45 Foo",
+    "2025-01-25 14:30:47 Baz",
     "2025-01-25 14:30:46 Bar",
-    "2025-01-25 14:30:47 Baz"
+    "2025-01-25 14:30:45 Foo"
   ],
-  "service_name": "rpi-sb-provisioner@10000000abcdef.service"
+  "service_name": "rpi-sb-provisioner@10000000abcdef.service",
+  "page": 1,
+  "page_size": 50,
+  "total_entries": 150,
+  "total_pages": 3,
+  "order": "desc"
 }
 ----
 
@@ -499,7 +498,28 @@ The endpoint returns a JSON object with log entries:
 |Field|Description
 |logs|Array of log entries, each containing timestamp and message
 |service_name|Name of the service the logs belong to
+|page|Current page number
+|page_size|Number of entries per page
+|total_entries|Total number of log entries available
+|total_pages|Total number of pages available
+|order|Current ordering: "desc" (newest first) or "asc" (oldest first)
 |===
+
+*Example Usage:*
+
+To retrieve the first page with default settings (50 newest entries):
+
+[source,bash]
+----
+curl http://localhost:3142/api/v2/service-log/rpi-sb-provisioner@10000000abcdef.service
+----
+
+To retrieve page 2 with 100 entries per page, oldest first:
+
+[source,bash]
+----
+curl "http://localhost:3142/api/v2/service-log/rpi-sb-provisioner@10000000abcdef.service?page=2&page_size=100&order=asc"
+----
 
 *Error Responses:*
 
@@ -520,10 +540,11 @@ If accessing an unauthorized service:
 
 *Notes:*
 
-- Returns the most recent 100 log entries for the specified service
-- Log entries are returned in reverse chronological order (newest first)
+- Default page size is 50 entries, maximum is 500
+- Log entries are returned in reverse chronological order (newest first) by default
 - Access is restricted to services with approved prefixes for security
-- This endpoint is optimized for polling and provides lighter responses than the HTML view
+- Pagination metadata allows for efficient browsing of large log files
+- The `page_size` parameter is capped at 500 to prevent performance issues
 
 [#error-response-format]
 == Error Response Format

@@ -394,6 +394,39 @@ namespace provisioner {
             // Log systemd log access to audit log
             AuditLog::logSystemdAccess(serviceName);
 
+            // Parse pagination and ordering parameters
+            int page = 1;
+            int pageSize = 50;
+            std::string order = "desc"; // Default to newest first
+            
+            auto pageParam = req->getParameter("page");
+            if (!pageParam.empty()) {
+                try {
+                    page = std::stoi(pageParam);
+                    if (page < 1) page = 1;
+                } catch (...) {
+                    page = 1;
+                }
+            }
+            
+            auto pageSizeParam = req->getParameter("page_size");
+            if (!pageSizeParam.empty()) {
+                try {
+                    pageSize = std::stoi(pageSizeParam);
+                    if (pageSize < 1) pageSize = 50;
+                    if (pageSize > 500) pageSize = 500; // Cap at 500
+                } catch (...) {
+                    pageSize = 50;
+                }
+            }
+            
+            auto orderParam = req->getParameter("order");
+            if (!orderParam.empty() && (orderParam == "asc" || orderParam == "desc")) {
+                order = orderParam;
+            }
+            
+            LOG_INFO << "Fetching logs: page=" << page << ", page_size=" << pageSize << ", order=" << order;
+
             // Open the journal
             sd_journal *j;
             int r = sd_journal_open(&j, SD_JOURNAL_LOCAL_ONLY);
@@ -429,43 +462,43 @@ namespace provisioner {
                 return;
             }
             
-            // Seek to the end
-            r = sd_journal_seek_tail(j);
-            if (r < 0) {
-                LOG_ERROR << "Failed to seek to end of journal: " << strerror(-r);
-                sd_journal_close(j);
-                auto resp = provisioner::utils::createErrorResponse(
-                    req,
-                    "Failed to seek in journal",
-                    drogon::k500InternalServerError, 
-                    "Journal Error",
-                    "JOURNAL_SEEK_ERROR",
-                    std::string("Error: ") + strerror(-r)
-                );
-                callback(resp);
-                return;
+            // Count total entries for pagination metadata
+            int totalEntries = 0;
+            if (order == "desc") {
+                sd_journal_seek_head(j);
+            } else {
+                sd_journal_seek_tail(j);
             }
             
-            // Move back 200 log entries
-            r = sd_journal_previous_skip(j, 200);
-            if (r < 0) {
-                LOG_ERROR << "Failed to skip backwards in journal: " << strerror(-r);
-                sd_journal_close(j);
-                auto resp = provisioner::utils::createErrorResponse(
-                    req,
-                    "Failed to navigate journal",
-                    drogon::k500InternalServerError,
-                    "Journal Error", 
-                    "JOURNAL_NAVIGATION_ERROR",
-                    std::string("Error: ") + strerror(-r)
-                );
-                callback(resp);
-                return;
+            while ((order == "desc" ? sd_journal_next(j) : sd_journal_previous(j)) > 0) {
+                totalEntries++;
             }
             
-            // Collect log entries
+            int totalPages = (totalEntries + pageSize - 1) / pageSize;
+            if (page > totalPages && totalPages > 0) page = totalPages;
+            
+            // Seek to appropriate position based on order and page
+            if (order == "desc") {
+                // Newest first: start from tail, go backwards
+                sd_journal_seek_tail(j);
+                int skipCount = (page - 1) * pageSize;
+                if (skipCount > 0) {
+                    sd_journal_previous_skip(j, skipCount);
+                }
+            } else {
+                // Oldest first: start from head, go forwards
+                sd_journal_seek_head(j);
+                int skipCount = (page - 1) * pageSize;
+                if (skipCount > 0) {
+                    sd_journal_next_skip(j, skipCount);
+                }
+            }
+            
+            // Collect log entries for the current page
             std::vector<std::string> logEntries;
-            while (sd_journal_next(j) > 0) {
+            int collected = 0;
+            
+            while (collected < pageSize && (order == "desc" ? sd_journal_previous(j) : sd_journal_next(j)) > 0) {
                 const void *data;
                 size_t length;
                 
@@ -500,10 +533,13 @@ namespace provisioner {
                 // Add the formatted log entry
                 std::string entry = std::string(timestr) + " " + message;
                 logEntries.push_back(entry);
+                collected++;
             }
             
-            // Reverse the log entries to get reverse-chronological order (newest first)
-            std::reverse(logEntries.begin(), logEntries.end());
+            // If order is desc, we collected backwards, so reverse to show newest first
+            if (order == "desc") {
+                std::reverse(logEntries.begin(), logEntries.end());
+            }
             
             sd_journal_close(j);
             
@@ -523,6 +559,11 @@ namespace provisioner {
                 
                 root["logs"] = logArray;
                 root["service_name"] = serviceName;
+                root["page"] = page;
+                root["page_size"] = pageSize;
+                root["total_entries"] = totalEntries;
+                root["total_pages"] = totalPages;
+                root["order"] = order;
                 
                 resp->setStatusCode(drogon::k200OK);
                 resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
@@ -534,6 +575,11 @@ namespace provisioner {
                 viewData.insert("log_entries", logEntries);
                 viewData.insert("currentPage", std::string("services"));
                 viewData.insert("auto_refresh", true); // Flag to enable auto-refresh in template
+                viewData.insert("page", page);
+                viewData.insert("page_size", pageSize);
+                viewData.insert("total_entries", totalEntries);
+                viewData.insert("total_pages", totalPages);
+                viewData.insert("order", order);
                 resp = drogon::HttpResponse::newHttpViewResponse("service_log.csp", viewData);
             }
             
@@ -570,6 +616,39 @@ namespace provisioner {
             // Log systemd log access to audit log
             AuditLog::logSystemdAccess(serviceName);
 
+            // Parse pagination and ordering parameters
+            int page = 1;
+            int pageSize = 50;
+            std::string order = "desc"; // Default to newest first
+            
+            auto pageParam = req->getParameter("page");
+            if (!pageParam.empty()) {
+                try {
+                    page = std::stoi(pageParam);
+                    if (page < 1) page = 1;
+                } catch (...) {
+                    page = 1;
+                }
+            }
+            
+            auto pageSizeParam = req->getParameter("page_size");
+            if (!pageSizeParam.empty()) {
+                try {
+                    pageSize = std::stoi(pageSizeParam);
+                    if (pageSize < 1) pageSize = 50;
+                    if (pageSize > 500) pageSize = 500; // Cap at 500
+                } catch (...) {
+                    pageSize = 50;
+                }
+            }
+            
+            auto orderParam = req->getParameter("order");
+            if (!orderParam.empty() && (orderParam == "asc" || orderParam == "desc")) {
+                order = orderParam;
+            }
+            
+            LOG_INFO << "API fetching logs: page=" << page << ", page_size=" << pageSize << ", order=" << order;
+
             // Open the journal
             sd_journal *j;
             int r = sd_journal_open(&j, SD_JOURNAL_LOCAL_ONLY);
@@ -605,43 +684,43 @@ namespace provisioner {
                 return;
             }
             
-            // Seek to the end
-            r = sd_journal_seek_tail(j);
-            if (r < 0) {
-                LOG_ERROR << "Failed to seek to end of journal: " << strerror(-r);
-                sd_journal_close(j);
-                auto resp = provisioner::utils::createErrorResponse(
-                    req,
-                    "Failed to seek in journal",
-                    drogon::k500InternalServerError,
-                    "Journal Error",
-                    "JOURNAL_SEEK_ERROR",
-                    std::string("Error: ") + strerror(-r)
-                );
-                callback(resp);
-                return;
+            // Count total entries for pagination metadata
+            int totalEntries = 0;
+            if (order == "desc") {
+                sd_journal_seek_head(j);
+            } else {
+                sd_journal_seek_tail(j);
             }
             
-            // Move back 100 log entries for the API (lighter than the full view)
-            r = sd_journal_previous_skip(j, 100);
-            if (r < 0) {
-                LOG_ERROR << "Failed to skip backwards in journal: " << strerror(-r);
-                sd_journal_close(j);
-                auto resp = provisioner::utils::createErrorResponse(
-                    req,
-                    "Failed to navigate journal",
-                    drogon::k500InternalServerError,
-                    "Journal Error",
-                    "JOURNAL_NAVIGATION_ERROR",
-                    std::string("Error: ") + strerror(-r)
-                );
-                callback(resp);
-                return;
+            while ((order == "desc" ? sd_journal_next(j) : sd_journal_previous(j)) > 0) {
+                totalEntries++;
             }
             
-            // Collect log entries
+            int totalPages = (totalEntries + pageSize - 1) / pageSize;
+            if (page > totalPages && totalPages > 0) page = totalPages;
+            
+            // Seek to appropriate position based on order and page
+            if (order == "desc") {
+                // Newest first: start from tail, go backwards
+                sd_journal_seek_tail(j);
+                int skipCount = (page - 1) * pageSize;
+                if (skipCount > 0) {
+                    sd_journal_previous_skip(j, skipCount);
+                }
+            } else {
+                // Oldest first: start from head, go forwards
+                sd_journal_seek_head(j);
+                int skipCount = (page - 1) * pageSize;
+                if (skipCount > 0) {
+                    sd_journal_next_skip(j, skipCount);
+                }
+            }
+            
+            // Collect log entries for the current page
             std::vector<std::string> logEntries;
-            while (sd_journal_next(j) > 0) {
+            int collected = 0;
+            
+            while (collected < pageSize && (order == "desc" ? sd_journal_previous(j) : sd_journal_next(j)) > 0) {
                 const void *data;
                 size_t length;
                 
@@ -674,10 +753,13 @@ namespace provisioner {
                 // Add the formatted log entry
                 std::string entry = std::string(timestr) + " " + message;
                 logEntries.push_back(entry);
+                collected++;
             }
             
-            // Reverse the entries to get newest first
-            std::reverse(logEntries.begin(), logEntries.end());
+            // If order is desc, we collected backwards, so reverse to show newest first
+            if (order == "desc") {
+                std::reverse(logEntries.begin(), logEntries.end());
+            }
             
             sd_journal_close(j);
             
@@ -691,6 +773,11 @@ namespace provisioner {
             
             root["logs"] = logArray;
             root["service_name"] = serviceName;
+            root["page"] = page;
+            root["page_size"] = pageSize;
+            root["total_entries"] = totalEntries;
+            root["total_pages"] = totalPages;
+            root["order"] = order;
             
             auto resp = drogon::HttpResponse::newHttpJsonResponse(root);
             callback(resp);
