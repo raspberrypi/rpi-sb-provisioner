@@ -27,10 +27,12 @@ namespace provisioner {
         
         // Log systemd log access
         static void logSystemdAccess(const std::string &service, const std::string &username = "");
+        
+        // Get client IP address from request (for logging purposes)
+        static std::string getClientIP(const HttpRequestPtr &req);
 
     private:
         static bool ensureAuditDatabase();
-        static std::string getClientIP(const HttpRequestPtr &req);
         
         // Database path
         static const std::string AUDIT_DB_PATH;
