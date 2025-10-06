@@ -232,23 +232,6 @@ derivePublicKey() {
     "${OPENSSL}" rsa -in "${CUSTOMER_KEY_FILE_PEM}" -pubout > "${CUSTOMER_PUBLIC_KEY_FILE}"
 }
 
-writeSig() {
-   SIG_TMP="$(mktemp)"
-   IMAGE="$1"
-   OUTPUT="$2"
-   sha256sum "${IMAGE}" | awk '{print $1}' > "${OUTPUT}"
-
-   # Include the update-timestamp
-   echo "ts: $(date -u +%s)" >> "${OUTPUT}"
-
-   if [ -n "$(get_signing_directives)" ]; then
-      # shellcheck disable=SC2046
-      "${OPENSSL}" dgst -sign $(get_signing_directives) -sha256 -out "${SIG_TMP}" "${IMAGE}"
-      echo "rsa2048: $(xxd -c 4096 -p < "${SIG_TMP}")" >> "${OUTPUT}"
-   fi
-   rm "${SIG_TMP}"
-}
-
 enforceSecureBootloaderConfig() {
     if ! grep -Fxq "SIGNED_BOOT=1" "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"; then
         echo "SIGNED_BOOT=1" >> "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
@@ -271,6 +254,7 @@ identifyBootloaderConfig() {
 }
 
 # This function is adapted from the functions in the usbboot repo.
+# It handles both signed (secure-boot) and unsigned (naked) EEPROM updates
 update_eeprom() {
     src_image="$1"
     dst_image="$2"
@@ -292,7 +276,7 @@ update_eeprom() {
 
         TMP_CONFIG_SIG="$(mktemp)"
         log "Signing bootloader config"
-        writeSig "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" "${TMP_CONFIG_SIG}"
+        rpi-eeprom-digest -i "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" -o "${TMP_CONFIG_SIG}" -k "${pem_file}"
 
         # shellcheck disable=SC2086
         cat "${TMP_CONFIG_SIG}" ${DEBUG}
@@ -318,6 +302,9 @@ update_eeprom() {
                 cp "${src_image}" "${dst_image}.intermediate"
                 ;;
         esac
+    else
+        # Unsigned mode: just copy the source as intermediate
+        cp "${src_image}" "${dst_image}.intermediate"
     fi
 
     rm -f "${dst_image}"
@@ -521,7 +508,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                         die "No Raspberry Pi EEPROM file to use as key vector"
                     else
                         update_eeprom "${SOURCE_EEPROM_IMAGE}" "${DESTINATION_EEPROM_IMAGE}" "${CUSTOMER_KEY_FILE_PEM}" "${CUSTOMER_PUBLIC_KEY_FILE}"
-                        writeSig "${DESTINATION_EEPROM_IMAGE}" "${DESTINATION_EEPROM_SIGNATURE}"
+                        rpi-eeprom-digest -i "${DESTINATION_EEPROM_IMAGE}" -o "${DESTINATION_EEPROM_SIGNATURE}" -k "${CUSTOMER_KEY_FILE_PEM}"
                     fi
                 fi
 
@@ -582,8 +569,82 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
             announce_stop "Signing fastboot image"
         fi
     else # !PROVISIONING_STYLE=secure-boot
+        # For non-secure-boot provisioning on 2711/2712, still update EEPROM but without signing
         case ${TARGET_DEVICE_FAMILY} in
             2712|2711)
+                NON_SECURE_BOOTLOADER_DIRECTORY="${RPI_SB_WORKDIR}/non-secure-bootloader/"
+                mkdir -p "${NON_SECURE_BOOTLOADER_DIRECTORY}"
+                
+                if [ ! -f "${NON_SECURE_BOOTLOADER_DIRECTORY}/config.txt" ]; then
+                    log "Creating non-secure bootloader for EEPROM update"
+                    touch "${NON_SECURE_BOOTLOADER_DIRECTORY}/config.txt"
+                    
+                    announce_start "Setting up EEPROM update for non-secure-boot device"
+                    if [ -z "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" ]; then
+                        RPI_DEVICE_BOOTLOADER_CONFIG_FILE=/var/lib/rpi-sb-provisioner/bootloader.naked
+                        log "Using naked bootloader config file: ${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
+                    fi
+                    
+                    SOURCE_EEPROM_IMAGE=
+                    DESTINATION_EEPROM_IMAGE=
+                    DESTINATION_EEPROM_SIGNATURE=
+                    BOOTCODE_BINARY_IMAGE=
+                    BOOTCODE_FLASHING_NAME=
+                    
+                    case $TARGET_DEVICE_FAMILY in
+                        2711)
+                            BCM_CHIP=2711
+                            EEPROM_SIZE=524288
+                            FIRMWARE_IMAGE_DIR="${FIRMWARE_ROOT}-${BCM_CHIP}/${FIRMWARE_RELEASE_STATUS}"
+                            getBootloaderUpdateVersion
+                            SOURCE_EEPROM_IMAGE="${BOOTLOADER_UPDATE_IMAGE}"
+                            BOOTCODE_BINARY_IMAGE="${FIRMWARE_IMAGE_DIR}/recovery.bin"
+                            BOOTCODE_FLASHING_NAME="${NON_SECURE_BOOTLOADER_DIRECTORY}/bootcode4.bin"
+                            ;;
+                        2712)
+                            BCM_CHIP=2712
+                            EEPROM_SIZE=2097152
+                            FIRMWARE_IMAGE_DIR="${FIRMWARE_ROOT}-${BCM_CHIP}/${FIRMWARE_RELEASE_STATUS}"
+                            getBootloaderUpdateVersion
+                            SOURCE_EEPROM_IMAGE="${BOOTLOADER_UPDATE_IMAGE}"
+                            BOOTCODE_BINARY_IMAGE="${FIRMWARE_IMAGE_DIR}/recovery.bin"
+                            BOOTCODE_FLASHING_NAME="${NON_SECURE_BOOTLOADER_DIRECTORY}/bootcode5.bin"
+                            ;;
+                    esac
+                    
+                    DESTINATION_EEPROM_IMAGE="${NON_SECURE_BOOTLOADER_DIRECTORY}/pieeprom.bin"
+                    DESTINATION_EEPROM_SIGNATURE="${NON_SECURE_BOOTLOADER_DIRECTORY}/pieeprom.sig"
+                    
+                    # Copy unsigned bootcode
+                    cp "${BOOTCODE_BINARY_IMAGE}" "${BOOTCODE_FLASHING_NAME}"
+                    
+                    # Update EEPROM using the standard update_eeprom function
+                    # Calling without pem_file creates an unsigned EEPROM update
+                    if [ ! -e "${DESTINATION_EEPROM_SIGNATURE}" ]; then
+                        if [ ! -e "${SOURCE_EEPROM_IMAGE}" ]; then
+                            record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
+                            die "No Raspberry Pi EEPROM file found for update"
+                        else
+                            log "Updating EEPROM with bootloader configuration (unsigned)"
+                            # Call update_eeprom without signing parameters
+                            update_eeprom "${SOURCE_EEPROM_IMAGE}" "${DESTINATION_EEPROM_IMAGE}" "" ""
+                            
+                            # Create unsigned signature using rpi-eeprom-digest
+                            # Without -k parameter, creates hash + timestamp only
+                            log "Creating unsigned pieeprom.sig using rpi-eeprom-digest"
+                            rpi-eeprom-digest -i "${DESTINATION_EEPROM_IMAGE}" -o "${DESTINATION_EEPROM_SIGNATURE}"
+                        fi
+                    fi
+                    
+                    # Simple recovery config to update EEPROM and reboot
+                    echo "recovery_reboot=1" > "${NON_SECURE_BOOTLOADER_DIRECTORY}/config.txt"
+                    
+                    log "Updating EEPROM to latest version"
+                    [ ! -f "/etc/rpi-sb-provisioner/special-skip-eeprom/${TARGET_DEVICE_SERIAL}" ] && timeout_fatal rpiboot -d "${NON_SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
+                    log "EEPROM update completed. Device rebooted."
+                fi
+                
+                # Prepare fastboot files
                 cp /usr/share/rpiboot/mass-storage-gadget64/bootfiles.bin "${RPI_SB_WORKDIR}/bootfiles.bin"
                 cp "$(get_fastboot_gadget)" "${RPI_SB_WORKDIR}"/boot.img
                 cp "$(get_fastboot_config_file)" "${RPI_SB_WORKDIR}"/config.txt
