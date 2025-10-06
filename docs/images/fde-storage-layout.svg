@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="900" height="520" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      .title { font: bold 16px sans-serif; }
+      .label { font: 14px sans-serif; }
+      .small-label { font: 12px sans-serif; }
+      .partition { fill: #e8f4f8; stroke: #2196F3; stroke-width: 2; }
+      .encrypted { fill: #fff3e0; stroke: #FF9800; stroke-width: 2; }
+      .container { fill: #f1f8e9; stroke: #4CAF50; stroke-width: 2; }
+      .boot-img { fill: #e3f2fd; stroke: #1976D2; stroke-width: 2; }
+      .outline { fill: none; stroke: #333; stroke-width: 2; }
+      .warning { fill: #ff5722; font: bold 12px sans-serif; }
+    </style>
+  </defs>
+  
+  <!-- Main container -->
+  <rect x="20" y="20" width="860" height="480" class="outline" rx="5"/>
+  <text x="40" y="50" class="title">Physical Storage (SD card / eMMC / NVMe) - FDE Mode</text>
+  
+  <!-- Boot partition -->
+  <rect x="40" y="80" width="280" height="380" class="partition" rx="3"/>
+  <text x="50" y="105" class="label" font-weight="bold">Partition 1 - /boot (FAT32)</text>
+  
+  <!-- boot.img container -->
+  <rect x="60" y="125" width="240" height="200" class="boot-img" rx="3"/>
+  <text x="70" y="145" class="label" font-weight="bold">boot.img</text>
+  <text x="70" y="165" class="small-label">(FAT32 filesystem image)</text>
+  <text x="80" y="190" class="small-label">Contains:</text>
+  <text x="90" y="210" class="small-label">• Pre-boot auth environment</text>
+  <text x="90" y="230" class="small-label">• initramfs</text>
+  <text x="90" y="250" class="small-label">• Kernel image</text>
+  <text x="90" y="270" class="small-label">• Device tree blobs</text>
+  <text x="90" y="290" class="small-label">• config.txt</text>
+  <text x="90" y="310" class="small-label">• Boot firmware files</text>
+  
+  <!-- No boot.sig warning -->
+  <rect x="60" y="340" width="240" height="80" fill="#ffebee" stroke="#f44336" stroke-width="2" rx="3"/>
+  <text x="180" y="365" class="warning" text-anchor="middle">⚠ No boot.sig</text>
+  <text x="70" y="385" class="small-label">boot.img is NOT authenticated</text>
+  <text x="70" y="405" class="small-label">Can be modified without verification</text>
+  
+  <text x="50" y="450" class="small-label" font-style="italic">~512MB</text>
+  
+  <!-- Encrypted partition -->
+  <rect x="340" y="80" width="520" height="380" class="encrypted" rx="3"/>
+  <text x="350" y="105" class="label" font-weight="bold">Partition 2 - Encrypted LUKS2 Container</text>
+  
+  <!-- Inner filesystem -->
+  <rect x="370" y="125" width="460" height="280" class="container" rx="3"/>
+  <text x="380" y="150" class="label" font-weight="bold">Root filesystem (ext4)</text>
+  <text x="380" y="175" class="label">Your Custom OS</text>
+  <text x="380" y="195" class="small-label">(from master image)</text>
+  
+  <text x="390" y="225" class="small-label">• System files</text>
+  <text x="390" y="245" class="small-label">• Applications</text>
+  <text x="390" y="265" class="small-label">• User data</text>
+  <text x="390" y="285" class="small-label">• Configuration</text>
+  
+  <text x="380" y="385" class="small-label" font-weight="bold">Encrypted with device-unique key</text>
+  <text x="380" y="400" class="small-label">stored in OTP memory</text>
+  
+  <text x="350" y="450" class="small-label" font-style="italic">Remainder of storage</text>
+  
+  <!-- Legend -->
+  <rect x="680" y="25" width="15" height="15" class="partition"/>
+  <text x="700" y="37" class="small-label">Boot partition</text>
+  
+  <rect x="680" y="45" width="15" height="15" class="boot-img"/>
+  <text x="700" y="57" class="small-label">boot.img (filesystem image)</text>
+  
+  <rect x="680" y="65" width="15" height="15" class="encrypted"/>
+  <text x="700" y="77" class="small-label">LUKS2 encrypted</text>
+</svg>
+

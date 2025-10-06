@@ -149,25 +149,27 @@ Three variants implement different security models:
 
 *Secure Boot Provisioner* (`rpi-sb-provisioner@.service`)
 
-* Create device-unique encryption key
+* Create device-unique encryption key and store in OTP memory
 * Partition and format storage
 * Create LUKS2 encrypted container
 * Deploy OS image into encrypted container
-* Sign boot firmware with customer key
+* Create pre-boot authentication environment (kernel + minimal modules)
+* Sign EEPROM bootloader and pre-boot environment with customer key
 * Configure secure boot chain
 
 *Full Disk Encryption Provisioner* (`rpi-fde-provisioner@.service`)
 
-* Create device-unique encryption key
+* Create device-unique encryption key and store in OTP memory
 * Partition and format storage
 * Create LUKS2 encrypted container
 * Deploy OS image into encrypted container
-* Deploy unsigned boot firmware
+* Create pre-boot authentication environment (unsigned)
 
 *Naked Provisioner* (`rpi-naked-provisioner@.service`)
 
 * Partition and format storage
 * Deploy OS image directly (no encryption)
+* Install standard boot firmware (uses Raspberry Pi retail key)
 
 *Scripts:*
 * `/usr/bin/rpi-sb-provisioner.sh`
@@ -358,6 +360,194 @@ Optional database recording device information.
 * OS image details
 
 *Purpose:* Track provisioned devices for inventory, warranty, and compliance
+
+== Provisioned System Architecture
+
+After provisioning is complete, the device has a specific security architecture depending on the provisioning mode.
+
+=== Secure Boot Mode: Complete Architecture
+
+In secure boot mode, the device implements a complete authenticated boot chain with encrypted storage.
+
+==== Storage Layout
+
+image::images/secure-boot-storage-layout.svg[Secure Boot Storage Layout,900]
+
+*Boot partition structure:*
+
+Partition 1 contains two special files:
+
+* *`boot.img`:* A FAT32 filesystem image file containing all boot components (firmware, kernel, initramfs, pre-boot authentication environment). The EEPROM bootloader mounts this image to access boot files.
+* *`boot.sig`:* Cryptographic signature for `boot.img`, signed with customer private key. The EEPROM bootloader verifies this signature before mounting `boot.img`.
+
+This encapsulation ensures the entire boot environment is authenticated as a single unit.
+
+==== Secure Boot Chain
+
+The boot process implements cryptographic verification at each stage:
+
+image::images/secure-boot-chain.svg[Secure Boot Chain,900]
+
+*Key security properties:*
+
+* *Authenticated boot chain:* Each component cryptographically verifies the next before execution
+* *Customer key in hardware:* Key hash burned into device OTP memory (permanent, cannot be changed)
+* *Signed components:* Only components signed with customer private key will execute
+* *Encrypted storage:* All OS data protected by LUKS2 encryption
+* *Device-unique keys:* Each device has unique encryption key stored in OTP memory
+* *Automatic unlock:* Pre-boot environment retrieves decryption key from OTP memory; no user interaction required
+* *Minimal pre-boot environment:* Contains only kernel and modules necessary for LUKS unlock and pivot_root
+
+==== Security Guarantees
+
+*What this prevents:*
+
+* *Unauthorized code execution:* Device will not execute code not signed with customer key
+* *Storage extraction:* Removing storage and reading it on another system yields only encrypted data
+* *Key extraction from storage:* Decryption key is stored in device OTP memory, not on storage device
+* *Device cloning:* Decryption keys are unique per device and stored in OTP; cannot clone storage to another device
+* *Boot chain tampering:* Any modification to EEPROM bootloader or pre-boot environment will fail signature verification
+
+*What this requires:*
+
+* *Secure key management:* Customer private key must be protected (used for signing)
+* *Trust in device hardware:* Security depends on device OTP memory and secure key storage
+
+=== Full Disk Encryption (FDE) Mode: Architecture
+
+FDE mode provides encrypted storage without secure boot enforcement.
+
+==== Storage Layout
+
+image::images/fde-storage-layout.svg[FDE Storage Layout,900]
+
+*Boot partition structure:*
+
+Partition 1 contains:
+
+* *`boot.img`:* A FAT32 filesystem image file containing boot components (pre-boot authentication environment, kernel, initramfs). The EEPROM bootloader mounts this image to access boot files.
+* *No signature file:* Unlike secure boot mode, there is no `boot.sig` file. The `boot.img` is loaded without verification.
+
+The storage layout is similar to secure boot mode (boot partition + LUKS2 container), but without boot authentication.
+
+==== Boot Chain
+
+image::images/fde-boot-chain.svg[FDE Boot Chain,900]
+
+*Key differences from secure boot mode:*
+
+* *Raspberry Pi retail key:* EEPROM bootloader authenticated with Raspberry Pi Ltd retail key (not customer key)
+* *Firmware substitution:* Any official Raspberry Pi firmware release can be substituted
+* *No pre-boot verification:* Pre-boot authentication environment loaded WITHOUT signature verification
+* *Encryption only:* Storage is encrypted, but pre-boot environment can be modified
+* *Same unlock mechanism:* Uses OTP-stored decryption key and pivot_root
+
+*Use case:* Scenarios requiring encryption without full boot chain authentication restrictions.
+
+=== Naked Mode: Architecture
+
+Naked mode provides basic OS deployment without security features.
+
+*Boot partition structure:*
+
+Partition 1 contains boot files directly (traditional Raspberry Pi layout):
+
+* Standard boot firmware files
+* Kernel and device tree files
+* No encapsulation in `boot.img`
+* No signature files
+
+==== Storage Layout
+
+image::images/naked-storage-layout.svg[Naked Mode Storage Layout,800]
+
+==== Boot Chain
+
+----
+Device Powers On → Bootloader → Firmware → Kernel → Your OS
+----
+
+*Characteristics:*
+
+* *No encryption:* Storage contents readable if device is extracted
+* *EEPROM authenticated:* EEPROM bootloader uses Raspberry Pi retail key authentication
+* *Kernel not authenticated:* No signature verification of kernel or boot files
+* *Standard boot:* Conventional Raspberry Pi boot process
+* *Fastest provisioning:* No encryption operations during deployment
+
+*Use case:* Development environments, non-security-critical deployments, maximum compatibility.
+
+=== Comparison of Provisioning Modes
+
+[cols="1,2,2,2"]
+|===
+|Feature |Secure Boot |FDE Only |Naked
+
+|*EEPROM authentication*
+|✓ Customer key
+|✓ RPi retail key
+|✓ RPi retail key
+
+|*Pre-boot environment auth*
+|✓ Customer key
+|✗ No
+|N/A
+
+|*Storage encryption*
+|✓ Yes (LUKS2)
+|✓ Yes (LUKS2)
+|✗ No
+
+|*Device-unique keys*
+|✓ Yes
+|✓ Yes
+|✗ No
+
+|*Customer firmware signing*
+|✓ Yes
+|✗ No
+|✗ No
+
+|*OTP customer key*
+|✓ Yes (permanent)
+|✗ No (RPi retail)
+|✗ No (RPi retail)
+
+|*OTP encryption key*
+|✓ Yes
+|✓ Yes
+|✗ No
+
+|*Storage extractable*
+|✗ No (encrypted)
+|✗ No (encrypted)
+|✓ Yes (unencrypted)
+
+|*Firmware substitution*
+|✗ No (customer-signed only)
+|✓ Yes (any RPi firmware)
+|✓ Yes (any RPi firmware)
+
+|*Pre-boot environment modifiable*
+|✗ No (signature verification)
+|✓ Yes (no verification)
+|N/A
+
+|*Provisioning time*
+|Longest
+|Medium
+|Fastest
+
+|*Security level*
+|Maximum
+|Medium
+|Minimal
+
+|*Use case*
+|Production devices
+|Encryption without boot restrictions
+|Development, testing
+|===
 
 == Data Flow
 

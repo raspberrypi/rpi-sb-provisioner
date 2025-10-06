@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="900" height="800" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      .title { font: bold 18px sans-serif; }
+      .stage-title { font: bold 14px sans-serif; fill: #fff; }
+      .stage-text { font: 12px sans-serif; fill: #fff; }
+      .arrow-text { font: 13px sans-serif; fill: #333; font-weight: bold; }
+      .stage-box { stroke-width: 2; rx: 5; }
+      .stage1 { fill: #1976D2; stroke: #0D47A1; }
+      .stage2 { fill: #388E3C; stroke: #1B5E20; }
+      .stage3 { fill: #F57C00; stroke: #E65100; }
+      .stage4 { fill: #C62828; stroke: #B71C1C; }
+    </style>
+    <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto">
+      <polygon points="0 0, 10 5, 0 10" fill="#333" />
+    </marker>
+  </defs>
+  
+  <!-- Title -->
+  <text x="450" y="30" class="title" text-anchor="middle">Secure Boot Chain</text>
+  <text x="450" y="50" style="font: 14px sans-serif; fill: #666;" text-anchor="middle">Device Powers On</text>
+  
+  <!-- Stage 1: Boot ROM -->
+  <rect x="50" y="80" width="800" height="120" class="stage-box stage1"/>
+  <text x="70" y="105" class="stage-title">1. Boot ROM (in device hardware)</text>
+  <text x="90" y="130" class="stage-text">• Immutable code in device silicon</text>
+  <text x="90" y="150" class="stage-text">• Reads customer key hash from OTP memory</text>
+  <text x="90" y="170" class="stage-text">• Verifies EEPROM bootloader signature</text>
+  
+  <!-- Arrow 1 -->
+  <line x1="450" y1="200" x2="450" y2="240" stroke="#333" stroke-width="3" marker-end="url(#arrowhead)"/>
+  <text x="470" y="225" class="arrow-text">Signature Valid?</text>
+  
+  <!-- Stage 2: EEPROM Bootloader -->
+  <rect x="50" y="250" width="800" height="120" class="stage-box stage2"/>
+  <text x="70" y="275" class="stage-title">2. EEPROM Bootloader (updated by provisioner)</text>
+  <text x="90" y="300" class="stage-text">• Signed with customer private key</text>
+  <text x="90" y="320" class="stage-text">• Reads boot.img and boot.sig from /boot partition</text>
+  <text x="90" y="340" class="stage-text">• Verifies boot.sig cryptographic signature for boot.img</text>
+  
+  <!-- Arrow 2 -->
+  <line x1="450" y1="370" x2="450" y2="410" stroke="#333" stroke-width="3" marker-end="url(#arrowhead)"/>
+  <text x="470" y="395" class="arrow-text">Signature Valid?</text>
+  
+  <!-- Stage 3: Pre-boot Authentication Environment -->
+  <rect x="50" y="420" width="800" height="160" class="stage-box stage3"/>
+  <text x="70" y="445" class="stage-title">3. Pre-boot Authentication Environment (inside verified boot.img)</text>
+  <text x="90" y="470" class="stage-text">• Authenticated via boot.sig verification</text>
+  <text x="90" y="490" class="stage-text">• Contains kernel and minimal modules required for LUKS unlock</text>
+  <text x="90" y="510" class="stage-text">• Retrieves device-unique decryption key from OTP memory</text>
+  <text x="90" y="530" class="stage-text">• Unlocks LUKS2 encrypted container</text>
+  <text x="90" y="550" class="stage-text">• Performs pivot_root to encrypted rootfs</text>
+  
+  <!-- Arrow 3 -->
+  <line x1="450" y1="580" x2="450" y2="620" stroke="#333" stroke-width="3" marker-end="url(#arrowhead)"/>
+  <text x="470" y="605" class="arrow-text">pivot_root Complete?</text>
+  
+  <!-- Stage 4: Custom OS -->
+  <rect x="50" y="630" width="800" height="120" class="stage-box stage4"/>
+  <text x="70" y="655" class="stage-title">4. Your Custom Operating System</text>
+  <text x="90" y="680" class="stage-text">• Running from encrypted rootfs</text>
+  <text x="90" y="700" class="stage-text">• All system data and applications encrypted at rest</text>
+  <text x="90" y="720" class="stage-text">• Normal Linux boot process continues with init system</text>
+  
+  <!-- Security badge -->
+  <rect x="650" y="765" width="200" height="25" fill="#4CAF50" stroke="#2E7D32" stroke-width="2" rx="12"/>
+  <text x="750" y="783" style="font: bold 14px sans-serif; fill: #fff;" text-anchor="middle">✓ Fully Secured</text>
+</svg>

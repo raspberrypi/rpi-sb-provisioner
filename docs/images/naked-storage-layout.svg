@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="800" height="500" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      .title { font: bold 16px sans-serif; }
+      .label { font: 14px sans-serif; }
+      .small-label { font: 12px sans-serif; }
+      .partition { fill: #e8f4f8; stroke: #2196F3; stroke-width: 2; }
+      .unencrypted { fill: #ffebee; stroke: #f44336; stroke-width: 2; }
+      .outline { fill: none; stroke: #333; stroke-width: 2; }
+      .warning { fill: #ff5722; font: bold 14px sans-serif; }
+    </style>
+  </defs>
+  
+  <!-- Main container -->
+  <rect x="20" y="20" width="760" height="460" class="outline" rx="5"/>
+  <text x="40" y="50" class="title">Physical Storage (SD card / eMMC / NVMe)</text>
+  
+  <!-- Boot partition -->
+  <rect x="40" y="80" width="200" height="360" class="partition" rx="3"/>
+  <text x="50" y="105" class="label" font-weight="bold">Partition 1</text>
+  <text x="50" y="125" class="label">/boot (FAT32)</text>
+  
+  <text x="60" y="155" class="small-label">• config.txt</text>
+  <text x="60" y="175" class="small-label">• Boot firmware</text>
+  <text x="60" y="195" class="small-label">• Kernel</text>
+  
+  <text x="50" y="420" class="small-label" font-style="italic">~512MB</text>
+  
+  <!-- Root partition (unencrypted) -->
+  <rect x="260" y="80" width="500" height="360" class="unencrypted" rx="3"/>
+  <text x="270" y="105" class="label" font-weight="bold">Partition 2</text>
+  <text x="270" y="125" class="label">Root filesystem (ext4)</text>
+  
+  <text x="280" y="160" class="label" font-weight="bold">Your Custom OS</text>
+  <text x="280" y="180" class="small-label">(unencrypted)</text>
+  
+  <text x="290" y="220" class="small-label">• System files</text>
+  <text x="290" y="240" class="small-label">• Applications</text>
+  <text x="290" y="260" class="small-label">• User data</text>
+  
+  <!-- Warning box -->
+  <rect x="280" y="320" width="460" height="100" fill="#fff3e0" stroke="#ff9800" stroke-width="2" rx="3"/>
+  <text x="510" y="345" class="warning" text-anchor="middle">⚠ No Encryption</text>
+  <text x="290" y="370" class="small-label">Storage contents are readable if</text>
+  <text x="290" y="390" class="small-label">the device is physically extracted</text>
+  
+  <text x="270" y="455" class="small-label" font-style="italic">Remainder of storage</text>
+  
+  <!-- Legend -->
+  <rect x="600" y="25" width="15" height="15" class="partition"/>
+  <text x="620" y="37" class="small-label">Boot partition</text>
+  
+  <rect x="600" y="45" width="15" height="15" class="unencrypted"/>
+  <text x="620" y="57" class="small-label">Unencrypted filesystem</text>
+</svg>
+
