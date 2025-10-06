@@ -4,6 +4,7 @@ service/rpi-naked-provisioner.sh                /usr/bin
 service/rpi-sb-bootstrap.sh                     /usr/bin
 service/rpi-sb-triage.sh                        /usr/bin
 service/rpi-sb-common.sh                        /usr/bin
+service/rpi-sb-image-bootimg-generator.sh       /usr/bin
 fetch-repo-package-list/fetch-repo-package-list /usr/bin
 rpi-package-download/rpi-package-download       /usr/bin
 
@@ -12,6 +13,7 @@ service/rpi-fde-provisioner@.service                        /usr/lib/systemd/sys
 service/rpi-naked-provisioner@.service                      /usr/lib/systemd/system
 service/rpi-sb-bootstrap@.service                           /usr/lib/systemd/system
 service/rpi-sb-triage@.service                              /usr/lib/systemd/system
+service/rpi-sb-image-bootimg-generator@.service             /usr/lib/systemd/system
 
 fetch-repo-package-list/fetch-repo-package-list@.timer      /usr/lib/systemd/system
 fetch-repo-package-list/fetch-repo-package-list@.service    /usr/lib/systemd/system
@@ -27,3 +29,4 @@ host-support/manufacturing-data                     /var/lib/rpi-sb-provisioner
 host-support/state-recording                        /var/lib/rpi-sb-provisioner
 
 host-support/config                                 /etc/rpi-sb-provisioner
+host-support/bootimg-package-config                 /etc/rpi-sb-provisioner

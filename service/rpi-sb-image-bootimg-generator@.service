@@ -1,0 +1,22 @@
+[Unit]
+Description=Generate secure boot image for %I
+Documentation=https://github.com/raspberrypi/rpi-sb-provisioner
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/rpi-sb-image-bootimg-generator.sh %I
+EnvironmentFile=/etc/rpi-sb-provisioner/config
+StandardOutput=journal
+StandardError=journal
+
+# Security hardening
+PrivateTmp=yes
+NoNewPrivileges=no
+ProtectSystem=strict
+ReadWritePaths=/srv/rpi-sb-provisioner
+ReadWritePaths=/var/log/rpi-sb-provisioner
+
+[Install]
+WantedBy=multi-user.target
+

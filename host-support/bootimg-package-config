@@ -1,0 +1,15 @@
+# Configuration for Debian packages generated from boot images
+# This file is sourced by rpi-sb-image-bootimg-generator.sh
+
+# Maintainer name for generated Debian packages
+# If not set, defaults to "System Administrator"
+RPI_SB_PACKAGE_MAINTAINER_NAME=
+
+# Maintainer email for generated Debian packages
+# If not set, defaults to "root@<hostname>"
+RPI_SB_PACKAGE_MAINTAINER_EMAIL=
+
+# Example configuration:
+# RPI_SB_PACKAGE_MAINTAINER_NAME="Acme Corporation"
+# RPI_SB_PACKAGE_MAINTAINER_EMAIL="ops@acme.com"
+

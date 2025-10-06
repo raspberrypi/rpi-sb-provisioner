@@ -1,0 +1,401 @@
+= Automatic Boot Image Generation
+:toc:
+:toc-title: Contents
+:toclevels: 2
+
+_Automatic generation of boot.img and boot.sig when system images are uploaded_
+
+== Overview
+
+When a new system image is uploaded to the provisioner, and secure-boot mode is configured with appropriate key material, the system automatically generates a signed `boot.img` file that can be used to update devices in the field without re-provisioning.
+
+This feature addresses the use case described in https://github.com/raspberrypi/rpi-sb-provisioner/issues/191[Issue #191], where users need to modify configuration files (like `config.txt`) on already-provisioned devices.
+
+== How It Works
+
+=== Workflow
+
+1. *Image Upload:* User uploads a new system image via the web interface
+2. *Automatic Trigger:* The provisioner service detects the upload
+3. *Configuration Check:* System verifies:
+   - `PROVISIONING_STYLE` is set to `secure-boot`
+   - Customer key material is available (`CUSTOMER_KEY_FILE_PEM` or `CUSTOMER_KEY_PKCS11_NAME`)
+   - `RPI_DEVICE_FAMILY` is configured
+4. *Boot Image Generation:* If checks pass, the system:
+   - Extracts the boot partition from the uploaded image
+   - Inserts the pre-boot authentication initramfs
+   - Modifies `cmdline.txt` and `config.txt` for secure boot
+   - Creates `boot.img` using `rpi-make-boot-image`
+   - Signs `boot.img` with the customer key to create `boot.sig`
+5. *Output:* Generated files are placed in `/srv/rpi-sb-provisioner/images/bootimg-output/`
+
+=== Generated Files
+
+For each uploaded image (e.g., `2024-10-06-raspios-bookworm-arm64.img`), the following files are created:
+
+* `<image-basename>.boot.img` - The signed boot image
+* `<image-basename>.boot.sig` - The RSA signature for the boot image
+* `<image-basename>.config.txt` - The fastboot configuration file
+* `rpi-sb-boot-update_<version>_all.deb` - **Debian package** containing boot files
+* `<image-basename>.package-info.txt` - Package information and installation instructions
+
+The Debian package version is derived from the first 12 characters of the source image's SHA256 hash, ensuring each package has a unique, traceable version.
+
+Example:
+----
+/srv/rpi-sb-provisioner/images/bootimg-output/
+├── 2024-10-06-raspios-bookworm-arm64.boot.img
+├── 2024-10-06-raspios-bookworm-arm64.boot.sig
+├── 2024-10-06-raspios-bookworm-arm64.config.txt
+├── rpi-sb-boot-update_a3f5e8c9b2d1_all.deb
+└── 2024-10-06-raspios-bookworm-arm64.package-info.txt
+----
+
+== Using Generated Boot Images
+
+=== Method 1: Debian Package Installation (Recommended)
+
+The easiest way to update provisioned devices is using the generated Debian package:
+
+[source,bash]
+----
+# On the provisioned device
+sudo dpkg -i rpi-sb-boot-update_a3f5e8c9b2d1_all.deb
+sudo reboot
+----
+
+The package will:
+
+* Install boot.img and boot.sig to `/boot/firmware/`
+* Overwrite existing boot files
+* Display a message indicating a reboot is required
+
+*Note:* `config.txt` is embedded inside `boot.img` and does not need to be installed separately. The bootloader mounts `boot.img` as a filesystem and reads `config.txt` from within it.
+
+*Advantages of using the Debian package:*
+
+* Standard package management integration
+* Version tracking with `dpkg -l rpi-sb-boot-update`
+* Clean removal with `dpkg -r rpi-sb-boot-update`
+* Automatic handling of file permissions
+* Traceable versions (SHA256-based version numbers)
+
+=== Method 2: Manual File Replacement
+
+If you need to manually update files on a device:
+
+1. Modify your base OS image with the desired changes
+2. Upload the modified image to the provisioner
+3. Retrieve the generated `boot.img` and `boot.sig` from the output directory
+4. Copy to the device:
++
+[source,bash]
+----
+# On the provisioner
+scp /srv/rpi-sb-provisioner/images/bootimg-output/*.boot.img device:/tmp/
+scp /srv/rpi-sb-provisioner/images/bootimg-output/*.boot.sig device:/tmp/
+
+# On the device
+sudo cp /tmp/*.boot.img /boot/firmware/boot.img
+sudo cp /tmp/*.boot.sig /boot/firmware/boot.sig
+sudo sync
+sudo reboot
+----
+
+=== Updating Config on Provisioned Devices
+
+If you need to update `config.txt` on devices already provisioned with secure boot:
+
+1. Modify your base OS image with the desired `config.txt` changes
+2. Upload the modified image to the provisioner
+3. Deploy the generated Debian package to your devices
+4. Reboot the devices
+
+*Important:* This approach updates only the boot configuration and kernel. The rootfs remains unchanged, preserving any device-specific configuration.
+
+=== Deployment at Scale
+
+For deploying updates to many devices, consider setting up an APT repository:
+
+==== Creating a Simple APT Repository
+
+[source,bash]
+----
+# On your update server
+mkdir -p /var/www/html/apt/pool/main
+mkdir -p /var/www/html/apt/dists/stable/main/binary-all
+
+# Copy the generated package
+cp rpi-sb-boot-update_*.deb /var/www/html/apt/pool/main/
+
+# Generate Packages file
+cd /var/www/html/apt
+dpkg-scanpackages pool/ /dev/null | gzip -9c > dists/stable/main/binary-all/Packages.gz
+
+# Create Release file
+cat > dists/stable/Release << EOF
+Origin: RPI-SB-Provisioner
+Label: Secure Boot Updates
+Suite: stable
+Codename: stable
+Architectures: all
+Components: main
+Description: Raspberry Pi Secure Boot Updates
+EOF
+----
+
+==== Configuring Devices to Use the Repository
+
+On each provisioned device:
+
+[source,bash]
+----
+# Add repository
+echo "deb [trusted=yes] http://your-server/apt stable main" | \
+  sudo tee /etc/apt/sources.list.d/rpi-sb-updates.list
+
+# Update and install
+sudo apt update
+sudo apt install rpi-sb-boot-update
+sudo reboot
+----
+
+*Note:* The `[trusted=yes]` flag is used because the packages are not signed with a GPG key. For production deployments, consider signing your repository with GPG.
+
+==== Package Versioning and Updates
+
+Since package versions are based on the source image SHA256:
+
+* Each unique source image produces a unique package version
+* dpkg/apt will treat packages with different versions as updates
+* You can have multiple versions in your repository
+* Devices can be pinned to specific versions if needed
+
+Example version progression:
+----
+rpi-sb-boot-update_a3f5e8c9b2d1_all.deb  # Initial version
+rpi-sb-boot-update_b7c2a1f5e3d8_all.deb  # After config.txt change
+rpi-sb-boot-update_c8d3b2e6f4a9_all.deb  # After kernel update
+----
+
+=== Security Considerations
+
+* The generated boot images are signed with your customer key
+* Only devices provisioned with the matching public key can use these boot images
+* The signing key must be the same one used during initial provisioning
+* Generated files and packages should be handled as sensitive material
+* Debian packages contain the source image filename and SHA256 in the changelog for traceability
+* Consider using HTTPS and GPG signing for production APT repositories
+
+== Configuration Requirements
+
+=== Required Settings
+
+In `/etc/rpi-sb-provisioner/config`:
+
+[source,bash]
+----
+# Must be set to secure-boot
+PROVISIONING_STYLE=secure-boot
+
+# Device family (4 for Pi 4/CM4, 5 for Pi 5/CM5)
+RPI_DEVICE_FAMILY=4
+
+# Key material (choose one)
+CUSTOMER_KEY_FILE_PEM=/path/to/customer-key.pem
+# OR
+CUSTOMER_KEY_PKCS11_NAME='pkcs11:object=<keypair-alias>;type=private'
+----
+
+=== Package Metadata Configuration
+
+In `/etc/rpi-sb-provisioner/bootimg-package-config`:
+
+[source,bash]
+----
+# Maintainer name for generated Debian packages
+RPI_SB_PACKAGE_MAINTAINER_NAME="Your Organization"
+
+# Maintainer email for generated Debian packages
+RPI_SB_PACKAGE_MAINTAINER_EMAIL="ops@example.com"
+----
+
+*Defaults if not configured:*
+
+* Name: `System Administrator`
+* Email: `root@<hostname>` (uses the provisioner server's hostname)
+
+This separate configuration file allows you to customize the package metadata without modifying the main provisioner configuration.
+
+=== Optional Settings
+
+If these are not set, the boot image generation will be skipped:
+
+* If `PROVISIONING_STYLE` is not `secure-boot`, generation is skipped
+* If no key material is configured, generation is skipped
+* If `RPI_DEVICE_FAMILY` is not set, generation is skipped
+
+== Monitoring and Logs
+
+=== Service Status
+
+Check the status of boot image generation for a specific image:
+
+[source,bash]
+----
+systemctl status rpi-sb-image-bootimg-generator@<image-filename>.service
+----
+
+=== Logs
+
+Logs are written to:
+
+* *Journal:* `journalctl -u rpi-sb-image-bootimg-generator@<image-filename>.service`
+* *File:* `/var/log/rpi-sb-provisioner/bootimg-generator/bootimg-generator.log`
+
+=== Log Inspection
+
+[source,bash]
+----
+# View recent boot image generation activity
+tail -f /var/log/rpi-sb-provisioner/bootimg-generator/bootimg-generator.log
+
+# View service status for all boot image generation jobs
+systemctl list-units 'rpi-sb-image-bootimg-generator@*'
+----
+
+== Implementation Details
+
+=== Components
+
+[cols="1,3"]
+|===
+|Component |Purpose
+
+|`rpi-sb-image-bootimg-generator.sh`
+|POSIX shell script that extracts boot partition and generates signed boot.img
+
+|`rpi-sb-image-bootimg-generator@.service`
+|systemd template service that runs the generation script
+
+|`images.cpp::triggerBootImgGeneration()`
+|C++ function in web service that triggers the systemd service via D-Bus on upload
+|===
+
+=== Process Flow
+
+1. Web service detects image upload (via multipart form upload)
+2. File is saved to `/srv/rpi-sb-provisioner/images/`
+3. `triggerBootImgGeneration()` is called with the filename
+4. Function makes a D-Bus call to systemd's Manager interface using `sd_bus_call_method()` to start the service
+5. systemd starts the service, which runs the shell script
+6. Shell script:
+   - Reads configuration from `/etc/rpi-sb-provisioner/config`
+   - Validates prerequisites (secure-boot mode, key material, device family)
+   - Mounts the image using loop device
+   - Extracts and modifies boot partition
+   - Creates and signs `boot.img`
+   - Places output files in `/srv/rpi-sb-provisioner/images/bootimg-output/`
+
+== Troubleshooting
+
+=== Boot Image Not Generated
+
+*Check configuration:*
+[source,bash]
+----
+grep -E '(PROVISIONING_STYLE|RPI_DEVICE_FAMILY|CUSTOMER_KEY)' /etc/rpi-sb-provisioner/config
+----
+
+*Check service status:*
+[source,bash]
+----
+systemctl status rpi-sb-image-bootimg-generator@<image-filename>.service
+----
+
+*Check logs:*
+[source,bash]
+----
+journalctl -u rpi-sb-image-bootimg-generator@<image-filename>.service -n 100
+----
+
+=== Common Issues
+
+*Issue:* Service starts but immediately exits
+[horizontal]
+Cause:: Configuration is not set to `secure-boot`, or key material is missing
+Solution:: Verify configuration settings in `/etc/rpi-sb-provisioner/config`
+
+*Issue:* "Boot partition not found" error
+[horizontal]
+Cause:: Uploaded file is not a valid Raspberry Pi OS image
+Solution:: Ensure the uploaded image is a standard Raspberry Pi OS image with a FAT32 boot partition
+
+*Issue:* "Key file does not exist" error
+[horizontal]
+Cause:: `CUSTOMER_KEY_FILE_PEM` points to a non-existent file
+Solution:: Verify the key file path and ensure the file is readable
+
+== Package Management
+
+=== Viewing Installed Package Information
+
+[source,bash]
+----
+# Check if the package is installed
+dpkg -l rpi-sb-boot-update
+
+# View package details including changelog
+dpkg -s rpi-sb-boot-update
+
+# View package contents
+dpkg -L rpi-sb-boot-update
+
+# View changelog (includes source image filename)
+zcat /usr/share/doc/rpi-sb-boot-update/changelog.Debian.gz
+----
+
+=== Package Removal
+
+To revert to a previous boot configuration:
+
+[source,bash]
+----
+# Remove the package (leaves config files)
+sudo dpkg -r rpi-sb-boot-update
+
+# Purge the package (removes everything)
+sudo dpkg -P rpi-sb-boot-update
+----
+
+*Note:* After removal, you'll need to manually restore the previous boot.img and boot.sig files.
+
+=== Querying Package Version
+
+[source,bash]
+----
+# Get installed version
+dpkg-query -W -f='${Version}\n' rpi-sb-boot-update
+
+# Check package info file for source image details
+cat /srv/rpi-sb-provisioner/images/bootimg-output/*.package-info.txt
+----
+
+== Future Enhancements
+
+Potential improvements for this feature:
+
+* Web UI integration to display and download generated packages
+* Automatic cleanup of old packages
+* GPG signing of APT repository
+* Support for FDE-only mode (without secure boot signing)
+* Notification when package generation completes
+* Batch generation for multiple images
+* Automatic APT repository generation and hosting
+
+== References
+
+* https://github.com/raspberrypi/rpi-sb-provisioner/issues/191[GitHub Issue #191]
+* link:architecture.adoc[System Architecture]
+* link:config_vars.adoc[Configuration Variables]
+

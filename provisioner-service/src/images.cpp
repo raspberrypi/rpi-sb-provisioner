@@ -12,6 +12,7 @@
 #include <sys/inotify.h>
 #include <sys/select.h>
 #include <errno.h>
+#include <systemd/sd-bus.h>
 #include "utils.h"
 
 #include <filesystem>
@@ -237,6 +238,110 @@ public:
 // Define static members
 std::unordered_map<std::string, std::vector<drogon::WebSocketConnectionPtr>> SHA256WebSocketController::activeConnections;
 std::mutex SHA256WebSocketController::connectionsMutex;
+
+// WebSocket controller for boot package status
+class BootPackageWebSocketController : public drogon::WebSocketController<BootPackageWebSocketController> {
+public:
+    // Store active WebSocket connections
+    static std::unordered_map<std::string, std::vector<drogon::WebSocketConnectionPtr>> activeConnections;
+    static std::mutex connectionsMutex;
+    
+    // Send update to all clients interested in this image
+    static void broadcastUpdate(const std::string& imageName, bool exists, const std::string& packageName) {
+        std::lock_guard<std::mutex> lock(connectionsMutex);
+        
+        auto it = activeConnections.find(imageName);
+        if (it != activeConnections.end() && !it->second.empty()) {
+            Json::Value response;
+            response["image_name"] = imageName;
+            response["exists"] = exists;
+            if (exists) {
+                response["package_name"] = packageName;
+                response["status"] = "available";
+                LOG_INFO << "WebSocket: Broadcasting boot package available for " << imageName << ": " << packageName;
+            } else {
+                response["status"] = "generating";
+                LOG_INFO << "WebSocket: Broadcasting boot package generating for " << imageName;
+            }
+            
+            std::string message = response.toStyledString();
+            
+            // Iterate over all clients and send the update
+            auto& connections = it->second;
+            auto connIt = connections.begin();
+            while (connIt != connections.end()) {
+                if ((*connIt)->connected()) {
+                    (*connIt)->send(message);
+                    ++connIt;
+                } else {
+                    // Remove disconnected clients
+                    connIt = connections.erase(connIt);
+                }
+            }
+        }
+    }
+
+    void handleNewMessage(const drogon::WebSocketConnectionPtr& wsConnPtr, std::string&& message, const drogon::WebSocketMessageType& type) override {
+        if (type == drogon::WebSocketMessageType::Text) {
+            Json::Value request;
+            Json::CharReaderBuilder builder;
+            std::string errors;
+            std::istringstream iss(message);
+            if (!Json::parseFromStream(builder, iss, &request, &errors)) {
+                Json::Value response;
+                response["error"] = "Invalid JSON";
+                wsConnPtr->send(response.toStyledString());
+                return;
+            }
+            
+            if (request.isMember("action") && request["action"].asString() == "check_boot_package" && 
+                request.isMember("image_name")) {
+                std::string imageName = request["image_name"].asString();
+                
+                // Register this connection as interested in this image
+                {
+                    std::lock_guard<std::mutex> lock(connectionsMutex);
+                    activeConnections[imageName].push_back(wsConnPtr);
+                }
+                
+                // Check for boot package
+                provisioner::requestBootPackageCheck(imageName);
+            }
+        }
+    }
+    
+    void handleNewConnection(const drogon::HttpRequestPtr& req, const drogon::WebSocketConnectionPtr& wsConnPtr) override {
+        LOG_INFO << "New WebSocket connection for boot package status";
+    }
+    
+    void handleConnectionClosed(const drogon::WebSocketConnectionPtr& wsConnPtr) override {
+        LOG_INFO << "WebSocket connection closed for boot package";
+        
+        // Remove this connection from all image subscriptions
+        {
+            std::lock_guard<std::mutex> lock(connectionsMutex);
+            for (auto& pair : activeConnections) {
+                auto& connections = pair.second;
+                connections.erase(
+                    std::remove_if(connections.begin(), connections.end(),
+                        [&wsConnPtr](const drogon::WebSocketConnectionPtr& conn) {
+                            return conn == wsConnPtr;
+                        }
+                    ),
+                    connections.end()
+                );
+            }
+        }
+    }
+    
+    WS_PATH_LIST_BEGIN
+    WS_PATH_ADD("/ws/boot-package");
+    WS_PATH_LIST_END
+};
+
+// Define static members
+std::unordered_map<std::string, std::vector<drogon::WebSocketConnectionPtr>> BootPackageWebSocketController::activeConnections;
+std::mutex BootPackageWebSocketController::connectionsMutex;
 
 namespace provisioner {
 
@@ -753,6 +858,107 @@ namespace provisioner {
         LOG_INFO << "Automatic SHA256 calculation initiated for all existing images";
     }
     
+    // Trigger boot.img generation for a newly uploaded image
+    void triggerBootImgGeneration(const std::string& imageName) {
+        LOG_INFO << "Triggering boot.img generation for: " << imageName;
+        
+        sd_bus_error error = SD_BUS_ERROR_NULL;
+        sd_bus_message *reply = nullptr;
+        sd_bus *bus = nullptr;
+        int ret;
+        
+        // Connect to the system bus
+        ret = sd_bus_open_system(&bus);
+        if (ret < 0) {
+            LOG_ERROR << "Failed to connect to system bus: " << strerror(-ret);
+            return;
+        }
+        
+        // Build the service unit name
+        std::string serviceName = "rpi-sb-image-bootimg-generator@" + imageName + ".service";
+        
+        // Call StartUnit method on systemd's Manager interface
+        // Method signature: StartUnit(in s name, in s mode, out o job)
+        // mode "replace" means: start the unit and cancel any conflicting jobs
+        ret = sd_bus_call_method(
+            bus,
+            "org.freedesktop.systemd1",           // service to contact
+            "/org/freedesktop/systemd1",          // object path
+            "org.freedesktop.systemd1.Manager",   // interface name
+            "StartUnit",                          // method name
+            &error,                               // error return
+            &reply,                               // reply message
+            "ss",                                 // input signature (two strings)
+            serviceName.c_str(),                  // unit name
+            "replace"                             // mode
+        );
+        
+        if (ret < 0) {
+            LOG_ERROR << "Failed to start boot.img generation service '" << serviceName 
+                      << "': " << error.message;
+            sd_bus_error_free(&error);
+        } else {
+            // Extract the job path from the reply (we don't need it, but should read it)
+            const char *job_path;
+            ret = sd_bus_message_read(reply, "o", &job_path);
+            if (ret >= 0) {
+                LOG_INFO << "Started boot.img generation service: " << serviceName 
+                         << " (job: " << job_path << ")";
+            } else {
+                LOG_INFO << "Started boot.img generation service: " << serviceName;
+            }
+        }
+        
+        // Cleanup
+        sd_bus_message_unref(reply);
+        sd_bus_error_free(&error);
+        sd_bus_unref(bus);
+    }
+    
+    // Request boot package status check
+    void requestBootPackageCheck(const std::string& imageName) {
+        LOG_INFO << "Checking boot package for: " << imageName;
+        
+        // Remove file extension from image name to get base name
+        std::string imageBaseName = imageName;
+        size_t dotPos = imageBaseName.find_last_of('.');
+        if (dotPos != std::string::npos) {
+            imageBaseName = imageBaseName.substr(0, dotPos);
+        }
+        
+        // Look for the debian package in the bootimg-output directory
+        std::filesystem::path outputDir("/srv/rpi-sb-provisioner/images/bootimg-output");
+        
+        bool exists = false;
+        std::string packageName;
+        
+        try {
+            if (std::filesystem::exists(outputDir) && std::filesystem::is_directory(outputDir)) {
+                // Look for .deb files matching the pattern
+                for (const auto& entry : std::filesystem::directory_iterator(outputDir)) {
+                    if (entry.is_regular_file() && entry.path().extension() == ".deb") {
+                        // Check if this package was generated from the same source image
+                        std::string infoFile = imageBaseName + ".package-info.txt";
+                        std::filesystem::path infoPath = outputDir / infoFile;
+                        
+                        if (std::filesystem::exists(infoPath)) {
+                            exists = true;
+                            packageName = entry.path().filename().string();
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            // Broadcast result to all interested WebSocket clients
+            BootPackageWebSocketController::broadcastUpdate(imageName, exists, packageName);
+            
+        } catch (const std::exception& e) {
+            LOG_ERROR << "Error checking boot package: " << e.what();
+            // Broadcast "not exists" on error
+            BootPackageWebSocketController::broadcastUpdate(imageName, false, "");
+        }
+    }
 
     
     // File watcher function implementation
@@ -1298,6 +1504,9 @@ namespace provisioner {
                 // Start SHA256 calculation in the background
                 requestSHA256Calculation(finalFilename);
                 
+                // Trigger boot.img generation for secure-boot configurations
+                triggerBootImgGeneration(finalFilename);
+                
                 // Set success response with JSON payload
                 resp->setStatusCode(drogon::k200OK);
                 resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
@@ -1340,6 +1549,160 @@ namespace provisioner {
             }
 
             callback(resp);
+        });
+
+        app.registerHandler("/get-boot-package-info", [](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
+            LOG_INFO << "Images::getBootPackageInfo";
+            
+            // Add audit log entry for handler access
+            AuditLog::logHandlerAccess(req, "/get-boot-package-info");
+            
+            std::string imageName = req->getParameter("name");
+            if (imageName.empty()) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Missing required parameter: name",
+                    drogon::k400BadRequest,
+                    "Bad Request",
+                    "MISSING_PARAMETER"
+                );
+                callback(resp);
+                return;
+            }
+            
+            // Remove file extension from image name to get base name
+            std::string imageBaseName = imageName;
+            size_t dotPos = imageBaseName.find_last_of('.');
+            if (dotPos != std::string::npos) {
+                imageBaseName = imageBaseName.substr(0, dotPos);
+            }
+            
+            // Look for the debian package in the bootimg-output directory
+            std::filesystem::path outputDir("/srv/rpi-sb-provisioner/images/bootimg-output");
+            
+            Json::Value result;
+            result["exists"] = false;
+            result["image_name"] = imageName;
+            
+            try {
+                if (std::filesystem::exists(outputDir) && std::filesystem::is_directory(outputDir)) {
+                    // Look for .deb files matching the pattern: rpi-sb-boot-update_*_all.deb
+                    for (const auto& entry : std::filesystem::directory_iterator(outputDir)) {
+                        if (entry.is_regular_file() && entry.path().extension() == ".deb") {
+                            std::string filename = entry.path().filename().string();
+                            // Check if this package was generated from the same source image
+                            // by checking for the package-info file
+                            std::string infoFile = imageBaseName + ".package-info.txt";
+                            std::filesystem::path infoPath = outputDir / infoFile;
+                            
+                            if (std::filesystem::exists(infoPath)) {
+                                result["exists"] = true;
+                                result["package_name"] = filename;
+                                result["package_path"] = entry.path().string();
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                auto resp = drogon::HttpResponse::newHttpJsonResponse(result);
+                callback(resp);
+            } catch (const std::exception& e) {
+                LOG_ERROR << "Error checking boot package: " << e.what();
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Failed to check boot package",
+                    drogon::k500InternalServerError,
+                    "Internal Error",
+                    "BOOT_PACKAGE_CHECK_ERROR",
+                    e.what()
+                );
+                callback(resp);
+            }
+        });
+
+        app.registerHandler("/download-boot-package", [](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
+            LOG_INFO << "Images::downloadBootPackage";
+            
+            // Add audit log entry for handler access
+            AuditLog::logHandlerAccess(req, "/download-boot-package");
+            
+            std::string imageName = req->getParameter("name");
+            if (imageName.empty()) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Missing required parameter: name",
+                    drogon::k400BadRequest,
+                    "Bad Request",
+                    "MISSING_PARAMETER"
+                );
+                callback(resp);
+                return;
+            }
+            
+            // Remove file extension from image name to get base name
+            std::string imageBaseName = imageName;
+            size_t dotPos = imageBaseName.find_last_of('.');
+            if (dotPos != std::string::npos) {
+                imageBaseName = imageBaseName.substr(0, dotPos);
+            }
+            
+            // Look for the debian package in the bootimg-output directory
+            std::filesystem::path outputDir("/srv/rpi-sb-provisioner/images/bootimg-output");
+            std::filesystem::path packagePath;
+            std::string packageName;
+            
+            try {
+                if (std::filesystem::exists(outputDir) && std::filesystem::is_directory(outputDir)) {
+                    // Look for .deb files with corresponding package-info file
+                    for (const auto& entry : std::filesystem::directory_iterator(outputDir)) {
+                        if (entry.is_regular_file() && entry.path().extension() == ".deb") {
+                            std::string infoFile = imageBaseName + ".package-info.txt";
+                            std::filesystem::path infoPath = outputDir / infoFile;
+                            
+                            if (std::filesystem::exists(infoPath)) {
+                                packagePath = entry.path();
+                                packageName = entry.path().filename().string();
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                if (packagePath.empty() || !std::filesystem::exists(packagePath)) {
+                    auto resp = provisioner::utils::createErrorResponse(
+                        req,
+                        "Boot package not found for this image",
+                        drogon::k404NotFound,
+                        "Not Found",
+                        "BOOT_PACKAGE_NOT_FOUND"
+                    );
+                    callback(resp);
+                    return;
+                }
+                
+                // Log the download
+                AuditLog::logFileSystemAccess("DOWNLOAD", packagePath.string(), true, "",
+                    "Boot package downloaded for image: " + imageName);
+                
+                // Send the file
+                auto resp = drogon::HttpResponse::newFileResponse(packagePath.string());
+                resp->setContentTypeCode(drogon::CT_APPLICATION_OCTET_STREAM);
+                resp->addHeader("Content-Disposition", "attachment; filename=\"" + packageName + "\"");
+                callback(resp);
+                
+            } catch (const std::exception& e) {
+                LOG_ERROR << "Error downloading boot package: " << e.what();
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Failed to download boot package",
+                    drogon::k500InternalServerError,
+                    "Internal Error",
+                    "BOOT_PACKAGE_DOWNLOAD_ERROR",
+                    e.what()
+                );
+                callback(resp);
+            }
         });
 
         app.registerHandler("/delete-image", [](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {

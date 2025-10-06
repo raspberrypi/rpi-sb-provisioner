@@ -96,6 +96,7 @@
             try {
                 // Stop any ongoing SHA256 calculation for this image
                 pendingSha256Requests.delete(name);
+                pendingBootPackageRequests.delete(name);
                 stopPolling(name);
                 
                 const response = await fetch(`/delete-image?name=${encodeURIComponent(name)}`, {
@@ -490,6 +491,108 @@
             }));
         }
         
+        // WebSocket for boot package status
+        let wsBootPackage = null;
+        let pendingBootPackageRequests = new Set();
+        
+        // Initialize WebSocket connection for boot packages
+        function initBootPackageWebSocket() {
+            if (!window.WebSocket) {
+                console.warn('WebSocket not supported - boot package status updates disabled');
+                return;
+            }
+            
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws/boot-package`;
+            
+            try {
+                wsBootPackage = new WebSocket(wsUrl);
+                
+                wsBootPackage.onopen = function() {
+                    console.log('Boot package WebSocket connected');
+                    // Request status for all boot packages
+                    initializeBootPackageRequests();
+                };
+                
+                wsBootPackage.onmessage = function(event) {
+                    try {
+                        const response = JSON.parse(event.data);
+                        console.log('Boot package WebSocket message:', response);
+                        updateBootPackageCell(response);
+                    } catch (error) {
+                        console.error('Error parsing boot package WebSocket message:', error);
+                    }
+                };
+                
+                wsBootPackage.onerror = function(error) {
+                    console.error('Boot package WebSocket error:', error);
+                };
+                
+                wsBootPackage.onclose = function() {
+                    console.log('Boot package WebSocket closed');
+                    wsBootPackage = null;
+                };
+            } catch (error) {
+                console.error('Failed to create boot package WebSocket:', error);
+            }
+        }
+        
+        // Update boot package cell with WebSocket response
+        function updateBootPackageCell(response) {
+            const imageName = response.image_name;
+            const cell = document.querySelector(`.boot-package-cell[data-image="${imageName}"]`);
+            if (!cell) return;
+            
+            if (response.exists && response.package_name) {
+                cell.innerHTML = `<a href="/download-boot-package?name=${encodeURIComponent(imageName)}" class="download-link" download>Download ${response.package_name}</a>`;
+                pendingBootPackageRequests.delete(imageName);
+            } else if (response.status === 'generating') {
+                cell.textContent = 'Generating...';
+            } else {
+                cell.textContent = 'Not available';
+                pendingBootPackageRequests.delete(imageName);
+            }
+        }
+        
+        // Request boot package status via WebSocket
+        function requestBootPackage(imageName) {
+            if (!wsBootPackage || wsBootPackage.readyState !== WebSocket.OPEN) {
+                console.warn('Boot package WebSocket not ready for:', imageName);
+                return;
+            }
+            
+            pendingBootPackageRequests.add(imageName);
+            wsBootPackage.send(JSON.stringify({
+                action: 'check_boot_package',
+                image_name: imageName
+            }));
+        }
+        
+        // Initialize boot package requests for all images
+        function initializeBootPackageRequests() {
+            if (!wsBootPackage || wsBootPackage.readyState !== WebSocket.OPEN) {
+                console.warn('Boot package WebSocket not connected');
+                return;
+            }
+            
+            const bootPackageCells = document.querySelectorAll('.boot-package-cell');
+            console.log(`Found ${bootPackageCells.length} boot package cells to initialize`);
+            
+            bootPackageCells.forEach(cell => {
+                const imageName = cell.getAttribute('data-image');
+                if (imageName && !pendingBootPackageRequests.has(imageName)) {
+                    console.log(`Requesting boot package status for: ${imageName}`);
+                    requestBootPackage(imageName);
+                }
+            });
+        }
+        
+        // Check all boot packages on page load
+        function checkAllBootPackages() {
+            // WebSocket will handle this when connected
+            initBootPackageWebSocket();
+        }
+        
         // Initialize SHA256 requests for all images
         function initializeSha256Requests() {
             if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -540,6 +643,8 @@
             initializePolling();
             // Optional: Still try to establish WebSocket for real-time updates
             initWebSocket();
+            // Check for boot packages
+            checkAllBootPackages();
         });
 
         // Force close WebSocket with timeout
@@ -580,10 +685,14 @@
             console.log('Page unloading - cleaning up WebSocket and polling');
             // Clear all pending requests first
             pendingSha256Requests.clear();
+            pendingBootPackageRequests.clear();
             // Stop all polling
             stopAllPolling();
-            // Force close WebSocket with timeout
+            // Force close WebSockets with timeout
             forceCloseWebSocket();
+            if (wsBootPackage) {
+                wsBootPackage.close();
+            }
         });
         
         // Also cleanup on page hide (covers more navigation scenarios)
@@ -629,6 +738,7 @@
                 <th>Image Name</th>
                 <th>SHA256</th>
                 <th>Status</th>
+                <th>Boot Package</th>
                 <th>Actions</th>
             </tr>
         </thead>
@@ -641,6 +751,7 @@
                     <td><%c++ $$ << image.at("name"); %></td>
                     <td class="sha256-cell" data-image="<%c++ $$ << image.at("name"); %>"><%c++ $$ << image.at("sha256"); %></td>
                     <td><%c++ $$ << (image.at("is_gold_master") == "true" ? "Current Gold Master" : ""); %></td>
+                    <td class="boot-package-cell" data-image="<%c++ $$ << image.at("name"); %>">Checking...</td>
                     <td>
                         <%c++ if (image.at("is_gold_master") == "true") { %>
                             <button class="clear-cache-btn" onclick="clearCaches()">Clear Caches</button>
@@ -802,6 +913,22 @@
         #copy-notification.show {
             opacity: 1;
         }
+        
+        /* Boot package download link styles */
+        .download-link {
+            color: #0066cc;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        
+        .download-link:hover {
+            text-decoration: underline;
+            color: #0052a3;
+        }
+        
+        .boot-package-cell {
+            min-width: 150px;
+        }
     </style>
 
     <script>
@@ -927,6 +1054,7 @@
                             <td>${data.filename}</td>
                             <td class="sha256-cell" data-image="${data.filename}">Calculating...</td>
                             <td></td>
+                            <td class="boot-package-cell" data-image="${data.filename}">Checking...</td>
                             <td>
                                 <button class="use-btn" onclick="useImage('${data.filename}')">Use</button>
                                 <button class="delete-btn" onclick="deleteImage('${data.filename}')">Delete</button>
@@ -938,6 +1066,9 @@
                         // Start polling for SHA256 of the new image
                         console.log(`Starting polling for newly uploaded image: ${data.filename}`);
                         startPolling(data.filename);
+                        
+                        // Request boot package status via WebSocket
+                        requestBootPackage(data.filename);
                     } else {
                         const errorData = await response.json();
                         showMessage(`Upload failed: ${errorData.message || 'Unknown error'}`, true);
