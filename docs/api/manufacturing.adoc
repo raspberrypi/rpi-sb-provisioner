@@ -62,7 +62,7 @@ The endpoint returns a JSON array where each element represents a provisioned de
 |boardname|Type of Raspberry Pi board (e.g., "CM5", "RPi5")
 |serial|Device serial number
 |eth_mac|Ethernet MAC address
-|wifi_mac|WiFi MAC address (if applicable)
+|wifi_mac|Wi-Fi MAC address (if applicable)
 |bt_mac|Bluetooth MAC address (if applicable)
 |mmc_size|Storage size in bytes
 |mmc_cid|MMC Card ID

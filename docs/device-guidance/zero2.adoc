@@ -22,12 +22,12 @@ The Zero 2 W does not have a power button or boot button. Entry into RPIBOOT mod
 
 === Required Materials
 
-* One USB-A to microUSB-B cable
+* One USB A to microUSB B cable
 * Raspberry Pi Zero 2 W device
 * SD card (any size, FAT32 formatted)
 * Computer with SD card reader (for initial SD card preparation)
 
-=== SD Card Preparation (One-Time)
+=== SD card preparation (one-time)
 
 Before provisioning Zero 2 W devices, prepare a special boot SD card:
 
@@ -137,7 +137,7 @@ This is a known issue: https://github.com/raspberrypi/usbboot/issues/101#issueco
 
 After this, USB boot mode should work normally.
 
-=== Problem: SD Card Not Working
+=== Problem: SD card not working
 
 *Symptoms:* You have created the bootcode.bin file, but the device still does not enter RPIBOOT mode.
 
@@ -146,7 +146,7 @@ After this, USB boot mode should work normally.
 * *Check the file is truly empty:* The file size must be exactly 0 bytes. Check the file properties.
 * *Check for hidden extensions:* On Windows, make sure the file is not actually named `bootcode.bin.txt`. Enable "File name extensions" in Windows Explorer to see the real name.
 * *Try a different SD card:* Some SD cards do not work well. Try a different card.
-* *Reformat the SD card:* Use the official SD Card Formatter tool from the SD Association: https://www.sdcard.org/downloads/formatter/
+* *Reformat the SD card:* Use the official SD card formatter tool from the SD Association: https://www.sdcard.org/downloads/formatter/
 
 === Problem: Provisioning Fails With Errors
 
@@ -169,7 +169,7 @@ After this, USB boot mode should work normally.
 * *USB port matters* - try USB 2 ports if USB 3 does not work
 * *May need first boot* - boot with Raspberry Pi OS once if USB boot fails
 
-*One-time preparation:*
+*One-time preparation*
 
 1. Format SD card as FAT32
 2. Create empty file named `bootcode.bin` on the SD card

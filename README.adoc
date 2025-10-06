@@ -30,7 +30,7 @@ Each device needs:
 
 Without this tool, preparing each device manually is time-consuming and error-prone. Each command must be executed precisely. A single mistake requires restarting the entire process.
 
-*This tool automates the entire provisioning workflow.* Connect a device, and the tool handles all configuration steps automatically. Typical provisioning time is 5-10 minutes per device.
+*This tool automates the entire provisioning workflow.* Connect a device, and the tool handles all configuration steps automatically. Typical provisioning time is 5–10 minutes per device.
 
 == Who Should Use This Tool?
 
@@ -109,7 +109,7 @@ For specific connection instructions for each device type, see the <<device-conn
 This is the computer that runs the provisioning tool. You need:
 
 * *One Raspberry Pi 5* (or another 64-bit Raspberry Pi device)
-* *Power supply:* Official Raspberry Pi 27W USB-C Power Supply
+* *Power supply:* Official Raspberry Pi 27W USB C power supply
 * *Operating system:* Raspberry Pi OS Bookworm or newer
 * *Storage:* At least 32GB free space (for temporary files)
 
@@ -124,23 +124,23 @@ What cables you need depends on which devices you want to prepare:
 |Device You Want To Prepare |What You Need
 
 |*Raspberry Pi 5*
-|USB-A to USB-C cable
+|USB A to USB C cable
 
 |*Raspberry Pi 4*
-|USB-A to USB-C cable
+|USB A to USB C cable
 
 |*Raspberry Pi Compute Module 4*
-|• USB-A to microUSB-B cable +
+|• USB A to microUSB B cable +
 • Compute Module 4 IO Board +
 • One jumper wire
 
 |*Raspberry Pi Compute Module 5*
-|• USB-A to USB-C cable +
+|• USB A to USB C cable +
 • Compute Module 5 IO Board +
 • One jumper wire
 
 |*Raspberry Pi Zero 2 W*
-|• USB-A to microUSB-B cable +
+|• USB A to microUSB B cable +
 • SD card (any size) +
 • Computer with SD card reader
 |===
@@ -152,7 +152,7 @@ For *Compute Module 4 or 5* devices:
 Connect your provisioning Raspberry Pi to the Compute Module IO Board as shown in this image:
 
 [pdfwidth=90%]
-.A correctly connected provisioning setup
+.A correctly connected provisioning system
 image::docs/images/rpi-connection-cm4io.png[]
 
 [IMPORTANT]
@@ -233,7 +233,7 @@ Once configured, the provisioning process is:
 3. *Disconnect the device* when both LEDs turn off
 4. The device is ready for deployment
 
-Typical provisioning time is 5-10 minutes per device. Progress can be monitored through the web interface.
+Typical provisioning time is 5–10 minutes per device. Progress can be monitored through the web interface.
 
 === Connecting Your Device
 
@@ -255,7 +255,7 @@ image::docs/images/rpi-cm4io-detail.png[]
 Raspberry Pi 5 requires a special button-press procedure:
 
 1. *Hold down the power button* on the Raspberry Pi 5
-2. *While holding the button*, plug in the USB-C cable to your provisioning computer
+2. *While holding the button*, plug in the USB C cable to your provisioning computer
 3. *Keep holding* the button until the device is recognized
 4. The provisioning process starts automatically
 
@@ -536,6 +536,72 @@ find /etc/rpi-sb-provisioner -name <serial>
 
 Replace `<serial>` with your device serial number.
 
+== Advanced Topics
+
+=== HTTP API for Integration
+
+The provisioning system provides a comprehensive HTTP API for integration with other systems and automation workflows.
+
+The API supports:
+
+* *Device monitoring:* Real-time status of connected devices during provisioning
+* *Manufacturing database access:* Query and export provisioned device records
+* *Service monitoring:* View provisioning service status and logs
+* *Configuration management:* Programmatic configuration updates
+* *Image management:* Upload, verify, and manage OS images
+* *Customisation scripts:* Create and manage provisioning hooks
+* *WebSocket support:* Real-time updates for devices and long-running operations
+* *Audit logging:* Security and compliance tracking
+
+*API Documentation:* See <<docs/api_endpoints.adoc,Complete API Reference>>
+
+The API documentation includes:
+
+* Detailed endpoint descriptions with request/response examples
+* Authentication and security requirements
+* WebSocket protocol specifications
+* Error handling and status codes
+* Integration examples and use cases
+
+Common integration scenarios:
+
+* Building custom monitoring dashboards
+* Automating device provisioning workflows
+* Integration with manufacturing execution systems (MES)
+* Quality assurance and compliance reporting
+* Custom mobile or desktop applications
+
+The web interface at http://localhost:3142 is built using this API, demonstrating practical usage patterns.
+
+=== Scaling to Mass Production
+
+For organizations planning to provision large quantities of devices, comprehensive scaling guidance is available.
+
+The scaling guide covers:
+
+* **Performance planning:** Expected throughput and capacity calculations
+* **Infrastructure requirements:** Hardware, network, and workspace configuration
+* **Workflow optimization:** Pipelined vs. batch provisioning strategies
+* **Operator efficiency:** Optimal device-to-operator ratios
+* **Deployment sizing:** Small, medium, and large-scale operation planning
+
+*Scaling Guide:* See <<docs/mass-provisioning-guidance/scaling.adoc,Mass Provisioning Scaling Guide>>
+
+The guide includes tested performance data:
+
+* Provisioning time: ~2.5 minutes per device (2.6GB image)
+* Operator capacity: Up to 7 devices per operator (pipelined)
+* Throughput: ~150 devices per 8-hour shift (single operator, optimized)
+
+Key considerations for production deployment:
+
+* Use pipelined provisioning for maximum efficiency
+* Plan for device preparation time (unboxing, cable connection)
+* Invest in quality USB infrastructure (official Raspberry Pi powered USB hubs)
+* Use NVMe storage on provisioning server for best performance
+* Implement quality controls and audit procedures
+* Consider API integration with manufacturing execution systems
+
 == Getting Help
 
 === Something Not Working?
@@ -548,10 +614,11 @@ Replace `<serial>` with your device serial number.
 
 This README provides the essential information to get started. For more detailed information:
 
+* *System architecture:* See <<docs/architecture.adoc,Architecture Documentation>> (understand how the system works)
 * *Configuration options:* See <<docs/config_vars.adoc,Configuration Reference>>
 * *Device-specific guides:* See the `docs/device-guidance/` folder
-* *API documentation:* See the `docs/api/` folder (for advanced users)
-* *Scaling guidance:* See <<docs/mass-provisioning-guidance/scaling.adoc,Scaling Guide>>
+* *HTTP API documentation:* See <<docs/api_endpoints.adoc,API Documentation>> (for integration and automation)
+* *Mass production scaling:* See <<docs/mass-provisioning-guidance/scaling.adoc,Scaling Guide>> (for high-volume operations)
 
 === Report Problems
 
@@ -610,6 +677,12 @@ This documentation provides all necessary information to begin provisioning secu
 
 |*Get help*
 |Check <<troubleshooting,Troubleshooting>> section above
+
+|*API access*
+|See <<docs/api_endpoints.adoc,API Documentation>> for HTTP API
+
+|*System architecture*
+|See <<docs/architecture.adoc,Architecture>> to understand how it works
 |===
 
 === Connection Quick Reference

@@ -10,7 +10,7 @@ The connection process requires holding the power button at specific times durin
 
 == What You Need
 
-* One USB-A to USB-C cable (high quality)
+* One USB A to USB C cable (high quality)
 * Your Raspberry Pi 5 device
 
 == The Connection Process
@@ -21,7 +21,7 @@ Raspberry Pi 5 requires a *two-step* connection process:
 
 1. *Hold down the power button* on the Raspberry Pi 5
 
-2. *While holding the button*, plug the USB-C cable from your provisioning computer into the Raspberry Pi 5
+2. *While holding the button*, plug the USB C cable from your provisioning computer into the Raspberry Pi 5
 
 3. *Keep holding the power button* until the provisioning system recognizes the device
 +
@@ -39,11 +39,11 @@ After a few moments, you need to reconnect the device:
 +
 Wait until you see the status: `bootstrap-fastboot-initialisation-started`
 
-2. *Unplug the USB-C cable* from the Raspberry Pi 5
+2. *Unplug the USB C cable* from the Raspberry Pi 5
 
 3. *Hold down the power button* on the Raspberry Pi 5
 
-4. *While holding the button*, plug the USB-C cable back into the Raspberry Pi 5
+4. *While holding the button*, plug the USB C cable back into the Raspberry Pi 5
 
 5. *Keep holding the power button* until the device is recognized again
 
@@ -75,7 +75,7 @@ Watch the LEDs on the Raspberry Pi 5:
 |Wait for `bootstrap-fastboot-initialisation-started` before unplugging.
 
 |*Good cables matter*
-|Use a high-quality USB-A to USB-C cable. Poor cables cause connection problems.
+|Use a high-quality USB A to USB C cable. Poor cables cause connection problems.
 
 |*Monitor in web interface*
 |The web interface at http://localhost:3142 shows you when to reconnect.
@@ -90,7 +90,7 @@ Watch the LEDs on the Raspberry Pi 5:
 *Solutions:*
 
 * *Hold button first:* Make sure you hold the power button BEFORE connecting the USB cable
-* *Try a better cable:* Use a shorter, high-quality USB-A to USB-C cable
+* *Try a better cable:* Use a shorter, high-quality USB A to USB C cable
 * *Try a different USB port:* Some USB ports work better than others
 * *Check power:* Make sure your provisioning computer has enough power
 * *Keep holding:* Hold the button until you see the device is recognized
