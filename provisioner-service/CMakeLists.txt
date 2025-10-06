@@ -95,7 +95,7 @@ set(CURL_DISABLE_NTLM ON CACHE BOOL "Set to ON to disable NTLM support." FORCE)
 
 FetchContent_Declare(curl
  GIT_REPOSITORY https://github.com/curl/curl.git
- GIT_TAG        curl-8_13_0
+ GIT_TAG        curl-8_16_0
  PATCH_COMMAND patch -p1 < ${CMAKE_SOURCE_DIR}/cmake/curl/http-no-auth.patch
  UPDATE_DISCONNECTED 1
  EXCLUDE_FROM_ALL  # Prevents installation in packages
