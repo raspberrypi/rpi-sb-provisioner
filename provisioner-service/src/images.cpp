@@ -247,7 +247,7 @@ public:
     static std::mutex connectionsMutex;
     
     // Send update to all clients interested in this image
-    static void broadcastUpdate(const std::string& imageName, bool exists, const std::string& packageName) {
+    static void broadcastUpdate(const std::string& imageName, bool exists, const std::string& packageName, const std::string& status = "") {
         std::lock_guard<std::mutex> lock(connectionsMutex);
         
         auto it = activeConnections.find(imageName);
@@ -255,7 +255,10 @@ public:
             Json::Value response;
             response["image_name"] = imageName;
             response["exists"] = exists;
-            if (exists) {
+            
+            if (!status.empty()) {
+                response["status"] = status;
+            } else if (exists) {
                 response["package_name"] = packageName;
                 response["status"] = "available";
                 LOG_INFO << "WebSocket: Broadcasting boot package available for " << imageName << ": " << packageName;
@@ -918,6 +921,15 @@ namespace provisioner {
     // Request boot package status check
     void requestBootPackageCheck(const std::string& imageName) {
         LOG_INFO << "Checking boot package for: " << imageName;
+        
+        // Check if provisioning style is secure-boot (boot packages only work in secure-boot mode)
+        auto provisioningStyle = provisioner::utils::getConfigValue("PROVISIONING_STYLE");
+        if (!provisioningStyle || *provisioningStyle != "secure-boot") {
+            std::string style = provisioningStyle ? *provisioningStyle : "unknown";
+            LOG_INFO << "Boot package not supported for provisioning style: " << style;
+            BootPackageWebSocketController::broadcastUpdate(imageName, false, "", "unsupported");
+            return;
+        }
         
         // Remove file extension from image name to get base name
         std::string imageBaseName = imageName;
@@ -1619,6 +1631,74 @@ namespace provisioner {
                 );
                 callback(resp);
             }
+        });
+
+        app.registerHandler("/generate-boot-package", [](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
+            LOG_INFO << "Images::generateBootPackage";
+            
+            // Add audit log entry for handler access
+            AuditLog::logHandlerAccess(req, "/generate-boot-package");
+            
+            // Check if provisioning style is secure-boot
+            auto provisioningStyle = provisioner::utils::getConfigValue("PROVISIONING_STYLE");
+            if (!provisioningStyle || *provisioningStyle != "secure-boot") {
+                std::string style = provisioningStyle ? *provisioningStyle : "unknown";
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Boot package generation only supported in secure-boot mode (current: " + style + ")",
+                    drogon::k400BadRequest,
+                    "Bad Request",
+                    "UNSUPPORTED_PROVISIONING_STYLE"
+                );
+                callback(resp);
+                return;
+            }
+            
+            std::string imageName = req->getParameter("name");
+            if (imageName.empty()) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Missing required parameter: name",
+                    drogon::k400BadRequest,
+                    "Bad Request",
+                    "MISSING_PARAMETER"
+                );
+                callback(resp);
+                return;
+            }
+            
+            // Verify the image file exists
+            std::filesystem::path imagePath(IMAGES_PATH);
+            imagePath /= imageName;
+            
+            if (!std::filesystem::exists(imagePath)) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Image file not found: " + imageName,
+                    drogon::k404NotFound,
+                    "Not Found",
+                    "IMAGE_NOT_FOUND"
+                );
+                callback(resp);
+                return;
+            }
+            
+            // Trigger boot.img generation
+            triggerBootImgGeneration(imageName);
+            
+            // Log the action
+            AuditLog::logFileSystemAccess("GENERATE_BOOT_PACKAGE", imagePath.string(), true, "", 
+                "Manual boot package generation requested");
+            
+            // Return success response
+            Json::Value result;
+            result["success"] = true;
+            result["message"] = "Boot package generation started for " + imageName;
+            result["image_name"] = imageName;
+            
+            auto resp = drogon::HttpResponse::newHttpJsonResponse(result);
+            resp->setStatusCode(drogon::k200OK);
+            callback(resp);
         });
 
         app.registerHandler("/download-boot-package", [](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {

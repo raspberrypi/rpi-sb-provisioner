@@ -88,6 +88,64 @@
             }
         }
 
+        async function generateBootPackage(name) {
+            if (!confirm('Generate boot package for ' + name + '?\n\nThis will create a Debian package with boot.img and boot.sig files.')) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/generate-boot-package?name=' + encodeURIComponent(name), {
+                    method: 'GET',
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    showMessage(result.message || 'Boot package generation started');
+                    
+                    // Update the boot package cell to show "Generating..."
+                    const cell = document.querySelector(`.boot-package-cell[data-image="${name}"]`);
+                    if (cell) {
+                        cell.textContent = 'Generating...';
+                    }
+                    
+                    let checkCount = 0;
+                    const maxChecks = 60; // 2 minutes (60 checks * 2 seconds)
+                    let generationComplete = false;
+                    
+                    // Poll for status updates
+                    const checkInterval = setInterval(async () => {
+                        checkCount++;
+                        
+                        if (wsBootPackage && wsBootPackage.readyState === WebSocket.OPEN) {
+                            requestBootPackage(name);
+                        }
+                        
+                        // Check if we've exceeded the timeout
+                        if (checkCount >= maxChecks && !generationComplete) {
+                            clearInterval(checkInterval);
+                            const cell = document.querySelector(`.boot-package-cell[data-image="${name}"]`);
+                            if (cell && cell.textContent === 'Generating...') {
+                                cell.innerHTML = `<span style="color: #f44336;">Generation failed or timed out</span> <button class="generate-btn" onclick="generateBootPackage('${name.replace(/'/g, "\\'")}')">Retry</button>`;
+                                showMessage('Boot package generation failed or timed out. Check logs for details.', true);
+                            }
+                        }
+                    }, 2000); // Check every 2 seconds
+                    
+                    // Store interval ID so it can be cleared when generation completes
+                    if (!window.bootPackageIntervals) {
+                        window.bootPackageIntervals = {};
+                    }
+                    window.bootPackageIntervals[name] = checkInterval;
+                } else {
+                    const error = await response.json();
+                    showMessage(error.message || 'Failed to generate boot package', true);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                showMessage('Failed to generate boot package', true);
+            }
+        }
+
         async function deleteImage(name) {
             if (!confirm('Are you sure you want to delete this image?')) {
                 return;
@@ -543,14 +601,29 @@
             const cell = document.querySelector(`.boot-package-cell[data-image="${imageName}"]`);
             if (!cell) return;
             
-            if (response.exists && response.package_name) {
+            if (response.status === 'unsupported') {
+                cell.innerHTML = `<span style="color: #666;" title="Boot packages are only available in secure-boot provisioning mode">Unsupported</span>`;
+                pendingBootPackageRequests.delete(imageName);
+            } else if (response.exists && response.package_name) {
                 cell.innerHTML = `<a href="/download-boot-package?name=${encodeURIComponent(imageName)}" class="download-link" download>Download ${response.package_name}</a>`;
                 pendingBootPackageRequests.delete(imageName);
+                
+                // Clear any polling interval for this image
+                if (window.bootPackageIntervals && window.bootPackageIntervals[imageName]) {
+                    clearInterval(window.bootPackageIntervals[imageName]);
+                    delete window.bootPackageIntervals[imageName];
+                }
             } else if (response.status === 'generating') {
                 cell.textContent = 'Generating...';
             } else {
-                cell.textContent = 'Not available';
+                cell.innerHTML = `<button class="generate-btn" onclick="generateBootPackage('${imageName.replace(/'/g, "\\'")}')">Generate</button>`;
                 pendingBootPackageRequests.delete(imageName);
+                
+                // Clear any polling interval for this image if generation failed
+                if (window.bootPackageIntervals && window.bootPackageIntervals[imageName]) {
+                    clearInterval(window.bootPackageIntervals[imageName]);
+                    delete window.bootPackageIntervals[imageName];
+                }
             }
         }
         
@@ -769,7 +842,7 @@
         .gold-master {
             background-color: #e6ffe6;
         }
-        .use-btn, .delete-btn, .clear-cache-btn {
+        .use-btn, .delete-btn, .clear-cache-btn, .generate-btn {
             min-width: 80px;
             padding: 8px 16px;
             margin-right: 5px;
@@ -793,6 +866,14 @@
         }
         .clear-cache-btn:hover {
             background-color: #0b7dda;
+        }
+        .generate-btn {
+            background-color: #FF9800;
+            color: white;
+            border: none;
+        }
+        .generate-btn:hover {
+            background-color: #F57C00;
         }
         .delete-btn {
             background-color: #f44336;

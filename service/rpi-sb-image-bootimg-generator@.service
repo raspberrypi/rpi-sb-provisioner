@@ -1,11 +1,11 @@
 [Unit]
-Description=Generate secure boot image for %I
+Description=Generate secure boot image for %i
 Documentation=https://github.com/raspberrypi/rpi-sb-provisioner
 After=network.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/rpi-sb-image-bootimg-generator.sh %I
+ExecStart=/usr/bin/rpi-sb-image-bootimg-generator.sh %i
 EnvironmentFile=/etc/rpi-sb-provisioner/config
 StandardOutput=journal
 StandardError=journal
