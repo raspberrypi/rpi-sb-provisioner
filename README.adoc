@@ -329,8 +329,8 @@ You can watch devices being provisioned in real time:
 *Using the Web Interface:*
 
 1. Open http://localhost:3142 in your browser
-2. Click the *Services* tab
-3. You will see all active provisioning operations
+2. Click the *Devices* tab to see a live visual representation of provisioning progress for all connected devices
+3. Alternatively, click the *Services* tab to see all active provisioning operations
 4. Click on any device to see detailed logs
 
 *Using the Command Line:*
