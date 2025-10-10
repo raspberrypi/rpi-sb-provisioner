@@ -256,8 +256,8 @@ announce_start "Debian package creation"
 # Calculate SHA256 of the image file for versioning
 log "Calculating SHA256 of image file..."
 IMAGE_SHA256=$(sha256sum "${IMAGE_PATH}" | awk '{print $1}')
-# Use first 12 characters as version
-PACKAGE_VERSION="${IMAGE_SHA256:0:12}"
+# Use first 12 characters as version, prefix with 0. to ensure valid Debian version
+PACKAGE_VERSION="0.$(printf '%s' "${IMAGE_SHA256}" | cut -c1-12)"
 log "Package version: ${PACKAGE_VERSION}"
 
 # Package name
