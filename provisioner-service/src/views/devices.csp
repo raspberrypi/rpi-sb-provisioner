@@ -528,6 +528,8 @@
             try { console.debug('applyTopology: pruning disabled; unseen nodes retained this tick'); } catch(e) {}
         }
     
+        let isPageUnloading = false;
+        
         function initWebSocket() {
             if (ws) try { ws.close(); } catch(e) {}
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -561,12 +563,35 @@
                 }
             };
             ws.onclose = () => {
-                setTimeout(initWebSocket, 1000);
+                // Only attempt reconnect if page is not being unloaded
+                if (!isPageUnloading) {
+                    setTimeout(initWebSocket, 1000);
+                }
             };
             ws.onerror = () => {
                 try { ws.close(); } catch(e) {}
             };
         }
+        
+        // Cleanup when navigating away
+        window.addEventListener('beforeunload', () => {
+            console.log('Page unloading - cleaning up WebSocket');
+            isPageUnloading = true;
+            if (ws) {
+                try { ws.close(); } catch(e) {}
+                ws = null;
+            }
+        });
+        
+        // Also cleanup on page hide (covers more navigation scenarios)
+        window.addEventListener('pagehide', () => {
+            console.log('Page hidden - cleaning up WebSocket');
+            isPageUnloading = true;
+            if (ws) {
+                try { ws.close(); } catch(e) {}
+                ws = null;
+            }
+        });
     </script>
 </head>
 <body>

@@ -571,7 +571,7 @@
                 }
                 
                 // Set up periodic metric updates
-                setInterval(function() {
+                const metricUpdateInterval = setInterval(function() {
                     const videoElement = document.getElementById('video');
                     if (videoElement && videoElement.videoWidth) {
                         updateMetric('videoDimensions', `${videoElement.videoWidth}x${videoElement.videoHeight}`);
@@ -594,6 +594,18 @@
                     // Measure frame brightness
                     measureFrameBrightness();
                 }, 1000);
+                
+                // Cleanup when navigating away
+                window.addEventListener('beforeunload', () => {
+                    console.log('Page unloading - cleaning up metric updates');
+                    clearInterval(metricUpdateInterval);
+                });
+                
+                // Also cleanup on page hide (covers more navigation scenarios)
+                window.addEventListener('pagehide', () => {
+                    console.log('Page hidden - cleaning up metric updates');
+                    clearInterval(metricUpdateInterval);
+                });
             }
             
             // Function to update a metric in the debug table

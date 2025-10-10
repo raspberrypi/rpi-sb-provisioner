@@ -447,6 +447,18 @@
                 stopRefresh();
             }
         });
+        
+        // Cleanup when navigating away
+        window.addEventListener('beforeunload', () => {
+            console.log('Page unloading - cleaning up auto-refresh');
+            stopRefresh();
+        });
+        
+        // Also cleanup on page hide (covers more navigation scenarios)
+        window.addEventListener('pagehide', () => {
+            console.log('Page hidden - cleaning up auto-refresh');
+            stopRefresh();
+        });
     </script>
 </body>
 </html> 
