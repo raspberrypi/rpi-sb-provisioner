@@ -1,3 +1,12 @@
+rpi-sb-provisioner (2.1.1) unstable; urgency=medium
+
+  * WebUI: Fix bootimg generator bashisms
+  * WebUI: Style bootimg generator buttons
+  * WebUI: Add explicit bootimg generation button
+  * WebUI: Fix hangs on navigation on pages using AJAX
+
+  -- Tom Dewey <tom.dewey@raspberrypi.com>  Fri, 10 Oct 2025 16:45:00 +0100
+
 rpi-sb-provisioner (2.1.0) unstable; urgency=medium
 
   * Features:

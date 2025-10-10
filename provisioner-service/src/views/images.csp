@@ -605,7 +605,7 @@
                 cell.innerHTML = `<span style="color: #666;" title="Boot packages are only available in secure-boot provisioning mode">Unsupported</span>`;
                 pendingBootPackageRequests.delete(imageName);
             } else if (response.exists && response.package_name) {
-                cell.innerHTML = `<a href="/download-boot-package?name=${encodeURIComponent(imageName)}" class="download-link" download>Download ${response.package_name}</a>`;
+                cell.innerHTML = `<a href="/download-boot-package?name=${encodeURIComponent(imageName)}" class="download-link" download title="${response.package_name}">Download</a>`;
                 pendingBootPackageRequests.delete(imageName);
                 
                 // Clear any polling interval for this image
@@ -624,6 +624,24 @@
                     clearInterval(window.bootPackageIntervals[imageName]);
                     delete window.bootPackageIntervals[imageName];
                 }
+            }
+        }
+        
+        // Fetch boot package status via HTTP (explicit status fetch)
+        async function fetchBootPackageStatus(imageName) {
+            try {
+                const response = await fetch(`/get-boot-package-info?name=${encodeURIComponent(imageName)}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    updateBootPackageCell(data);
+                    return data;
+                } else {
+                    console.error('Failed to fetch boot package status for:', imageName);
+                    return null;
+                }
+            } catch (error) {
+                console.error('Error fetching boot package status:', error);
+                return null;
             }
         }
         
@@ -660,10 +678,63 @@
             });
         }
         
+        // Setup long-interval polling for boot packages (fallback mechanism)
+        function setupBootPackagePolling() {
+            // Clear any existing polling interval
+            if (window.bootPackageLongPoll) {
+                clearInterval(window.bootPackageLongPoll);
+            }
+            
+            // Poll every 30 seconds as a fallback
+            window.bootPackageLongPoll = setInterval(() => {
+                const bootPackageCells = document.querySelectorAll('.boot-package-cell');
+                bootPackageCells.forEach(cell => {
+                    const imageName = cell.getAttribute('data-image');
+                    if (imageName) {
+                        fetchBootPackageStatus(imageName);
+                    }
+                });
+            }, 30000); // 30 seconds
+        }
+        
         // Check all boot packages on page load
         function checkAllBootPackages() {
-            // WebSocket will handle this when connected
+            // Explicitly fetch status for all images on load
+            const bootPackageCells = document.querySelectorAll('.boot-package-cell');
+            bootPackageCells.forEach(cell => {
+                const imageName = cell.getAttribute('data-image');
+                if (imageName) {
+                    fetchBootPackageStatus(imageName);
+                }
+            });
+            
+            // Setup long-interval polling as fallback
+            setupBootPackagePolling();
+            
+            // Also initialize WebSocket for real-time updates
             initBootPackageWebSocket();
+        }
+        
+        // Cleanup function to be called when navigating away
+        function cleanupBootPackagePolling() {
+            // Clear long-interval polling
+            if (window.bootPackageLongPoll) {
+                clearInterval(window.bootPackageLongPoll);
+                window.bootPackageLongPoll = null;
+            }
+            
+            // Clear all per-image intervals
+            if (window.bootPackageIntervals) {
+                Object.values(window.bootPackageIntervals).forEach(interval => {
+                    clearInterval(interval);
+                });
+                window.bootPackageIntervals = {};
+            }
+            
+            // Close WebSocket
+            if (wsBootPackage && wsBootPackage.readyState === WebSocket.OPEN) {
+                wsBootPackage.close();
+            }
         }
         
         // Initialize SHA256 requests for all images
@@ -761,6 +832,7 @@
             pendingBootPackageRequests.clear();
             // Stop all polling
             stopAllPolling();
+            cleanupBootPackagePolling();
             // Force close WebSockets with timeout
             forceCloseWebSocket();
             if (wsBootPackage) {
@@ -773,8 +845,10 @@
             console.log('Page hidden - cleaning up WebSocket and polling');
             // Clear all pending requests first
             pendingSha256Requests.clear();
+            pendingBootPackageRequests.clear();
             // Stop all polling
             stopAllPolling();
+            cleanupBootPackagePolling();
             // Force close WebSocket with timeout
             forceCloseWebSocket();
         });
@@ -997,14 +1071,21 @@
         
         /* Boot package download link styles */
         .download-link {
-            color: #0066cc;
+            display: inline-block;
+            padding: 6px 12px;
+            background-color: #2196F3;
+            color: white;
             text-decoration: none;
             font-weight: 500;
+            border-radius: 3px;
+            font-size: 14px;
+            cursor: pointer;
+            border: none;
         }
         
         .download-link:hover {
-            text-decoration: underline;
-            color: #0052a3;
+            background-color: #0b7dda;
+            text-decoration: none;
         }
         
         .boot-package-cell {

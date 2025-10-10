@@ -263,8 +263,8 @@ public:
                 response["status"] = "available";
                 LOG_INFO << "WebSocket: Broadcasting boot package available for " << imageName << ": " << packageName;
             } else {
-                response["status"] = "generating";
-                LOG_INFO << "WebSocket: Broadcasting boot package generating for " << imageName;
+                response["status"] = "not_found";
+                LOG_INFO << "WebSocket: Broadcasting boot package not found for " << imageName;
             }
             
             std::string message = response.toStyledString();
@@ -910,6 +910,9 @@ namespace provisioner {
             } else {
                 LOG_INFO << "Started boot.img generation service: " << serviceName;
             }
+            
+            // Broadcast "generating" status to WebSocket clients
+            BootPackageWebSocketController::broadcastUpdate(imageName, false, "", "generating");
         }
         
         // Cleanup
@@ -1582,6 +1585,18 @@ namespace provisioner {
                 return;
             }
             
+            // Check if provisioning style is secure-boot (boot packages only work in secure-boot mode)
+            auto provisioningStyle = provisioner::utils::getConfigValue("PROVISIONING_STYLE");
+            if (!provisioningStyle || *provisioningStyle != "secure-boot") {
+                Json::Value result;
+                result["exists"] = false;
+                result["image_name"] = imageName;
+                result["status"] = "unsupported";
+                auto resp = drogon::HttpResponse::newHttpJsonResponse(result);
+                callback(resp);
+                return;
+            }
+            
             // Remove file extension from image name to get base name
             std::string imageBaseName = imageName;
             size_t dotPos = imageBaseName.find_last_of('.');
@@ -1595,6 +1610,7 @@ namespace provisioner {
             Json::Value result;
             result["exists"] = false;
             result["image_name"] = imageName;
+            result["status"] = "not_found";
             
             try {
                 if (std::filesystem::exists(outputDir) && std::filesystem::is_directory(outputDir)) {
@@ -1611,6 +1627,7 @@ namespace provisioner {
                                 result["exists"] = true;
                                 result["package_name"] = filename;
                                 result["package_path"] = entry.path().string();
+                                result["status"] = "available";
                                 break;
                             }
                         }
