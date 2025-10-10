@@ -1,6 +1,7 @@
 = Raspberry Pi Secure Boot Provisioner
 :toc:
 :toc-title: Contents
+:toclevels: 1
 
 _Automated provisioning of secure boot and encryption for Raspberry Pi devices_
 
@@ -30,7 +31,7 @@ Each device needs:
 
 Without this tool, preparing each device manually is time-consuming and error-prone. Each command must be executed precisely. A single mistake requires restarting the entire process.
 
-*This tool automates the entire provisioning workflow.* Connect a device, and the tool handles all configuration steps automatically. Typical provisioning time is 5–10 minutes per device.
+*This tool automates the entire provisioning workflow.* Connect a device, and the tool handles all configuration steps automatically. Typical provisioning time is approximately 3 minutes per device (for a 2.6GB OS image).
 
 == Who Should Use This Tool?
 
@@ -213,7 +214,7 @@ You need to set these basic options:
 
 The web interface includes help text for each option. Read it carefully.
 
-For complete details about all configuration options, see the <<docs/config_vars.adoc,Configuration Reference>>.
+For complete details about all configuration options, see the link:docs/config_vars.adoc[Configuration Reference].
 
 === Step 5: Start Provisioning
 
@@ -233,7 +234,7 @@ Once configured, the provisioning process is:
 3. *Disconnect the device* when both LEDs turn off
 4. The device is ready for deployment
 
-Typical provisioning time is 5–10 minutes per device. Progress can be monitored through the web interface.
+Typical provisioning time is approximately 3 minutes per device (for a 2.6GB OS image). Progress can be monitored through the web interface.
 
 === Connecting Your Device
 
@@ -259,15 +260,15 @@ Raspberry Pi 5 requires a special button-press procedure:
 3. *Keep holding* the button until the device is recognized
 4. The provisioning process starts automatically
 
-For detailed instructions, see: <<docs/device-guidance/pi5.adoc,Raspberry Pi 5 Connection Guide>>
+For detailed instructions, see: link:docs/device-guidance/pi5.adoc[Raspberry Pi 5 Connection Guide]
 
 ==== For Raspberry Pi 4
 
-See the detailed guide: <<docs/device-guidance/pi4.adoc,Raspberry Pi 4 Connection Guide>>
+See the detailed guide: link:docs/device-guidance/pi4.adoc[Raspberry Pi 4 Connection Guide]
 
 ==== For Raspberry Pi Zero 2 W
 
-See the detailed guide: <<docs/device-guidance/zero2.adoc,Raspberry Pi Zero 2 W Connection Guide>>
+See the detailed guide: link:docs/device-guidance/zero2.adoc[Raspberry Pi Zero 2 W Connection Guide]
 
 === What Happens During Provisioning
 
@@ -354,7 +355,7 @@ By default, this tool does *not* block JTAG debugging access. JTAG is a hardware
 
 If you want to block JTAG access for maximum security, you must enable the `RPI_DEVICE_LOCK_JTAG` option in your configuration.
 
-See the <<docs/config_vars.adoc#rpi_device_lock_jtag,Configuration Reference>> for details.
+See the link:docs/config_vars.adoc#rpi_device_lock_jtag[Configuration Reference] for details.
 
 *Note:* If you block JTAG, Raspberry Pi engineers cannot help debug hardware issues if you need support.
 ====
@@ -553,7 +554,7 @@ The API supports:
 * *WebSocket support:* Real-time updates for devices and long-running operations
 * *Audit logging:* Security and compliance tracking
 
-*API Documentation:* See <<docs/api_endpoints.adoc,Complete API Reference>>
+*API Documentation:* See link:docs/api_endpoints.adoc[Complete API Reference]
 
 The API documentation includes:
 
@@ -585,7 +586,7 @@ The scaling guide covers:
 * **Operator efficiency:** Optimal device-to-operator ratios
 * **Deployment sizing:** Small, medium, and large-scale operation planning
 
-*Scaling Guide:* See <<docs/mass-provisioning-guidance/scaling.adoc,Mass Provisioning Scaling Guide>>
+*Scaling Guide:* See link:docs/mass-provisioning-guidance/scaling.adoc[Mass Provisioning Scaling Guide]
 
 The guide includes tested performance data:
 
@@ -614,11 +615,11 @@ Key considerations for production deployment:
 
 This README provides the essential information to get started. For more detailed information:
 
-* *System architecture:* See <<docs/architecture.adoc,Architecture Documentation>> (understand how the system works)
-* *Configuration options:* See <<docs/config_vars.adoc,Configuration Reference>>
+* *System architecture:* See link:docs/architecture.adoc[Architecture Documentation] (understand how the system works)
+* *Configuration options:* See link:docs/config_vars.adoc[Configuration Reference]
 * *Device-specific guides:* See the `docs/device-guidance/` folder
-* *HTTP API documentation:* See <<docs/api_endpoints.adoc,API Documentation>> (for integration and automation)
-* *Mass production scaling:* See <<docs/mass-provisioning-guidance/scaling.adoc,Scaling Guide>> (for high-volume operations)
+* *HTTP API documentation:* See link:docs/api_endpoints.adoc[API Documentation] (for integration and automation)
+* *Mass production scaling:* See link:docs/mass-provisioning-guidance/scaling.adoc[Scaling Guide] (for high-volume operations)
 
 === Report Problems
 
@@ -679,10 +680,10 @@ This documentation provides all necessary information to begin provisioning secu
 |Check <<troubleshooting,Troubleshooting>> section above
 
 |*API access*
-|See <<docs/api_endpoints.adoc,API Documentation>> for HTTP API
+|See link:docs/api_endpoints.adoc[API Documentation] for HTTP API
 
 |*System architecture*
-|See <<docs/architecture.adoc,Architecture>> to understand how it works
+|See link:docs/architecture.adoc[Architecture] to understand how it works
 |===
 
 === Connection Quick Reference
