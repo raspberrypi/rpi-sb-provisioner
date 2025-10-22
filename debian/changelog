@@ -1,3 +1,16 @@
+rpi-sb-provisioner (2.1.2) unstable; urgency=medium
+
+  * Bootstrap: Fix USB path extraction for hub-connected devices
+  * WebUI: Add serial-based fallback matching for device status display
+  * Fix: Devices connected via USB hubs now correctly show provisioning
+    status in the topology map view
+  * Packaging:
+    - Fix maintainer-script-ignores-errors by adding set -e to postinst
+    - Fix man page table formatting by preprocessing with tbl
+    - Add lintian override for boot image generator
+
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Wed, 22 Oct 2025 16:45:00 +0100
+
 rpi-sb-provisioner (2.1.1) unstable; urgency=medium
 
   * WebUI: Fix bootimg generator bashisms
@@ -5,7 +18,7 @@ rpi-sb-provisioner (2.1.1) unstable; urgency=medium
   * WebUI: Add explicit bootimg generation button
   * WebUI: Fix hangs on navigation on pages using AJAX
 
-  -- Tom Dewey <tom.dewey@raspberrypi.com>  Fri, 10 Oct 2025 16:45:00 +0100
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Fri, 10 Oct 2025 16:45:00 +0100
 
 rpi-sb-provisioner (2.1.0) unstable; urgency=medium
 
