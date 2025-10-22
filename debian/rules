@@ -14,7 +14,7 @@ debian/rpi-sb-provisioner.1:
 	asciidoctor -b docbook --attribute leveloffset=+1 --out-file - README.adoc |\
 	  pandoc -f docbook -s -t man --shift-heading-level-by=-1 > debian/rpi-sb-provisioner.1.tmp
 	  
-	# Now add proper NAME section with awk and create final man page
+	# Now add proper NAME section with awk and create intermediate man page
 	awk 'BEGIN { print ".TH \"rpi-sb-provisioner\" \"1\" \"\" \"\" \"User Commands\""; \
 	             print ".SH NAME"; \
 	             print "rpi-sb-provisioner \\- Raspberry Pi Secure Boot Provisioner"; \
@@ -22,10 +22,13 @@ debian/rpi-sb-provisioner.1:
 	     /^\.SH / { if (first_section) { first_section = 0; } else { print; } next; } \
 	     /^\.TH / { next; } \
 	     /^\.hy/ { next; } \
-	     { if (!first_section) print; }' debian/rpi-sb-provisioner.1.tmp > debian/rpi-sb-provisioner.1
+	     { if (!first_section) print; }' debian/rpi-sb-provisioner.1.tmp > debian/rpi-sb-provisioner.1.raw
+	
+	# Preprocess with tbl to resolve table formatting
+	tbl debian/rpi-sb-provisioner.1.raw > debian/rpi-sb-provisioner.1
 	     
-	# Clean up temporary file
-	rm -f debian/rpi-sb-provisioner.1.tmp
+	# Clean up temporary files
+	rm -f debian/rpi-sb-provisioner.1.tmp debian/rpi-sb-provisioner.1.raw
 
 %:
 	# Generate the man page before running dh
@@ -55,5 +58,6 @@ override_dh_installsystemd:
 	dh_installsystemd --name=rpi-naked-provisioner@
 	dh_installsystemd --name=rpi-sb-bootstrap@
 	dh_installsystemd --name=rpi-sb-triage@
+	dh_installsystemd --no-enable --name=rpi-sb-image-bootimg-generator@
 	dh_installsystemd --no-enable --name=fetch-repo-package-list@
 	dh_installsystemd --no-enable --name=rpi-package-download@
