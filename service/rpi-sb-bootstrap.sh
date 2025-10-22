@@ -91,7 +91,8 @@ TARGET_DEVICE_PATH="$1"
 # - Y is the port number on that bus  
 # - Z is the optional port number for devices behind a hub
 # Example: "1-1.2" means bus 1, hub port 1, hub downstream port 2
-TARGET_USB_PATH="$(udevadm info "${TARGET_DEVICE_PATH}" | grep -oP '^M: \K.*')"
+# Extract USB device path from udevadm (P: line) and parse out the topology path
+TARGET_USB_PATH="$(udevadm info "${TARGET_DEVICE_PATH}" | grep -oP '^P: \K.*' | grep -oE '[0-9]+-[0-9]+(\.[0-9]+)*$' || true)"
 TARGET_DEVICE_FAMILY="$(udevadm info --name="$TARGET_DEVICE_PATH" --query=property --property=ID_MODEL_ID --value)"
 # TARGET_DEVICE_SERIAL is best-effort, not all rpiboot devices have it set (some only show 32-bits)
 TARGET_DEVICE_SERIAL="$(udevadm info --name="$TARGET_DEVICE_PATH" --query=property --property=ID_SERIAL_SHORT --value)"
@@ -101,6 +102,17 @@ if [ -z "${TARGET_DEVICE_SERIAL}" ] || [ "${TARGET_DEVICE_SERIAL}" = "Broadcom" 
     log "Using device path as serial: ${TARGET_DEVICE_SERIAL}"
 else
     log "Using device serial: ${TARGET_DEVICE_SERIAL}"
+fi
+
+# If USB path extraction from udevadm failed, try using serial-based lookup as fallback
+if [ -z "${TARGET_USB_PATH}" ] && [ -n "${TARGET_DEVICE_SERIAL}" ] && [ "${TARGET_DEVICE_SERIAL}" != "${TARGET_DEVICE_PATH}" ]; then
+    log "USB path extraction from udevadm failed, attempting serial-based lookup"
+    TARGET_USB_PATH="$(get_usb_path_for_serial "${TARGET_DEVICE_SERIAL}" || true)"
+    if [ -n "${TARGET_USB_PATH}" ]; then
+        log "Found USB path via serial lookup: ${TARGET_USB_PATH}"
+    else
+        log "Warning: Could not determine USB path for device"
+    fi
 fi
 
 

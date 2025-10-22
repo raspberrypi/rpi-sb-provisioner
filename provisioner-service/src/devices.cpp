@@ -369,6 +369,41 @@ namespace provisioner {
                     }
                 }
             }
+
+            // Fallback: Match by serial number when endpoint lookup failed
+            // This handles cases where the endpoint field in the database doesn't match the USB topology
+            // (e.g., due to incorrect USB path extraction during bootstrap phase)
+            std::unordered_map<std::string, DbRecord> latestBySerial;
+            for (const auto &p : latestByEndpoint) {
+                if (!p.second.serial.empty()) {
+                    latestBySerial[p.second.serial] = p.second;
+                }
+            }
+
+            for (auto &p : nodes) {
+                UsbNode &n = p.second;
+                // Skip if already has state (endpoint match succeeded), is placeholder, or is hub
+                if (!n.state.empty() || n.isPlaceholder || n.isHub) continue;
+                // Skip if no serial available
+                if (n.serial.empty()) continue;
+                
+                auto sit = latestBySerial.find(n.serial);
+                if (sit != latestBySerial.end()) {
+                    const auto &rec = sit->second;
+                    n.state = rec.state;
+                    if (!rec.image.empty()) {
+                        n.image = rec.image;
+                    }
+                    n.ip = rec.ip;
+                    // Apply manufacturing data if available
+                    auto mit = latestMfgBySerial.find(n.serial);
+                    if (mit != latestMfgBySerial.end()) {
+                        const auto &mr = mit->second;
+                        if (!mr.boardname.empty()) n.model = mr.boardname;
+                        else if (!mr.processor.empty() && n.model.empty()) n.model = mr.processor;
+                    }
+                }
+            }
         }
 
         int inferModelGeneration(const UsbNode &n) {
