@@ -602,7 +602,7 @@
             if (!cell) return;
             
             if (response.status === 'unsupported') {
-                cell.innerHTML = `<span style="color: #666;" title="Boot packages are only available in secure-boot provisioning mode">Unsupported</span>`;
+                cell.innerHTML = `<span style="color: #666;" title="Boot packages are only available in secure-boot or fde-only provisioning modes">Unsupported</span>`;
                 pendingBootPackageRequests.delete(imageName);
             } else if (response.exists && response.package_name) {
                 cell.innerHTML = `<a href="/download-boot-package?name=${encodeURIComponent(imageName)}" class="download-link" download title="${response.package_name}">Download</a>`;
