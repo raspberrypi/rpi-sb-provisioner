@@ -62,7 +62,7 @@ Two rules detect Raspberry Pi devices in different boot states:
 *Rule 1: RPIBOOT mode detection*
 ----
 ACTION=="add", SUBSYSTEM=="usb", 
-  ATTRS{idVendor}=="0a5c", ATTR{idProduct}=="2764|2710|2711|2712",
+  ATTRS{idVendor}=="0a5c", ATTR{idProduct}=="2764|2711|2712",
   TAG+="systemd",
   PROGRAM="/usr/bin/systemd-escape -p --template=rpi-sb-bootstrap@.service $env{DEVNAME}",
   ENV{SYSTEMD_WANTS}+="%c"

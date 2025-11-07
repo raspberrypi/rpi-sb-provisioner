@@ -1,11 +1,11 @@
 # Disable mass-storage interface if it's made available, we only wish to use
 # the vendor interface (rpiboot) for programming.
 ACTION=="add", DRIVER=="usb-storage", \
-  ATTRS{idVendor}=="0a5c", ATTRS{idProduct}=="2764|2710|2711|2712", \
+  ATTRS{idVendor}=="0a5c", ATTRS{idProduct}=="2764|2711|2712", \
   ATTR{authorized}="0"
 
 ACTION=="add", SUBSYSTEM=="usb", \
-  ATTRS{idVendor}=="0a5c", ATTR{idProduct}=="2764|2710|2711|2712", \
+  ATTRS{idVendor}=="0a5c", ATTR{idProduct}=="2764|2711|2712", \
   TAG+="systemd", \
   PROGRAM="/usr/bin/systemd-escape -p --template=rpi-sb-bootstrap@.service $env{DEVNAME}", \
   ENV{SYSTEMD_WANTS}+="%c"
