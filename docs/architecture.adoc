@@ -73,9 +73,8 @@ ACTION=="add", SUBSYSTEM=="usb",
 *Action:* Start `rpi-sb-bootstrap@.service` with the device path as parameter
 
 *Product IDs:*
-* `2764` - Reserved for boot ROM
-* `2710` - Raspberry Pi 3 family devices
-* `2711` - Raspberry Pi 4 family devices (Raspberry Pi 4, Compute Module 4, Zero 2 W)
+* `2764` - Raspberry Pi 3 family devices (Zero 2 W)
+* `2711` - Raspberry Pi 4 family devices (Raspberry Pi 4, Compute Module 4)
 * `2712` - Raspberry Pi 5 family devices (Raspberry Pi 5, Compute Module 5)
 
 *Rule 2: fastboot mode detection*
