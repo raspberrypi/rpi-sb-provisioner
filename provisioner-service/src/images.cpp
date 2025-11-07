@@ -925,9 +925,9 @@ namespace provisioner {
     void requestBootPackageCheck(const std::string& imageName) {
         LOG_INFO << "Checking boot package for: " << imageName;
         
-        // Check if provisioning style is secure-boot (boot packages only work in secure-boot mode)
+        // Check if provisioning style supports boot packages (secure-boot or fde-only)
         auto provisioningStyle = provisioner::utils::getConfigValue("PROVISIONING_STYLE");
-        if (!provisioningStyle || *provisioningStyle != "secure-boot") {
+        if (!provisioningStyle || (*provisioningStyle != "secure-boot" && *provisioningStyle != "fde-only")) {
             std::string style = provisioningStyle ? *provisioningStyle : "unknown";
             LOG_INFO << "Boot package not supported for provisioning style: " << style;
             BootPackageWebSocketController::broadcastUpdate(imageName, false, "", "unsupported");
@@ -1585,9 +1585,9 @@ namespace provisioner {
                 return;
             }
             
-            // Check if provisioning style is secure-boot (boot packages only work in secure-boot mode)
+            // Check if provisioning style supports boot packages (secure-boot or fde-only)
             auto provisioningStyle = provisioner::utils::getConfigValue("PROVISIONING_STYLE");
-            if (!provisioningStyle || *provisioningStyle != "secure-boot") {
+            if (!provisioningStyle || (*provisioningStyle != "secure-boot" && *provisioningStyle != "fde-only")) {
                 Json::Value result;
                 result["exists"] = false;
                 result["image_name"] = imageName;
@@ -1656,13 +1656,13 @@ namespace provisioner {
             // Add audit log entry for handler access
             AuditLog::logHandlerAccess(req, "/generate-boot-package");
             
-            // Check if provisioning style is secure-boot
+            // Check if provisioning style supports boot packages (secure-boot or fde-only)
             auto provisioningStyle = provisioner::utils::getConfigValue("PROVISIONING_STYLE");
-            if (!provisioningStyle || *provisioningStyle != "secure-boot") {
+            if (!provisioningStyle || (*provisioningStyle != "secure-boot" && *provisioningStyle != "fde-only")) {
                 std::string style = provisioningStyle ? *provisioningStyle : "unknown";
                 auto resp = provisioner::utils::createErrorResponse(
                     req,
-                    "Boot package generation only supported in secure-boot mode (current: " + style + ")",
+                    "Boot package generation only supported in secure-boot or fde-only mode (current: " + style + ")",
                     drogon::k400BadRequest,
                     "Bad Request",
                     "UNSUPPORTED_PROVISIONING_STYLE"
