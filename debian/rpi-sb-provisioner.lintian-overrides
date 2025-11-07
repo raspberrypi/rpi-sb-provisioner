@@ -14,6 +14,7 @@ rpi-sb-provisioner: script-with-language-extension [usr/bin/rpi-sb-bootstrap.sh]
 rpi-sb-provisioner: script-with-language-extension [usr/bin/rpi-sb-common.sh]
 rpi-sb-provisioner: script-with-language-extension [usr/bin/rpi-sb-provisioner.sh]
 rpi-sb-provisioner: script-with-language-extension [usr/bin/rpi-sb-triage.sh]
-rpi-sb-provisioner: script-with-language-extension [usr/bin/rpi-sb-image-bootimage-generator.sh]
+rpi-sb-provisioner: script-with-language-extension [usr/bin/rpi-sb-image-bootimg-generator.sh]
 # Deliberately using a minimal custom curl build for security hardening
 rpi-sb-provisioner: embedded-library curl [usr/bin/rpi-provisioner-ui] 
+rpi-sb-provisioner: embedded-library libjsoncpp [usr/bin/rpi-provisioner-ui]
