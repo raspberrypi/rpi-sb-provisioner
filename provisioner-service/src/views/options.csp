@@ -143,6 +143,85 @@
         .cust-btn-lg {
             margin-top: 20px;
         }
+        
+        /* Field validation feedback styles */
+        .field-feedback {
+            display: none;
+            margin-top: 5px;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 13px;
+            line-height: 1.4;
+            animation: slideDown 0.3s ease-out;
+        }
+        
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-5px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .field-feedback.error {
+            background-color: #fee;
+            border: 1px solid #fcc;
+            color: #c33;
+            display: block;
+        }
+        
+        .field-feedback.success {
+            background-color: #efe;
+            border: 1px solid #cfc;
+            color: #3a3;
+            display: block;
+        }
+        
+        .field-feedback.info {
+            background-color: #e7f3ff;
+            border: 1px solid #b3d9ff;
+            color: #0066cc;
+            display: block;
+        }
+        
+        .field-feedback.validating {
+            background-color: #fff9e6;
+            border: 1px solid #ffe6b3;
+            color: #996600;
+            display: block;
+        }
+        
+        .field-feedback-icon {
+            margin-right: 6px;
+            font-weight: bold;
+        }
+        
+        .form-group {
+            position: relative;
+        }
+        
+        .form-group input[type="text"],
+        .form-group select {
+            transition: border-color 0.2s;
+        }
+        
+        .form-group input.validating,
+        .form-group select.validating {
+            border-color: #ffcc66;
+        }
+        
+        .form-group input.valid,
+        .form-group select.valid {
+            border-color: #66cc66;
+        }
+        
+        .form-group input.invalid,
+        .form-group select.invalid {
+            border-color: #cc6666;
+        }
     </style>
     <script>
         function showSuccess() {
@@ -172,30 +251,30 @@
                 const auto& key = option.first;
                 const auto& value = option.second;
             %>
-                <div class="form-group">
+                <div class="form-group" data-field-name="<%c++ $$ << key; %>">
                     <div class="option-header">
                         <label for="<%c++ $$ << key; %>"><%c++ $$ << key; %></label>
                         <button type="button" class="help-button" data-target="modal-<%c++ $$ << key; %>">Help</button>
                     </div>
                     <%c++ if(key == "PROVISIONING_STYLE") { %>
-                    <select id="<%c++ $$ << key; %>" name="<%c++ $$ << key; %>">
+                    <select id="<%c++ $$ << key; %>" name="<%c++ $$ << key; %>" onblur="validateAndSaveField('<%c++ $$ << key; %>')">
                         <option value="secure-boot" <%c++ if(value == "secure-boot") $$ << "selected"; %>>secure-boot</option>
                         <option value="fde-only" <%c++ if(value == "fde-only") $$ << "selected"; %>>fde-only</option>
                         <option value="naked" <%c++ if(value == "naked") $$ << "selected"; %>>naked</option>
                     </select>
                     <%c++ } else if(key == "RPI_DEVICE_STORAGE_TYPE") { %>
-                    <select id="<%c++ $$ << key; %>" name="<%c++ $$ << key; %>">
+                    <select id="<%c++ $$ << key; %>" name="<%c++ $$ << key; %>" onblur="validateAndSaveField('<%c++ $$ << key; %>')">
                         <option value="sd" <%c++ if(value == "sd") $$ << "selected"; %>>sd</option>
                         <option value="emmc" <%c++ if(value == "emmc") $$ << "selected"; %>>emmc</option>
                         <option value="nvme" <%c++ if(value == "nvme") $$ << "selected"; %>>nvme</option>
                     </select>
                     <%c++ } else if(key == "RPI_DEVICE_STORAGE_CIPHER") { %>
-                    <select id="<%c++ $$ << key; %>" name="<%c++ $$ << key; %>">
+                    <select id="<%c++ $$ << key; %>" name="<%c++ $$ << key; %>" onblur="validateAndSaveField('<%c++ $$ << key; %>')">
                         <option value="aes-xts-plain64" <%c++ if(value == "aes-xts-plain64") $$ << "selected"; %>>aes-xts-plain64</option>
                         <option value="xchacha12,aes-adiantum-plain64" <%c++ if(value == "xchacha12,aes-adiantum-plain64") $$ << "selected"; %>>xchacha12,aes-adiantum-plain64</option>
                     </select>
                     <%c++ } else if(key == "RPI_DEVICE_FAMILY") { %>
-                    <select id="<%c++ $$ << key; %>" name="<%c++ $$ << key; %>">
+                    <select id="<%c++ $$ << key; %>" name="<%c++ $$ << key; %>" onblur="validateAndSaveField('<%c++ $$ << key; %>')">
                         <option value="4" <%c++ if(value == "4") $$ << "selected"; %>>4</option>
                         <option value="5" <%c++ if(value == "5") $$ << "selected"; %>>5</option>
                         <option value="2W" <%c++ if(value == "2W") $$ << "selected"; %>>2W</option>
@@ -216,11 +295,12 @@
                         <a href="/options/firmware" target="_blank" class="cust-btn cust-btn-primary">Select Firmware</a>
                     </div>
                     <%c++ } else if(key == "RPI_DEVICE_LOCK_JTAG" || key == "RPI_DEVICE_EEPROM_WP_SET") { %>
-                    <input type="checkbox" id="<%c++ $$ << key; %>" name="<%c++ $$ << key; %>" <%c++ if(!value.empty()) $$ << "checked"; %>>
+                    <input type="checkbox" id="<%c++ $$ << key; %>" name="<%c++ $$ << key; %>" <%c++ if(!value.empty()) $$ << "checked"; %> onchange="validateAndSaveField('<%c++ $$ << key; %>')">
                     <label for="<%c++ $$ << key; %>" style="font-weight: normal; display: inline;">Enable</label>
                     <%c++ } else { %>
-                    <input type="text" id="<%c++ $$ << key; %>" name="<%c++ $$ << key; %>" value="<%c++ $$ << value; %>">
+                    <input type="text" id="<%c++ $$ << key; %>" name="<%c++ $$ << key; %>" value="<%c++ $$ << value; %>" onblur="validateAndSaveField('<%c++ $$ << key; %>')">
                     <%c++ } %>
+                    <div id="feedback-<%c++ $$ << key; %>" class="field-feedback"></div>
                 </div>
             <%c++ } %>
             <button type="submit" class="cust-btn cust-btn-success cust-btn-lg">Save Options</button>
@@ -379,6 +459,146 @@
                 }
             });
         });
+        
+        // Function to show field feedback
+        function showFieldFeedback(fieldName, type, message) {
+            const feedbackDiv = document.getElementById('feedback-' + fieldName);
+            const fieldElement = document.getElementById(fieldName);
+            
+            if (!feedbackDiv) return;
+            
+            // Clear previous classes
+            feedbackDiv.className = 'field-feedback';
+            if (fieldElement) {
+                fieldElement.classList.remove('valid', 'invalid', 'validating');
+            }
+            
+            // Add appropriate class and content
+            if (type === 'error') {
+                feedbackDiv.classList.add('error');
+                feedbackDiv.innerHTML = '<span class="field-feedback-icon">✗</span>' + message;
+                if (fieldElement) fieldElement.classList.add('invalid');
+            } else if (type === 'success') {
+                feedbackDiv.classList.add('success');
+                feedbackDiv.innerHTML = '<span class="field-feedback-icon">✓</span>' + message;
+                if (fieldElement) fieldElement.classList.add('valid');
+                
+                // Auto-hide success message after 3 seconds
+                setTimeout(() => {
+                    feedbackDiv.style.display = 'none';
+                    if (fieldElement) fieldElement.classList.remove('valid');
+                }, 3000);
+            } else if (type === 'info') {
+                feedbackDiv.classList.add('info');
+                feedbackDiv.innerHTML = '<span class="field-feedback-icon">ⓘ</span>' + message;
+            } else if (type === 'validating') {
+                feedbackDiv.classList.add('validating');
+                feedbackDiv.innerHTML = '<span class="field-feedback-icon">⟳</span>' + message;
+                if (fieldElement) fieldElement.classList.add('validating');
+            }
+        }
+        
+        // Function to hide field feedback
+        function hideFieldFeedback(fieldName) {
+            const feedbackDiv = document.getElementById('feedback-' + fieldName);
+            const fieldElement = document.getElementById(fieldName);
+            
+            if (feedbackDiv) {
+                feedbackDiv.style.display = 'none';
+                feedbackDiv.className = 'field-feedback';
+            }
+            
+            if (fieldElement) {
+                fieldElement.classList.remove('valid', 'invalid', 'validating');
+            }
+        }
+        
+        // Function to validate a single field
+        async function validateField(fieldName, fieldValue) {
+            try {
+                const response = await fetch('/options/validate', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        field: fieldName,
+                        value: fieldValue
+                    })
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    return result;
+                } else {
+                    return { valid: false, error: 'Validation request failed' };
+                }
+            } catch (error) {
+                console.error('Validation error:', error);
+                return { valid: false, error: 'Network error during validation' };
+            }
+        }
+        
+        // Function to save a single field
+        async function saveField(fieldName, fieldValue) {
+            const options = {};
+            options[fieldName] = fieldValue;
+            
+            try {
+                const response = await fetch('/options/set', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(options)
+                });
+
+                return response.ok;
+            } catch (error) {
+                console.error('Save error:', error);
+                return false;
+            }
+        }
+        
+        // Main function to validate and save a field on blur
+        async function validateAndSaveField(fieldName) {
+            const fieldElement = document.getElementById(fieldName);
+            if (!fieldElement) return;
+            
+            let fieldValue;
+            if (fieldElement.type === 'checkbox') {
+                fieldValue = fieldElement.checked ? "1" : "";
+            } else {
+                fieldValue = fieldElement.value;
+            }
+            
+            // Show validating state
+            showFieldFeedback(fieldName, 'validating', 'Validating...');
+            
+            // Validate the field
+            const validationResult = await validateField(fieldName, fieldValue);
+            
+            if (!validationResult.valid) {
+                // Show validation error
+                showFieldFeedback(fieldName, 'error', validationResult.error || 'Validation failed');
+                return;
+            }
+            
+            // If validation passed, save the field
+            showFieldFeedback(fieldName, 'validating', 'Saving...');
+            const saveSuccess = await saveField(fieldName, fieldValue);
+            
+            if (saveSuccess) {
+                // Show success message
+                let successMessage = 'Saved successfully';
+                if (validationResult.message) {
+                    successMessage += ' - ' + validationResult.message;
+                }
+                showFieldFeedback(fieldName, 'success', successMessage);
+            } else {
+                showFieldFeedback(fieldName, 'error', 'Failed to save value');
+            }
+        }
         
         async function saveOptions() {
             const form = document.getElementById('optionsForm');

@@ -68,6 +68,303 @@ namespace provisioner {
             callback(resp);
         });
 
+        app.registerHandler(OPTIONS_PATH + "/validate", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
+            LOG_INFO << "Options::validate";
+            
+            // Add audit log entry for handler access
+            AuditLog::logHandlerAccess(req, "/options/validate");
+
+            // SECURITY: Restrict to POST method only
+            if (req->getMethod() != HttpMethod::Post) {
+                LOG_WARN << "SECURITY: Rejected non-POST request to /options/validate from " << AuditLog::getClientIP(req);
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "This endpoint only accepts POST requests",
+                    drogon::k405MethodNotAllowed,
+                    "Method Not Allowed",
+                    "METHOD_NOT_ALLOWED"
+                );
+                callback(resp);
+                return;
+            }
+
+            auto body = req->getJsonObject();
+            if (!body) {
+                LOG_ERROR << "Options::validate: Invalid JSON body";
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Invalid JSON request body",
+                    drogon::k400BadRequest,
+                    "Invalid Request",
+                    "INVALID_JSON"
+                );
+                callback(resp);
+                return;
+            }
+
+            std::string fieldName = body->get("field", "").asString();
+            std::string fieldValue = body->get("value", "").asString();
+
+            if (fieldName.empty()) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Field name is required",
+                    drogon::k400BadRequest,
+                    "Invalid Request",
+                    "MISSING_FIELD_NAME"
+                );
+                callback(resp);
+                return;
+            }
+
+            // SECURITY: Dynamic whitelist of allowed configuration field names
+            // This prevents arbitrary field name injection and limits validation to known config keys
+            // We use the actual configuration file as the source of truth - if a field exists in the
+            // config, it's valid for validation. This makes the system self-maintaining.
+            auto configValues = utils::getAllConfigValues();
+            std::set<std::string> allowedFields;
+            for (const auto& [key, value] : configValues) {
+                allowedFields.insert(key);
+            }
+
+            if (allowedFields.find(fieldName) == allowedFields.end()) {
+                LOG_WARN << "SECURITY: Rejected validation request for unknown field: " << fieldName << " from " << AuditLog::getClientIP(req);
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Unknown configuration field: " + fieldName + ". Field must exist in configuration file.",
+                    drogon::k400BadRequest,
+                    "Invalid Field",
+                    "UNKNOWN_FIELD"
+                );
+                callback(resp);
+                return;
+            }
+
+            // SECURITY: Validate and canonicalize file paths to prevent path traversal attacks
+            auto validateAndCanonicalizePath = [](const std::string& path) -> std::optional<std::string> {
+                if (path.empty()) return path;
+                
+                try {
+                    // Convert to absolute path and resolve . and .. components
+                    std::filesystem::path fsPath(path);
+                    std::filesystem::path canonicalPath;
+                    
+                    // Check if path exists - if so, canonicalize it
+                    if (std::filesystem::exists(fsPath)) {
+                        canonicalPath = std::filesystem::canonical(fsPath);
+                    } else {
+                        // For non-existent paths, make absolute and lexically normalize
+                        canonicalPath = std::filesystem::absolute(fsPath).lexically_normal();
+                    }
+                    
+                    // Reject paths containing .. after normalization (path traversal attempt)
+                    std::string pathStr = canonicalPath.string();
+                    if (pathStr.find("..") != std::string::npos) {
+                        return std::nullopt;
+                    }
+                    
+                    return pathStr;
+                } catch (const std::filesystem::filesystem_error&) {
+                    // Invalid path
+                    return std::nullopt;
+                }
+            };
+
+            Json::Value jsonResponse;
+            jsonResponse["valid"] = true;
+            jsonResponse["field"] = fieldName;
+
+            // Validate based on field type
+            if (fieldName == "CUSTOMER_KEY_FILE_PEM") {
+                if (!fieldValue.empty()) {
+                    // SECURITY: Canonicalize path to prevent traversal
+                    auto canonicalPath = validateAndCanonicalizePath(fieldValue);
+                    if (!canonicalPath) {
+                        jsonResponse["valid"] = false;
+                        jsonResponse["error"] = "Invalid or unsafe file path";
+                    } else if (!std::filesystem::exists(*canonicalPath)) {
+                        jsonResponse["valid"] = false;
+                        jsonResponse["error"] = "Key file does not exist at specified path";
+                    } else if (!std::filesystem::is_regular_file(*canonicalPath)) {
+                        jsonResponse["valid"] = false;
+                        jsonResponse["error"] = "Path exists but is not a regular file";
+                    } else {
+                        // Check if file is readable
+                        std::ifstream testFile(*canonicalPath);
+                        if (!testFile.is_open()) {
+                            jsonResponse["valid"] = false;
+                            jsonResponse["error"] = "File exists but is not readable";
+                        }
+                    }
+                }
+            } else if (fieldName == "GOLD_MASTER_OS_FILE") {
+                if (fieldValue.empty()) {
+                    jsonResponse["valid"] = false;
+                    jsonResponse["error"] = "Gold master OS file path is mandatory";
+                } else {
+                    // SECURITY: Canonicalize path to prevent traversal
+                    auto canonicalPath = validateAndCanonicalizePath(fieldValue);
+                    if (!canonicalPath) {
+                        jsonResponse["valid"] = false;
+                        jsonResponse["error"] = "Invalid or unsafe file path";
+                    } else if (!std::filesystem::exists(*canonicalPath)) {
+                        jsonResponse["valid"] = false;
+                        jsonResponse["error"] = "Image file does not exist at specified path";
+                    } else if (!std::filesystem::is_regular_file(*canonicalPath)) {
+                        jsonResponse["valid"] = false;
+                        jsonResponse["error"] = "Path exists but is not a regular file";
+                    } else {
+                        // Check file extension - should be .img
+                        std::string ext = std::filesystem::path(*canonicalPath).extension().string();
+                        if (ext != ".img") {
+                            jsonResponse["valid"] = false;
+                            jsonResponse["error"] = "File should have .img extension (uncompressed image)";
+                        }
+                    }
+                }
+            } else if (fieldName == "RPI_SB_WORKDIR") {
+                if (!fieldValue.empty()) {
+                    // SECURITY: Canonicalize path to prevent traversal
+                    auto canonicalPath = validateAndCanonicalizePath(fieldValue);
+                    if (!canonicalPath) {
+                        jsonResponse["valid"] = false;
+                        jsonResponse["error"] = "Invalid or unsafe directory path";
+                    } else if (std::filesystem::exists(*canonicalPath)) {
+                        if (!std::filesystem::is_directory(*canonicalPath)) {
+                            jsonResponse["valid"] = false;
+                            jsonResponse["error"] = "Path exists but is not a directory";
+                        }
+                    } else {
+                        // Check if parent directory exists
+                        std::filesystem::path path(*canonicalPath);
+                        std::filesystem::path parentPath = path.parent_path();
+                        if (parentPath.empty()) {
+                            parentPath = ".";
+                        }
+                        if (!std::filesystem::exists(parentPath)) {
+                            jsonResponse["valid"] = false;
+                            jsonResponse["error"] = "Parent directory does not exist";
+                        } else if (!std::filesystem::is_directory(parentPath)) {
+                            jsonResponse["valid"] = false;
+                            jsonResponse["error"] = "Parent path exists but is not a directory";
+                        }
+                    }
+                }
+            } else if (fieldName == "RPI_SB_PROVISIONER_MANUFACTURING_DB") {
+                if (fieldValue.empty()) {
+                    jsonResponse["valid"] = false;
+                    jsonResponse["error"] = "Manufacturing database path is mandatory";
+                } else {
+                    // SECURITY: Canonicalize path to prevent traversal
+                    auto canonicalPath = validateAndCanonicalizePath(fieldValue);
+                    if (!canonicalPath) {
+                        jsonResponse["valid"] = false;
+                        jsonResponse["error"] = "Invalid or unsafe file path";
+                    } else if (!std::filesystem::exists(*canonicalPath)) {
+                        // Check if parent directory exists
+                        std::filesystem::path path(*canonicalPath);
+                        std::filesystem::path parentPath = path.parent_path();
+                        if (parentPath.empty()) {
+                            parentPath = ".";
+                        }
+                        if (!std::filesystem::exists(parentPath)) {
+                            jsonResponse["valid"] = false;
+                            jsonResponse["error"] = "Parent directory does not exist";
+                        } else if (!std::filesystem::is_directory(parentPath)) {
+                            jsonResponse["valid"] = false;
+                            jsonResponse["error"] = "Parent path exists but is not a directory";
+                        } else {
+                            jsonResponse["message"] = "File will be created on save";
+                        }
+                    } else if (std::filesystem::is_directory(*canonicalPath)) {
+                        jsonResponse["valid"] = false;
+                        jsonResponse["error"] = "Path exists but is a directory (expected file path)";
+                    }
+                }
+            } else if (fieldName == "RPI_DEVICE_BOOTLOADER_CONFIG_FILE") {
+                if (!fieldValue.empty()) {
+                    // SECURITY: Canonicalize path to prevent traversal
+                    auto canonicalPath = validateAndCanonicalizePath(fieldValue);
+                    if (!canonicalPath) {
+                        jsonResponse["valid"] = false;
+                        jsonResponse["error"] = "Invalid or unsafe file path";
+                    } else if (!std::filesystem::exists(*canonicalPath)) {
+                        jsonResponse["valid"] = false;
+                        jsonResponse["error"] = "Bootloader config file does not exist at specified path";
+                    } else if (!std::filesystem::is_regular_file(*canonicalPath)) {
+                        jsonResponse["valid"] = false;
+                        jsonResponse["error"] = "Path exists but is not a regular file";
+                    }
+                }
+            } else if (fieldName == "RPI_DEVICE_RETRIEVE_KEYPAIR") {
+                if (!fieldValue.empty()) {
+                    // SECURITY: Canonicalize path to prevent traversal
+                    auto canonicalPath = validateAndCanonicalizePath(fieldValue);
+                    if (!canonicalPath) {
+                        jsonResponse["valid"] = false;
+                        jsonResponse["error"] = "Invalid or unsafe directory path";
+                    } else if (std::filesystem::exists(*canonicalPath)) {
+                        if (!std::filesystem::is_directory(*canonicalPath)) {
+                            jsonResponse["valid"] = false;
+                            jsonResponse["error"] = "Path exists but is not a directory";
+                        }
+                    } else {
+                        std::filesystem::path path(*canonicalPath);
+                        std::filesystem::path parentPath = path.parent_path();
+                        if (parentPath.empty()) {
+                            parentPath = ".";
+                        }
+                        if (!std::filesystem::exists(parentPath)) {
+                            jsonResponse["valid"] = false;
+                            jsonResponse["error"] = "Parent directory does not exist";
+                        } else {
+                            jsonResponse["message"] = "Directory will be created if needed";
+                        }
+                    }
+                }
+            } else if (fieldName == "RPI_DEVICE_FAMILY") {
+                if (fieldValue != "4" && fieldValue != "5" && fieldValue != "2W") {
+                    jsonResponse["valid"] = false;
+                    jsonResponse["error"] = "Device family must be 4, 5, or 2W";
+                }
+            } else if (fieldName == "PROVISIONING_STYLE") {
+                if (fieldValue != "secure-boot" && fieldValue != "fde-only" && fieldValue != "naked") {
+                    jsonResponse["valid"] = false;
+                    jsonResponse["error"] = "Provisioning style must be secure-boot, fde-only, or naked";
+                }
+            } else if (fieldName == "RPI_DEVICE_STORAGE_TYPE") {
+                if (fieldValue != "sd" && fieldValue != "emmc" && fieldValue != "nvme") {
+                    jsonResponse["valid"] = false;
+                    jsonResponse["error"] = "Storage type must be sd, emmc, or nvme";
+                }
+            } else if (fieldName == "RPI_DEVICE_STORAGE_CIPHER") {
+                if (!fieldValue.empty() && fieldValue != "aes-xts-plain64" && fieldValue != "xchacha12,aes-adiantum-plain64") {
+                    jsonResponse["valid"] = false;
+                    jsonResponse["error"] = "Cipher must be aes-xts-plain64 or xchacha12,aes-adiantum-plain64";
+                }
+            } else if (fieldName == "CUSTOMER_KEY_PKCS11_NAME") {
+                if (!fieldValue.empty()) {
+                    // Basic validation for PKCS11 format
+                    if (fieldValue.find("pkcs11:") != 0) {
+                        jsonResponse["valid"] = false;
+                        jsonResponse["error"] = "PKCS11 name must start with 'pkcs11:'";
+                    } else if (fieldValue.find("object=") == std::string::npos) {
+                        jsonResponse["valid"] = false;
+                        jsonResponse["error"] = "PKCS11 name must include 'object=' parameter";
+                    } else if (fieldValue.find("type=private") == std::string::npos) {
+                        jsonResponse["valid"] = false;
+                        jsonResponse["error"] = "PKCS11 name must include 'type=private' parameter";
+                    }
+                }
+            }
+
+            auto resp = HttpResponse::newHttpResponse();
+            resp->setStatusCode(k200OK);
+            resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+            resp->setBody(Json::FastWriter().write(jsonResponse));
+            callback(resp);
+        });
+
         app.registerHandler(OPTIONS_PATH + "/set", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
             LOG_INFO << "Options::set";
             
