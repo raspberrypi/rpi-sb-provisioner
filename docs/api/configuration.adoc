@@ -68,6 +68,100 @@ HTTP 200 OK with no body on success.
 - Automatically creates manufacturing database file if path is set and file doesn't exist
 - Clears working directory contents if `RPI_SB_WORKDIR` is modified
 
+== /options/validate
+
+*HTTP Method:* POST
+
+*Description:* Validates a single configuration field value before saving. Performs field-specific validation including file path checks on disk.
+
+*Request Format:*
+
+[source,json]
+----
+{
+  "field": "GOLD_MASTER_OS_FILE",
+  "value": "/srv/rpi-sb-provisioner/images/raspios-2025-04-01.img"
+}
+----
+
+*Response Format (Success):*
+
+[source,json]
+----
+{
+  "valid": true,
+  "field": "GOLD_MASTER_OS_FILE"
+}
+----
+
+*Response Format (Success with Info):*
+
+[source,json]
+----
+{
+  "valid": true,
+  "field": "RPI_SB_PROVISIONER_MANUFACTURING_DB",
+  "message": "File will be created on save"
+}
+----
+
+*Response Format (Validation Failure):*
+
+[source,json]
+----
+{
+  "valid": false,
+  "field": "GOLD_MASTER_OS_FILE",
+  "error": "Image file does not exist at specified path"
+}
+----
+
+*Validation Rules:*
+
+File Path Fields (must exist and be readable):
+
+- `CUSTOMER_KEY_FILE_PEM` - RSA private key file
+- `GOLD_MASTER_OS_FILE` - Must have .img extension (mandatory)
+- `RPI_DEVICE_BOOTLOADER_CONFIG_FILE` - Bootloader configuration file
+
+Directory Path Fields (must exist or be creatable):
+
+- `RPI_SB_WORKDIR` - Working directory for cached assets
+- `RPI_DEVICE_RETRIEVE_KEYPAIR` - Directory for storing device keypairs
+
+Database Path Fields:
+
+- `RPI_SB_PROVISIONER_MANUFACTURING_DB` - SQLite database path (mandatory, parent directory must exist)
+
+Enumerated Values:
+
+- `PROVISIONING_STYLE` - Must be `secure-boot`, `fde-only`, or `naked`
+- `RPI_DEVICE_FAMILY` - Must be `4`, `5`, or `2W`
+- `RPI_DEVICE_STORAGE_TYPE` - Must be `sd`, `emmc`, or `nvme`
+- `RPI_DEVICE_STORAGE_CIPHER` - Must be `aes-xts-plain64` or `xchacha12,aes-adiantum-plain64`
+
+Format-Specific:
+
+- `CUSTOMER_KEY_PKCS11_NAME` - Must start with `pkcs11:` and include `object=` and `type=private` parameters
+
+*Security Measures:*
+
+- *HTTP Method Restriction:* Only accepts POST requests; returns 405 Method Not Allowed for other methods
+- *Dynamic Field Whitelist:* Only validates fields that exist in the configuration file; rejects unknown fields
+- *Path Canonicalization:* File paths are canonicalized to prevent path traversal attacks (../)
+- *Path Validation:* Rejects paths with suspicious patterns after normalization
+- *Audit Logging:* All validation requests are logged with client IP addresses
+- *Input Validation:* JSON body is validated before processing
+- *No Execution:* Endpoint only reads from filesystem, never writes or executes
+
+*Notes:*
+
+- Used by the web UI for real-time field validation
+- Always returns HTTP 200 with JSON indicating validation success/failure
+- File system checks verify actual file/directory existence and permissions
+- Does not modify configuration - use `/options/set` to save values
+- Failed validation attempts for unknown fields are logged as security warnings
+
 == /options/clear-workdir
 
 *HTTP Method:* POST
