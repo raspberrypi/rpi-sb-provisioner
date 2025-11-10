@@ -141,9 +141,7 @@ What cables you need depends on which devices you want to prepare:
 • One jumper wire
 
 |*Raspberry Pi Zero 2 W*
-|• USB A to microUSB B cable +
-• SD card (any size) +
-• Computer with SD card reader
+|• USB A to microUSB B cable
 |===
 
 === Connecting the Hardware
@@ -704,8 +702,7 @@ This documentation provides all necessary information to begin provisioning secu
 *Each time:* Connect GPIO 8 to GND → Connect USB
 
 |*Raspberry Pi Zero 2 W*
-|*One-time:* Create SD card with empty `bootcode.bin` file +
-*Each time:* Insert SD card → Connect USB to "USB" port +
+|Insert empty SD card → Connect USB to "USB" port +
 *Note:* No secure-boot support (use fde-only or naked)
 |===
 
