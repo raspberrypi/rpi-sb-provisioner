@@ -1,0 +1,20 @@
+# PAM configuration for nginx
+# This file should be copied to /etc/pam.d/nginx
+#
+# This configuration allows nginx to authenticate users against the system's
+# user accounts (same as SSH login credentials)
+
+# Standard Unix authentication
+@include common-auth
+@include common-account
+@include common-session
+
+# Alternative: If you want to authenticate against specific users only,
+# you can use pam_listfile instead:
+# auth required pam_listfile.so onerr=fail item=user sense=allow file=/etc/nginx/allowed_users
+#
+# Then create /etc/nginx/allowed_users with one username per line:
+# user1
+# user2
+# user3
+
