@@ -5,12 +5,13 @@ rpi-sb-provisioner (2.1.2) unstable; urgency=medium
   * WebUI: Add dynamic validation for options form fields
   * Fix: Devices connected via USB hubs now correctly show provisioning
     status in the topology map view
+  * WebUI: Fixup device state retrieval race condition
   * Packaging:
     - Fix maintainer-script-ignores-errors by adding set -e to postinst
     - Fix man page table formatting by preprocessing with tbl
     - Add lintian override for boot image generator
 
- -- Tom Dewey <tom.dewey@raspberrypi.com>  Wed, 13 Nov 2025 16:45:00 +0100
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Mon, 17 Nov 2025 16:45:00 +0100
 
 rpi-sb-provisioner (2.1.1) unstable; urgency=medium
 

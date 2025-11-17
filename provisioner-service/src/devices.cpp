@@ -747,7 +747,7 @@ namespace provisioner {
             }
 
             sqlite3_stmt* stmt;
-            const char* sql = "SELECT serial, endpoint, state, image, ip_address FROM devices WHERE serial = ?";
+            const char* sql = "SELECT serial, endpoint, state, image, ip_address FROM devices WHERE serial = ? ORDER BY ts DESC LIMIT 1";
             rc = sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr);
 
             if (rc != SQLITE_OK) {
