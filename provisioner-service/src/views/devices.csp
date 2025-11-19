@@ -290,6 +290,125 @@
             }
             function polarToCartesian(cx, cy, r, a) { return { x: cx + r*Math.cos(a), y: cy + r*Math.sin(a) }; }
 
+            function nodesOverlap(n1, n2, minDistance) {
+                // Check if two nodes overlap considering their radii and a minimum distance
+                const dx = n1.x - n2.x;
+                const dy = n1.y - n2.y;
+                const dist = Math.sqrt(dx*dx + dy*dy);
+                const minDist = (n1.radius || 0) + (n2.radius || 0) + minDistance;
+                return dist < minDist;
+            }
+
+            function resolveCollisions(positions, centerX, centerY, baseRadius, metrics, maxIterations = 8) {
+                // Enhanced collision resolution: adjust both angles and radial distances
+                if (positions.length <= 1) return positions;
+                
+                const minDistance = 10; // Minimum pixel spacing between node edges
+                const maxRadiusMultiplier = 1.6; // Allow nodes to move up to 60% further out
+                let adjusted = positions.map(p => Object.assign({}, p, { 
+                    originalRadius: baseRadius,
+                    currentRadius: baseRadius 
+                }));
+                
+                for (let iter = 0; iter < maxIterations; iter++) {
+                    let hasCollision = false;
+                    
+                    for (let i = 0; i < adjusted.length; i++) {
+                        for (let j = i + 1; j < adjusted.length; j++) {
+                            if (nodesOverlap(adjusted[i], adjusted[j], minDistance)) {
+                                hasCollision = true;
+                                
+                                // Calculate current angles and radii
+                                const angle1 = Math.atan2(adjusted[i].y - centerY, adjusted[i].x - centerX);
+                                const angle2 = Math.atan2(adjusted[j].y - centerY, adjusted[j].x - centerX);
+                                const radius1 = adjusted[i].currentRadius || baseRadius;
+                                const radius2 = adjusted[j].currentRadius || baseRadius;
+                                
+                                let angleDiff = angle2 - angle1;
+                                // Normalize angle difference to [-PI, PI]
+                                while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
+                                while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
+                                
+                                const dx = adjusted[j].x - adjusted[i].x;
+                                const dy = adjusted[j].y - adjusted[i].y;
+                                const currentDist = Math.sqrt(dx*dx + dy*dy);
+                                const requiredDist = adjusted[i].radius + adjusted[j].radius + minDistance;
+                                
+                                // Strategy: Try angular adjustment first, then radial if needed
+                                const angularSpace = Math.abs(angleDiff);
+                                const avgRadius = (radius1 + radius2) / 2;
+                                const minAngularSpace = Math.asin(Math.min(1, requiredDist / avgRadius));
+                                
+                                if (angularSpace > minAngularSpace * 0.8 || iter < maxIterations / 2) {
+                                    // Sufficient angular space OR early iterations: adjust angles
+                                    const adjust = Math.min(0.15, (minAngularSpace - angularSpace) / 2 + 0.05);
+                                    const newAngle1 = angle1 - adjust * Math.sign(angleDiff);
+                                    const newAngle2 = angle2 + adjust * Math.sign(angleDiff);
+                                    
+                                    const newPos1 = polarToCartesian(centerX, centerY, radius1, newAngle1);
+                                    const newPos2 = polarToCartesian(centerX, centerY, radius2, newAngle2);
+                                    
+                                    adjusted[i].x = newPos1.x;
+                                    adjusted[i].y = newPos1.y;
+                                    adjusted[i].angle = newAngle1;
+                                    adjusted[j].x = newPos2.x;
+                                    adjusted[j].y = newPos2.y;
+                                    adjusted[j].angle = newAngle2;
+                                } else {
+                                    // Insufficient angular space: also adjust radii
+                                    // Move one or both nodes further from center
+                                    const radiusAdjust = (requiredDist - currentDist) / 2 * 0.8;
+                                    
+                                    // Prefer adjusting the node that has moved less from base radius
+                                    const delta1 = Math.abs(radius1 - baseRadius);
+                                    const delta2 = Math.abs(radius2 - baseRadius);
+                                    
+                                    let newRadius1 = radius1;
+                                    let newRadius2 = radius2;
+                                    
+                                    if (delta1 <= delta2 && radius1 < baseRadius * maxRadiusMultiplier) {
+                                        newRadius1 = Math.min(baseRadius * maxRadiusMultiplier, radius1 + radiusAdjust);
+                                    }
+                                    if (delta2 <= delta1 && radius2 < baseRadius * maxRadiusMultiplier) {
+                                        newRadius2 = Math.min(baseRadius * maxRadiusMultiplier, radius2 + radiusAdjust);
+                                    }
+                                    
+                                    // Apply new positions
+                                    const newPos1 = polarToCartesian(centerX, centerY, newRadius1, angle1);
+                                    const newPos2 = polarToCartesian(centerX, centerY, newRadius2, angle2);
+                                    
+                                    adjusted[i].x = newPos1.x;
+                                    adjusted[i].y = newPos1.y;
+                                    adjusted[i].currentRadius = newRadius1;
+                                    adjusted[j].x = newPos2.x;
+                                    adjusted[j].y = newPos2.y;
+                                    adjusted[j].currentRadius = newRadius2;
+                                    
+                                    // Also apply small angular adjustment
+                                    const smallAngularAdjust = 0.08;
+                                    const newAngle1 = angle1 - smallAngularAdjust * Math.sign(angleDiff);
+                                    const newAngle2 = angle2 + smallAngularAdjust * Math.sign(angleDiff);
+                                    
+                                    const combinedPos1 = polarToCartesian(centerX, centerY, newRadius1, newAngle1);
+                                    const combinedPos2 = polarToCartesian(centerX, centerY, newRadius2, newAngle2);
+                                    
+                                    adjusted[i].x = combinedPos1.x;
+                                    adjusted[i].y = combinedPos1.y;
+                                    adjusted[i].angle = newAngle1;
+                                    adjusted[j].x = combinedPos2.x;
+                                    adjusted[j].y = combinedPos2.y;
+                                    adjusted[j].angle = newAngle2;
+                                }
+                            }
+                        }
+                    }
+                    
+                    if (!hasCollision) break;
+                }
+                
+                return adjusted;
+            }
+
             function drawLink(svg, x1, y1, x2, y2) {
                 const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
                 const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
@@ -355,24 +474,58 @@
                 const direct = nodes.filter(d => !d.isHub && String(d.parentId||'server') === 'server' && /^\d+-\d+$/.test(String(d.id)) && !d.placeholder)
                                     .map(d => Object.assign({}, d, { id: canonicalizeIdByRoot(String(d.id), canonicalByPort) }));
                 const uniqueDirect = Array.from(new Map(direct.map(d => [parseRootPort(String(d.id)), d])).values());
-                let portsTotal = 0; topLevelHubs.forEach(h => { const prefix = String(h.id)+'.'; portsTotal += nodes.filter(m => String(m.id).startsWith(prefix)).length; });
+                let portsTotal = 0; 
+                topLevelHubs.forEach(h => { 
+                    const prefix = String(h.id)+'.'; 
+                    const childrenRaw = nodes.filter(m => String(m.id).startsWith(prefix)).map(m => Object.assign({}, m, { id: canonicalizeIdByRoot(String(m.id), canonicalByPort) }));
+                    const uniqueChildren = Array.from(new Map(childrenRaw.map(c => [String(c.id), c])).values());
+                    portsTotal += uniqueChildren.length; 
+                });
                 const visibleCount = 1 + topLevelHubs.length + uniqueDirect.length + portsTotal;
                 const scale = visibleCount <= 2 ? 1.8 : visibleCount <= 4 ? 1.5 : visibleCount <= 8 ? 1.2 : 1.0;
                 const ringScale = scale > 1 ? Math.max(0.8, 1 - (scale - 1) * 0.3) : 1;
                 const metrics = { deviceR: 34*scale, hubR: 34*scale, serverR: 36*scale, labelFont: 12*scale, stateFont: 12*scale, watermarkMul: scale };
 
                 // Hubs around server
-                const hubRadius = 170*ringScale; const hubAngleStep = topLevelHubs.length ? (2*Math.PI/topLevelHubs.length) : (2*Math.PI);
+                const hubRadius = 170*ringScale; 
+                const hubAngleStep = topLevelHubs.length ? (2*Math.PI/topLevelHubs.length) : (2*Math.PI);
+                let hubPositions = topLevelHubs.map((h,i) => {
+                    const ang = i*hubAngleStep - Math.PI/2;
+                    const p = polarToCartesian(cx, cy, hubRadius, ang);
+                    return { id: String(h.id), x: p.x, y: p.y, angle: ang, radius: metrics.hubR };
+                });
+                // Apply collision resolution to hub positions
+                hubPositions = resolveCollisions(hubPositions, cx, cy, hubRadius, metrics);
                 const hubPos = new Map();
-                topLevelHubs.forEach((h,i) => { const ang = i*hubAngleStep - Math.PI/2; const p = polarToCartesian(cx, cy, hubRadius, ang); hubPos.set(String(h.id), {x:p.x,y:p.y,angle:ang}); });
+                hubPositions.forEach(h => hubPos.set(h.id, {x: h.x, y: h.y, angle: h.angle}));
 
                 // Ports around hubs
                 topLevelHubs.forEach(h => {
                     const base = hubPos.get(String(h.id)); if (!base) return; const prefix = String(h.id)+'.';
-                    const children = nodes.filter(m => String(m.id).startsWith(prefix)).map(m => Object.assign({}, m, { id: canonicalizeIdByRoot(String(m.id), canonicalByPort) })).sort((a,b)=>String(a.id).localeCompare(String(b.id)));
-                    const ports = children.length ? children : []; const pr = 110*ringScale; const step = ports.length ? (2*Math.PI/ports.length) : (Math.PI/2);
+                    const childrenRaw = nodes.filter(m => String(m.id).startsWith(prefix)).map(m => Object.assign({}, m, { id: canonicalizeIdByRoot(String(m.id), canonicalByPort) }));
+                    // Deduplicate by canonicalized ID to handle companion USB controllers
+                    const children = Array.from(new Map(childrenRaw.map(c => [String(c.id), c])).values()).sort((a,b)=>String(a.id).localeCompare(String(b.id)));
+                    const ports = children.length ? children : []; 
+                    const pr = 110*ringScale; 
+                    const step = ports.length ? (2*Math.PI/ports.length) : (Math.PI/2);
                     const start = (base.angle + Math.PI) + step/2;
-                    ports.forEach((pnode, idx) => { const a = start + idx*step; const pt = polarToCartesian(base.x, base.y, pr, a); drawLink(svg, base.x, base.y, pt.x, pt.y); const pos = (base.y > pt.y) ? 'above' : 'below'; drawNode(svg, pt.x, pt.y, pnode, false, pos, metrics); });
+                    
+                    // Create initial positions for ports
+                    let portPositions = ports.map((pnode, idx) => {
+                        const a = start + idx*step;
+                        const pt = polarToCartesian(base.x, base.y, pr, a);
+                        return { node: pnode, x: pt.x, y: pt.y, angle: a, radius: metrics.deviceR };
+                    });
+                    
+                    // Apply collision resolution to port positions
+                    portPositions = resolveCollisions(portPositions, base.x, base.y, pr, metrics);
+                    
+                    // Draw the ports with adjusted positions
+                    portPositions.forEach(pp => {
+                        drawLink(svg, base.x, base.y, pp.x, pp.y);
+                        const pos = (base.y > pp.y) ? 'above' : 'below';
+                        drawNode(svg, pp.x, pp.y, pp.node, false, pos, metrics);
+                    });
                 });
 
                 // Direct devices around server
