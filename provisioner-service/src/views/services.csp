@@ -51,6 +51,7 @@
                     <th>Service Name</th>
                     <th>Status</th>
                     <th>Active</th>
+                    <th>Last Updated</th>
                     <th>Actions</th>
                 </tr>
             </thead>
@@ -79,6 +80,7 @@
                                 [](char c) { return c == ' ' || c == '(' || c == ')'; }), activeClass.end());
                             $$ << activeClass;
                         %>"><%c++ $$ << service.at("active"); %></td>
+                        <td class="timestamp-cell" data-timestamp="0">Loading...</td>
                         <td>
                             <a href="/service-log/<%c++ $$ << service.at("full_name"); %>" class="log-link">View Logs</a>
                         </td>
@@ -86,7 +88,7 @@
                 <%c++ } %>
             <%c++ } else { %>
                     <tr>
-                        <td colspan="4" class="no-devices">No services available</td>
+                        <td colspan="5" class="no-devices">No services available</td>
                     </tr>
             <%c++ } %>
             </tbody>
@@ -98,6 +100,31 @@
         // Function to convert active state to valid CSS class
         function activeStateToClass(active) {
             return 'status-' + active.replace(/[\s()]/g, '');
+        }
+        
+        // Function to format timestamp (microseconds since epoch) to local time
+        function formatTimestamp(timestampMicros) {
+            if (!timestampMicros || timestampMicros === 0) {
+                return 'Never';
+            }
+            
+            // Convert microseconds to milliseconds for JavaScript Date
+            const date = new Date(timestampMicros / 1000);
+            
+            // Check if date is valid
+            if (isNaN(date.getTime())) {
+                return 'Invalid date';
+            }
+            
+            // Format as local time: YYYY-MM-DD HH:MM:SS
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            const hours = String(date.getHours()).padStart(2, '0');
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            const seconds = String(date.getSeconds()).padStart(2, '0');
+            
+            return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
         }
         
         // Function to fetch and update the services table
@@ -119,6 +146,7 @@
                                 <th>Service Name</th>
                                 <th>Status</th>
                                 <th>Active</th>
+                                <th>Last Updated</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
@@ -132,11 +160,14 @@
                             serviceName = service.base_name + '@' + service.instance;
                         }
                         
+                        const formattedTimestamp = formatTimestamp(service.timestamp);
+                        
                         tableHtml += `
                             <tr>
                                 <td>${serviceName}</td>
                                 <td>${service.status}</td>
                                 <td class="${activeStateToClass(service.active)}">${service.active}</td>
+                                <td class="timestamp-cell">${formattedTimestamp}</td>
                                 <td>
                                     <a href="/service-log/${service.full_name}" class="log-link">View Logs</a>
                                 </td>
@@ -146,7 +177,7 @@
                 } else {
                     tableHtml += `
                         <tr>
-                            <td colspan="4" class="no-devices">No services available</td>
+                            <td colspan="5" class="no-devices">No services available</td>
                         </tr>
                     `;
                 }

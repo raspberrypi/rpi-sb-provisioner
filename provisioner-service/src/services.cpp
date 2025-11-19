@@ -323,6 +323,9 @@ namespace provisioner {
                 serviceObj["instance"] = info.instance;
                 serviceObj["base_name"] = info.base_name;
                 
+                // Add timestamp in microseconds since epoch (will be converted to local time in frontend)
+                serviceObj["timestamp"] = Json::Value::UInt64(info.timestamp);
+                
                 // Reconstruct the full service name for log links
                 std::string fullName;
                 if (!info.instance.empty()) {
@@ -523,15 +526,20 @@ namespace provisioner {
                     continue;
                 }
                 
-                // Convert timestamp to readable format
+                // Convert timestamp to ISO 8601 format (UTC)
                 time_t secs = time / 1000000;
+                uint64_t usecs = time % 1000000;
                 struct tm tm;
-                localtime_r(&secs, &tm);
+                gmtime_r(&secs, &tm);
                 char timestr[64];
-                strftime(timestr, sizeof(timestr), "%Y-%m-%d %H:%M:%S", &tm);
+                strftime(timestr, sizeof(timestr), "%Y-%m-%dT%H:%M:%S", &tm);
+                
+                // Add milliseconds and Z suffix for ISO 8601 UTC format
+                char isotimestr[80];
+                snprintf(isotimestr, sizeof(isotimestr), "%s.%03ldZ", timestr, usecs / 1000);
                 
                 // Add the formatted log entry
-                std::string entry = std::string(timestr) + " " + message;
+                std::string entry = std::string(isotimestr) + " " + message;
                 logEntries.push_back(entry);
                 collected++;
             }
@@ -743,15 +751,20 @@ namespace provisioner {
                     continue;
                 }
                 
-                // Convert timestamp to readable format
+                // Convert timestamp to ISO 8601 format (UTC)
                 time_t secs = time / 1000000;
+                uint64_t usecs = time % 1000000;
                 struct tm tm;
-                localtime_r(&secs, &tm);
+                gmtime_r(&secs, &tm);
                 char timestr[64];
-                strftime(timestr, sizeof(timestr), "%Y-%m-%d %H:%M:%S", &tm);
+                strftime(timestr, sizeof(timestr), "%Y-%m-%dT%H:%M:%S", &tm);
+                
+                // Add milliseconds and Z suffix for ISO 8601 UTC format
+                char isotimestr[80];
+                snprintf(isotimestr, sizeof(isotimestr), "%s.%03ldZ", timestr, usecs / 1000);
                 
                 // Add the formatted log entry
-                std::string entry = std::string(timestr) + " " + message;
+                std::string entry = std::string(isotimestr) + " " + message;
                 logEntries.push_back(entry);
                 collected++;
             }
