@@ -196,6 +196,24 @@ add_custom_command(
 # Create a custom target for downloading ZXing
 add_custom_target(download_zxing DEPENDS ${ZXING_JS_PATH})
 
+# Download D3.js library for graph visualization
+set(D3_JS_URL "https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js")
+set(D3_JS_PATH "${CMAKE_SOURCE_DIR}/static/js/d3.min.js")
+
+# Add a custom command to download D3.js at build time
+add_custom_command(
+    OUTPUT ${D3_JS_PATH}
+    COMMAND ${CMAKE_COMMAND} -E echo "Downloading D3.js library from ${D3_JS_URL}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_SOURCE_DIR}/static/js"
+    COMMAND curl --silent --show-error --output ${D3_JS_PATH} ${D3_JS_URL}
+    COMMAND ${CMAKE_COMMAND} -E echo "D3.js library downloaded to ${D3_JS_PATH}"
+    COMMENT "Downloading D3.js visualization library"
+    VERBATIM
+)
+
+# Create a custom target for downloading D3.js
+add_custom_target(download_d3 DEPENDS ${D3_JS_PATH})
+
 project(rpi-provisioner-ui)
 
 find_package(SQLite3 REQUIRED)
@@ -237,6 +255,9 @@ add_dependencies(rpi-provisioner-ui compile_views)
 
 # Add zxing dependency
 add_dependencies(rpi-provisioner-ui download_zxing)
+
+# Add D3.js dependency
+add_dependencies(rpi-provisioner-ui download_d3)
 
 target_sources(rpi-provisioner-ui
     PRIVATE
