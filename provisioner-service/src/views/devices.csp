@@ -3,6 +3,7 @@
 <head>
     <title>USB Topology</title>
     <%view stylesheet %>
+    <script src="/static/js/d3.min.js"></script>
     <style>
         .topology-container { padding: 10px; }
         .node { border: 1px solid #ccc; border-radius: 6px; padding: 8px 10px; margin: 6px; background: #fafafa; display: inline-block; min-width: 160px; }
@@ -23,14 +24,38 @@
         .view-tab.active { background: #0b69ff; color: #fff; border-color: #0b69ff; }
         .view-container { display: none; }
         .view-container.active { display: block; }
-        .mindmap-container { padding: 4px; }
-        .mindmap-container svg { width: 100%; height: 70vh; display: block; }
-        .mm-node-label { font: 12px sans-serif; dominant-baseline: middle; text-anchor: middle; }
-        .mm-node-circle { fill: #eef6ff; stroke: #9ec9ff; stroke-width: 2; }
-        .mm-node-circle.device { fill: #f7fff0; stroke: #bde6a1; }
-        .mm-link { stroke: #bbb; stroke-width: 2; fill: none; }
-        .mm-watermark { font-family: sans-serif; font-weight: 900; opacity: 0.14; fill: #d32f2f; pointer-events: none; text-anchor: middle; dominant-baseline: middle; }
-        .mm-state-text { font: 12px sans-serif; fill: #555; text-anchor: middle; dominant-baseline: hanging; pointer-events: none; }
+        .mindmap-container { padding: 4px; position: relative; background: #fafafa; border: 1px solid #ddd; border-radius: 4px; }
+        .mindmap-container svg { width: 100%; height: 70vh; display: block; min-height: 500px; }
+        
+        /* D3 Graph Styles */
+        .d3-link { stroke: #bbb; stroke-width: 2; fill: none; stroke-opacity: 0.6; }
+        .d3-link.highlighted { stroke: #0b69ff; stroke-width: 3; stroke-opacity: 1; }
+        
+        .d3-node-circle { stroke-width: 2.5; cursor: pointer; transition: all 0.2s ease; }
+        .d3-node-circle.hub { fill: #eef6ff; stroke: #9ec9ff; }
+        .d3-node-circle.device { fill: #f7fff0; stroke: #bde6a1; }
+        .d3-node-circle.server { fill: #fff; stroke: #666; stroke-width: 3; }
+        .d3-node-circle:hover { stroke-width: 4; filter: brightness(1.1); }
+        .d3-node-circle.clicked { stroke: #0b69ff; stroke-width: 4; filter: drop-shadow(0 0 8px rgba(11, 105, 255, 0.5)); }
+        
+        .d3-node-label { font: 12px sans-serif; text-anchor: middle; pointer-events: none; user-select: none; }
+        .d3-node-badge { font: 10px sans-serif; font-weight: bold; fill: #fff; text-anchor: middle; pointer-events: none; }
+        .d3-node-state { font: 10px sans-serif; fill: #555; text-anchor: middle; pointer-events: none; }
+        
+        .d3-watermark { font-family: sans-serif; font-weight: 900; opacity: 0.12; fill: #d32f2f; pointer-events: none; text-anchor: middle; dominant-baseline: middle; }
+        
+        /* Tooltip */
+        .d3-tooltip { position: absolute; padding: 8px 12px; background: rgba(0, 0, 0, 0.85); color: #fff; border-radius: 4px; 
+                      font-size: 12px; pointer-events: none; z-index: 1000; white-space: nowrap; opacity: 0; transition: opacity 0.2s; }
+        .d3-tooltip.visible { opacity: 1; }
+        
+        /* Zoom controls */
+        .zoom-controls { position: absolute; top: 10px; right: 10px; display: flex; flex-direction: column; gap: 4px; z-index: 100; }
+        .zoom-btn { width: 32px; height: 32px; border: 1px solid #9ec9ff; background: #fff; color: #0b3d91; border-radius: 4px; 
+                    cursor: pointer; font-weight: bold; font-size: 16px; display: flex; align-items: center; justify-content: center; 
+                    transition: all 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .zoom-btn:hover { background: #eef6ff; transform: scale(1.1); }
+        .zoom-btn:active { transform: scale(0.95); }
     </style>
     <script>
         let ws = null;
@@ -263,20 +288,28 @@
             return null;
         }
 
-        // --- Relational (mind map) view module ---
-        const MindMap = (() => {
+        // --- D3.js Interactive Graph Module ---
+        const D3Graph = (() => {
+            let svg, g, zoom, simulation, tooltip;
+            let nodesData = [], linksData = [];
+            let nodeElements, linkElements, labelElements;
+            
             function generationText(n) {
                 if (!n) return '';
                 if (n.modelGen === 5) return '5';
                 if (n.modelGen === 4) return '4';
                 return '';
             }
-            function labelForMm(n) {
+            
+            function labelForNode(n) {
                 if (!n) return '';
-                if (n.id === 'server') return 'Provisioning Server';
-                if (n.isHub) return 'USB Hub';
+                if (n.id === 'server') return 'Server';
+                if (n.isHub) {
+                    if (n.serial) return n.serial;
+                    return 'Hub';
+                }
                 if (n.serial) return n.serial;
-                if (n.vendor || n.product) return (n.vendor||'') + ':' + (n.product||'');
+                if (n.vendor || n.product) return `${n.vendor||''}:${n.product||''}`.replace('::', ':');
                 const idStr = String(n.id||'');
                 let portNum = '';
                 const dotParts = idStr.split('.');
@@ -286,262 +319,241 @@
                     if (dashIdx !== -1) portNum = idStr.substring(dashIdx + 1);
                 }
                 if (portNum && /^\d+$/.test(portNum)) return `Port ${portNum}`;
-                return 'Port';
+                return 'Device';
             }
-            function polarToCartesian(cx, cy, r, a) { return { x: cx + r*Math.cos(a), y: cy + r*Math.sin(a) }; }
-
-            function nodesOverlap(n1, n2, minDistance) {
-                // Check if two nodes overlap considering their radii and a minimum distance
-                const dx = n1.x - n2.x;
-                const dy = n1.y - n2.y;
-                const dist = Math.sqrt(dx*dx + dy*dy);
-                const minDist = (n1.radius || 0) + (n2.radius || 0) + minDistance;
-                return dist < minDist;
+            
+            function getNodeRadius(n) {
+                if (n.id === 'server') return 40;
+                if (n.isHub) return 30;
+                return 28;
+            }
+            
+            function getNodeClass(n) {
+                if (n.id === 'server') return 'server';
+                if (n.isHub) return 'hub';
+                return 'device';
+            }
+            
+            function tooltipText(n) {
+                const parts = [];
+                parts.push(`<strong>${labelForNode(n)}</strong>`);
+                if (n.id && n.id !== 'server') parts.push(`ID: ${n.id}`);
+                if (n.model) parts.push(`Model: ${n.model}`);
+                if (n.state) parts.push(`State: ${n.state}`);
+                if (n.ip) parts.push(`IP: ${n.ip}`);
+                if (n.image) parts.push(`Image: ${n.image}`);
+                return parts.join('<br/>');
             }
 
-            function resolveCollisions(positions, centerX, centerY, baseRadius, metrics, maxIterations = 8) {
-                // Enhanced collision resolution: adjust both angles and radial distances
-                if (positions.length <= 1) return positions;
+            
+            function processNodes(rawNodes) {
+                // Build canonical map and deduplicate nodes
+                const canonicalByPort = buildCanonicalRootHubMap(rawNodes);
+                const nodeMap = new Map();
+                const links = [];
                 
-                const minDistance = 10; // Minimum pixel spacing between node edges
-                const maxRadiusMultiplier = 1.6; // Allow nodes to move up to 60% further out
-                let adjusted = positions.map(p => Object.assign({}, p, { 
-                    originalRadius: baseRadius,
-                    currentRadius: baseRadius 
-                }));
+                rawNodes.forEach(n => {
+                    const canonicalId = canonicalizeIdByRoot(String(n.id), canonicalByPort);
+                    if (!nodeMap.has(canonicalId)) {
+                        nodeMap.set(canonicalId, { ...n, id: canonicalId });
+                    }
+                });
                 
-                for (let iter = 0; iter < maxIterations; iter++) {
-                    let hasCollision = false;
-                    
-                    for (let i = 0; i < adjusted.length; i++) {
-                        for (let j = i + 1; j < adjusted.length; j++) {
-                            if (nodesOverlap(adjusted[i], adjusted[j], minDistance)) {
-                                hasCollision = true;
-                                
-                                // Calculate current angles and radii
-                                const angle1 = Math.atan2(adjusted[i].y - centerY, adjusted[i].x - centerX);
-                                const angle2 = Math.atan2(adjusted[j].y - centerY, adjusted[j].x - centerX);
-                                const radius1 = adjusted[i].currentRadius || baseRadius;
-                                const radius2 = adjusted[j].currentRadius || baseRadius;
-                                
-                                let angleDiff = angle2 - angle1;
-                                // Normalize angle difference to [-PI, PI]
-                                while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
-                                while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
-                                
-                                const dx = adjusted[j].x - adjusted[i].x;
-                                const dy = adjusted[j].y - adjusted[i].y;
-                                const currentDist = Math.sqrt(dx*dx + dy*dy);
-                                const requiredDist = adjusted[i].radius + adjusted[j].radius + minDistance;
-                                
-                                // Strategy: Try angular adjustment first, then radial if needed
-                                const angularSpace = Math.abs(angleDiff);
-                                const avgRadius = (radius1 + radius2) / 2;
-                                const minAngularSpace = Math.asin(Math.min(1, requiredDist / avgRadius));
-                                
-                                if (angularSpace > minAngularSpace * 0.8 || iter < maxIterations / 2) {
-                                    // Sufficient angular space OR early iterations: adjust angles
-                                    const adjust = Math.min(0.15, (minAngularSpace - angularSpace) / 2 + 0.05);
-                                    const newAngle1 = angle1 - adjust * Math.sign(angleDiff);
-                                    const newAngle2 = angle2 + adjust * Math.sign(angleDiff);
-                                    
-                                    const newPos1 = polarToCartesian(centerX, centerY, radius1, newAngle1);
-                                    const newPos2 = polarToCartesian(centerX, centerY, radius2, newAngle2);
-                                    
-                                    adjusted[i].x = newPos1.x;
-                                    adjusted[i].y = newPos1.y;
-                                    adjusted[i].angle = newAngle1;
-                                    adjusted[j].x = newPos2.x;
-                                    adjusted[j].y = newPos2.y;
-                                    adjusted[j].angle = newAngle2;
-                                } else {
-                                    // Insufficient angular space: also adjust radii
-                                    // Move one or both nodes further from center
-                                    const radiusAdjust = (requiredDist - currentDist) / 2 * 0.8;
-                                    
-                                    // Prefer adjusting the node that has moved less from base radius
-                                    const delta1 = Math.abs(radius1 - baseRadius);
-                                    const delta2 = Math.abs(radius2 - baseRadius);
-                                    
-                                    let newRadius1 = radius1;
-                                    let newRadius2 = radius2;
-                                    
-                                    if (delta1 <= delta2 && radius1 < baseRadius * maxRadiusMultiplier) {
-                                        newRadius1 = Math.min(baseRadius * maxRadiusMultiplier, radius1 + radiusAdjust);
-                                    }
-                                    if (delta2 <= delta1 && radius2 < baseRadius * maxRadiusMultiplier) {
-                                        newRadius2 = Math.min(baseRadius * maxRadiusMultiplier, radius2 + radiusAdjust);
-                                    }
-                                    
-                                    // Apply new positions
-                                    const newPos1 = polarToCartesian(centerX, centerY, newRadius1, angle1);
-                                    const newPos2 = polarToCartesian(centerX, centerY, newRadius2, angle2);
-                                    
-                                    adjusted[i].x = newPos1.x;
-                                    adjusted[i].y = newPos1.y;
-                                    adjusted[i].currentRadius = newRadius1;
-                                    adjusted[j].x = newPos2.x;
-                                    adjusted[j].y = newPos2.y;
-                                    adjusted[j].currentRadius = newRadius2;
-                                    
-                                    // Also apply small angular adjustment
-                                    const smallAngularAdjust = 0.08;
-                                    const newAngle1 = angle1 - smallAngularAdjust * Math.sign(angleDiff);
-                                    const newAngle2 = angle2 + smallAngularAdjust * Math.sign(angleDiff);
-                                    
-                                    const combinedPos1 = polarToCartesian(centerX, centerY, newRadius1, newAngle1);
-                                    const combinedPos2 = polarToCartesian(centerX, centerY, newRadius2, newAngle2);
-                                    
-                                    adjusted[i].x = combinedPos1.x;
-                                    adjusted[i].y = combinedPos1.y;
-                                    adjusted[i].angle = newAngle1;
-                                    adjusted[j].x = combinedPos2.x;
-                                    adjusted[j].y = combinedPos2.y;
-                                    adjusted[j].angle = newAngle2;
-                                }
-                            }
+                // Build links from parent relationships
+                nodeMap.forEach(n => {
+                    if (n.parentId) {
+                        const canonicalParentId = canonicalizeIdByRoot(String(n.parentId), canonicalByPort);
+                        const parent = nodeMap.get(canonicalParentId) || nodeMap.get('server');
+                        if (parent) {
+                            links.push({ source: parent.id, target: n.id });
                         }
                     }
+                });
+                
+                return { nodes: Array.from(nodeMap.values()), links };
+            }
+            
+            function init() {
+                const container = document.querySelector('.mindmap-container');
+                svg = d3.select('#d3-graph-svg');
+                const width = container.clientWidth;
+                const height = Math.max(container.clientHeight, 500);
+                
+                svg.attr('width', width).attr('height', height);
+                
+                // Create tooltip
+                tooltip = d3.select(container)
+                    .append('div')
+                    .attr('class', 'd3-tooltip');
+                
+                // Add zoom controls
+                const zoomControls = d3.select(container)
+                    .append('div')
+                    .attr('class', 'zoom-controls');
+                
+                zoomControls.append('button')
+                    .attr('class', 'zoom-btn')
+                    .html('+')
+                    .on('click', () => svg.transition().call(zoom.scaleBy, 1.3));
+                
+                zoomControls.append('button')
+                    .attr('class', 'zoom-btn')
+                    .html('−')
+                    .on('click', () => svg.transition().call(zoom.scaleBy, 0.7));
+                
+                zoomControls.append('button')
+                    .attr('class', 'zoom-btn')
+                    .html('⊙')
+                    .on('click', () => svg.transition().call(zoom.transform, d3.zoomIdentity));
+                
+                // Setup zoom behavior
+                zoom = d3.zoom()
+                    .scaleExtent([0.3, 3])
+                    .on('zoom', (event) => {
+                        g.attr('transform', event.transform);
+                    });
+                
+                svg.call(zoom);
+                
+                // Create main group for graph
+                g = svg.append('g');
+                
+                // Setup force simulation
+                simulation = d3.forceSimulation()
+                    .force('link', d3.forceLink().id(d => d.id).distance(d => {
+                        // Server to hubs: longer distance
+                        if (d.source.id === 'server') return 180;
+                        // Hub to devices: medium distance
+                        if (d.source.isHub) return 120;
+                        return 80;
+                    }))
+                    .force('charge', d3.forceManyBody().strength(-800))
+                    .force('center', d3.forceCenter(width / 2, height / 2))
+                    .force('collision', d3.forceCollide().radius(d => getNodeRadius(d) + 15))
+                    .alphaDecay(0.02);
+                
+                return update;
+            }
+            
+            function update(rawNodes) {
+                const { nodes, links } = processNodes(rawNodes);
+                
+                nodesData = nodes;
+                linksData = links;
+                
+                // Update links
+                linkElements = g.selectAll('.d3-link')
+                    .data(linksData, d => `${d.source.id}-${d.target.id}`);
+                
+                linkElements.exit().remove();
+                
+                const linkEnter = linkElements.enter()
+                    .append('line')
+                    .attr('class', 'd3-link');
+                
+                linkElements = linkEnter.merge(linkElements);
+                
+                // Update nodes
+                const nodeGroups = g.selectAll('.d3-node-group')
+                    .data(nodesData, d => d.id);
+                
+                nodeGroups.exit().remove();
+                
+                const nodeEnter = nodeGroups.enter()
+                    .append('g')
+                    .attr('class', 'd3-node-group')
+                    .call(d3.drag()
+                        .on('start', dragstarted)
+                        .on('drag', dragged)
+                        .on('end', dragended));
+                
+                // Add circles
+                nodeEnter.append('circle')
+                    .attr('class', d => `d3-node-circle ${getNodeClass(d)}`)
+                    .attr('r', d => getNodeRadius(d))
+                    .on('click', (event, d) => {
+                        // Navigate to device detail page (if not server)
+                        if (d.id !== 'server' && !d.isHub && d.serial) {
+                            window.location.href = `/device/${d.serial}`;
+                        }
+                        // Visual feedback
+                        d3.selectAll('.d3-node-circle').classed('clicked', false);
+                        d3.select(event.target).classed('clicked', true);
+                    })
+                    .on('mouseover', (event, d) => {
+                        tooltip.html(tooltipText(d))
+                            .classed('visible', true)
+                            .style('left', (event.pageX + 10) + 'px')
+                            .style('top', (event.pageY - 10) + 'px');
+                        // Highlight connected links
+                        linkElements.classed('highlighted', l => l.source.id === d.id || l.target.id === d.id);
+                    })
+                    .on('mouseout', () => {
+                        tooltip.classed('visible', false);
+                        linkElements.classed('highlighted', false);
+                    });
+                
+                // Add generation watermark for devices
+                nodeEnter.append('text')
+                    .attr('class', 'd3-watermark')
+                    .attr('font-size', d => d.id === 'server' ? '32' : '24')
+                    .attr('dy', 4)
+                    .text(d => generationText(d));
+                
+                // Add labels
+                nodeEnter.append('text')
+                    .attr('class', 'd3-node-label')
+                    .attr('dy', d => getNodeRadius(d) + 14)
+                    .text(d => labelForNode(d));
+                
+                // Add state text
+                nodeEnter.append('text')
+                    .attr('class', 'd3-node-state')
+                    .attr('dy', d => -(getNodeRadius(d) + 6))
+                    .text(d => d.state || '');
+                
+                const nodeGroupsMerged = nodeEnter.merge(nodeGroups);
+                
+                // Update existing nodes
+                nodeGroupsMerged.select('.d3-node-label').text(d => labelForNode(d));
+                nodeGroupsMerged.select('.d3-node-state').text(d => d.state || '');
+                nodeGroupsMerged.select('.d3-watermark').text(d => generationText(d));
+                
+                // Update simulation
+                simulation.nodes(nodesData).on('tick', ticked);
+                simulation.force('link').links(linksData);
+                simulation.alpha(0.3).restart();
+                
+                function ticked() {
+                    linkElements
+                        .attr('x1', d => d.source.x)
+                        .attr('y1', d => d.source.y)
+                        .attr('x2', d => d.target.x)
+                        .attr('y2', d => d.target.y);
                     
-                    if (!hasCollision) break;
+                    nodeGroupsMerged
+                        .attr('transform', d => `translate(${d.x},${d.y})`);
                 }
                 
-                return adjusted;
-            }
-
-            function drawLink(svg, x1, y1, x2, y2) {
-                const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-                const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
-                path.setAttribute('d', `M ${x1} ${y1} Q ${mx} ${my} ${x2} ${y2}`);
-                path.setAttribute('class', 'mm-link');
-                svg.appendChild(path);
-            }
-            function drawNode(svg, x, y, n, isHub, statePos, metrics) {
-                const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-                const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-                const radius = (n && n.id === 'server') ? metrics.serverR : (isHub ? metrics.hubR : metrics.deviceR);
-                circle.setAttribute('cx', x); circle.setAttribute('cy', y); circle.setAttribute('r', radius);
-                circle.setAttribute('class', 'mm-node-circle' + (n && !n.isHub ? ' device' : ''));
-                g.appendChild(circle);
-
-                const genTxt = generationText(n||{});
-                if (!isHub && genTxt) {
-                    const wm = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                    wm.setAttribute('x', x); wm.setAttribute('y', y + 2);
-                    wm.setAttribute('class', 'mm-watermark');
-                    const len = String(genTxt).length;
-                    const fontSize = (len <= 2 ? 28 : (len <= 4 ? 16 : 12)) * (metrics.watermarkMul||1);
-                    wm.setAttribute('font-size', String(fontSize));
-                    wm.textContent = genTxt; g.appendChild(wm);
+                function dragstarted(event, d) {
+                    if (!event.active) simulation.alphaTarget(0.3).restart();
+                    d.fx = d.x;
+                    d.fy = d.y;
                 }
-
-                const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                t.setAttribute('x', x); t.setAttribute('y', y); t.setAttribute('class', 'mm-node-label');
-                t.setAttribute('font-size', String(metrics.labelFont));
-                t.textContent = labelForMm(n||{}); g.appendChild(t);
-
-                if (!isHub && n && n.state) {
-                    const st = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                    st.setAttribute('x', x);
-                    st.setAttribute('y', statePos === 'above' ? (y - (metrics.deviceR + 12)) : (y + (metrics.deviceR + 12)));
-                    st.setAttribute('class', 'mm-state-text'); st.setAttribute('font-size', String(metrics.stateFont));
-                    st.textContent = String(n.state); g.appendChild(st);
+                
+                function dragged(event, d) {
+                    d.fx = event.x;
+                    d.fy = event.y;
                 }
-
-                svg.appendChild(g);
-            }
-
-            function render(nodes, svg) {
-                while (svg.firstChild) svg.removeChild(svg.firstChild);
-                const width = svg.clientWidth || svg.parentElement.clientWidth;
-                const height = svg.clientHeight || 600;
-                const cx = width/2, cy = Math.max(height/2, 250);
-
-                // Canonical roots and top-level hubs
-                const canonicalByPort = buildCanonicalRootHubMap(nodes);
-                const emitted = new Set();
-                const topLevelHubs = [];
-                for (const n of nodes) {
-                    if (!n || !n.isHub) continue;
-                    const pid = String(n.parentId||'server');
-                    if (pid !== 'server' || !/^\d+-\d+$/.test(String(n.id))) continue;
-                    const cid = canonicalizeIdByRoot(String(n.id), canonicalByPort);
-                    if (emitted.has(cid)) continue; emitted.add(cid);
-                    topLevelHubs.push(Object.assign({}, n, { id: cid }));
+                
+                function dragended(event, d) {
+                    if (!event.active) simulation.alphaTarget(0);
+                    // Uncomment to pin nodes after dragging:
+                    // d.fx = null;
+                    // d.fy = null;
                 }
-
-                // Count visible things for scaling
-                const direct = nodes.filter(d => !d.isHub && String(d.parentId||'server') === 'server' && /^\d+-\d+$/.test(String(d.id)) && !d.placeholder)
-                                    .map(d => Object.assign({}, d, { id: canonicalizeIdByRoot(String(d.id), canonicalByPort) }));
-                const uniqueDirect = Array.from(new Map(direct.map(d => [parseRootPort(String(d.id)), d])).values());
-                let portsTotal = 0; 
-                topLevelHubs.forEach(h => { 
-                    const prefix = String(h.id)+'.'; 
-                    const childrenRaw = nodes.filter(m => String(m.id).startsWith(prefix)).map(m => Object.assign({}, m, { id: canonicalizeIdByRoot(String(m.id), canonicalByPort) }));
-                    const uniqueChildren = Array.from(new Map(childrenRaw.map(c => [String(c.id), c])).values());
-                    portsTotal += uniqueChildren.length; 
-                });
-                const visibleCount = 1 + topLevelHubs.length + uniqueDirect.length + portsTotal;
-                const scale = visibleCount <= 2 ? 1.8 : visibleCount <= 4 ? 1.5 : visibleCount <= 8 ? 1.2 : 1.0;
-                const ringScale = scale > 1 ? Math.max(0.8, 1 - (scale - 1) * 0.3) : 1;
-                const metrics = { deviceR: 34*scale, hubR: 34*scale, serverR: 36*scale, labelFont: 12*scale, stateFont: 12*scale, watermarkMul: scale };
-
-                // Hubs around server
-                const hubRadius = 170*ringScale; 
-                const hubAngleStep = topLevelHubs.length ? (2*Math.PI/topLevelHubs.length) : (2*Math.PI);
-                let hubPositions = topLevelHubs.map((h,i) => {
-                    const ang = i*hubAngleStep - Math.PI/2;
-                    const p = polarToCartesian(cx, cy, hubRadius, ang);
-                    return { id: String(h.id), x: p.x, y: p.y, angle: ang, radius: metrics.hubR };
-                });
-                // Apply collision resolution to hub positions
-                hubPositions = resolveCollisions(hubPositions, cx, cy, hubRadius, metrics);
-                const hubPos = new Map();
-                hubPositions.forEach(h => hubPos.set(h.id, {x: h.x, y: h.y, angle: h.angle}));
-
-                // Ports around hubs
-                topLevelHubs.forEach(h => {
-                    const base = hubPos.get(String(h.id)); if (!base) return; const prefix = String(h.id)+'.';
-                    const childrenRaw = nodes.filter(m => String(m.id).startsWith(prefix)).map(m => Object.assign({}, m, { id: canonicalizeIdByRoot(String(m.id), canonicalByPort) }));
-                    // Deduplicate by canonicalized ID to handle companion USB controllers
-                    const children = Array.from(new Map(childrenRaw.map(c => [String(c.id), c])).values()).sort((a,b)=>String(a.id).localeCompare(String(b.id)));
-                    const ports = children.length ? children : []; 
-                    const pr = 110*ringScale; 
-                    const step = ports.length ? (2*Math.PI/ports.length) : (Math.PI/2);
-                    const start = (base.angle + Math.PI) + step/2;
-                    
-                    // Create initial positions for ports
-                    let portPositions = ports.map((pnode, idx) => {
-                        const a = start + idx*step;
-                        const pt = polarToCartesian(base.x, base.y, pr, a);
-                        return { node: pnode, x: pt.x, y: pt.y, angle: a, radius: metrics.deviceR };
-                    });
-                    
-                    // Apply collision resolution to port positions
-                    portPositions = resolveCollisions(portPositions, base.x, base.y, pr, metrics);
-                    
-                    // Draw the ports with adjusted positions
-                    portPositions.forEach(pp => {
-                        drawLink(svg, base.x, base.y, pp.x, pp.y);
-                        const pos = (base.y > pp.y) ? 'above' : 'below';
-                        drawNode(svg, pp.x, pp.y, pp.node, false, pos, metrics);
-                    });
-                });
-
-                // Direct devices around server
-                const ddRadius = 170*ringScale; const dd = uniqueDirect; const ddStep = dd.length ? (2*Math.PI/dd.length) : 0;
-                dd.forEach((d,i)=>{ const ang = i*ddStep - Math.PI/2; const p = polarToCartesian(cx, cy, ddRadius, ang); drawLink(svg, cx, cy, p.x, p.y); const pos = (cy > p.y) ? 'above' : 'below'; drawNode(svg, p.x, p.y, d, false, pos, metrics); });
-
-                // Draw hubs and server last for correct z-order
-                topLevelHubs.forEach(h => { const b = hubPos.get(String(h.id)); if (!b) return; drawLink(svg, cx, cy, b.x, b.y); drawNode(svg, b.x, b.y, h, true, null, metrics); });
-                drawNode(svg, cx, cy, { id: 'server', isHub: true }, true, null, metrics);
             }
-
-            function init() {
-                const svg = document.getElementById('mm-svg');
-                render([{ id: 'server', isHub: true }], svg);
-                return (nodes) => render(nodes, svg);
-            }
+            
             return { init };
         })();
 
@@ -696,8 +708,8 @@
                         try { console.log('ws: topology message nodes', msg.nodes.length, 'removed', Array.isArray(msg.removed) ? msg.removed.length : 0); } catch(e) {}
                         // Apply updates first
                         applyTopology(msg.nodes);
-                        // Also update relational view if active
-                        if (window.__mmApply) { try { window.__mmApply(msg.nodes); } catch(e) {} }
+                        // Also update D3 interactive graph if active
+                        if (window.__d3Apply) { try { window.__d3Apply(msg.nodes); } catch(e) { console.error('D3 update error:', e); } }
                         // Then process removals explicitly from backend
                         if (Array.isArray(msg.removed)) {
                             for (const id of msg.removed) {
@@ -756,7 +768,7 @@
         <button id="tab-topo" class="view-tab">Detail</button>
     </div>
     <div id="rel-view" class="view-container active">
-        <div class="mindmap-container"><svg id="mm-svg"></svg></div>
+        <div class="mindmap-container"><svg id="d3-graph-svg"></svg></div>
     </div>
     <div id="topo-view" class="view-container">
         <div class="topology-container">
@@ -768,8 +780,8 @@
         const topologyRoot = document.getElementById('topology-root');
         // Initialize with a server root to minimize layout shifts
         applyTopology([{ id: 'server', isHub: true }]);
-        // Initialize full relational view
-        window.__mmApply = MindMap.init();
+        // Initialize D3 interactive graph
+        window.__d3Apply = D3Graph.init();
         // Tabs
         const tabRel = document.getElementById('tab-rel');
         const tabTopo = document.getElementById('tab-topo');
