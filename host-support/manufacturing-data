@@ -33,6 +33,7 @@ metadata_gather() {
         "0x08") BOARD_STR="3B" ;;
         "0x09") BOARD_STR="Zero" ;;
         "0x0A") BOARD_STR="CM3" ;;
+        "0x0C") BOARD_STR="Zero W" ;;
         "0x0D") BOARD_STR="3B+" ;;
         "0x0E") BOARD_STR="3A+" ;;
         "0x10") BOARD_STR="CM3+" ;;
@@ -44,9 +45,9 @@ metadata_gather() {
         "0x17") BOARD_STR="5" ;;
         "0x18") BOARD_STR="CM5" ;;
         "0x19") BOARD_STR="500" ;;
-        "0x20") BOARD_STR="CM5 Lite" ;;
+        "0x1a") BOARD_STR="CM5 Lite" ;;
         *)
-            BOARD_STR="Unsupported Board"
+            BOARD_STR="Unsupported Board: ${TYPE}"
     esac
     
     case ${PROCESSOR} in
@@ -56,7 +57,7 @@ metadata_gather() {
         "0x3") PROCESSOR_STR="BCM2711" ;;
         "0x4") PROCESSOR_STR="BCM2712" ;;
         *)
-            PROCESSOR_STR="Unknown"
+            PROCESSOR_STR="Unknown: ${PROCESSOR}"
     esac
     
     case ${MEMORY} in
@@ -68,7 +69,7 @@ metadata_gather() {
         "0x5") MEMORY_STR="8GB" ;;
         "0x6") MEMORY_STR="16GB" ;;
         *)
-            MEMORY_STR="Unknown"
+            MEMORY_STR="Unknown: ${MEMORY}"
     esac
     
     case ${MANUFACTURER} in
@@ -79,7 +80,7 @@ metadata_gather() {
         "0x4") MANUFACTURER_STR="Embest" ;;
         "0x5") MANUFACTURER_STR="Stadium" ;;
         *)
-            MANUFACTURER_STR="Unknown"
+            MANUFACTURER_STR="Unknown: ${MANUFACTURER}"
     esac
     
     echo "Board is: ${BOARD_STR}, with revision number ${REVISION}. Has Processor ${PROCESSOR_STR} with Memory ${MEMORY_STR}. Was manufactured by ${MANUFACTURER_STR}"
