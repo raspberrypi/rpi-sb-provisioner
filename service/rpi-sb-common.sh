@@ -135,7 +135,7 @@ setup_fastboot_and_id_vars() {
     USE_IPV4=
     USE_IPV6=
     set +e
-    IPV6_ADDRESS="$(fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar ipv6-address 2>&1 | grep -oE '([0-9a-fA-F]{0,4}:){1,7}[0-9a-fA-F]{0,4}|::([0-9a-fA-F]{0,4}:){0,6}[0-9a-fA-F]{0,4}|[0-9a-fA-F]{0,4}::([0-9a-fA-F]{0,4}:){0,5}[0-9a-fA-F]{0,4}|([0-9a-fA-F]{0,4}:){1,2}:([0-9a-fA-F]{0,4}:){0,4}[0-9a-fA-F]{0,4}')"
+    IPV6_ADDRESS="$(fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar ipv6-address 2>&1 | awk '/^ipv6-address:/ {print $2}')"
     (timeout_nonfatal fastboot -s tcp:"${IPV6_ADDRESS}" getvar version)
     USE_IPV6=$?
     IPV4_ADDRESS="$(fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar ipv4-address 2>&1 | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}')"
