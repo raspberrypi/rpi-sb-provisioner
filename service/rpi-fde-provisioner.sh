@@ -713,14 +713,14 @@ fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}"p1 
 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash mapper/cryptroot "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
 announce_stop "Writing OS images"
 
+metadata_gather
+
 # Run customisation script for post-flash stage
 run_customisation_script "fde-provisioner" "post-flash" "${FASTBOOT_DEVICE_SPECIFIER}" "${TARGET_DEVICE_SERIAL}" "${RPI_DEVICE_STORAGE_TYPE}"
 
 announce_start "Set LED status"
 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem led PWR 0
 announce_stop "Set LED status"
-
-metadata_gather
 
 record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_FINISHED}" "${TARGET_USB_PATH}"
 log "Provisioning completed. Remove the device from this machine."
