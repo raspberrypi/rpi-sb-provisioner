@@ -114,6 +114,442 @@ namespace provisioner {
         std::unordered_map<std::string, UsbNode> currentTopology;
         // App start time in milliseconds since epoch; used to ignore stale DB rows
         std::atomic<long long> appStartMs{0};
+        
+        // Test mode state for fake device injection
+        std::atomic<bool> testModeEnabled{false};
+        std::unordered_map<std::string, UsbNode> testTopology;
+        
+        // USB spec constants
+        constexpr int USB_MAX_DEVICES = 127;      // Maximum devices per host controller
+        constexpr int USB_MAX_HUB_DEPTH = 5;      // Maximum external hubs in chain (7 tiers total)
+        
+        // Generate a fake serial number
+        std::string generateFakeSerial(int index) {
+            char buf[32];
+            snprintf(buf, sizeof(buf), "TEST%08x", 0x10000000 + index);
+            return buf;
+        }
+        
+        // Generate a fake IP address
+        std::string generateFakeIP(int index) {
+            return "192.168.100." + std::to_string((index % 254) + 1);
+        }
+        
+        // Test scenario generators
+        std::unordered_map<std::string, UsbNode> generateDirectDevices(int count) {
+            // Devices connected directly to root ports (no hubs)
+            std::unordered_map<std::string, UsbNode> nodes;
+            
+            // Server root
+            UsbNode server;
+            server.id = "server";
+            server.parentId = "";
+            server.isHub = true;
+            server.vendor = "Provisioner";
+            server.product = "Server";
+            nodes["server"] = server;
+            
+            // Add root hub placeholder for USB 3 (bus 3)
+            UsbNode rootHub;
+            rootHub.id = "3-0";
+            rootHub.parentId = "server";
+            rootHub.isHub = true;
+            rootHub.portCount = std::min(count, 4);
+            nodes["3-0"] = rootHub;
+            
+            // Direct devices on different root ports
+            const char* states[] = {"bootstrap", "triage", "provisioning", "complete", "error"};
+            const char* models[] = {"CM5", "CM4", "Pi 5", "Pi 4B", "Zero 2 W"};
+            const int modelGens[] = {5, 4, 5, 4, 0};
+            
+            for (int i = 0; i < count && i < 4; ++i) {
+                UsbNode dev;
+                dev.id = "3-" + std::to_string(i + 1);
+                dev.parentId = "server";
+                dev.isHub = false;
+                dev.vendor = "2e8a";
+                dev.product = "000" + std::to_string(i);
+                dev.productName = "BCM2712 Boot";
+                dev.serial = generateFakeSerial(i);
+                dev.state = states[i % 5];
+                dev.ip = generateFakeIP(i);
+                dev.model = models[i % 5];
+                nodes[dev.id] = dev;
+            }
+            
+            return nodes;
+        }
+        
+        std::unordered_map<std::string, UsbNode> generateHubWithDevices(int hubPorts, int deviceCount) {
+            // Single hub with multiple devices
+            std::unordered_map<std::string, UsbNode> nodes;
+            
+            // Server root
+            UsbNode server;
+            server.id = "server";
+            server.parentId = "";
+            server.isHub = true;
+            server.vendor = "Provisioner";
+            server.product = "Server";
+            nodes["server"] = server;
+            
+            // Root hub
+            UsbNode rootHub;
+            rootHub.id = "3-0";
+            rootHub.parentId = "server";
+            rootHub.isHub = true;
+            rootHub.portCount = 2;
+            nodes["3-0"] = rootHub;
+            
+            // USB Hub on port 1
+            UsbNode hub;
+            hub.id = "3-1";
+            hub.parentId = "server";
+            hub.isHub = true;
+            hub.vendor = "0bda";
+            hub.product = "5411";
+            hub.productName = "USB3.0 Hub";
+            hub.portCount = hubPorts;
+            nodes["3-1"] = hub;
+            
+            // Devices under the hub
+            const char* states[] = {"bootstrap", "triage", "provisioning", "complete", "error"};
+            const char* models[] = {"CM5", "CM4", "Pi 5", "Pi 4B", "Zero 2 W"};
+            
+            for (int i = 0; i < deviceCount && i < hubPorts; ++i) {
+                UsbNode dev;
+                dev.id = "3-1." + std::to_string(i + 1);
+                dev.parentId = "3-1";
+                dev.isHub = false;
+                dev.vendor = "2e8a";
+                dev.product = "000" + std::to_string(i);
+                dev.productName = "BCM2712 Boot";
+                dev.serial = generateFakeSerial(100 + i);
+                dev.state = states[i % 5];
+                dev.ip = generateFakeIP(100 + i);
+                dev.model = models[i % 5];
+                nodes[dev.id] = dev;
+            }
+            
+            // Add placeholders for empty ports
+            for (int i = deviceCount; i < hubPorts; ++i) {
+                UsbNode ph;
+                ph.id = "3-1." + std::to_string(i + 1);
+                ph.parentId = "3-1";
+                ph.isHub = false;
+                ph.isPlaceholder = true;
+                nodes[ph.id] = ph;
+            }
+            
+            return nodes;
+        }
+        
+        std::unordered_map<std::string, UsbNode> generateNestedHubs(int depth, int devicesPerHub) {
+            // Nested hubs up to specified depth (max 5)
+            std::unordered_map<std::string, UsbNode> nodes;
+            depth = std::min(depth, USB_MAX_HUB_DEPTH);
+            
+            // Server root
+            UsbNode server;
+            server.id = "server";
+            server.parentId = "";
+            server.isHub = true;
+            server.vendor = "Provisioner";
+            server.product = "Server";
+            nodes["server"] = server;
+            
+            // Root hub
+            UsbNode rootHub;
+            rootHub.id = "3-0";
+            rootHub.parentId = "server";
+            rootHub.isHub = true;
+            rootHub.portCount = 2;
+            nodes["3-0"] = rootHub;
+            
+            // Build chain of hubs
+            std::string parentId = "server";
+            std::string currentId = "3-1";
+            const char* states[] = {"bootstrap", "triage", "provisioning", "complete"};
+            const char* models[] = {"CM5", "CM4", "Pi 5", "Pi 4B"};
+            int deviceIndex = 0;
+            
+            for (int d = 0; d < depth; ++d) {
+                // Add hub at this depth
+                UsbNode hub;
+                hub.id = currentId;
+                hub.parentId = parentId;
+                hub.isHub = true;
+                hub.vendor = "0bda";
+                hub.product = "5411";
+                hub.productName = "USB3.0 Hub (Tier " + std::to_string(d + 1) + ")";
+                hub.portCount = devicesPerHub + 1; // +1 for next hub
+                nodes[hub.id] = hub;
+                
+                // Add devices at this level
+                for (int i = 0; i < devicesPerHub; ++i) {
+                    UsbNode dev;
+                    dev.id = currentId + "." + std::to_string(i + 1);
+                    dev.parentId = currentId;
+                    dev.isHub = false;
+                    dev.vendor = "2e8a";
+                    dev.product = "0003";
+                    dev.productName = "BCM2712 Boot";
+                    dev.serial = generateFakeSerial(200 + deviceIndex);
+                    dev.state = states[deviceIndex % 4];
+                    dev.ip = generateFakeIP(200 + deviceIndex);
+                    dev.model = models[deviceIndex % 4];
+                    nodes[dev.id] = dev;
+                    deviceIndex++;
+                }
+                
+                // Prepare for next level
+                parentId = currentId;
+                currentId = currentId + "." + std::to_string(devicesPerHub + 1);
+            }
+            
+            return nodes;
+        }
+        
+        std::unordered_map<std::string, UsbNode> generateMaxTopology() {
+            // Maximum USB topology: 127 devices with hub hierarchy
+            std::unordered_map<std::string, UsbNode> nodes;
+            
+            // Server root
+            UsbNode server;
+            server.id = "server";
+            server.parentId = "";
+            server.isHub = true;
+            server.vendor = "Provisioner";
+            server.product = "Server";
+            nodes["server"] = server;
+            
+            // Root hubs for USB2 (bus 1) and USB3 (bus 3)
+            for (int bus : {1, 3}) {
+                UsbNode rootHub;
+                rootHub.id = std::to_string(bus) + "-0";
+                rootHub.parentId = "server";
+                rootHub.isHub = true;
+                rootHub.portCount = 4;
+                nodes[rootHub.id] = rootHub;
+            }
+            
+            const char* states[] = {"bootstrap", "triage", "provisioning", "complete", "error"};
+            const char* models[] = {"CM5", "CM4", "Pi 5", "Pi 4B", "Zero 2 W"};
+            int deviceIndex = 0;
+            int totalDevices = 0;
+            
+            // Create hierarchical structure to reach ~127 devices
+            // 4 root ports × 7-port hubs × 4 devices per hub = 112 devices + hubs
+            for (int bus : {1, 3}) {
+                for (int rootPort = 1; rootPort <= 2 && totalDevices < USB_MAX_DEVICES - 10; ++rootPort) {
+                    std::string hubId = std::to_string(bus) + "-" + std::to_string(rootPort);
+                    
+                    // Add 7-port hub
+                    UsbNode hub;
+                    hub.id = hubId;
+                    hub.parentId = "server";
+                    hub.isHub = true;
+                    hub.vendor = "0bda";
+                    hub.product = "5411";
+                    hub.productName = "USB3.0 Hub";
+                    hub.portCount = 7;
+                    nodes[hub.id] = hub;
+                    totalDevices++;
+                    
+                    // Add devices to hub
+                    for (int port = 1; port <= 7 && totalDevices < USB_MAX_DEVICES; ++port) {
+                        // Every 3rd port gets a sub-hub with more devices
+                        if (port % 3 == 0 && totalDevices < USB_MAX_DEVICES - 5) {
+                            std::string subHubId = hubId + "." + std::to_string(port);
+                            UsbNode subHub;
+                            subHub.id = subHubId;
+                            subHub.parentId = hubId;
+                            subHub.isHub = true;
+                            subHub.vendor = "0bda";
+                            subHub.product = "5411";
+                            subHub.productName = "USB3.0 Sub-Hub";
+                            subHub.portCount = 4;
+                            nodes[subHub.id] = subHub;
+                            totalDevices++;
+                            
+                            // Devices on sub-hub
+                            for (int subPort = 1; subPort <= 4 && totalDevices < USB_MAX_DEVICES; ++subPort) {
+                                UsbNode dev;
+                                dev.id = subHubId + "." + std::to_string(subPort);
+                                dev.parentId = subHubId;
+                                dev.isHub = false;
+                                dev.vendor = "2e8a";
+                                dev.product = "0003";
+                                dev.productName = "BCM2712 Boot";
+                                dev.serial = generateFakeSerial(deviceIndex);
+                                dev.state = states[deviceIndex % 5];
+                                dev.ip = generateFakeIP(deviceIndex);
+                                dev.model = models[deviceIndex % 5];
+                                nodes[dev.id] = dev;
+                                deviceIndex++;
+                                totalDevices++;
+                            }
+                        } else {
+                            // Regular device
+                            UsbNode dev;
+                            dev.id = hubId + "." + std::to_string(port);
+                            dev.parentId = hubId;
+                            dev.isHub = false;
+                            dev.vendor = "2e8a";
+                            dev.product = "0003";
+                            dev.productName = "BCM2712 Boot";
+                            dev.serial = generateFakeSerial(deviceIndex);
+                            dev.state = states[deviceIndex % 5];
+                            dev.ip = generateFakeIP(deviceIndex);
+                            dev.model = models[deviceIndex % 5];
+                            nodes[dev.id] = dev;
+                            deviceIndex++;
+                            totalDevices++;
+                        }
+                    }
+                }
+            }
+            
+            LOG_INFO << "Generated max topology with " << totalDevices << " devices";
+            return nodes;
+        }
+        
+        std::unordered_map<std::string, UsbNode> generateMixedTopology() {
+            // Mixed topology: direct devices, hubs, and nested hubs
+            std::unordered_map<std::string, UsbNode> nodes;
+            
+            // Server root
+            UsbNode server;
+            server.id = "server";
+            server.parentId = "";
+            server.isHub = true;
+            server.vendor = "Provisioner";
+            server.product = "Server";
+            nodes["server"] = server;
+            
+            // Root hubs
+            for (int bus : {1, 3}) {
+                UsbNode rootHub;
+                rootHub.id = std::to_string(bus) + "-0";
+                rootHub.parentId = "server";
+                rootHub.isHub = true;
+                rootHub.portCount = 4;
+                nodes[rootHub.id] = rootHub;
+            }
+            
+            const char* states[] = {"bootstrap", "triage", "provisioning", "complete", "error"};
+            const char* models[] = {"CM5", "CM4", "Pi 5", "Pi 4B", "Zero 2 W"};
+            int deviceIndex = 0;
+            
+            // USB3 bus: Direct device on port 1
+            {
+                UsbNode dev;
+                dev.id = "3-1";
+                dev.parentId = "server";
+                dev.isHub = false;
+                dev.vendor = "2e8a";
+                dev.product = "0003";
+                dev.productName = "BCM2712 Boot";
+                dev.serial = generateFakeSerial(deviceIndex++);
+                dev.state = "complete";
+                dev.ip = generateFakeIP(0);
+                dev.model = "CM5";
+                nodes[dev.id] = dev;
+            }
+            
+            // USB3 bus: Hub on port 2 with devices
+            {
+                UsbNode hub;
+                hub.id = "3-2";
+                hub.parentId = "server";
+                hub.isHub = true;
+                hub.vendor = "0bda";
+                hub.product = "5411";
+                hub.productName = "USB3.0 Hub";
+                hub.portCount = 4;
+                nodes[hub.id] = hub;
+                
+                for (int i = 1; i <= 3; ++i) {
+                    UsbNode dev;
+                    dev.id = "3-2." + std::to_string(i);
+                    dev.parentId = "3-2";
+                    dev.isHub = false;
+                    dev.vendor = "2e8a";
+                    dev.product = "0003";
+                    dev.productName = "BCM2712 Boot";
+                    dev.serial = generateFakeSerial(deviceIndex);
+                    dev.state = states[deviceIndex % 5];
+                    dev.ip = generateFakeIP(deviceIndex);
+                    dev.model = models[deviceIndex % 5];
+                    nodes[dev.id] = dev;
+                    deviceIndex++;
+                }
+                
+                // Placeholder for empty port
+                UsbNode ph;
+                ph.id = "3-2.4";
+                ph.parentId = "3-2";
+                ph.isPlaceholder = true;
+                nodes[ph.id] = ph;
+            }
+            
+            // USB2 bus: Nested hubs
+            {
+                UsbNode hub1;
+                hub1.id = "1-1";
+                hub1.parentId = "server";
+                hub1.isHub = true;
+                hub1.vendor = "0bda";
+                hub1.product = "5411";
+                hub1.productName = "USB2.0 Hub";
+                hub1.portCount = 4;
+                nodes[hub1.id] = hub1;
+                
+                // Device on hub1 port 1
+                UsbNode dev1;
+                dev1.id = "1-1.1";
+                dev1.parentId = "1-1";
+                dev1.isHub = false;
+                dev1.vendor = "2e8a";
+                dev1.product = "0003";
+                dev1.productName = "BCM2711 Boot";
+                dev1.serial = generateFakeSerial(deviceIndex++);
+                dev1.state = "provisioning";
+                dev1.ip = generateFakeIP(50);
+                dev1.model = "CM4";
+                nodes[dev1.id] = dev1;
+                
+                // Nested hub on hub1 port 2
+                UsbNode hub2;
+                hub2.id = "1-1.2";
+                hub2.parentId = "1-1";
+                hub2.isHub = true;
+                hub2.vendor = "0bda";
+                hub2.product = "5411";
+                hub2.productName = "USB2.0 Sub-Hub";
+                hub2.portCount = 4;
+                nodes[hub2.id] = hub2;
+                
+                // Devices on nested hub
+                for (int i = 1; i <= 2; ++i) {
+                    UsbNode dev;
+                    dev.id = "1-1.2." + std::to_string(i);
+                    dev.parentId = "1-1.2";
+                    dev.isHub = false;
+                    dev.vendor = "2e8a";
+                    dev.product = "0003";
+                    dev.productName = "BCM2711 Boot";
+                    dev.serial = generateFakeSerial(deviceIndex);
+                    dev.state = states[deviceIndex % 5];
+                    dev.ip = generateFakeIP(60 + i);
+                    dev.model = "Pi 4B";
+                    nodes[dev.id] = dev;
+                    deviceIndex++;
+                }
+            }
+            
+            return nodes;
+        }
 
         std::string readFileTrimmed(const std::filesystem::path &p) {
             try {
@@ -490,6 +926,44 @@ namespace provisioner {
                 std::chrono::system_clock::now().time_since_epoch()).count());
             return root;
         }
+        
+        void injectTestTopology(const std::string& scenario) {
+            std::unordered_map<std::string, UsbNode> newTopology;
+            
+            if (scenario == "direct") {
+                newTopology = generateDirectDevices(4);
+            } else if (scenario == "hub") {
+                newTopology = generateHubWithDevices(7, 5);
+            } else if (scenario == "nested") {
+                newTopology = generateNestedHubs(3, 2);
+            } else if (scenario == "deep") {
+                newTopology = generateNestedHubs(USB_MAX_HUB_DEPTH, 1);
+            } else if (scenario == "max") {
+                newTopology = generateMaxTopology();
+            } else if (scenario == "mixed") {
+                newTopology = generateMixedTopology();
+            } else if (scenario == "clear" || scenario == "off") {
+                testModeEnabled = false;
+                LOG_INFO << "Test mode disabled";
+                return;
+            } else {
+                LOG_WARN << "Unknown test scenario: " << scenario;
+                return;
+            }
+            
+            {
+                std::lock_guard<std::mutex> lock(topologyMutex);
+                testTopology = newTopology;
+                testModeEnabled = true;
+            }
+            
+            // Broadcast the test topology
+            Json::FastWriter w;
+            std::string msg = w.write(topologyToJson(newTopology));
+            DevicesWebSocketController::broadcast(msg);
+            
+            LOG_INFO << "Test mode enabled with scenario: " << scenario << " (" << newTopology.size() << " nodes)";
+        }
 
         std::string topologySnapshotString() {
             std::lock_guard<std::mutex> lock(topologyMutex);
@@ -501,6 +975,14 @@ namespace provisioner {
             LOG_INFO << "Topology worker started";
             Json::Value lastJson;
             while (topologyRunning) {
+                // Skip real USB scanning when test mode is enabled
+                if (testModeEnabled) {
+                    for (int i=0; i<10 && topologyRunning; ++i) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+                    }
+                    continue;
+                }
+                
                 auto newMap = scanUsbSysfs();
                 enrichWithProvisioningState(newMap);
 
@@ -1139,6 +1621,93 @@ namespace provisioner {
             resp->setBody(buffer.str());
             callback(resp);
         }); // devices/{serialno}/key/private handler
+
+        // Secret test mode endpoint - only accessible with special header or localhost
+        app.registerHandler("/devices/_test/{scenario}", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback, const std::string &scenario) {
+            auto resp = HttpResponse::newHttpResponse();
+            
+            // Security: Only allow from localhost or with secret header
+            std::string clientIP = AuditLog::getClientIP(req);
+            std::string secretHeader = req->getHeader("X-Test-Secret");
+            bool isLocalhost = (clientIP == "127.0.0.1" || clientIP == "::1" || clientIP.find("localhost") != std::string::npos);
+            bool hasSecret = (secretHeader == "rpi-provisioner-test-2024");
+            
+            if (!isLocalhost && !hasSecret) {
+                resp->setStatusCode(k404NotFound);
+                resp->setBody("Not Found");
+                callback(resp);
+                return;
+            }
+            
+            LOG_INFO << "Test mode request: scenario=" << scenario << " from " << clientIP;
+            
+            // Inject the test topology
+            injectTestTopology(scenario);
+            
+            Json::Value result;
+            result["status"] = "ok";
+            result["scenario"] = scenario;
+            result["testMode"] = testModeEnabled.load();
+            result["availableScenarios"] = Json::arrayValue;
+            result["availableScenarios"].append("direct");   // 4 devices directly on root ports
+            result["availableScenarios"].append("hub");      // 7-port hub with 5 devices
+            result["availableScenarios"].append("nested");   // 3-level nested hubs
+            result["availableScenarios"].append("deep");     // Max depth (5 hubs) chain
+            result["availableScenarios"].append("max");      // Near 127 device limit
+            result["availableScenarios"].append("mixed");    // Mixed topology
+            result["availableScenarios"].append("clear");    // Disable test mode
+            result["availableScenarios"].append("off");      // Alias for clear
+            
+            Json::FastWriter writer;
+            resp->setStatusCode(k200OK);
+            resp->setContentTypeCode(CT_APPLICATION_JSON);
+            resp->setBody(writer.write(result));
+            callback(resp);
+        }); // devices/_test/{scenario} handler
+
+        // Test mode status endpoint
+        app.registerHandler("/devices/_test", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
+            auto resp = HttpResponse::newHttpResponse();
+            
+            // Security: Only allow from localhost or with secret header
+            std::string clientIP = AuditLog::getClientIP(req);
+            std::string secretHeader = req->getHeader("X-Test-Secret");
+            bool isLocalhost = (clientIP == "127.0.0.1" || clientIP == "::1" || clientIP.find("localhost") != std::string::npos);
+            bool hasSecret = (secretHeader == "rpi-provisioner-test-2024");
+            
+            if (!isLocalhost && !hasSecret) {
+                resp->setStatusCode(k404NotFound);
+                resp->setBody("Not Found");
+                callback(resp);
+                return;
+            }
+            
+            Json::Value result;
+            result["testMode"] = testModeEnabled.load();
+            result["availableScenarios"] = Json::arrayValue;
+            result["availableScenarios"].append("direct");
+            result["availableScenarios"].append("hub");
+            result["availableScenarios"].append("nested");
+            result["availableScenarios"].append("deep");
+            result["availableScenarios"].append("max");
+            result["availableScenarios"].append("mixed");
+            result["availableScenarios"].append("clear");
+            result["availableScenarios"].append("off");
+            result["description"] = Json::objectValue;
+            result["description"]["direct"] = "4 devices connected directly to root ports";
+            result["description"]["hub"] = "Single 7-port hub with 5 devices";
+            result["description"]["nested"] = "3-level nested hub hierarchy";
+            result["description"]["deep"] = "Maximum depth (5 external hubs) chain";
+            result["description"]["max"] = "Near USB maximum (127 devices)";
+            result["description"]["mixed"] = "Mixed topology with direct, hub, and nested devices";
+            result["description"]["clear"] = "Disable test mode, return to real USB scanning";
+            
+            Json::FastWriter writer;
+            resp->setStatusCode(k200OK);
+            resp->setContentTypeCode(CT_APPLICATION_JSON);
+            resp->setBody(writer.write(result));
+            callback(resp);
+        }); // devices/_test handler
     }
 
     
