@@ -456,8 +456,8 @@ int main(int argc, char* argv[])
     // Create directory if it doesn't exist
     std::filesystem::create_directories(uploadPath);
 
-    // Configure static files path
-    constexpr const char *staticPath = "/usr/share/rpi-sb-provisioner/static";
+    // Configure static files path (document root, static files served from /static/ subfolder)
+    constexpr const char *staticPath = "/usr/share/rpi-sb-provisioner";
     
     // Configure Drogon app framework
     app
