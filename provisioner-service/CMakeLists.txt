@@ -10,6 +10,36 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include(FetchContent)
 
+# Add jsoncpp FIRST (before Drogon) so Drogon finds and uses this vendored version
+# instead of finding system libjsoncpp-dev
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libraries" FORCE)
+set(BUILD_STATIC_LIBS ON CACHE BOOL "Build static libraries" FORCE)
+set(JSONCPP_WITH_TESTS OFF CACHE BOOL "Compile and run JsonCpp test executables" FORCE)
+set(JSONCPP_WITH_POST_BUILD_UNITTEST OFF CACHE BOOL "Automatically run unit-tests as a post build step" FORCE)
+set(JSONCPP_WITH_PKGCONFIG_SUPPORT OFF CACHE BOOL "Generate and install .pc files" FORCE)
+set(JSONCPP_WITH_CMAKE_PACKAGE OFF CACHE BOOL "Generate and install cmake package files" FORCE)
+
+FetchContent_Declare(jsoncpp
+ GIT_REPOSITORY https://github.com/open-source-parsers/jsoncpp.git
+ GIT_TAG        1.9.6
+ EXCLUDE_FROM_ALL  # Prevents installation in packages
+)
+
+FetchContent_GetProperties(jsoncpp)
+string(TOLOWER "jsoncpp" jsoncppName)
+if(NOT ${jsoncppName}_POPULATED)
+  FetchContent_Populate(jsoncpp)
+  add_subdirectory(${${jsoncppName}_SOURCE_DIR} ${${jsoncppName}_BINARY_DIR} EXCLUDE_FROM_ALL)
+endif()
+
+# Unset jsoncpp configuration flags
+unset(BUILD_SHARED_LIBS)
+unset(BUILD_STATIC_LIBS)
+unset(JSONCPP_WITH_TESTS)
+unset(JSONCPP_WITH_POST_BUILD_UNITTEST)
+unset(JSONCPP_WITH_PKGCONFIG_SUPPORT)
+unset(JSONCPP_WITH_CMAKE_PACKAGE)
+
 # Prevent installation of Drogon dependencies by setting BUILD_* options before declaring the dependency
 set(BUILD_EXAMPLES OFF CACHE BOOL "Build Drogon examples" FORCE)
 set(BUILD_CTL ON CACHE BOOL "Build drogon_ctl utility" FORCE)  # Needed for compiling CSP templates
@@ -107,35 +137,6 @@ if(NOT ${curlName}_POPULATED)
   FetchContent_Populate(curl)
   add_subdirectory(${${curlName}_SOURCE_DIR} ${${curlName}_BINARY_DIR} EXCLUDE_FROM_ALL)
 endif()
-
-# Add jsoncpp with static linking
-set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libraries" FORCE)
-set(BUILD_STATIC_LIBS ON CACHE BOOL "Build static libraries" FORCE)
-set(JSONCPP_WITH_TESTS OFF CACHE BOOL "Compile and run JsonCpp test executables" FORCE)
-set(JSONCPP_WITH_POST_BUILD_UNITTEST OFF CACHE BOOL "Automatically run unit-tests as a post build step" FORCE)
-set(JSONCPP_WITH_PKGCONFIG_SUPPORT OFF CACHE BOOL "Generate and install .pc files" FORCE)
-set(JSONCPP_WITH_CMAKE_PACKAGE OFF CACHE BOOL "Generate and install cmake package files" FORCE)
-
-FetchContent_Declare(jsoncpp
- GIT_REPOSITORY https://github.com/open-source-parsers/jsoncpp.git
- GIT_TAG        1.9.6
- EXCLUDE_FROM_ALL  # Prevents installation in packages
-)
-
-FetchContent_GetProperties(jsoncpp)
-string(TOLOWER "jsoncpp" jsoncppName)
-if(NOT ${jsoncppName}_POPULATED)
-  FetchContent_Populate(jsoncpp)
-  add_subdirectory(${${jsoncppName}_SOURCE_DIR} ${${jsoncppName}_BINARY_DIR} EXCLUDE_FROM_ALL)
-endif()
-
-# Unset jsoncpp configuration flags
-unset(BUILD_SHARED_LIBS)
-unset(BUILD_STATIC_LIBS)
-unset(JSONCPP_WITH_TESTS)
-unset(JSONCPP_WITH_POST_BUILD_UNITTEST)
-unset(JSONCPP_WITH_PKGCONFIG_SUPPORT)
-unset(JSONCPP_WITH_CMAKE_PACKAGE)
 
 # Unset curl configuration flags
 unset(BUILD_CURL_EXE)
