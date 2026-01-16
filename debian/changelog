@@ -1,3 +1,37 @@
+rpi-sb-provisioner (2.1.3) unstable; urgency=medium
+
+  * Features:
+    - Add test mode for USB device topology simulation
+    - Add timestamp handling and formatting for service logs
+    - Integrate D3.js for enhanced graph visualization in device topology UI
+    - Enhance collision resolution for device layout in UI
+    - Add configuration field validation endpoint with real-time UI feedback
+    - Add Nginx reverse proxy example configuration with PAM authentication
+
+  * Bootstrap Improvements:
+    - Run metadata_gather before post-flash for better data collection
+    - Simplify IPv6 address extraction with awk
+
+  * WebUI:
+    - Allow boot package generation for both secure-boot and fde-only
+      provisioning styles
+    - Display last updated timestamps for services in user-friendly format
+    - Improve device visualization with D3.js graph rendering and tooltips
+
+  * Manufacturing Data:
+    - Add support for capturing Zero W and unknown device values
+
+  * Packaging:
+    - Update to debhelper-compat version 13
+    - Use jsoncpp as a vendored dependency in CMake configuration
+    - Update static files path configuration for improved clarity
+    - Update lintian overrides for embedded libjsoncpp
+
+  * Dependencies:
+    - Update rpiboot and rpi-eeprom to catch November 2025 firmware
+
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Thu, 16 Jan 2026 12:00:00 +0000
+
 rpi-sb-provisioner (2.1.2) unstable; urgency=medium
 
   * Bootstrap: Fix USB path extraction for hub-connected devices
