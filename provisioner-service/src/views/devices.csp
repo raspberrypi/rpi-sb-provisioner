@@ -35,6 +35,9 @@
         .d3-node-circle.hub { fill: #eef6ff; stroke: #9ec9ff; }
         .d3-node-circle.device { fill: #f7fff0; stroke: #bde6a1; }
         .d3-node-circle.server { fill: #fff; stroke: #666; stroke-width: 3; }
+        .d3-node-circle.tier { fill: #f5f0ff; stroke: #b39ddb; stroke-width: 3; }  /* USB 2/3 Root - purple */
+        .d3-node-circle.rootport-ss { fill: #e3f2fd; stroke: #2196f3; stroke-width: 2; }  /* USB 3 Root Port - blue (SuperSpeed) */
+        .d3-node-circle.rootport-hs { fill: #fff8e1; stroke: #ff9800; stroke-width: 2; }  /* USB 2 Root Port - orange (HighSpeed) */
         .d3-node-circle:hover { stroke-width: 4; filter: brightness(1.1); }
         .d3-node-circle.clicked { stroke: #0b69ff; stroke-width: 4; filter: drop-shadow(0 0 8px rgba(11, 105, 255, 0.5)); }
         
@@ -56,6 +59,36 @@
                     transition: all 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
         .zoom-btn:hover { background: #eef6ff; transform: scale(1.1); }
         .zoom-btn:active { transform: scale(0.95); }
+        
+        /* Color legend */
+        .d3-legend { position: absolute; bottom: 10px; left: 10px; background: rgba(255,255,255,0.95); border: 1px solid #ddd; 
+                     border-radius: 6px; padding: 8px 12px; font-size: 11px; z-index: 100; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .d3-legend-title { font-weight: 600; margin-bottom: 6px; color: #333; }
+        .d3-legend-item { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
+        .d3-legend-color { width: 14px; height: 14px; border-radius: 50%; border: 2px solid; flex-shrink: 0; }
+        .d3-legend-label { color: #555; }
+        
+        /* Secret test panel styles */
+        .test-panel { display: none; position: fixed; top: 60px; right: 20px; background: rgba(40, 40, 40, 0.95); 
+                      border: 2px solid #ff6b35; border-radius: 8px; padding: 12px 16px; z-index: 9999; 
+                      font-family: monospace; font-size: 12px; color: #fff; min-width: 220px; box-shadow: 0 4px 12px rgba(0,0,0,0.4); }
+        .test-panel.visible { display: block; animation: slideIn 0.2s ease-out; }
+        @keyframes slideIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+        .test-panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; 
+                             border-bottom: 1px solid #ff6b35; padding-bottom: 6px; }
+        .test-panel-title { font-weight: bold; color: #ff6b35; font-size: 13px; }
+        .test-panel-close { background: none; border: none; color: #888; cursor: pointer; font-size: 16px; padding: 0 4px; }
+        .test-panel-close:hover { color: #fff; }
+        .test-panel-status { font-size: 10px; color: #888; margin-bottom: 8px; }
+        .test-panel-status.active { color: #4caf50; }
+        .test-btn { display: block; width: 100%; padding: 6px 10px; margin: 4px 0; background: #333; border: 1px solid #555; 
+                    border-radius: 4px; color: #fff; cursor: pointer; text-align: left; font-family: monospace; font-size: 11px; 
+                    transition: all 0.15s; }
+        .test-btn:hover { background: #444; border-color: #ff6b35; }
+        .test-btn:active { transform: scale(0.98); }
+        .test-btn.danger { border-color: #f44336; }
+        .test-btn.danger:hover { background: #5a2020; border-color: #f44336; }
+        .test-btn-desc { font-size: 9px; color: #888; margin-left: 8px; }
     </style>
     <script>
         let ws = null;
@@ -293,6 +326,7 @@
             let svg, g, zoom, simulation, tooltip;
             let nodesData = [], linksData = [];
             let nodeElements, linkElements, labelElements;
+            let graphWidth = 800, graphHeight = 500;  // Store dimensions for layout
             
             function generationText(n) {
                 if (!n) return '';
@@ -304,6 +338,8 @@
             function labelForNode(n) {
                 if (!n) return '';
                 if (n.id === 'server') return 'Server';
+                // Handle placeholder nodes with explicit labels (tiers, root ports)
+                if (n.label) return n.label;
                 if (n.isHub) {
                     if (n.serial) return n.serial;
                     return 'Hub';
@@ -324,12 +360,16 @@
             
             function getNodeRadius(n) {
                 if (n.id === 'server') return 40;
+                if (n.isTier) return 35;  // USB 2/3 Root nodes
+                if (n.isRootPort) return 25;  // Root Port nodes (smaller)
                 if (n.isHub) return 30;
                 return 28;
             }
             
             function getNodeClass(n) {
                 if (n.id === 'server') return 'server';
+                if (n.isTier) return 'tier';  // USB 2/3 Root
+                if (n.isRootPort) return n.speed === 'ss' ? 'rootport-ss' : 'rootport-hs';  // Root Port by speed
                 if (n.isHub) return 'hub';
                 return 'device';
             }
@@ -346,24 +386,134 @@
             }
 
             
-            function processNodes(rawNodes) {
+            function processNodes(rawNodes, width, height) {
                 // Build canonical map and deduplicate nodes
                 const canonicalByPort = buildCanonicalRootHubMap(rawNodes);
                 const nodeMap = new Map();
                 const links = [];
                 
+                // Center point for layout
+                const cx = (width || 800) / 2;
+                const cy = (height || 500) / 2;
+                
+                // First, identify which tiers and root ports we need
+                // For USB 3 (SS), use port number; for USB 2 (HS), use bus number
+                const portsUsed = { hs: new Set(), ss: new Set() };
+                const hsBusSet = new Set();
+                rawNodes.forEach(n => {
+                    const id = String(n.id);
+                    const parentId = n.parentId ? String(n.parentId) : 'server';
+                    const rootPort = parseRootPort(id);
+                    if (parentId === 'server' && rootPort) {
+                        const tier = busTierForId(id);
+                        if (tier === 'ss') {
+                            portsUsed.ss.add(rootPort);
+                        } else if (tier === 'hs') {
+                            const busNum = parseBus(id);
+                            if (!isNaN(busNum)) hsBusSet.add(busNum);
+                        }
+                    }
+                });
+                // Map HS buses to ordinal root port numbers (bus 1 → port 1, bus 2 → port 2, etc.)
+                const hsBusOrder = Array.from(hsBusSet).sort((a, b) => a - b);
+                const hsBusToPort = new Map();
+                hsBusOrder.forEach((bus, idx) => {
+                    hsBusToPort.set(bus, idx + 1);
+                    portsUsed.hs.add(String(idx + 1));
+                });
+                
+                // Create tier placeholder nodes (USB 2 Root, USB 3 Root)
+                // Position them on opposite sides of the server
+                const hasSS = portsUsed.ss.size > 0;
+                const hasHS = portsUsed.hs.size > 0;
+                const tierRadius = 130;  // Distance from server to tier nodes
+                
+                if (hasSS) {
+                    // USB 3 on the right
+                    nodeMap.set('usb3-root', { 
+                        id: 'usb3-root', isHub: true, isTier: true, label: 'USB 3 Root', parentId: 'server',
+                        x: cx + tierRadius, y: cy
+                    });
+                }
+                if (hasHS) {
+                    // USB 2 on the left
+                    nodeMap.set('usb2-root', { 
+                        id: 'usb2-root', isHub: true, isTier: true, label: 'USB 2 Root', parentId: 'server',
+                        x: cx - tierRadius, y: cy
+                    });
+                }
+                
+                // Create root port placeholder nodes under each tier
+                // Spread them in an arc around their parent tier
+                const rootPortRadius = 100;  // Distance from tier to root ports
+                const ssPorts = Array.from(portsUsed.ss).sort();
+                const hsPorts = Array.from(portsUsed.hs).sort();
+                
+                ssPorts.forEach((port, idx) => {
+                    const id = `rootport-ss-${port}`;
+                    // Spread USB 3 root ports in right arc
+                    const angleStart = -Math.PI / 2.5;  // wider spread
+                    const angleEnd = Math.PI / 2.5;
+                    const angle = ssPorts.length === 1 ? 0 : angleStart + (angleEnd - angleStart) * idx / (ssPorts.length - 1);
+                    nodeMap.set(id, { 
+                        id, isHub: true, isRootPort: true, speed: 'ss', label: `Root Port ${port}`, parentId: 'usb3-root',
+                        x: cx + tierRadius + rootPortRadius * Math.cos(angle),
+                        y: cy + rootPortRadius * Math.sin(angle)
+                    });
+                });
+                hsPorts.forEach((port, idx) => {
+                    const id = `rootport-hs-${port}`;
+                    // Spread USB 2 root ports in left arc
+                    const angleStart = Math.PI - Math.PI / 2.5;  // wider spread
+                    const angleEnd = Math.PI + Math.PI / 2.5;
+                    const angle = hsPorts.length === 1 ? Math.PI : angleStart + (angleEnd - angleStart) * idx / (hsPorts.length - 1);
+                    nodeMap.set(id, { 
+                        id, isHub: true, isRootPort: true, speed: 'hs', label: `Root Port ${port}`, parentId: 'usb2-root',
+                        x: cx - tierRadius - rootPortRadius * Math.cos(angle - Math.PI),
+                        y: cy + rootPortRadius * Math.sin(angle)
+                    });
+                });
+                
+                // Add actual device nodes
                 rawNodes.forEach(n => {
                     const canonicalId = canonicalizeIdByRoot(String(n.id), canonicalByPort);
                     if (!nodeMap.has(canonicalId)) {
-                        nodeMap.set(canonicalId, { ...n, id: canonicalId });
+                        const node = { ...n, id: canonicalId };
+                        // Set server at center
+                        if (canonicalId === 'server') {
+                            node.x = cx;
+                            node.y = cy;
+                        } else {
+                            // Tag devices with their USB side for x-force
+                            const tier = busTierForId(canonicalId);
+                            if (tier) node.side = tier;  // 'ss' or 'hs'
+                        }
+                        nodeMap.set(canonicalId, node);
                     }
                 });
                 
                 // Build links from parent relationships
                 nodeMap.forEach(n => {
                     if (n.parentId) {
-                        const canonicalParentId = canonicalizeIdByRoot(String(n.parentId), canonicalByPort);
-                        const parent = nodeMap.get(canonicalParentId) || nodeMap.get('server');
+                        let parentId = String(n.parentId);
+                        
+                        // For direct children of server, reroute to root port placeholders
+                        if (parentId === 'server' && !n.isTier) {
+                            const tier = busTierForId(String(n.id));
+                            if (tier === 'ss') {
+                                // USB 3: use port number from ID
+                                const rootPort = parseRootPort(String(n.id));
+                                if (rootPort) parentId = `rootport-ss-${rootPort}`;
+                            } else if (tier === 'hs') {
+                                // USB 2: use bus number to determine root port
+                                const busNum = parseBus(String(n.id));
+                                const portNum = hsBusToPort.get(busNum) || 1;
+                                parentId = `rootport-hs-${portNum}`;
+                            }
+                        }
+                        
+                        const canonicalParentId = canonicalizeIdByRoot(parentId, canonicalByPort);
+                        const parent = nodeMap.get(canonicalParentId) || nodeMap.get(parentId) || nodeMap.get('server');
                         if (parent) {
                             links.push({ source: parent.id, target: n.id });
                         }
@@ -376,10 +526,10 @@
             function init() {
                 const container = document.querySelector('.mindmap-container');
                 svg = d3.select('#d3-graph-svg');
-                const width = container.clientWidth;
-                const height = Math.max(container.clientHeight, 500);
+                graphWidth = container.clientWidth || 800;
+                graphHeight = Math.max(container.clientHeight, 500);
                 
-                svg.attr('width', width).attr('height', height);
+                svg.attr('width', graphWidth).attr('height', graphHeight);
                 
                 // Create tooltip
                 tooltip = d3.select(container)
@@ -406,6 +556,35 @@
                     .html('⊙')
                     .on('click', () => svg.transition().call(zoom.transform, d3.zoomIdentity));
                 
+                // Add color legend
+                const legend = d3.select(container)
+                    .append('div')
+                    .attr('class', 'd3-legend');
+                
+                legend.append('div')
+                    .attr('class', 'd3-legend-title')
+                    .text('Legend');
+                
+                const legendItems = [
+                    { color: '#fff', stroke: '#666', label: 'Server' },
+                    { color: '#f5f0ff', stroke: '#b39ddb', label: 'USB Tier' },
+                    { color: '#e3f2fd', stroke: '#2196f3', label: 'USB 3 Port' },
+                    { color: '#fff8e1', stroke: '#ff9800', label: 'USB 2 Port' },
+                    { color: '#eef6ff', stroke: '#9ec9ff', label: 'Hub' },
+                    { color: '#f7fff0', stroke: '#bde6a1', label: 'Device' }
+                ];
+                
+                legendItems.forEach(item => {
+                    const row = legend.append('div').attr('class', 'd3-legend-item');
+                    row.append('div')
+                        .attr('class', 'd3-legend-color')
+                        .style('background', item.color)
+                        .style('border-color', item.stroke);
+                    row.append('span')
+                        .attr('class', 'd3-legend-label')
+                        .text(item.label);
+                });
+                
                 // Setup zoom behavior
                 zoom = d3.zoom()
                     .scaleExtent([0.3, 3])
@@ -420,23 +599,122 @@
                 
                 // Setup force simulation
                 simulation = d3.forceSimulation()
-                    .force('link', d3.forceLink().id(d => d.id).distance(d => {
-                        // Server to hubs: longer distance
-                        if (d.source.id === 'server') return 180;
-                        // Hub to devices: medium distance
-                        if (d.source.isHub) return 120;
-                        return 80;
+                    .force('link', d3.forceLink().id(d => d.id)
+                        .distance(d => {
+                            // Server to tier nodes (USB 2/3 Root): more space
+                            if (d.source.id === 'server') return 120;
+                            // Tier to root port: spread out
+                            if (d.source.isTier) return 100;
+                            // Root port to devices/hubs: good spacing
+                            if (d.source.isRootPort) return 90;
+                            // Hub to devices: generous distance
+                            if (d.source.isHub) return 100;
+                            return 90;
+                        })
+                        .strength(d => {
+                            // Root ports pull devices moderately
+                            if (d.source.isRootPort) return 1.5;
+                            // Other structural links
+                            if (d.source.isTier || d.source.id === 'server') return 1.2;
+                            // Hub to device links
+                            if (d.source.isHub) return 1.0;
+                            return 1.0;
+                        }))
+                    .force('charge', d3.forceManyBody().strength(d => {
+                        // Root ports repel more strongly to spread out
+                        if (d.isRootPort) return -800;
+                        // Tier nodes also repel strongly
+                        if (d.isTier) return -600;
+                        // Hubs need space
+                        if (d.isHub) return -500;
+                        // Regular devices repel moderately
+                        return -400;
                     }))
-                    .force('charge', d3.forceManyBody().strength(-800))
-                    .force('center', d3.forceCenter(width / 2, height / 2))
-                    .force('collision', d3.forceCollide().radius(d => getNodeRadius(d) + 15))
-                    .alphaDecay(0.02);
+                    .force('collision', d3.forceCollide().radius(d => getNodeRadius(d) + 30).strength(1))
+                    // NO center forces - let nodes spread naturally
+                    // Custom radial force to push nodes outward from server
+                    .force('radial', function() {
+                        let nodes;
+                        function force(alpha) {
+                            const cx = graphWidth / 2;
+                            const cy = graphHeight / 2;
+                            nodes.forEach(n => {
+                                if (n.id === 'server') return; // Server stays put
+                                const dx = n.x - cx;
+                                const dy = n.y - cy;
+                                const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+                                // Push outward based on hierarchy depth
+                                let minDist = 100;
+                                if (n.isTier) minDist = 120;
+                                else if (n.isRootPort) minDist = 200;
+                                else if (n.isHub) minDist = 280;
+                                else minDist = 350; // devices pushed furthest
+                                
+                                if (dist < minDist) {
+                                    const push = (minDist - dist) * 0.1 * alpha;
+                                    n.vx += (dx / dist) * push;
+                                    n.vy += (dy / dist) * push;
+                                }
+                            });
+                        }
+                        force.initialize = function(_) { nodes = _; };
+                        return force;
+                    }())
+                    // Custom force to repel USB2 and USB3 hierarchies from each other
+                    .force('crossRepel', function() {
+                        let nodes;
+                        function force(alpha) {
+                            // Find all nodes in each hierarchy
+                            const ssNodes = nodes.filter(n => n.speed === 'ss' || n.side === 'ss' || n.id === 'usb3-root');
+                            const hsNodes = nodes.filter(n => n.speed === 'hs' || n.side === 'hs' || n.id === 'usb2-root');
+                            // Repel SS nodes from HS nodes
+                            ssNodes.forEach(ss => {
+                                hsNodes.forEach(hs => {
+                                    const dx = ss.x - hs.x;
+                                    const dy = ss.y - hs.y;
+                                    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+                                    // Stronger repulsion for structural nodes, lighter for devices
+                                    const baseStrength = (ss.isRootPort || ss.isTier ? 800 : 400) * alpha;
+                                    const repulse = baseStrength / (dist * dist);
+                                    // Push apart along the vector between them
+                                    ss.vx += (dx / dist) * repulse;
+                                    ss.vy += (dy / dist) * repulse;
+                                    hs.vx -= (dx / dist) * repulse;
+                                    hs.vy -= (dy / dist) * repulse;
+                                });
+                            });
+                        }
+                        force.initialize = function(_) { nodes = _; };
+                        return force;
+                    }())
+                    // Custom force to keep USB3 on right, USB2 on left
+                    .force('xSeparation', d3.forceX().x(d => {
+                        const cx = graphWidth / 2;
+                        // USB 3 tier and root ports stay on right
+                        if (d.id === 'usb3-root' || d.speed === 'ss') return cx + 200;
+                        // USB 2 tier and root ports stay on left
+                        if (d.id === 'usb2-root' || d.speed === 'hs') return cx - 200;
+                        // Server stays centered
+                        if (d.id === 'server') return cx;
+                        // Devices: pull toward their USB side with more spread
+                        if (d.side === 'ss') return cx + 350;  // USB 3 devices further right
+                        if (d.side === 'hs') return cx - 350;  // USB 2 devices further left
+                        return d.x || cx;
+                    }).strength(d => {
+                        // Strong force on structural nodes
+                        if (d.isTier || d.isRootPort || d.id === 'server') return 0.3;
+                        // Moderate force on devices to keep them on their side
+                        if (d.side) return 0.2;
+                        return 0;
+                    }))
+                    .velocityDecay(0.4)  // Lower friction for more movement
+                    .alphaDecay(0.02);   // Slower decay to allow better spreading
                 
                 return update;
             }
             
             function update(rawNodes) {
-                const { nodes, links } = processNodes(rawNodes);
+                const { nodes, links } = processNodes(rawNodes, graphWidth, graphHeight);
                 
                 nodesData = nodes;
                 linksData = links;
@@ -472,8 +750,8 @@
                     .attr('class', d => `d3-node-circle ${getNodeClass(d)}`)
                     .attr('r', d => getNodeRadius(d))
                     .on('click', (event, d) => {
-                        // Navigate to device detail page (if not server)
-                        if (d.id !== 'server' && !d.isHub && d.serial) {
+                        // Navigate to device detail page (only for actual devices with serial)
+                        if (d.id !== 'server' && !d.isHub && !d.isTier && !d.isRootPort && d.serial) {
                             window.location.href = `/device/${d.serial}`;
                         }
                         // Visual feedback
@@ -481,10 +759,13 @@
                         d3.select(event.target).classed('clicked', true);
                     })
                     .on('mouseover', (event, d) => {
+                        // Get container position to calculate relative coordinates
+                        const container = document.querySelector('.mindmap-container');
+                        const containerRect = container.getBoundingClientRect();
                         tooltip.html(tooltipText(d))
                             .classed('visible', true)
-                            .style('left', (event.pageX + 10) + 'px')
-                            .style('top', (event.pageY - 10) + 'px');
+                            .style('left', (event.clientX - containerRect.left + 10) + 'px')
+                            .style('top', (event.clientY - containerRect.top - 10) + 'px');
                         // Highlight connected links
                         linkElements.classed('highlighted', l => l.source.id === d.id || l.target.id === d.id);
                     })
@@ -762,6 +1043,36 @@
 <body>
     <%view navbar %>
     
+    <!-- Secret Test Panel (Ctrl+Shift+T to toggle) -->
+    <div id="test-panel" class="test-panel">
+        <div class="test-panel-header">
+            <span class="test-panel-title">🧪 USB Test Mode</span>
+            <button class="test-panel-close" onclick="toggleTestPanel()">&times;</button>
+        </div>
+        <div id="test-status" class="test-panel-status">Status: Checking...</div>
+        <button class="test-btn" onclick="injectTestScenario('direct')">
+            Direct <span class="test-btn-desc">4 devices on root ports</span>
+        </button>
+        <button class="test-btn" onclick="injectTestScenario('hub')">
+            Hub <span class="test-btn-desc">7-port hub, 5 devices</span>
+        </button>
+        <button class="test-btn" onclick="injectTestScenario('nested')">
+            Nested <span class="test-btn-desc">3-level hub hierarchy</span>
+        </button>
+        <button class="test-btn" onclick="injectTestScenario('deep')">
+            Deep <span class="test-btn-desc">Max depth (5 hubs)</span>
+        </button>
+        <button class="test-btn" onclick="injectTestScenario('max')">
+            Max <span class="test-btn-desc">~127 devices (USB limit)</span>
+        </button>
+        <button class="test-btn" onclick="injectTestScenario('mixed')">
+            Mixed <span class="test-btn-desc">Various topologies</span>
+        </button>
+        <button class="test-btn danger" onclick="injectTestScenario('clear')">
+            ✕ Clear Test Mode <span class="test-btn-desc">Return to real USB</span>
+        </button>
+    </div>
+    
     <h1>Devices</h1>
     <div class="view-tabs">
         <button id="tab-rel" class="view-tab active">Relational</button>
@@ -794,6 +1105,66 @@
         tabRel.addEventListener('click', ()=>setActive('rel'));
         tabTopo.addEventListener('click', ()=>setActive('topo'));
         initWebSocket();
+        
+        // Secret Test Mode Controls
+        const testPanel = document.getElementById('test-panel');
+        const testStatus = document.getElementById('test-status');
+        let testModeActive = false;
+        
+        function toggleTestPanel() {
+            testPanel.classList.toggle('visible');
+            if (testPanel.classList.contains('visible')) {
+                checkTestStatus();
+            }
+        }
+        
+        async function checkTestStatus() {
+            try {
+                const resp = await fetch('/devices/_test');
+                if (resp.ok) {
+                    const data = await resp.json();
+                    testModeActive = data.testMode;
+                    testStatus.textContent = testModeActive ? 'Status: TEST MODE ACTIVE' : 'Status: Normal (real USB)';
+                    testStatus.className = 'test-panel-status' + (testModeActive ? ' active' : '');
+                } else {
+                    testStatus.textContent = 'Status: Unavailable (not localhost?)';
+                }
+            } catch (e) {
+                testStatus.textContent = 'Status: Error checking';
+            }
+        }
+        
+        async function injectTestScenario(scenario) {
+            try {
+                testStatus.textContent = 'Loading: ' + scenario + '...';
+                const resp = await fetch('/devices/_test/' + scenario);
+                if (resp.ok) {
+                    const data = await resp.json();
+                    testModeActive = data.testMode;
+                    testStatus.textContent = testModeActive ? 'Status: TEST MODE - ' + scenario : 'Status: Normal (real USB)';
+                    testStatus.className = 'test-panel-status' + (testModeActive ? ' active' : '');
+                    console.log('Test scenario applied:', scenario, data);
+                } else {
+                    testStatus.textContent = 'Error: ' + resp.status;
+                }
+            } catch (e) {
+                testStatus.textContent = 'Error: ' + e.message;
+                console.error('Test scenario error:', e);
+            }
+        }
+        
+        // Keyboard shortcut: Ctrl+Shift+T to toggle test panel
+        document.addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.shiftKey && e.key === 'T') {
+                e.preventDefault();
+                toggleTestPanel();
+            }
+        });
+        
+        // URL parameter: ?test=1 to auto-show panel
+        if (new URLSearchParams(window.location.search).get('test') === '1') {
+            toggleTestPanel();
+        }
     </script>
 </body>
 </html> 
