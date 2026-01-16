@@ -687,6 +687,50 @@
                         force.initialize = function(_) { nodes = _; };
                         return force;
                     }())
+                    // Custom force to push nodes away from edge lines they're not connected to
+                    .force('edgeAvoid', function() {
+                        let nodes, links;
+                        function force(alpha) {
+                            if (!links || !nodes) return;
+                            const avoidDistance = 40; // Minimum distance from edges
+                            nodes.forEach(node => {
+                                links.forEach(link => {
+                                    // Skip if node is source or target of this link
+                                    if (link.source.id === node.id || link.target.id === node.id) return;
+                                    
+                                    // Calculate distance from node to line segment
+                                    const x1 = link.source.x, y1 = link.source.y;
+                                    const x2 = link.target.x, y2 = link.target.y;
+                                    const px = node.x, py = node.y;
+                                    
+                                    const dx = x2 - x1, dy = y2 - y1;
+                                    const lenSq = dx * dx + dy * dy;
+                                    if (lenSq === 0) return; // Degenerate segment
+                                    
+                                    // Project point onto line, clamped to segment
+                                    let t = ((px - x1) * dx + (py - y1) * dy) / lenSq;
+                                    t = Math.max(0, Math.min(1, t));
+                                    
+                                    const closestX = x1 + t * dx;
+                                    const closestY = y1 + t * dy;
+                                    
+                                    const distX = px - closestX;
+                                    const distY = py - closestY;
+                                    const dist = Math.sqrt(distX * distX + distY * distY) || 1;
+                                    
+                                    // Push away if too close
+                                    if (dist < avoidDistance) {
+                                        const push = (avoidDistance - dist) * 0.5 * alpha;
+                                        node.vx += (distX / dist) * push;
+                                        node.vy += (distY / dist) * push;
+                                    }
+                                });
+                            });
+                        }
+                        force.initialize = function(n) { nodes = n; };
+                        force.links = function(l) { links = l; return force; };
+                        return force;
+                    }())
                     // Custom force to keep USB3 on right, USB2 on left
                     .force('xSeparation', d3.forceX().x(d => {
                         const cx = graphWidth / 2;
@@ -803,14 +847,43 @@
                 // Update simulation
                 simulation.nodes(nodesData).on('tick', ticked);
                 simulation.force('link').links(linksData);
+                // Pass links to edge avoidance force
+                if (simulation.force('edgeAvoid')) {
+                    simulation.force('edgeAvoid').links(linksData);
+                }
                 simulation.alpha(0.3).restart();
                 
                 function ticked() {
+                    // Draw links from edge of source node to edge of target node
                     linkElements
-                        .attr('x1', d => d.source.x)
-                        .attr('y1', d => d.source.y)
-                        .attr('x2', d => d.target.x)
-                        .attr('y2', d => d.target.y);
+                        .attr('x1', d => {
+                            const dx = d.target.x - d.source.x;
+                            const dy = d.target.y - d.source.y;
+                            const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+                            const sourceRadius = getNodeRadius(d.source);
+                            return d.source.x + (dx / dist) * sourceRadius;
+                        })
+                        .attr('y1', d => {
+                            const dx = d.target.x - d.source.x;
+                            const dy = d.target.y - d.source.y;
+                            const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+                            const sourceRadius = getNodeRadius(d.source);
+                            return d.source.y + (dy / dist) * sourceRadius;
+                        })
+                        .attr('x2', d => {
+                            const dx = d.target.x - d.source.x;
+                            const dy = d.target.y - d.source.y;
+                            const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+                            const targetRadius = getNodeRadius(d.target);
+                            return d.target.x - (dx / dist) * targetRadius;
+                        })
+                        .attr('y2', d => {
+                            const dx = d.target.x - d.source.x;
+                            const dy = d.target.y - d.source.y;
+                            const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+                            const targetRadius = getNodeRadius(d.target);
+                            return d.target.y - (dy / dist) * targetRadius;
+                        });
                     
                     nodeGroupsMerged
                         .attr('transform', d => `translate(${d.x},${d.y})`);
