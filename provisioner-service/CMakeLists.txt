@@ -32,6 +32,11 @@ if(NOT ${jsoncppName}_POPULATED)
   add_subdirectory(${${jsoncppName}_SOURCE_DIR} ${${jsoncppName}_BINARY_DIR} EXCLUDE_FROM_ALL)
 endif()
 
+# Set JSONCPP_INCLUDE_DIRS and JSONCPP_LIBRARIES so Drogon's find_package(Jsoncpp) succeeds
+# These variables are what FindJsoncpp.cmake looks for, and must be set before Drogon configures
+set(JSONCPP_INCLUDE_DIRS "${${jsoncppName}_SOURCE_DIR}/include" CACHE PATH "jsoncpp include dir" FORCE)
+set(JSONCPP_LIBRARIES jsoncpp_static CACHE STRING "jsoncpp library" FORCE)
+
 # Unset jsoncpp configuration flags
 unset(BUILD_SHARED_LIBS)
 unset(BUILD_STATIC_LIBS)
