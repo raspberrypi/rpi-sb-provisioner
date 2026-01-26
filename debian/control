@@ -9,7 +9,7 @@ Homepage: https://www.raspberrypi.com/software
 Package: rpi-sb-provisioner
 Architecture: arm64
 Pre-Depends: dpkg (>= 1.16.1), ${misc:Pre-Depends}
-Depends: ${misc:Depends}, ${shlibs:Depends}, fastboot (>= 33.0.3), python3, python3-pycryptodome, openssl, cpio, android-sdk-platform-tools, rpi-eeprom (>= 28.8-1), rpiboot (>= 20251107~092017), curl, dctrl-tools, diffutils, libengine-pkcs11-openssl, libp11-kit-dev, gnutls-bin, jq, sqlite3, iputils-ping, rpi-make-boot-image, android-sdk-libsparse-utils, libsystemd0, xxd
+Depends: ${misc:Depends}, ${shlibs:Depends}, fastboot (>= 33.0.3), python3, python3-pycryptodome, openssl, cpio, android-sdk-platform-tools, rpi-eeprom (>= 28.8-1), rpiboot (>= 20251107~092017), curl, dctrl-tools, diffutils, libengine-pkcs11-openssl, libp11-kit-dev, gnutls-bin, jq, sqlite3, iputils-ping, rpi-make-boot-image, android-sdk-libsparse-utils, libsystemd0, xxd, rpi-modcopy
 Description: Automated provisioning of secure boot for Raspberry Pi Devices
  This package provides tools for configuring and provisioning Raspberry Pi
  devices with secure boot capabilities. It enables automated setup of
