@@ -43,7 +43,13 @@ log() {
     printf "[%s] %s\n" "${timestamp}" "$message"
 }
 
+CLEANUP_DONE=0
+
 cleanup() {
+    # Guard against multiple invocations (signal + EXIT trap)
+    [ "$CLEANUP_DONE" -eq 1 ] && return
+    CLEANUP_DONE=1
+
     returnvalue=$?
     if [ ${HOLDING_LOCKFILE} -eq 1 ]; then
         rm -rf "$DEVICE_LOCK"
@@ -65,7 +71,7 @@ cleanup() {
     if [ -n "${DELETE_PRIVATE_TMPDIR}" ]; then
         announce_start "Deleting customised intermediates"
         # shellcheck disable=SC2086
-        rm -rf "${DELETE_PRIVATE_TMPDIR}" ${DEBUG}
+        rm -rf "${RPI_SB_WORKDIR}" ${DEBUG}
         DELETE_PRIVATE_TMPDIR=
         announce_stop "Deleting customised intermediates"
     fi
@@ -82,7 +88,7 @@ cleanup() {
     exit $returnvalue
 }
 
-trap cleanup INT TERM
+trap cleanup EXIT INT TERM
 
 # On pre-Pi4 devices, only TARGET_DEVICE_PATH is likely to be unique.
 TARGET_DEVICE_PATH="$1"
@@ -721,4 +727,3 @@ set -e
 
 # Exit with success code for systemd
 true
-cleanup

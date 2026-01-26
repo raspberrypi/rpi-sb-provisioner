@@ -130,6 +130,7 @@ timeout_fatal() {
     set -e
 }
 TMP_DIR=""
+CLEANUP_DONE=0
 
 get_cryptroot() {
     if [ -f /etc/rpi-sb-provisioner/cryptroot_initramfs ]; then
@@ -274,6 +275,10 @@ unmount_image() {
 }
 
 cleanup() {
+    # Guard against multiple invocations (signal + EXIT trap)
+    [ "$CLEANUP_DONE" -eq 1 ] && return
+    CLEANUP_DONE=1
+
     returnvalue=$?
     [ -d "${TMP_DIR}/rpi-boot-img-mount" ] && umount "${TMP_DIR}"/rpi-boot-img-mount && sync
     [ -d "${TMP_DIR}/rpi-rootfs-img-mount" ] && umount "${TMP_DIR}"/rpi-rootfs-img-mount && sync
@@ -293,7 +298,7 @@ cleanup() {
 
     exit ${returnvalue}
 }
-trap cleanup INT TERM
+trap cleanup EXIT INT TERM
 
 ### Start the provisioner phase
 
@@ -344,7 +349,7 @@ record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_STARTED}" "${TARGET_USB_PA
 
 systemd-notify --ready --status="Provisioning started"
 
-TMP_DIR=$(mktemp -d)
+TMP_DIR=$(mktemp -d -p /srv/rpi-sb-provisioner)
 RPI_DEVICE_STORAGE_TYPE="$(check_pidevice_storage_type "${RPI_DEVICE_STORAGE_TYPE}")"
 DELETE_PRIVATE_TMPDIR=
 announce_start "Finding the cache directory"
@@ -704,4 +709,3 @@ systemd-notify --status="Provisioning completed successfully" STOPPING=1
 
 # Exit with success code for systemd
 true
-cleanup
