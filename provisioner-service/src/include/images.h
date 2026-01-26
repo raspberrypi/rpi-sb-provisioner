@@ -3,6 +3,7 @@
 #include <drogon/drogon.h>
 #include <drogon/HttpAppFramework.h>
 #include <drogon/HttpResponse.h>
+#include <cstdint>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -105,6 +106,7 @@ namespace provisioner {
     struct ImageInfo {
         std::string name;
         std::string sha256;
+        std::uintmax_t size = 0;  // File size in bytes
     };
 
     class Images {

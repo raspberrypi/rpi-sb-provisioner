@@ -103,6 +103,7 @@ namespace provisioner {
         std::string model;       // device model/type (e.g., CM5, 4B, Zero 2 W)
         int portCount{0};        // number of ports if hub (from maxchild)
         bool isPlaceholder{false};
+        int speed{0};            // USB speed in Mbps (e.g., 480 for USB2, 5000 for USB3)
     };
 
     // Tracker state
@@ -623,6 +624,11 @@ namespace provisioner {
                     if (node.model.empty() && !pn.empty()) node.model = pn;
                     const std::string s = readFileTrimmed(entry.path()/"serial");
                     if (!s.empty()) node.serial = s;
+                    // Read USB speed (in Mbps, e.g., 480, 5000, 10000, 20000)
+                    const std::string speedStr = readFileTrimmed(entry.path()/"speed");
+                    if (!speedStr.empty()) {
+                        try { node.speed = std::stoi(speedStr); } catch (...) {}
+                    }
                 }
 
                 // Detect hubs via either device or interface class files
@@ -912,6 +918,7 @@ namespace provisioner {
                 if (!n.model.empty()) j["model"] = n.model;
                 if (!n.ip.empty()) j["ip"] = n.ip;
                 if (n.isPlaceholder) j["placeholder"] = true;
+                if (n.speed > 0) j["speed"] = n.speed;
                 int gen = inferModelGeneration(n);
                 if (gen > 0) j["modelGen"] = gen;
                 arr.append(j);

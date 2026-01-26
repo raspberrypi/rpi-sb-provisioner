@@ -6,9 +6,112 @@
 #include <regex>
 #include <optional>
 #include <map>
+#include <vector>
+#include <random>
+#include <mutex>
+#include <chrono>
+#include <unordered_map>
 
 namespace provisioner {
     namespace utils {
+        
+        // ===== Firmware Information =====
+        
+        /**
+         * Information about a firmware file
+         */
+        struct FirmwareInfo {
+            std::string version;        // e.g., "2024-01-15"
+            std::string filename;       // e.g., "pieeprom-2024-01-15.bin"
+            std::string filepath;       // Full path to file
+            std::string releaseChannel; // e.g., "default", "latest", "beta"
+            uintmax_t size;             // File size in bytes
+        };
+        
+        /**
+         * Scan the firmware directory for available firmware versions
+         * 
+         * @param deviceFamily The device family ("4", "5", or "2W")
+         * @return A vector of FirmwareInfo sorted by version (newest first)
+         */
+        std::vector<FirmwareInfo> scanFirmwareDirectory(const std::string& deviceFamily);
+        
+        /**
+         * Get the chip number for a device family
+         * 
+         * @param deviceFamily The device family ("4", "5", or "2W")
+         * @return The chip number ("2711", "2712") or empty string if unknown
+         */
+        inline std::string getChipNumberForFamily(const std::string& deviceFamily) {
+            if (deviceFamily == "4") return "2711";
+            if (deviceFamily == "5") return "2712";
+            return "";
+        }
+        
+        // ===== CSRF Protection =====
+        
+        /**
+         * CSRF token manager - handles generation and validation of tokens
+         * Tokens are time-limited and single-use for maximum security
+         */
+        class CsrfTokenManager {
+        public:
+            static CsrfTokenManager& getInstance();
+            
+            /**
+             * Generate a new CSRF token for a session
+             * 
+             * @param sessionId A unique identifier for the session (can be IP + User-Agent hash)
+             * @return The generated token
+             */
+            std::string generateToken(const std::string& sessionId);
+            
+            /**
+             * Validate a CSRF token
+             * 
+             * @param sessionId The session identifier
+             * @param token The token to validate
+             * @return true if valid, false otherwise
+             */
+            bool validateToken(const std::string& sessionId, const std::string& token);
+            
+            /**
+             * Clean up expired tokens (call periodically)
+             */
+            void cleanupExpiredTokens();
+            
+        private:
+            CsrfTokenManager() = default;
+            
+            struct TokenInfo {
+                std::string token;
+                std::chrono::steady_clock::time_point createdAt;
+                bool used = false;
+            };
+            
+            std::mutex mutex_;
+            std::unordered_map<std::string, std::vector<TokenInfo>> sessionTokens_;
+            
+            static constexpr int TOKEN_VALIDITY_SECONDS = 3600;  // 1 hour
+            static constexpr int MAX_TOKENS_PER_SESSION = 10;
+            static constexpr int TOKEN_LENGTH = 32;
+        };
+        
+        /**
+         * Generate a session ID from request (IP + User-Agent hash)
+         * 
+         * @param req The HTTP request
+         * @return A session identifier string
+         */
+        std::string getSessionIdFromRequest(const drogon::HttpRequestPtr& req);
+        
+        /**
+         * Validate CSRF token from request header or body
+         * 
+         * @param req The HTTP request
+         * @return true if valid, false otherwise
+         */
+        bool validateCsrfToken(const drogon::HttpRequestPtr& req);
         /**
          * Sanitize path components to prevent directory traversal attacks
          * 
