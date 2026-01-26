@@ -27,6 +27,7 @@ host-support/bootloader.secure                      /var/lib/rpi-sb-provisioner
 host-support/bootloader.naked                       /var/lib/rpi-sb-provisioner
 host-support/manufacturing-data                     /var/lib/rpi-sb-provisioner
 host-support/state-recording                        /var/lib/rpi-sb-provisioner
+host-support/kernel_modules.list                    /var/lib/rpi-sb-provisioner
 
 host-support/config                                 /etc/rpi-sb-provisioner
 host-support/bootimg-package-config                 /etc/rpi-sb-provisioner
