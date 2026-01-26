@@ -209,14 +209,38 @@
             return el;
         }
 
+        // Map of bus number -> speed (populated from backend data)
+        const busSpeedMap = new Map();
+        
         function busTierForId(id) {
             const m = String(id).match(/^(\d+)-/);
             if (!m) return null;
             const bus = parseInt(m[1], 10);
-            // On Pi 5, buses 3/4 are SuperSpeed; 1/2 are HighSpeed
-            if (bus === 3 || bus === 4) return 'ss';
-            if (bus === 1 || bus === 2) return 'hs';
-            return null;
+            // Use actual speed from backend if available
+            if (busSpeedMap.has(bus)) {
+                const speed = busSpeedMap.get(bus);
+                // USB 3.0 = 5000 Mbps, USB 3.1 Gen 2 = 10000, USB 3.2 = 20000
+                return speed >= 5000 ? 'ss' : 'hs';
+            }
+            // Fallback: assume even buses are USB 3, odd buses are USB 2
+            // (common pattern on Pi 5 where bus 2/4 are SuperSpeed, 1/3 are HighSpeed)
+            return (bus % 2 === 0) ? 'ss' : 'hs';
+        }
+        
+        function updateBusSpeedMap(nodes) {
+            // Extract speed information from nodes to determine bus tier
+            // Look for root-level devices (parentId === 'server') with speed info
+            for (const n of nodes) {
+                if (!n || !n.speed) continue;
+                const m = String(n.id).match(/^(\d+)-/);
+                if (!m) continue;
+                const bus = parseInt(m[1], 10);
+                // Store the speed for this bus (higher speed wins if multiple devices)
+                const currentSpeed = busSpeedMap.get(bus) || 0;
+                if (n.speed > currentSpeed) {
+                    busSpeedMap.set(bus, n.speed);
+                }
+            }
         }
 
         function buildCanonicalRootHubMap(nodes) {
@@ -387,8 +411,12 @@
 
             
             function processNodes(rawNodes, width, height) {
+                // Sort nodes by speed (descending) so higher-speed nodes are processed first
+                // This ensures USB 3 devices win over their USB 2 companions during canonicalization
+                const sortedNodes = [...rawNodes].sort((a, b) => (b.speed || 0) - (a.speed || 0));
+                
                 // Build canonical map and deduplicate nodes
-                const canonicalByPort = buildCanonicalRootHubMap(rawNodes);
+                const canonicalByPort = buildCanonicalRootHubMap(sortedNodes);
                 const nodeMap = new Map();
                 const links = [];
                 
@@ -400,7 +428,7 @@
                 // For USB 3 (SS), use port number; for USB 2 (HS), use bus number
                 const portsUsed = { hs: new Set(), ss: new Set() };
                 const hsBusSet = new Set();
-                rawNodes.forEach(n => {
+                sortedNodes.forEach(n => {
                     const id = String(n.id);
                     const parentId = n.parentId ? String(n.parentId) : 'server';
                     const rootPort = parseRootPort(id);
@@ -474,8 +502,8 @@
                     });
                 });
                 
-                // Add actual device nodes
-                rawNodes.forEach(n => {
+                // Add actual device nodes (using sorted list so USB 3 nodes are processed first)
+                sortedNodes.forEach(n => {
                     const canonicalId = canonicalizeIdByRoot(String(n.id), canonicalByPort);
                     if (!nodeMap.has(canonicalId)) {
                         const node = { ...n, id: canonicalId };
@@ -939,15 +967,18 @@
     
         function applyTopology(nodes) {
             try { console.log('applyTopology: received nodes', Array.isArray(nodes) ? nodes.length : nodes); } catch(e) {}
+            // Sort nodes by speed (descending) so higher-speed nodes are processed first
+            // This ensures USB 3 devices win over their USB 2 companions during canonicalization
+            const sortedNodes = [...nodes].sort((a, b) => (b.speed || 0) - (a.speed || 0));
             const seen = new Set();
             const emittedIds = new Set(); // ids after canonicalization to avoid duplicates
             // Build per-root canonical mapping so companion hubs (e.g., buses 3/4) are coalesced
-            const canonicalByPort = buildCanonicalRootHubMap(nodes);
-            const nodeIdSet = new Set(nodes.map(n => String(n.id)));
+            const canonicalByPort = buildCanonicalRootHubMap(sortedNodes);
+            const nodeIdSet = new Set(sortedNodes.map(n => String(n.id)));
             // Pre-create tier containers and at least 2 root-port groups per tier
             const portsByTier = { hs: new Set(), ss: new Set() };
             const hsBusSet = new Set();
-            for (const n of nodes) {
+            for (const n of sortedNodes) {
                 const id = String(n.id);
                 const parentId = n.parentId ? String(n.parentId) : 'server';
                 const port = parseRootPort(id);
@@ -975,14 +1006,18 @@
             for (let i = 1; i <= desiredMaxHs; i++) ensureRootPortGroupUnder(hsTierEl, i);
             const ssTierEl = ensureRootTier('ss');
             for (let i = 1; i <= desiredMaxSs; i++) ensureRootPortGroupUnder(ssTierEl, i);
-            // Sort by parent depth and id to ensure stable parent-before-child ordering
-            nodes.sort((a,b) => {
+            // Sort by parent depth, then by speed (descending) to ensure parent-before-child ordering
+            // and higher-speed nodes processed first within each depth level
+            sortedNodes.sort((a,b) => {
                 const ad = String(a.parentId || 'server').split('.').length;
                 const bd = String(b.parentId || 'server').split('.').length;
                 if (ad !== bd) return ad - bd;
+                // Within same depth, process higher speed first so USB 3 wins over USB 2 companions
+                const speedDiff = (b.speed || 0) - (a.speed || 0);
+                if (speedDiff !== 0) return speedDiff;
                 return String(a.id).localeCompare(String(b.id));
             });
-            for (const n of nodes) {
+            for (const n of sortedNodes) {
                 const rawId = String(n.id);
                 if (rawId === 'server') { seen.add('server'); continue; }
                 // Canonicalize id by root-port; drop if it maps to an already-present id
@@ -1060,6 +1095,8 @@
                     const msg = JSON.parse(event.data);
                     if (msg && msg.type === 'topology' && Array.isArray(msg.nodes)) {
                         try { console.log('ws: topology message nodes', msg.nodes.length, 'removed', Array.isArray(msg.removed) ? msg.removed.length : 0); } catch(e) {}
+                        // Update bus speed map first (before processing topology)
+                        updateBusSpeedMap(msg.nodes);
                         // Apply updates first
                         applyTopology(msg.nodes);
                         // Also update D3 interactive graph if active

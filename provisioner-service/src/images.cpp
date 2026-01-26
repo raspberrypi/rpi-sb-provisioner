@@ -1334,6 +1334,100 @@ namespace provisioner {
             callback(resp);
         });
 
+        // JSON-only endpoint for listing images (used by Options page)
+        app.registerHandler("/images/list", [](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
+            LOG_INFO << "Images::list (JSON)";
+            AuditLog::logHandlerAccess(req, "/images/list");
+
+            std::vector<ImageInfo> imageInfos;
+            
+            try {
+                for (const auto &entry : std::filesystem::directory_iterator(IMAGES_PATH)) {
+                    if (entry.is_regular_file()) {
+                        std::filesystem::path imagePath = entry.path();
+                        // Skip SHA256 sidecar files from the listing
+                        if (imagePath.extension() == ".sha256") {
+                            continue;
+                        }
+                        ImageInfo info;
+                        info.name = imagePath.filename().string();
+                        
+                        // Get file size
+                        try {
+                            info.size = std::filesystem::file_size(imagePath);
+                        } catch (...) {
+                            info.size = 0;
+                        }
+                        
+                        // Get SHA256 - prefer sidecar file, then cache
+                        try {
+                            std::filesystem::path sidecarPath = imagePath;
+                            sidecarPath += ".sha256";
+                            if (std::filesystem::exists(sidecarPath)) {
+                                std::ifstream in(sidecarPath);
+                                std::string line;
+                                if (in && std::getline(in, line)) {
+                                    while (!line.empty() && (line.back()==' ' || line.back()=='\t' || line.back()=='\n' || line.back()=='\r')) {
+                                        line.pop_back();
+                                    }
+                                    info.sha256 = line;
+                                }
+                            }
+                        } catch (...) {}
+                        
+                        if (info.sha256.empty()) {
+                            std::lock_guard<std::mutex> lock(sha256Cache_mutex);
+                            auto it = sha256Cache.find(info.name);
+                            if (it != sha256Cache.end()) {
+                                if (it->second.status == SHA256Status::COMPLETE) {
+                                    info.sha256 = it->second.value;
+                                } else if (it->second.status == SHA256Status::PENDING) {
+                                    info.sha256 = "Calculating...";
+                                } else {
+                                    info.sha256 = "Error";
+                                }
+                            } else {
+                                info.sha256 = "Calculating...";
+                            }
+                        }
+                        
+                        imageInfos.push_back(info);
+                    }
+                }
+            } catch (const std::filesystem::filesystem_error& e) {
+                LOG_ERROR << "Error scanning images directory: " << e.what();
+            }
+            
+            // Get current gold master for comparison
+            std::string currentGoldMaster;
+            auto goldMasterPath = provisioner::utils::getConfigValue("GOLD_MASTER_OS_FILE");
+            if (goldMasterPath) {
+                currentGoldMaster = *goldMasterPath;
+            }
+            
+            // Build JSON response
+            Json::Value response;
+            Json::Value imageArray(Json::arrayValue);
+            
+            for (const auto& info : imageInfos) {
+                Json::Value imageObj;
+                imageObj["name"] = info.name;
+                imageObj["path"] = std::string(IMAGES_PATH) + "/" + info.name;
+                imageObj["sha256"] = info.sha256;
+                imageObj["size_mb"] = info.size / (1024.0 * 1024.0);
+                imageObj["is_gold_master"] = (currentGoldMaster.find(info.name) != std::string::npos);
+                imageArray.append(imageObj);
+            }
+            
+            response["images"] = imageArray;
+            
+            auto resp = drogon::HttpResponse::newHttpResponse();
+            resp->setStatusCode(drogon::k200OK);
+            resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+            resp->setBody(response.toStyledString());
+            callback(resp);
+        });
+
         app.registerHandler("/get-image-sha256", [](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
             LOG_INFO << "Images::get-image-sha256";
 

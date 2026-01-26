@@ -371,6 +371,23 @@ namespace provisioner {
             // Add audit log entry for handler access
             AuditLog::logHandlerAccess(req, "/options/set");
 
+            // SECURITY: Validate CSRF token for browser requests
+            // Only enforce if the X-CSRF-Token header is present (gradual rollout)
+            if (!req->getHeader("X-CSRF-Token").empty()) {
+                if (!utils::validateCsrfToken(req)) {
+                    LOG_WARN << "SECURITY: CSRF validation failed for /options/set from " << AuditLog::getClientIP(req);
+                    auto resp = provisioner::utils::createErrorResponse(
+                        req,
+                        "Invalid or expired security token. Please refresh the page and try again.",
+                        drogon::k403Forbidden,
+                        "Security Error",
+                        "CSRF_VALIDATION_FAILED"
+                    );
+                    callback(resp);
+                    return;
+                }
+            }
+
             auto body = req->getJsonObject();
             if (!body) {
                 LOG_ERROR << "Options::set: Invalid JSON body";
@@ -526,6 +543,21 @@ namespace provisioner {
             callback(resp);
         });
 
+        // CSRF token endpoint - generates a new token for the session
+        app.registerHandler(OPTIONS_PATH + "/csrf-token", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
+            LOG_INFO << "Options::csrf-token";
+            
+            std::string sessionId = utils::getSessionIdFromRequest(req);
+            std::string token = utils::CsrfTokenManager::getInstance().generateToken(sessionId);
+            
+            Json::Value response;
+            response["token"] = token;
+            
+            auto resp = HttpResponse::newHttpJsonResponse(response);
+            resp->setStatusCode(k200OK);
+            callback(resp);
+        });
+
         // Firmware selection handlers
         app.registerHandler(OPTIONS_PATH + "/firmware", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
             LOG_INFO << "Options::firmware";
@@ -541,23 +573,27 @@ namespace provisioner {
                 deviceFamily = familyIt->second;
             }
             
-            // Map device family to chip number
-            std::string chipNumber = "";
-            if (deviceFamily == "4") {
-                chipNumber = "2711";
-            } else if (deviceFamily == "5") {
-                chipNumber = "2712";
+            std::string chipNumber = utils::getChipNumberForFamily(deviceFamily);
+            
+            // Get firmware information using the helper
+            auto firmwareInfoList = utils::scanFirmwareDirectory(deviceFamily);
+            
+            // Convert to map format for template compatibility
+            std::vector<std::map<std::string, std::string>> firmwareList;
+            for (const auto& info : firmwareInfoList) {
+                std::map<std::string, std::string> fwMap;
+                fwMap["version"] = info.version;
+                fwMap["filename"] = info.filename;
+                fwMap["filepath"] = info.filepath;
+                fwMap["releaseChannel"] = info.releaseChannel;
+                fwMap["size"] = std::to_string(info.size);
+                firmwareList.push_back(fwMap);
             }
             
-            // Get firmware information
-            std::vector<std::map<std::string, std::string>> firmwareList;
+            // Get release notes
             std::string releaseNotes = "";
-            
             if (!chipNumber.empty()) {
-                std::string firmwareDir = "/lib/firmware/raspberrypi/bootloader-" + chipNumber;
-                
-                // Get release notes
-                std::string releaseNotesPath = firmwareDir + "/release-notes.md";
+                std::string releaseNotesPath = "/lib/firmware/raspberrypi/bootloader-" + chipNumber + "/release-notes.md";
                 if (std::filesystem::exists(releaseNotesPath)) {
                     std::ifstream notesFile(releaseNotesPath);
                     if (notesFile.is_open()) {
@@ -568,70 +604,6 @@ namespace provisioner {
                         notesFile.close();
                     }
                 }
-                
-                // Scan for firmware files in all release directories
-                std::vector<std::string> releaseDirs = {"default", "latest", "beta", "stable", "critical"};
-                std::map<std::string, std::vector<std::pair<std::string, std::string>>> versionToChannelsAndPaths; // Map version to (channel, filepath) pairs
-                
-                // First pass: collect all files and group by version
-                for (const auto& releaseDir : releaseDirs) {
-                    std::string releasePath = firmwareDir + "/" + releaseDir;
-                    if (std::filesystem::exists(releasePath) && std::filesystem::is_directory(releasePath)) {
-                        for (const auto& entry : std::filesystem::directory_iterator(releasePath)) {
-                            if (entry.is_regular_file()) {
-                                std::string filename = entry.path().filename().string();
-                                if (filename.find("pieeprom-") == 0 && filename.ends_with(".bin")) {
-                                    // Extract version from filename
-                                    std::regex versionRegex(R"(pieeprom-(\d{4}-\d{2}-\d{2})\.bin)");
-                                    std::smatch match;
-                                    if (std::regex_search(filename, match, versionRegex)) {
-                                        std::string version = match[1].str();
-                                        std::string filepath = entry.path().string();
-                                        
-                                        // Add this channel and filepath for this version
-                                        versionToChannelsAndPaths[version].push_back({releaseDir, filepath});
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                
-                // Second pass: for each version, pick the preferred channel and create firmware info
-                for (const auto& [version, channelsAndPaths] : versionToChannelsAndPaths) {
-                    // Find the preferred channel (default > latest > beta > stable > critical)
-                    std::string preferredChannel = "";
-                    std::string preferredFilepath = "";
-                    
-                    for (const auto& preferredOrder : releaseDirs) {
-                        for (const auto& [channel, filepath] : channelsAndPaths) {
-                            if (channel == preferredOrder) {
-                                preferredChannel = channel;
-                                preferredFilepath = filepath;
-                                break;
-                            }
-                        }
-                        if (!preferredChannel.empty()) break;
-                    }
-                    
-                    // Create firmware info for this version
-                    if (!preferredChannel.empty()) {
-                        std::map<std::string, std::string> firmwareInfo;
-                        firmwareInfo["version"] = version;
-                        firmwareInfo["filename"] = std::filesystem::path(preferredFilepath).filename().string();
-                        firmwareInfo["filepath"] = preferredFilepath;
-                        firmwareInfo["releaseChannel"] = preferredChannel;
-                        firmwareInfo["size"] = std::to_string(std::filesystem::file_size(preferredFilepath));
-                        
-                        firmwareList.push_back(firmwareInfo);
-                    }
-                }
-                
-                // Sort by version (newest first)
-                std::sort(firmwareList.begin(), firmwareList.end(), 
-                    [](const auto& a, const auto& b) {
-                        return a.at("version") > b.at("version");
-                    });
             }
 
             // Get currently selected firmware file
@@ -653,13 +625,118 @@ namespace provisioner {
             callback(resp);
         });
 
+        // Firmware list JSON endpoint for inline browser
+        app.registerHandler(OPTIONS_PATH + "/firmware/list", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
+            LOG_INFO << "Options::firmware::list";
+            
+            AuditLog::logHandlerAccess(req, "/options/firmware/list");
+
+            // SECURITY: Restrict to GET method only
+            if (req->getMethod() != HttpMethod::Get) {
+                LOG_WARN << "SECURITY: Rejected non-GET request to /options/firmware/list from " << AuditLog::getClientIP(req);
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "This endpoint only accepts GET requests",
+                    drogon::k405MethodNotAllowed,
+                    "Method Not Allowed",
+                    "METHOD_NOT_ALLOWED"
+                );
+                callback(resp);
+                return;
+            }
+
+            auto configValues = utils::getAllConfigValues();
+            
+            // Get device family from config
+            std::string deviceFamily = "";
+            auto familyIt = configValues.find("RPI_DEVICE_FAMILY");
+            if (familyIt != configValues.end()) {
+                deviceFamily = familyIt->second;
+            }
+            
+            std::string chipNumber = utils::getChipNumberForFamily(deviceFamily);
+            
+            // Get firmware information using the shared helper
+            auto firmwareInfoList = utils::scanFirmwareDirectory(deviceFamily);
+            
+            // Convert to JSON
+            Json::Value firmwareList(Json::arrayValue);
+            for (const auto& info : firmwareInfoList) {
+                Json::Value fw;
+                fw["version"] = info.version;
+                fw["filename"] = info.filename;
+                fw["filepath"] = info.filepath;
+                fw["releaseChannel"] = info.releaseChannel;
+                fw["size"] = std::to_string(info.size);
+                firmwareList.append(fw);
+            }
+
+            // Get currently selected firmware file
+            std::string selectedFirmwareFile = "";
+            auto firmwareFileIt = configValues.find("RPI_DEVICE_FIRMWARE_FILE");
+            if (firmwareFileIt != configValues.end()) {
+                selectedFirmwareFile = firmwareFileIt->second;
+            }
+
+            Json::Value jsonResponse;
+            jsonResponse["deviceFamily"] = deviceFamily;
+            jsonResponse["chipNumber"] = chipNumber;
+            jsonResponse["firmwareList"] = firmwareList;
+            jsonResponse["selectedFirmwareFile"] = selectedFirmwareFile;
+            
+            auto resp = HttpResponse::newHttpResponse();
+            resp->setStatusCode(k200OK);
+            resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+            resp->setBody(Json::FastWriter().write(jsonResponse));
+            callback(resp);
+        });
+
         app.registerHandler(OPTIONS_PATH + "/firmware/set", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
-            LOG_INFO << "Options::firmware::set";
+            LOG_INFO << "Options::firmware::set - Method: " << req->getMethodString() 
+                     << ", Content-Type: " << req->getHeader("Content-Type")
+                     << ", Body length: " << req->getBody().length();
             
             AuditLog::logHandlerAccess(req, "/options/firmware/set");
 
+            // SECURITY: Restrict to POST method only
+            if (req->getMethod() != HttpMethod::Post) {
+                LOG_WARN << "SECURITY: Rejected non-POST request to /options/firmware/set from " << AuditLog::getClientIP(req);
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "This endpoint only accepts POST requests",
+                    drogon::k405MethodNotAllowed,
+                    "Method Not Allowed",
+                    "METHOD_NOT_ALLOWED"
+                );
+                callback(resp);
+                return;
+            }
+
+            // SECURITY: Validate CSRF token for browser requests
+            if (!req->getHeader("X-CSRF-Token").empty()) {
+                if (!utils::validateCsrfToken(req)) {
+                    LOG_WARN << "SECURITY: CSRF validation failed for /options/firmware/set from " << AuditLog::getClientIP(req);
+                    auto resp = provisioner::utils::createErrorResponse(
+                        req,
+                        "Invalid or expired security token. Please refresh the page and try again.",
+                        drogon::k403Forbidden,
+                        "Security Error",
+                        "CSRF_VALIDATION_FAILED"
+                    );
+                    callback(resp);
+                    return;
+                }
+            }
+
             auto body = req->getJsonObject();
             if (!body) {
+                // Log more details for debugging
+                LOG_ERROR << "Failed to parse JSON body. Content-Type: " << req->getHeader("Content-Type") 
+                          << ", Body length: " << req->getBody().length();
+                if (req->getBody().length() < 1000) {
+                    LOG_ERROR << "Body content: " << req->getBody();
+                }
+                
                 auto resp = provisioner::utils::createErrorResponse(
                     req,
                     "Invalid JSON request body",
@@ -672,29 +749,92 @@ namespace provisioner {
             }
 
             std::string selectedFirmware = body->get("firmware_path", "").asString();
-            if (selectedFirmware.empty()) {
-                auto resp = provisioner::utils::createErrorResponse(
-                    req,
-                    "No firmware path specified",
-                    drogon::k400BadRequest,
-                    "Invalid Request",
-                    "NO_FIRMWARE_PATH"
-                );
-                callback(resp);
-                return;
-            }
-
-            // Validate that the firmware file exists
-            if (!std::filesystem::exists(selectedFirmware)) {
-                auto resp = provisioner::utils::createErrorResponse(
-                    req,
-                    "Selected firmware file does not exist",
-                    drogon::k400BadRequest,
-                    "Invalid Request",
-                    "FIRMWARE_NOT_FOUND"
-                );
-                callback(resp);
-                return;
+            LOG_INFO << "Firmware selection request: " << selectedFirmware;
+            
+            // Empty path is valid - it means "use default firmware"
+            if (!selectedFirmware.empty()) {
+                // SECURITY: Validate the firmware path is within the allowed directory
+                // Note: /lib/firmware may be a symlink to /usr/lib/firmware, so we need to
+                // canonicalize the base path as well for proper comparison
+                const std::string allowedFirmwareBaseRaw = "/lib/firmware/raspberrypi/bootloader-";
+                std::string allowedFirmwareBase = allowedFirmwareBaseRaw;
+                
+                // Try to get canonical path of the base directory (minus the trailing "bootloader-")
+                try {
+                    std::filesystem::path basePath("/lib/firmware/raspberrypi");
+                    if (std::filesystem::exists(basePath)) {
+                        allowedFirmwareBase = std::filesystem::canonical(basePath).string() + "/bootloader-";
+                    }
+                } catch (...) {
+                    // If canonicalization fails, use the raw path
+                }
+                
+                try {
+                    // Canonicalize to prevent path traversal
+                    std::filesystem::path firmwarePath(selectedFirmware);
+                    std::filesystem::path canonicalPath;
+                    
+                    if (std::filesystem::exists(firmwarePath)) {
+                        canonicalPath = std::filesystem::canonical(firmwarePath);
+                    } else {
+                        auto resp = provisioner::utils::createErrorResponse(
+                            req,
+                            "Selected firmware file does not exist",
+                            drogon::k400BadRequest,
+                            "Invalid Request",
+                            "FIRMWARE_NOT_FOUND"
+                        );
+                        callback(resp);
+                        return;
+                    }
+                    
+                    std::string canonicalStr = canonicalPath.string();
+                    
+                    LOG_DEBUG << "Firmware path validation: canonical=" << canonicalStr << ", allowedBase=" << allowedFirmwareBase;
+                    
+                    // Verify the path starts with the allowed firmware directory
+                    if (canonicalStr.find(allowedFirmwareBase) != 0) {
+                        LOG_WARN << "SECURITY: Rejected firmware path outside allowed directory: " << canonicalStr 
+                                 << " (expected prefix: " << allowedFirmwareBase << ") from " << AuditLog::getClientIP(req);
+                        auto resp = provisioner::utils::createErrorResponse(
+                            req,
+                            "Firmware path must be within the system firmware directory",
+                            drogon::k400BadRequest,
+                            "Invalid Path",
+                            "INVALID_FIRMWARE_PATH"
+                        );
+                        callback(resp);
+                        return;
+                    }
+                    
+                    // Verify it's a regular file (not a directory or symlink to something else)
+                    if (!std::filesystem::is_regular_file(canonicalPath)) {
+                        auto resp = provisioner::utils::createErrorResponse(
+                            req,
+                            "Selected path is not a regular file",
+                            drogon::k400BadRequest,
+                            "Invalid Request",
+                            "NOT_A_FILE"
+                        );
+                        callback(resp);
+                        return;
+                    }
+                    
+                    // Use the canonical path for storage
+                    selectedFirmware = canonicalStr;
+                    
+                } catch (const std::filesystem::filesystem_error& e) {
+                    LOG_ERROR << "Filesystem error validating firmware path: " << e.what();
+                    auto resp = provisioner::utils::createErrorResponse(
+                        req,
+                        "Invalid firmware path",
+                        drogon::k400BadRequest,
+                        "Invalid Request",
+                        "INVALID_PATH"
+                    );
+                    callback(resp);
+                    return;
+                }
             }
 
             // Update config with the selected firmware path
@@ -729,6 +869,20 @@ namespace provisioner {
             LOG_INFO << "Options::firmware::notes";
             
             AuditLog::logHandlerAccess(req, "/options/firmware/notes");
+
+            // SECURITY: Restrict to GET method only
+            if (req->getMethod() != HttpMethod::Get) {
+                LOG_WARN << "SECURITY: Rejected non-GET request to /options/firmware/notes from " << AuditLog::getClientIP(req);
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "This endpoint only accepts GET requests",
+                    drogon::k405MethodNotAllowed,
+                    "Method Not Allowed",
+                    "METHOD_NOT_ALLOWED"
+                );
+                callback(resp);
+                return;
+            }
 
             LOG_INFO << "Requested version: '" << version << "'";
             
@@ -833,6 +987,223 @@ namespace provisioner {
             Json::Value jsonResponse;
             jsonResponse["version"] = version;
             jsonResponse["notes"] = releaseNotes;
+            
+            auto resp = HttpResponse::newHttpResponse();
+            resp->setStatusCode(k200OK);
+            resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+            resp->setBody(Json::FastWriter().write(jsonResponse));
+            callback(resp);
+        });
+
+        // Key file upload handler
+        app.registerHandler(OPTIONS_PATH + "/upload-key", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
+            LOG_INFO << "Options::upload-key";
+            
+            AuditLog::logHandlerAccess(req, "/options/upload-key");
+
+            // SECURITY: Restrict to POST method only
+            if (req->getMethod() != HttpMethod::Post) {
+                LOG_WARN << "SECURITY: Rejected non-POST request to /options/upload-key from " << AuditLog::getClientIP(req);
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "This endpoint only accepts POST requests",
+                    drogon::k405MethodNotAllowed,
+                    "Method Not Allowed",
+                    "METHOD_NOT_ALLOWED"
+                );
+                callback(resp);
+                return;
+            }
+
+            // SECURITY: Validate CSRF token for browser requests
+            if (!req->getHeader("X-CSRF-Token").empty()) {
+                if (!utils::validateCsrfToken(req)) {
+                    LOG_WARN << "SECURITY: CSRF validation failed for /options/upload-key from " << AuditLog::getClientIP(req);
+                    auto resp = provisioner::utils::createErrorResponse(
+                        req,
+                        "Invalid or expired security token. Please refresh the page and try again.",
+                        drogon::k403Forbidden,
+                        "Security Error",
+                        "CSRF_VALIDATION_FAILED"
+                    );
+                    callback(resp);
+                    return;
+                }
+            }
+
+            // Get the uploaded file
+            MultiPartParser fileParser;
+            if (fileParser.parse(req) != 0) {
+                LOG_ERROR << "Failed to parse multipart form data";
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Failed to parse file upload",
+                    drogon::k400BadRequest,
+                    "Invalid Request",
+                    "PARSE_ERROR"
+                );
+                callback(resp);
+                return;
+            }
+
+            auto &files = fileParser.getFiles();
+            if (files.empty()) {
+                LOG_ERROR << "No files in upload request";
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "No file provided",
+                    drogon::k400BadRequest,
+                    "Invalid Request",
+                    "NO_FILE"
+                );
+                callback(resp);
+                return;
+            }
+
+            const auto &file = files[0];
+            
+            // SECURITY: Validate file size (max 64KB for a key file - generous limit)
+            constexpr size_t MAX_KEY_FILE_SIZE = 64 * 1024;
+            if (file.fileLength() > MAX_KEY_FILE_SIZE) {
+                LOG_WARN << "SECURITY: Rejected oversized key file: " << file.fileLength() << " bytes from " << AuditLog::getClientIP(req);
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Key file too large. Maximum size is 64KB.",
+                    drogon::k400BadRequest,
+                    "File Too Large",
+                    "FILE_TOO_LARGE"
+                );
+                callback(resp);
+                return;
+            }
+            
+            // SECURITY: Validate file extension
+            std::string filename = file.getFileName();
+            std::filesystem::path filePath(filename);
+            std::string ext = filePath.extension().string();
+            std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+            
+            if (ext != ".pem" && ext != ".key") {
+                LOG_WARN << "SECURITY: Rejected file with invalid extension: " << ext << " from " << AuditLog::getClientIP(req);
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Invalid file type. Only .pem and .key files are allowed.",
+                    drogon::k400BadRequest,
+                    "Invalid File Type",
+                    "INVALID_FILE_TYPE"
+                );
+                callback(resp);
+                return;
+            }
+            
+            // SECURITY: Basic content validation - check for PEM header
+            std::string_view fileContentView = file.fileContent();
+            std::string fileContent(fileContentView.data(), fileContentView.size());
+            if (fileContent.find("-----BEGIN") == std::string::npos) {
+                LOG_WARN << "SECURITY: Rejected file without PEM header from " << AuditLog::getClientIP(req);
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "File does not appear to be a valid PEM-encoded key. Expected '-----BEGIN' header.",
+                    drogon::k400BadRequest,
+                    "Invalid Key Format",
+                    "INVALID_KEY_FORMAT"
+                );
+                callback(resp);
+                return;
+            }
+
+            // Define the key storage directory
+            std::string keyStorageDir = "/etc/rpi-sb-provisioner/keys";
+            
+            // Create the directory if it doesn't exist
+            try {
+                if (!std::filesystem::exists(keyStorageDir)) {
+                    std::filesystem::create_directories(keyStorageDir);
+                    // Set restrictive permissions on the keys directory
+                    std::filesystem::permissions(keyStorageDir,
+                        std::filesystem::perms::owner_all,
+                        std::filesystem::perm_options::replace);
+                }
+            } catch (const std::filesystem::filesystem_error& e) {
+                LOG_ERROR << "Failed to create keys directory: " << e.what();
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Failed to create key storage directory",
+                    drogon::k500InternalServerError,
+                    "Storage Error",
+                    "STORAGE_ERROR"
+                );
+                callback(resp);
+                return;
+            }
+
+            // Generate a safe filename (sanitize the original name)
+            std::string safeFilename = filePath.filename().string();
+            // Remove any path components and suspicious characters
+            safeFilename.erase(std::remove_if(safeFilename.begin(), safeFilename.end(), 
+                [](char c) { return c == '/' || c == '\\' || c == '\0' || c == ':'; }), safeFilename.end());
+            
+            if (safeFilename.empty()) {
+                safeFilename = "customer-key.pem";
+            }
+
+            std::string destPath = keyStorageDir + "/" + safeFilename;
+            
+            // Save the file
+            try {
+                file.saveAs(destPath);
+                
+                // Set restrictive permissions on the key file (owner read only)
+                std::filesystem::permissions(destPath,
+                    std::filesystem::perms::owner_read,
+                    std::filesystem::perm_options::replace);
+                
+                AuditLog::logFileSystemAccess("UPLOAD_KEY", destPath, true);
+                
+            } catch (const std::exception& e) {
+                LOG_ERROR << "Failed to save key file: " << e.what();
+                AuditLog::logFileSystemAccess("UPLOAD_KEY", destPath, false, "", e.what());
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Failed to save key file",
+                    drogon::k500InternalServerError,
+                    "Storage Error",
+                    "SAVE_ERROR"
+                );
+                callback(resp);
+                return;
+            }
+
+            // Update the config with the new key path
+            std::map<std::string, std::string> existing_options = utils::getAllConfigValues();
+            existing_options["CUSTOMER_KEY_FILE_PEM"] = destPath;
+            // Clear PKCS11 setting when uploading a PEM key
+            existing_options["CUSTOMER_KEY_PKCS11_NAME"] = "";
+
+            std::ofstream config_write("/etc/rpi-sb-provisioner/config");
+            if (!config_write.is_open()) {
+                LOG_ERROR << "Failed to open config file for writing";
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Failed to update configuration",
+                    drogon::k500InternalServerError,
+                    "Config Error",
+                    "CONFIG_WRITE_ERROR"
+                );
+                callback(resp);
+                return;
+            }
+
+            for (const auto &[k, v] : existing_options) {
+                config_write << k << "=" << v << "\n";
+            }
+            config_write.close();
+
+            // Return success with the path
+            Json::Value jsonResponse;
+            jsonResponse["success"] = true;
+            jsonResponse["path"] = destPath;
+            jsonResponse["filename"] = safeFilename;
             
             auto resp = HttpResponse::newHttpResponse();
             resp->setStatusCode(k200OK);

@@ -106,9 +106,7 @@
 <div class="rpi-navbar">
     <div class="rpi-nav-items">
         <a href="/devices" <%c++ if(@@.get<std::string>("currentPage") == "devices") { %>class="active"<%c++ } %>>Devices</a>
-        <a href="/get-images" <%c++ if(@@.get<std::string>("currentPage") == "images") { %>class="active"<%c++ } %>>Images</a>
         <a href="/options/get" <%c++ if(@@.get<std::string>("currentPage") == "options") { %>class="active"<%c++ } %>>Options</a>
-        <a href="/options/firmware" <%c++ if(@@.get<std::string>("currentPage") == "firmware") { %>class="active"<%c++ } %>>Firmware</a>
         <a href="/customisation/list-scripts" <%c++ if(@@.get<std::string>("currentPage") == "customisation") { %>class="active"<%c++ } %>>Customisation</a>
         <a href="/services" <%c++ if(@@.get<std::string>("currentPage") == "services") { %>class="active"<%c++ } %>>Services</a>
         <a href="/manu-db" <%c++ if(@@.get<std::string>("currentPage") == "manufacturing") { %>class="active"<%c++ } %>>Manufacturing Database</a>

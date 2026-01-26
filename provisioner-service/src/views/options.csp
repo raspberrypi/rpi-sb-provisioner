@@ -4,563 +4,1914 @@
     <title>Configuration Options</title>
     <%view stylesheet %>
     <style>
-        .collapsible {
-            background-color: #f1f1f1;
-            color: #444;
-            cursor: pointer;
-            padding: 5px 10px;
-            border: none;
-            text-align: left;
-            outline: none;
-            font-size: 12px;
-            margin-left: 10px;
-            border-radius: 4px;
-            display: inline-block;
-            vertical-align: middle;
+        /* ===== Section Styling ===== */
+        .config-section {
+            background: #fff;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
         }
         
-        .active, .collapsible:hover {
-            background-color: #ddd;
+        .section-header {
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid #f0f0f0;
         }
         
-        .help-content {
-            padding: 0 18px;
-            max-height: 0;
-            overflow: hidden;
-            transition: max-height 0.2s ease-out;
-            background-color: #f9f9f9;
-            margin-top: 5px;
-            border-radius: 4px;
-            clear: both;
-        }
-        
-        .help-content p {
-            margin: 10px 0;
-            font-size: 14px;
-            line-height: 1.4;
-        }
-        
-        .warning {
-            color: #cc0000;
-            font-weight: bold;
-        }
-        
-        .note {
-            color: #0066cc;
-            font-weight: bold;
-        }
-        
-        .option-header {
-            margin-bottom: 5px;
-        }
-        
-        label {
-            display: inline-block;
-            margin-bottom: 5px;
-            font-weight: bold;
-        }
-        
-        .help-button {
-            background-color: #f1f1f1;
-            color: #444;
-            cursor: pointer;
-            padding: 5px 10px;
-            border: none;
-            text-align: left;
-            outline: none;
-            font-size: 12px;
-            margin-left: 10px;
-            border-radius: 4px;
-            display: inline-block;
-            vertical-align: middle;
-        }
-        
-        .help-button:hover {
-            background-color: #ddd;
-        }
-        
-        /* The Modal Background */
-        .modal {
-            display: none;
-            position: fixed;
-            z-index: 1000;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0,0,0,0.4);
-            overflow: auto;
-        }
-        
-        /* Modal Content */
-        .modal-content {
-            background-color: #fefefe;
-            margin: 10% auto;
-            padding: 20px;
-            border: 1px solid #888;
-            width: 70%;
-            max-width: 700px;
-            border-radius: 5px;
-            box-shadow: 0 4px 8px 0 rgba(0,0,0,0.2);
-            position: relative;
-        }
-        
-        /* Close Button */
-        .close-modal {
-            color: #aaa;
-            float: right;
-            font-size: 28px;
-            font-weight: bold;
-            cursor: pointer;
-        }
-        
-        .close-modal:hover,
-        .close-modal:focus {
-            color: black;
-            text-decoration: none;
-            cursor: pointer;
-        }
-        
-        .modal-title {
-            margin-top: 0;
+        .section-title {
+            font-size: 1.25rem;
+            font-weight: 600;
             color: #333;
-            border-bottom: 1px solid #eee;
-            padding-bottom: 10px;
+            margin: 0 0 6px 0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }
         
-        .modal-body {
-            max-height: 60vh;
-            overflow-y: auto;
-            padding-right: 5px;
+        .section-title-icon {
+            font-size: 1.4rem;
         }
         
-        .modal-body p {
-            margin: 10px 0;
-            font-size: 14px;
+        .section-description {
+            font-size: 0.9rem;
+            color: #666;
+            margin: 0;
             line-height: 1.5;
         }
         
-        .cust-btn-lg {
-            margin-top: 20px;
+        /* ===== Tile Selector Styling ===== */
+        .tile-selector {
+            display: grid;
+            gap: 12px;
+            margin-bottom: 20px;
         }
         
-        /* Field validation feedback styles */
-        .field-feedback {
-            display: none;
-            margin-top: 5px;
-            padding: 8px 12px;
-            border-radius: 4px;
-            font-size: 13px;
+        .tile-selector.three-col {
+            grid-template-columns: repeat(3, 1fr);
+        }
+        
+        .tile-selector.two-col {
+            grid-template-columns: repeat(2, 1fr);
+        }
+        
+        @media (max-width: 768px) {
+            .tile-selector.three-col,
+            .tile-selector.two-col {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .tile-option {
+            position: relative;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 16px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            background: #fafafa;
+        }
+        
+        .tile-option:hover {
+            border-color: #007bff;
+            background: #f8faff;
+        }
+        
+        .tile-option.selected {
+            border-color: #007bff;
+            background: #e7f1ff;
+            box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.15);
+        }
+        
+        .tile-option input[type="radio"] {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+        }
+        
+        .tile-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+        
+        .tile-icon {
+            font-size: 1.75rem;
+            line-height: 1;
+        }
+        
+        .tile-title {
+            font-weight: 600;
+            font-size: 1rem;
+            color: #333;
+        }
+        
+        .tile-description {
+            font-size: 0.85rem;
+            color: #666;
             line-height: 1.4;
-            animation: slideDown 0.3s ease-out;
+            margin: 0;
         }
         
-        @keyframes slideDown {
-            from {
-                opacity: 0;
-                transform: translateY(-5px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
+        .tile-badge {
+            display: inline-block;
+            font-size: 0.7rem;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-weight: 500;
+            margin-top: 8px;
         }
         
-        .field-feedback.error {
-            background-color: #fee;
-            border: 1px solid #fcc;
-            color: #c33;
-            display: block;
+        .tile-badge.recommended {
+            background: #d4edda;
+            color: #155724;
         }
         
-        .field-feedback.success {
-            background-color: #efe;
-            border: 1px solid #cfc;
-            color: #3a3;
-            display: block;
+        .tile-badge.warning {
+            background: #fff3cd;
+            color: #856404;
         }
         
-        .field-feedback.info {
-            background-color: #e7f3ff;
-            border: 1px solid #b3d9ff;
-            color: #0066cc;
-            display: block;
+        .tile-badge.danger {
+            background: #f8d7da;
+            color: #721c24;
         }
         
-        .field-feedback.validating {
-            background-color: #fff9e6;
-            border: 1px solid #ffe6b3;
-            color: #996600;
-            display: block;
+        .tile-badge.info {
+            background: #cce5ff;
+            color: #004085;
         }
         
-        .field-feedback-icon {
-            margin-right: 6px;
+        /* Tile inline warnings */
+        .tile-warning {
+            margin-top: 10px;
+            padding: 8px 10px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            line-height: 1.4;
+        }
+        
+        .tile-warning.caution {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            color: #856404;
+        }
+        
+        .tile-warning.danger {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        
+        .tile-check {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            background: #007bff;
+            color: white;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
             font-weight: bold;
         }
         
-        .form-group {
+        .tile-option.selected .tile-check {
+            display: flex;
+        }
+        
+        /* ===== Key Configuration Tabs ===== */
+        .key-config-container {
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+        
+        .key-tabs {
+            display: flex;
+            background: #f5f5f5;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        
+        .key-tab {
+            flex: 1;
+            padding: 14px 20px;
+            text-align: center;
+            cursor: pointer;
+            font-weight: 500;
+            color: #666;
+            border: none;
+            background: transparent;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+        
+        .key-tab:hover {
+            background: #eee;
+            color: #333;
+        }
+        
+        .key-tab.active {
+            background: #fff;
+            color: #007bff;
+            border-bottom: 2px solid #007bff;
+            margin-bottom: -1px;
+        }
+        
+        .key-tab-icon {
+            font-size: 1.2rem;
+        }
+        
+        .key-panel {
+            display: none;
+            padding: 20px;
+            background: #fff;
+        }
+        
+        .key-panel.active {
+            display: block;
+        }
+        
+        .file-upload-zone {
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+            padding: 30px;
+            text-align: center;
+            background: #fafafa;
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+        
+        .file-upload-zone:hover,
+        .file-upload-zone.dragover {
+            border-color: #007bff;
+            background: #f0f7ff;
+        }
+        
+        .file-upload-zone.has-file {
+            border-color: #28a745;
+            background: #f0fff4;
+        }
+        
+        .upload-icon {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            color: #999;
+        }
+        
+        .file-upload-zone.has-file .upload-icon {
+            color: #28a745;
+        }
+        
+        .upload-text {
+            font-size: 0.95rem;
+            color: #666;
+            margin-bottom: 8px;
+        }
+        
+        .upload-hint {
+            font-size: 0.8rem;
+            color: #999;
+        }
+        
+        .current-file-display {
+            margin-top: 15px;
+            padding: 12px;
+            background: #e9ecef;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .current-file-icon {
+            font-size: 1.5rem;
+            color: #28a745;
+        }
+        
+        .current-file-info {
+            flex: 1;
+        }
+        
+        .current-file-name {
+            font-weight: 500;
+            color: #333;
+            word-break: break-all;
+        }
+        
+        .current-file-path {
+            font-size: 0.8rem;
+            color: #666;
+            font-family: monospace;
+        }
+        
+        .remove-file-btn {
+            background: none;
+            border: none;
+            color: #dc3545;
+            cursor: pointer;
+            padding: 5px;
+            font-size: 1.2rem;
+        }
+        
+        /* PKCS11 Helper */
+        .pkcs11-builder {
+            margin-top: 15px;
+        }
+        
+        .pkcs11-input-group {
+            margin-bottom: 15px;
+        }
+        
+        .pkcs11-input-group label {
+            display: block;
+            font-weight: 500;
+            margin-bottom: 6px;
+            color: #333;
+        }
+        
+        .pkcs11-input-group input {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            font-size: 0.95rem;
+        }
+        
+        .pkcs11-preview {
+            background: #f5f5f5;
+            padding: 12px;
+            border-radius: 6px;
+            margin-top: 15px;
+            font-family: monospace;
+            font-size: 0.85rem;
+            word-break: break-all;
+        }
+        
+        .pkcs11-preview-label {
+            font-size: 0.75rem;
+            color: #666;
+            margin-bottom: 5px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+        
+        /* ===== Inline Help & Warnings ===== */
+        .inline-help {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            padding: 10px 12px;
+            background: #f8f9fa;
+            border-radius: 6px;
+            margin-top: 10px;
+            font-size: 0.85rem;
+            color: #666;
+            line-height: 1.4;
+        }
+        
+        .inline-help-icon {
+            color: #6c757d;
+            flex-shrink: 0;
+            margin-top: 1px;
+        }
+        
+        .inline-warning {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            padding: 10px 12px;
+            background: #fff3cd;
+            border: 1px solid #ffeeba;
+            border-radius: 6px;
+            margin-top: 10px;
+            font-size: 0.85rem;
+            color: #856404;
+            line-height: 1.4;
+        }
+        
+        .inline-warning-icon {
+            flex-shrink: 0;
+            margin-top: 1px;
+        }
+        
+        /* ===== Form Field Styling ===== */
+        .field-group {
+            margin-bottom: 20px;
+        }
+        
+        .field-label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #333;
+        }
+        
+        .field-label .optional-badge {
+            font-weight: 400;
+            font-size: 0.8rem;
+            color: #888;
+            margin-left: 6px;
+        }
+        
+        .field-input {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            font-size: 0.95rem;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        
+        .field-input:focus {
+            outline: none;
+            border-color: #007bff;
+            box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
+        }
+        
+        .field-input.valid {
+            border-color: #28a745;
+        }
+        
+        .field-input.invalid {
+            border-color: #dc3545;
+        }
+        
+        /* ===== Toggle Switch ===== */
+        .toggle-group {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 16px;
+            background: #fafafa;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            margin-bottom: 15px;
+        }
+        
+        .toggle-switch {
             position: relative;
+            width: 50px;
+            height: 26px;
+            flex-shrink: 0;
         }
         
-        .form-group input[type="text"],
-        .form-group select {
-            transition: border-color 0.2s;
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
         }
         
-        .form-group input.validating,
-        .form-group select.validating {
-            border-color: #ffcc66;
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: 0.3s;
+            border-radius: 26px;
         }
         
-        .form-group input.valid,
-        .form-group select.valid {
-            border-color: #66cc66;
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 20px;
+            width: 20px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: 0.3s;
+            border-radius: 50%;
         }
         
-        .form-group input.invalid,
-        .form-group select.invalid {
-            border-color: #cc6666;
+        .toggle-switch input:checked + .toggle-slider {
+            background-color: #007bff;
+        }
+        
+        .toggle-switch input:checked + .toggle-slider:before {
+            transform: translateX(24px);
+        }
+        
+        .toggle-content {
+            flex: 1;
+        }
+        
+        .toggle-title {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 4px;
+        }
+        
+        .toggle-description {
+            font-size: 0.85rem;
+            color: #666;
+            line-height: 1.4;
+        }
+        
+        /* ===== Feedback Messages ===== */
+        .field-feedback {
+            display: none;
+            margin-top: 8px;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            line-height: 1.4;
+            animation: slideDown 0.2s ease-out;
+        }
+        
+        @keyframes slideDown {
+            from { opacity: 0; transform: translateY(-5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .field-feedback.error {
+            display: block;
+            background-color: #fee;
+            border: 1px solid #fcc;
+            color: #c33;
+        }
+        
+        .field-feedback.success {
+            display: block;
+            background-color: #efe;
+            border: 1px solid #cfc;
+            color: #3a3;
+        }
+        
+        .field-feedback.validating {
+            display: block;
+            background-color: #fff9e6;
+            border: 1px solid #ffe6b3;
+            color: #996600;
+        }
+        
+        /* ===== Success/Error Messages ===== */
+        .page-message {
+            padding: 12px 16px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            display: none;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .page-message.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .page-message.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .page-message.show {
+            display: flex;
+        }
+        
+        /* ===== Save Button ===== */
+        .save-section {
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+            padding-top: 20px;
+            border-top: 1px solid #e0e0e0;
+            margin-top: 10px;
+        }
+        
+        .save-btn {
+            padding: 12px 32px;
+            font-size: 1rem;
+            font-weight: 500;
+        }
+        
+        /* ===== Inline Firmware Browser ===== */
+        .firmware-expand-btn {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            width: 100%;
+            padding: 10px 16px;
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            color: #495057;
+            transition: all 0.2s;
+            margin-top: 10px;
+        }
+        
+        .firmware-expand-btn:hover {
+            background: #e9ecef;
+            border-color: #adb5bd;
+        }
+        
+        .firmware-expand-btn.expanded {
+            border-bottom-left-radius: 0;
+            border-bottom-right-radius: 0;
+            border-bottom-color: transparent;
+            background: #fff;
+        }
+        
+        .expand-icon {
+            font-size: 0.7rem;
+            transition: transform 0.2s;
+        }
+        
+        .firmware-expand-btn.expanded .expand-icon {
+            transform: rotate(180deg);
+        }
+        
+        .firmware-browser {
+            border: 1px solid #dee2e6;
+            border-top: none;
+            border-radius: 0 0 8px 8px;
+            background: #fff;
+            overflow: hidden;
+        }
+        
+        .firmware-browser-content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0;
+            max-height: 600px;
+            overflow: hidden;
+        }
+        
+        @media (max-width: 900px) {
+            .firmware-browser-content {
+                grid-template-columns: 1fr;
+                max-height: none;
+            }
+        }
+        
+        .firmware-list-container {
+            border-right: 1px solid #e9ecef;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        @media (max-width: 900px) {
+            .firmware-list-container {
+                border-right: none;
+                border-bottom: 1px solid #e9ecef;
+            }
+        }
+        
+        .firmware-list-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        .firmware-list-header h4 {
+            margin: 0;
+            font-size: 0.9rem;
+            color: #495057;
+        }
+        
+        .firmware-loading {
+            font-size: 0.8rem;
+            color: #6c757d;
+        }
+        
+        .firmware-list {
+            overflow-y: auto;
+            max-height: calc(600px - 45px); /* container max-height minus header */
+            padding: 8px;
+        }
+        
+        .firmware-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            border: 1px solid transparent;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.15s;
+            margin-bottom: 4px;
+        }
+        
+        .firmware-item:hover {
+            background: #f8f9fa;
+            border-color: #dee2e6;
+        }
+        
+        .firmware-item.viewing {
+            background: #e3f2fd;
+            border-color: #90caf9;
+        }
+        
+        .firmware-item.selected {
+            background: #e8f5e9;
+            border-color: #a5d6a7;
+        }
+        
+        .firmware-item-info {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .firmware-item-version {
+            font-weight: 600;
+            color: #333;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .firmware-item-channel {
+            font-size: 0.7rem;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-weight: 500;
+            text-transform: uppercase;
+        }
+        
+        .firmware-item-channel.default { background: #c8e6c9; color: #2e7d32; }
+        .firmware-item-channel.latest { background: #bbdefb; color: #1565c0; }
+        .firmware-item-channel.beta { background: #fff9c4; color: #f9a825; }
+        .firmware-item-channel.stable { background: #e0e0e0; color: #616161; }
+        .firmware-item-channel.critical { background: #ffcdd2; color: #c62828; }
+        
+        .firmware-item-meta {
+            font-size: 0.75rem;
+            color: #888;
+            margin-top: 2px;
+        }
+        
+        .firmware-item-select {
+            padding: 4px 10px;
+            font-size: 0.75rem;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            opacity: 0;
+            transition: opacity 0.15s;
+        }
+        
+        .firmware-item:hover .firmware-item-select,
+        .firmware-item.viewing .firmware-item-select {
+            opacity: 1;
+        }
+        
+        .firmware-item.selected .firmware-item-select {
+            background: #28a745;
+            opacity: 1;
+        }
+        
+        .firmware-item-select:hover {
+            background: #0056b3;
+        }
+        
+        .firmware-item.selected .firmware-item-select:hover {
+            background: #28a745;
+            cursor: default;
+        }
+        
+        .firmware-selected-badge {
+            font-size: 0.7rem;
+            background: #28a745;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 3px;
+            margin-left: auto;
+        }
+        
+        .firmware-notes-container {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            border-radius: 0 0 8px 0;
+        }
+        
+        .firmware-notes-container h4 {
+            margin: 0;
+            padding: 12px 16px;
+            font-size: 0.9rem;
+            color: #495057;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        .firmware-notes {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+            padding-bottom: 24px;
+            font-size: 0.85rem;
+            line-height: 1.5;
+            max-height: calc(600px - 45px); /* container max-height minus header */
+            min-height: 200px;
+        }
+        
+        .firmware-notes-placeholder {
+            color: #999;
+            font-style: italic;
+            text-align: center;
+            padding: 40px 20px;
+        }
+        
+        .firmware-notes pre {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            font-family: inherit;
+            margin: 0;
+            background: none;
+            border: none;
+            padding: 0;
+        }
+        
+        .firmware-notes h3 {
+            font-size: 1rem;
+            margin: 0 0 10px 0;
+            color: #333;
+        }
+        
+        .firmware-empty {
+            text-align: center;
+            padding: 30px;
+            color: #888;
+        }
+        
+        .firmware-empty-icon {
+            font-size: 2rem;
+            margin-bottom: 10px;
+            opacity: 0.5;
+        }
+        
+        /* ===== Image Browser Styling ===== */
+        .image-browser-container {
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-top: 12px;
+        }
+        
+        .image-browser-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        .image-browser-header h4 {
+            margin: 0;
+            font-size: 0.9rem;
+            color: #495057;
+        }
+        
+        .image-browser-actions {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .image-upload-btn {
+            padding: 6px 12px;
+            font-size: 0.8rem;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        
+        .image-upload-btn:hover {
+            background: #0056b3;
+        }
+        
+        .image-list {
+            max-height: calc(600px - 45px); /* container max-height minus header */
+            overflow-y: auto;
+            padding: 8px;
+        }
+        
+        .image-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            border: 1px solid transparent;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.15s;
+            margin-bottom: 4px;
+        }
+        
+        .image-item:hover {
+            background: #f8f9fa;
+            border-color: #dee2e6;
+        }
+        
+        .image-item.selected {
+            background: #e8f5e9;
+            border-color: #a5d6a7;
+        }
+        
+        .image-item-info {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .image-item-name {
+            font-weight: 600;
+            color: #333;
+            word-break: break-all;
+        }
+        
+        .image-item-meta {
+            font-size: 0.8rem;
+            color: #888;
+            margin-top: 2px;
+        }
+        
+        .image-item-select {
+            padding: 4px 10px;
+            font-size: 0.75rem;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            opacity: 0;
+            transition: opacity 0.15s;
+        }
+        
+        .image-item:hover .image-item-select {
+            opacity: 1;
+        }
+        
+        .image-item.selected .image-item-select {
+            background: #28a745;
+            opacity: 1;
+        }
+        
+        .image-selected-badge {
+            font-size: 0.7rem;
+            background: #28a745;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 3px;
+        }
+        
+        .image-empty {
+            text-align: center;
+            padding: 30px;
+            color: #888;
+        }
+        
+        .image-upload-zone {
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+            background: #fafafa;
+            transition: all 0.2s;
+            cursor: pointer;
+            margin: 8px;
+        }
+        
+        .image-upload-zone:hover,
+        .image-upload-zone.dragover {
+            border-color: #007bff;
+            background: #f0f7ff;
+        }
+        
+        .image-upload-progress {
+            margin: 8px;
+            padding: 12px;
+            background: #f5f5f5;
+            border-radius: 6px;
+        }
+        
+        .image-upload-progress-bar {
+            height: 8px;
+            background: #e0e0e0;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 8px;
+        }
+        
+        .image-upload-progress-fill {
+            height: 100%;
+            background: #007bff;
+            transition: width 0.3s;
+        }
+        
+        .image-upload-progress-text {
+            font-size: 0.8rem;
+            color: #666;
+            text-align: center;
         }
     </style>
-    <script>
-        function showSuccess() {
-            document.getElementById('success-message').style.display = 'block';
-            setTimeout(() => {
-                document.getElementById('success-message').style.display = 'none';
-            }, 3000);
-        }
-    </script>
 </head>
 <body>
     <%view navbar %>
 
     <h1>Configuration Options</h1>
     
-    <div id="success-message" class="success-message">
-        Options saved successfully!
+    <div id="success-message" class="page-message success">
+        <span>&#10003;</span> Options saved successfully!
     </div>
     
-    <div id="error-message" class="error-message"></div>
-
-    <div class="options-form">
-        <form id="optionsForm" onsubmit="event.preventDefault(); saveOptions();">
-            <%c++ 
-            auto options = @@.get<std::map<std::string, std::string>>("options");
-            for(const auto& option : options) {
-                const auto& key = option.first;
-                const auto& value = option.second;
-            %>
-                <div class="form-group" data-field-name="<%c++ $$ << key; %>">
-                    <div class="option-header">
-                        <label for="<%c++ $$ << key; %>"><%c++ $$ << key; %></label>
-                        <button type="button" class="help-button" data-target="modal-<%c++ $$ << key; %>">Help</button>
-                    </div>
-                    <%c++ if(key == "PROVISIONING_STYLE") { %>
-                    <select id="<%c++ $$ << key; %>" name="<%c++ $$ << key; %>" onblur="validateAndSaveField('<%c++ $$ << key; %>')">
-                        <option value="secure-boot" <%c++ if(value == "secure-boot") $$ << "selected"; %>>secure-boot</option>
-                        <option value="fde-only" <%c++ if(value == "fde-only") $$ << "selected"; %>>fde-only</option>
-                        <option value="naked" <%c++ if(value == "naked") $$ << "selected"; %>>naked</option>
-                    </select>
-                    <%c++ } else if(key == "RPI_DEVICE_STORAGE_TYPE") { %>
-                    <select id="<%c++ $$ << key; %>" name="<%c++ $$ << key; %>" onblur="validateAndSaveField('<%c++ $$ << key; %>')">
-                        <option value="sd" <%c++ if(value == "sd") $$ << "selected"; %>>sd</option>
-                        <option value="emmc" <%c++ if(value == "emmc") $$ << "selected"; %>>emmc</option>
-                        <option value="nvme" <%c++ if(value == "nvme") $$ << "selected"; %>>nvme</option>
-                    </select>
-                    <%c++ } else if(key == "RPI_DEVICE_STORAGE_CIPHER") { %>
-                    <select id="<%c++ $$ << key; %>" name="<%c++ $$ << key; %>" onblur="validateAndSaveField('<%c++ $$ << key; %>')">
-                        <option value="aes-xts-plain64" <%c++ if(value == "aes-xts-plain64") $$ << "selected"; %>>aes-xts-plain64</option>
-                        <option value="xchacha12,aes-adiantum-plain64" <%c++ if(value == "xchacha12,aes-adiantum-plain64") $$ << "selected"; %>>xchacha12,aes-adiantum-plain64</option>
-                    </select>
-                    <%c++ } else if(key == "RPI_DEVICE_FAMILY") { %>
-                    <select id="<%c++ $$ << key; %>" name="<%c++ $$ << key; %>" onblur="validateAndSaveField('<%c++ $$ << key; %>')">
-                        <option value="4" <%c++ if(value == "4") $$ << "selected"; %>>4</option>
-                        <option value="5" <%c++ if(value == "5") $$ << "selected"; %>>5</option>
-                        <option value="2W" <%c++ if(value == "2W") $$ << "selected"; %>>2W</option>
-                    </select>
-                    <%c++ } else if(key == "RPI_DEVICE_FIRMWARE_FILE") { %>
-                    <div>
-                        <input type="hidden" id="<%c++ $$ << key; %>" name="<%c++ $$ << key; %>" value="<%c++ $$ << value; %>">
-                        <%c++ if(!value.empty()) { %>
-                            <div style="margin-bottom: 10px; padding: 10px; background-color: #e9ecef; border-radius: 4px; font-size: 14px;">
-                                <strong>Currently selected:</strong><br>
-                                <code><%c++ $$ << value; %></code>
-                            </div>
-                        <%c++ } else { %>
-                            <div style="margin-bottom: 10px; padding: 10px; background-color: #fff3cd; border: 1px solid #ffeaa7; border-radius: 4px; font-size: 14px; color: #856404;">
-                                <strong>No firmware selected</strong> - System will use default firmware
-                            </div>
-                        <%c++ } %>
-                        <a href="/options/firmware" target="_blank" class="cust-btn cust-btn-primary">Select Firmware</a>
-                    </div>
-                    <%c++ } else if(key == "RPI_DEVICE_LOCK_JTAG" || key == "RPI_DEVICE_EEPROM_WP_SET") { %>
-                    <input type="checkbox" id="<%c++ $$ << key; %>" name="<%c++ $$ << key; %>" <%c++ if(!value.empty()) $$ << "checked"; %> onchange="validateAndSaveField('<%c++ $$ << key; %>')">
-                    <label for="<%c++ $$ << key; %>" style="font-weight: normal; display: inline;">Enable</label>
-                    <%c++ } else { %>
-                    <input type="text" id="<%c++ $$ << key; %>" name="<%c++ $$ << key; %>" value="<%c++ $$ << value; %>" onblur="validateAndSaveField('<%c++ $$ << key; %>')">
-                    <%c++ } %>
-                    <div id="feedback-<%c++ $$ << key; %>" class="field-feedback"></div>
-                </div>
-            <%c++ } %>
-            <button type="submit" class="cust-btn cust-btn-success cust-btn-lg">Save Options</button>
-        </form>
+    <div id="error-message" class="page-message error">
+        <span>&#10007;</span> <span id="error-text">Failed to save options</span>
     </div>
 
-    <!-- Modal Help Windows -->
     <%c++ 
-    for(const auto& option : options) {
-        const auto& key = option.first;
+    auto options = @@.get<std::map<std::string, std::string>>("options");
+    
+    // Extract values for use in the template
+    std::string provisioningStyle = options.count("PROVISIONING_STYLE") ? options["PROVISIONING_STYLE"] : "secure-boot";
+    std::string deviceFamily = options.count("RPI_DEVICE_FAMILY") ? options["RPI_DEVICE_FAMILY"] : "5";
+    std::string storageType = options.count("RPI_DEVICE_STORAGE_TYPE") ? options["RPI_DEVICE_STORAGE_TYPE"] : "sd";
+    std::string storageCipher = options.count("RPI_DEVICE_STORAGE_CIPHER") ? options["RPI_DEVICE_STORAGE_CIPHER"] : "aes-xts-plain64";
+    std::string keyFilePem = options.count("CUSTOMER_KEY_FILE_PEM") ? options["CUSTOMER_KEY_FILE_PEM"] : "";
+    std::string keyPkcs11 = options.count("CUSTOMER_KEY_PKCS11_NAME") ? options["CUSTOMER_KEY_PKCS11_NAME"] : "";
+    std::string goldMasterFile = options.count("GOLD_MASTER_OS_FILE") ? options["GOLD_MASTER_OS_FILE"] : "";
+    std::string bootloaderConfig = options.count("RPI_DEVICE_BOOTLOADER_CONFIG_FILE") ? options["RPI_DEVICE_BOOTLOADER_CONFIG_FILE"] : "";
+    std::string firmwareFile = options.count("RPI_DEVICE_FIRMWARE_FILE") ? options["RPI_DEVICE_FIRMWARE_FILE"] : "";
+    std::string workDir = options.count("RPI_SB_WORKDIR") ? options["RPI_SB_WORKDIR"] : "";
+    std::string mfgDb = options.count("RPI_SB_PROVISIONER_MANUFACTURING_DB") ? options["RPI_SB_PROVISIONER_MANUFACTURING_DB"] : "";
+    std::string keypairDir = options.count("RPI_DEVICE_RETRIEVE_KEYPAIR") ? options["RPI_DEVICE_RETRIEVE_KEYPAIR"] : "";
+    bool lockJtag = options.count("RPI_DEVICE_LOCK_JTAG") && !options["RPI_DEVICE_LOCK_JTAG"].empty();
+    bool eepromWp = options.count("RPI_DEVICE_EEPROM_WP_SET") && !options["RPI_DEVICE_EEPROM_WP_SET"].empty();
     %>
-    <div id="modal-<%c++ $$ << key; %>" class="modal">
-        <div class="modal-content">
-            <span class="close-modal">&times;</span>
-            <h3 class="modal-title"><%c++ $$ << key; %></h3>
-            <div class="modal-body">
-            <%c++ if(key == "PROVISIONING_STYLE") { %>
-                <p><strong>Mandatory, with a default</strong></p>
-                <p>Select the provisioning style you wish to use. Supported values are <code>secure-boot</code>, <code>fde-only</code> and <code>naked</code>.</p>
-                <p>If <code>PROVISIONING_STYLE</code> is not specified, it defaults to <code>secure-boot</code>.</p>
-            <%c++ } else if(key == "CUSTOMER_KEY_FILE_PEM") { %>
-                <p><strong>Optional, mandatory if CUSTOMER_KEY_PKCS11_NAME is not set</strong></p>
-                <p>The fully qualified path to your signing key. This file is expected to contain an RSA 2048-bit Private Key, encoded in PEM format.</p>
-                <p class="warning">This file should be considered key material, and should be protected while at rest and in use according to your threat model.</p>
-            <%c++ } else if(key == "CUSTOMER_KEY_PKCS11_NAME") { %>
-                <p><strong>Optional, mandatory if CUSTOMER_KEY_FILE_PEM is not set</strong></p>
-                <p>The keypair alias for a PKCS11 keypair, typically stored on a Hardware Security Module (HSM) and provided through a helper tool.</p>
-                <p>This is expected to act in place of the RSA 2048-bit Private key specified with CUSTOMER_KEY_FILE_PEM, and will be used as the signing device for all future pre-boot authentication images.</p>
-                <p>The value should take the format:</p>
-                <p><code>"pkcs11:object=&lt;keypair-alias&gt;;type=private"</code></p>
-                <p class="warning">You must use double quotes to enclose the value.</p>
-                <p class="warning">The PKCS11 provider, and it's associated HSM, should be considered key material and should be protected while at rest and in use according to your threat model.</p>
-            <%c++ } else if(key == "GOLD_MASTER_OS_FILE") { %>
-                <p><strong>Mandatory</strong></p>
-                <p>This should be your 'gold master' OS image.
-                <p>No customisation should be present in this image that you would not expect to be deployed to your entire fleet.</p>
-                <p><code>rpi-sb-provisioner</code> assumes this image has been created using <code>pi-gen</code>, and using a non-<code>pi-gen</code> image may produce undefined behaviour.</p>
-                <p class="warning">This file <strong>must</strong> be the uncompressed image.</p>
-            <%c++ } else if(key == "RPI_DEVICE_STORAGE_TYPE") { %>
-                <p><strong>Mandatory</strong></p>
-                <p>Specify the kind of storage your target will use. Supported values are:</p>
-                <ul>
-                    <li><code>sd</code> - SD card storage</li>
-                    <li><code>emmc</code> - eMMC storage</li>
-                    <li><code>nvme</code> - NVMe storage</li>
-                </ul>
-            <%c++ } else if(key == "RPI_DEVICE_STORAGE_CIPHER") { %>
-                <p><strong>Optional</strong></p>
-                <p>Specify the full-disk-encryption cipher.</p>
-                <p>Supported values are <code>aes-xts-plain64</code>, <code>xchacha12,aes-adiantum-plain64</code>.</p>
-                <p>If <code>RPI_DEVICE_STORAGE_CIPHER</code> is not specified, it defaults to <code>aes-xts-plain64</code>.</p>
-                <p><code>aes-xts-plain64</code> is recommended for Raspberry Pi 5 family devices (including Compute Module 5).</p>
-                <p>All other Raspberry Pi devices are recommended to use <code>xchacha12,aes-adiantum-plain64</code> for performance reasons.</p>
-            <%c++ } else if(key == "RPI_DEVICE_FAMILY") { %>
-                <p><strong>Mandatory</strong></p>
-                <p>Specify the family of Raspberry Pi device you are provisioning. Supported values are <code>4</code>, <code>5</code>, <code>2W</code>. For example,</p>
-                <ul>
-                    <li>A Raspberry Pi Compute Module 4 would be family <code>4</code></li>
-                    <li>A Raspberry Pi 5 would be family <code>5</code></li>
-                    <li>A Raspberry Pi Compute Module 5 would be family <code>5</code></li>
-                    <li>A Raspberry Pi Zero 2 W would be family <code>2W</code></li>
-                </ul>
-            <%c++ } else if(key == "RPI_DEVICE_BOOTLOADER_CONFIG_FILE") { %>
-                <p><strong>Mandatory, with a default</strong></p>
-                <p class="warning"><code>rpi-sb-provisioner</code> will ignore the Raspberry Pi Bootloader configuration built by <code>pi-gen</code>, and use the one provided in this variable.</p>
-                <p>Specify the Raspberry Pi Bootloader configuration you want your provisioned devices to use. A default is provided.</p>
-                <p>Further information on the format of this configuration file can be found in the Raspberry Pi Documentation, at <a href="https://www.raspberrypi.com/documentation/computers/config_txt.html" target="_blank">https://www.raspberrypi.com/documentation/computers/config_txt.html</a></p>
-            <%c++ } else if(key == "RPI_DEVICE_FIRMWARE_FILE") { %>
-                <p><strong>Optional</strong></p>
-                <p>Specify an explicit path to a specific pieeprom firmware file to use during provisioning.</p>
-                <p>When set, the provisioning system will use the exact firmware file specified. If not set, the system will automatically select the latest firmware from the 'default' release channel.</p>
-                <p>Example: <code>/lib/firmware/raspberrypi/bootloader-2712/default/pieeprom-2025-05-08.bin</code></p>
-                <p>This setting is typically configured through the firmware selection interface (click "Select Firmware" button) rather than manually entering a path.</p>
-                <p class="warning">Ensure the specified firmware file exists and is compatible with your target device family before provisioning.</p>
-            <%c++ } else if(key == "RPI_DEVICE_LOCK_JTAG") { %>
-                <p><strong>Optional</strong></p>
-                <p>Raspberry Pi devices have a mechanism to restrict JTAG access to the device.</p>
-                <p>Note that using this function will prevent Raspberry Pi engineers from being able to assist in debugging your device, should you request assitance.</p>
-                <p>Set to any value to enable the JTAG restrictions.</p>
-            <%c++ } else if(key == "RPI_DEVICE_EEPROM_WP_SET") { %>
-                <p><strong>Optional</strong></p>
-                <p>Raspberry Pi devices that use an EEPROM as part of their boot flow can configure that EEPROM to enable write protection - preventing modification.</p>
-                <p>Set to any value to enable EEPROM write protection.</p>
-            <%c++ } else if(key == "RPI_DEVICE_FETCH_METADATA") { %>
-                <p><strong>Deprecated</strong></p>
-                <p>This configuration option is no longer available. rpi-sb-provisioner will always collect metadata from each device that is provisioned.</p>
-                <p>Collected metadata includes board type, revision number, processor name, memory configuration, manufacturer information, and other device-specific details.</p>
-                <p>This data is automatically inserted into device logs and stored in the manufacturing database when configured with RPI_SB_PROVISIONER_MANUFACTURING_DB.</p>
-            <%c++ } else if(key == "RPI_DEVICE_RETRIEVE_KEYPAIR") { %>
-                <p><strong>Optional</strong></p>
-                <p>Specify a directory to copy the device unique keypair to. The keys will be named &lt;serial&gt;.der and &lt;serial&gt;.pub</p>
-                <p>Set to the path of a directory to use, otherwise keys will be stored alongside provisioning logs in a directory named "keypair".</p>
-                <p class="note">These keys are sensitive key material, and you must ensure they are handled appropriately.</p>
-            <%c++ } else if(key == "RPI_SB_WORKDIR") { %>
-                <p><strong>Optional</strong></p>
-                <p class="warning">If you do not set this variable, your modified OS intermediates will not be stored, and will be unavailable for inspection.</p>
-                <p>Set to a location to cache OS assets between provisioning sessions. Recommended for use in production. For example:</p>
-                <p><code>/srv/rpi-sb-provisioner/workdir</code></p>
-            <%c++ } else if(key == "RPI_SB_PROVISIONER_MANUFACTURING_DB") { %>
-                <p><strong>Mandatory</strong></p>
-                <p>Store manufacturing data in a sqlite3 database.</p>
-                <p>Set to the path of a file to contain a SQLite database stored on local storage.</p>
-                <p>Defaults to /srv/rpi-sb-provisioner/manufacturing.db</p>
-                <p>The manufacturing database will include:
-                <ul>
-                    <li>Board name</li>
-                    <li>Board serial</li>
-                    <li>Ethernet MAC address</li>
-                    <li>WiFi MAC Address (if populated)</li>
-                    <li>Bluetooth MAC Address (if populated)</li>
-                    <li>eMMC Size (in bytes)</li>
-                    <li>eMMC Card ID</li>
-                    <li>Raspberry Pi Device Unique Identifier</li>
-                    <li>Board revision</li>
-                    <li>The processor name</li>
-                    <li>The size of the fitted RAM</li>
-                    <li>The physical board manufacturer</li>
-                </ul>
-                </p>
-                <p>You must not specify the path of a database stored on a network drive or similar storage, as this mechanism is only safe to use on a single provisioning system.</p>
-                <p>For merging the output with multiple provisioning systems, consider "Processing the manufacturing database" later in the README.</p>
 
-            <%c++ } else { %>
-                <p>No specific documentation available for this option.</p>
-            <%c++ } %>
+    <form id="optionsForm" onsubmit="event.preventDefault(); saveAllOptions();">
+        
+        <!-- ===== SECTION 1: Target Device ===== -->
+        <div class="config-section">
+            <div class="section-header">
+                <h2 class="section-title">
+                    <span class="section-title-icon">&#128421;</span>
+                    Target Device
+                </h2>
+                <p class="section-description">Select the Raspberry Pi model you'll be provisioning.</p>
+            </div>
+            
+            <!-- Device Family Tiles -->
+            <div class="field-group">
+                <label class="field-label">Device Family</label>
+                <div class="tile-selector three-col">
+                    <label class="tile-option <%c++ if(deviceFamily == "5") $$ << "selected"; %>">
+                        <input type="radio" name="RPI_DEVICE_FAMILY" value="5" <%c++ if(deviceFamily == "5") $$ << "checked"; %>>
+                        <span class="tile-check">&#10003;</span>
+                        <div class="tile-header">
+                            <span class="tile-title">Raspberry Pi 5</span>
+                        </div>
+                        <p class="tile-description">Pi 5, Compute Module 5. Supports secure boot.</p>
+                    </label>
+                    
+                    <label class="tile-option <%c++ if(deviceFamily == "4") $$ << "selected"; %>">
+                        <input type="radio" name="RPI_DEVICE_FAMILY" value="4" <%c++ if(deviceFamily == "4") $$ << "checked"; %>>
+                        <span class="tile-check">&#10003;</span>
+                        <div class="tile-header">
+                            <span class="tile-title">Raspberry Pi 4</span>
+                        </div>
+                        <p class="tile-description">Pi 4, Compute Module 4. Supports secure boot.</p>
+                    </label>
+                    
+                    <label class="tile-option <%c++ if(deviceFamily == "2W") $$ << "selected"; %>">
+                        <input type="radio" name="RPI_DEVICE_FAMILY" value="2W" <%c++ if(deviceFamily == "2W") $$ << "checked"; %>>
+                        <span class="tile-check">&#10003;</span>
+                        <div class="tile-header">
+                            <span class="tile-title">Zero 2 W</span>
+                        </div>
+                        <p class="tile-description">Zero 2 W. FDE and naked provisioning only.</p>
+                        <span class="tile-badge warning">No secure boot</span>
+                    </label>
+                </div>
+            </div>
+            
+            <!-- Storage Type Tiles -->
+            <div class="field-group">
+                <label class="field-label">Storage Type</label>
+                <div class="tile-selector <%c++ if(deviceFamily == "2W") $$ << "two-col"; else $$ << "three-col"; %>" id="storage-type-selector">
+                    <label class="tile-option <%c++ if(storageType == "sd") $$ << "selected"; %>" id="sd-tile">
+                        <input type="radio" name="RPI_DEVICE_STORAGE_TYPE" value="sd" <%c++ if(storageType == "sd") $$ << "checked"; %>>
+                        <span class="tile-check">&#10003;</span>
+                        <div class="tile-header">
+                            <span class="tile-title">SD Card</span>
+                        </div>
+                        <p class="tile-description">Standard microSD card storage.</p>
+                    </label>
+                    
+                    <label class="tile-option <%c++ if(storageType == "emmc") $$ << "selected"; %>" id="emmc-tile">
+                        <input type="radio" name="RPI_DEVICE_STORAGE_TYPE" value="emmc" <%c++ if(storageType == "emmc") $$ << "checked"; %>>
+                        <span class="tile-check">&#10003;</span>
+                        <div class="tile-header">
+                            <span class="tile-title">eMMC</span>
+                        </div>
+                        <p class="tile-description">Embedded flash storage on Compute Modules.</p>
+                    </label>
+                    
+                    <label class="tile-option <%c++ if(storageType == "nvme") $$ << "selected"; %>" id="nvme-tile" <%c++ if(deviceFamily == "2W") $$ << "style=\"display: none;\""; %>>
+                        <input type="radio" name="RPI_DEVICE_STORAGE_TYPE" value="nvme" <%c++ if(storageType == "nvme") $$ << "checked"; %>>
+                        <span class="tile-check">&#10003;</span>
+                        <div class="tile-header">
+                            <span class="tile-title">NVMe</span>
+                        </div>
+                        <p class="tile-description">NVMe SSD storage. Requires Pi 5 or HAT.</p>
+                    </label>
+                </div>
             </div>
         </div>
-    </div>
-    <%c++ } %>
+        
+        <!-- ===== SECTION 2: Security Configuration ===== -->
+        <div class="config-section">
+            <div class="section-header">
+                <h2 class="section-title">
+                    <span class="section-title-icon">&#128274;</span>
+                    Security Configuration
+                </h2>
+                <p class="section-description">Choose your provisioning security model.</p>
+            </div>
+            
+            <!-- Provisioning Style Tiles -->
+            <div class="field-group">
+                <label class="field-label">Provisioning Style</label>
+                <div class="tile-selector <%c++ if(deviceFamily == "2W") $$ << "two-col"; else $$ << "three-col"; %>" id="provisioning-style-selector">
+                    <label class="tile-option <%c++ if(provisioningStyle == "secure-boot") $$ << "selected"; %>" id="secure-boot-tile" <%c++ if(deviceFamily == "2W") $$ << "style=\"display: none;\""; %>>
+                        <input type="radio" name="PROVISIONING_STYLE" value="secure-boot" <%c++ if(provisioningStyle == "secure-boot") $$ << "checked"; %>>
+                        <span class="tile-check">&#10003;</span>
+                        <div class="tile-header">
+                            <span class="tile-title">Secure Boot</span>
+                        </div>
+                        <p class="tile-description">Signed bootloader chain with encrypted storage. Devices only boot verified, signed code.</p>
+                        <span class="tile-badge recommended">Recommended</span>
+                    </label>
+                    
+                    <label class="tile-option <%c++ if(provisioningStyle == "fde-only") $$ << "selected"; %>" id="fde-only-tile">
+                        <input type="radio" name="PROVISIONING_STYLE" value="fde-only" <%c++ if(provisioningStyle == "fde-only") $$ << "checked"; %>>
+                        <span class="tile-check">&#10003;</span>
+                        <div class="tile-header">
+                            <span class="tile-title">FDE Only</span>
+                        </div>
+                        <p class="tile-description">Full-disk encryption protects data at rest. No boot-time code verification.</p>
+                        <div class="tile-warning caution">
+                            <strong>No secure boot chain.</strong> Does not protect against SD card swapping or man-in-the-middle attacks.
+                        </div>
+                    </label>
+                    
+                    <label class="tile-option <%c++ if(provisioningStyle == "naked") $$ << "selected"; %>" id="naked-tile">
+                        <input type="radio" name="PROVISIONING_STYLE" value="naked" <%c++ if(provisioningStyle == "naked") $$ << "checked"; %>>
+                        <span class="tile-check">&#10003;</span>
+                        <div class="tile-header">
+                            <span class="tile-title">Naked</span>
+                        </div>
+                        <p class="tile-description">Basic provisioning without encryption or boot verification.</p>
+                        <span class="tile-badge danger">No security</span>
+                        <div class="tile-warning danger">
+                            <strong>Not recommended for production.</strong> No encryption, no boot verification. Use only for development.
+                        </div>
+                    </label>
+                </div>
+                
+                <!-- Notice when secure boot is unavailable -->
+                <div class="inline-help" id="no-secure-boot-notice" <%c++ if(deviceFamily != "2W") $$ << "style=\"display: none;\""; %>>
+                    <span class="inline-help-icon">&#9432;</span>
+                    <span>Secure Boot is not available for Zero 2 W. Select FDE Only or Naked provisioning.</span>
+                </div>
+            </div>
+            
+            <!-- Encryption Cipher Tiles -->
+            <div class="field-group" id="cipher-group">
+                <label class="field-label">Encryption Cipher</label>
+                <div class="tile-selector two-col">
+                    <label class="tile-option <%c++ if(storageCipher == "aes-xts-plain64") $$ << "selected"; %>">
+                        <input type="radio" name="RPI_DEVICE_STORAGE_CIPHER" value="aes-xts-plain64" <%c++ if(storageCipher == "aes-xts-plain64") $$ << "checked"; %>>
+                        <span class="tile-check">&#10003;</span>
+                        <div class="tile-header">
+                            <span class="tile-title">AES-XTS</span>
+                        </div>
+                        <p class="tile-description">Hardware-accelerated on Pi 5. Software fallback on other devices.</p>
+                        <span class="tile-badge recommended" id="aes-badge">Best for Pi 5</span>
+                    </label>
+                    
+                    <label class="tile-option <%c++ if(storageCipher == "xchacha12,aes-adiantum-plain64") $$ << "selected"; %>">
+                        <input type="radio" name="RPI_DEVICE_STORAGE_CIPHER" value="xchacha12,aes-adiantum-plain64" <%c++ if(storageCipher == "xchacha12,aes-adiantum-plain64") $$ << "checked"; %>>
+                        <span class="tile-check">&#10003;</span>
+                        <div class="tile-header">
+                            <span class="tile-title">Adiantum</span>
+                        </div>
+                        <p class="tile-description">Optimized for devices without AES hardware acceleration.</p>
+                        <span class="tile-badge recommended" id="adiantum-badge">Best for Pi 4 / Zero 2</span>
+                    </label>
+                </div>
+            </div>
+            
+            <!-- Key Configuration (Secure Boot only) -->
+            <div class="field-group" id="key-config-group">
+                <label class="field-label">Bootloader Signing Key (RSA 2048-bit)</label>
+                <div class="key-config-container">
+                    <div class="key-tabs">
+                        <button type="button" class="key-tab <%c++ if(keyPkcs11.empty()) $$ << "active"; %>" data-tab="pem">
+                            <span class="key-tab-icon">&#128196;</span>
+                            PEM Key File
+                        </button>
+                        <button type="button" class="key-tab <%c++ if(!keyPkcs11.empty()) $$ << "active"; %>" data-tab="pkcs11">
+                            <span class="key-tab-icon">&#128273;</span>
+                            PKCS#11 / HSM
+                        </button>
+                    </div>
+                    
+                    <div class="key-panel <%c++ if(keyPkcs11.empty()) $$ << "active"; %>" data-panel="pem">
+                        <div class="file-upload-zone <%c++ if(!keyFilePem.empty()) $$ << "has-file"; %>" id="key-upload-zone">
+                            <div class="upload-icon">&#128196;</div>
+                            <div class="upload-text">Drop your PEM key file here or click to browse</div>
+                            <div class="upload-hint">RSA 2048-bit Private Key in PEM format</div>
+                            <input type="file" id="key-file-input" accept=".pem,.key" style="display: none;">
+                        </div>
+                        <%c++ if(!keyFilePem.empty()) { %>
+                        <div class="current-file-display" id="current-key-display">
+                            <span class="current-file-icon">&#128273;</span>
+                            <div class="current-file-info">
+                                <div class="current-file-name">Key file configured</div>
+                                <div class="current-file-path"><%c++ $$ << keyFilePem; %></div>
+                            </div>
+                            <button type="button" class="remove-file-btn" onclick="removeKeyFile()">&#10005;</button>
+                        </div>
+                        <%c++ } %>
+                        <input type="hidden" name="CUSTOMER_KEY_FILE_PEM" id="CUSTOMER_KEY_FILE_PEM" value="<%c++ $$ << keyFilePem; %>">
+                        
+                        <div class="inline-warning">
+                            <span class="inline-warning-icon">&#9888;</span>
+                            <span>This is sensitive key material. Protect according to your threat model.</span>
+                        </div>
+                    </div>
+                    
+                    <div class="key-panel <%c++ if(!keyPkcs11.empty()) $$ << "active"; %>" data-panel="pkcs11">
+                        <div class="pkcs11-builder">
+                            <div class="pkcs11-input-group">
+                                <label for="pkcs11-alias">Keypair Alias</label>
+                                <input type="text" id="pkcs11-alias" placeholder="e.g., my-signing-key" oninput="updatePkcs11Preview()">
+                            </div>
+                            
+                            <div class="pkcs11-preview" id="pkcs11-preview">
+                                <div class="pkcs11-preview-label">Generated PKCS#11 URI:</div>
+                                <code id="pkcs11-uri">pkcs11:object=<em>&lt;alias&gt;</em>;type=private</code>
+                            </div>
+                            
+                            <input type="hidden" name="CUSTOMER_KEY_PKCS11_NAME" id="CUSTOMER_KEY_PKCS11_NAME" value="<%c++ $$ << keyPkcs11; %>">
+                        </div>
+                        
+                        <div class="inline-warning">
+                            <span class="inline-warning-icon">&#9888;</span>
+                            <span>The HSM and PKCS#11 provider should be protected according to your threat model.</span>
+                        </div>
+                        
+                        <div class="inline-help">
+                            <span class="inline-help-icon">&#9432;</span>
+                            <span>PKCS#11 keys are typically stored on a Hardware Security Module (HSM). Enter only the keypair alias - the full URI will be generated automatically.</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="inline-help">
+                    <span class="inline-help-icon">&#9432;</span>
+                    <span>This RSA private key is used to sign the bootloader. The corresponding public key will be fused into the device's OTP during provisioning.</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- ===== SECTION 3: OS Image & Firmware ===== -->
+        <div class="config-section">
+            <div class="section-header">
+                <h2 class="section-title">
+                    <span class="section-title-icon">&#128190;</span>
+                    OS Image &amp; Firmware
+                </h2>
+                <p class="section-description">Configure the operating system image and device firmware.</p>
+            </div>
+            
+            <!-- Gold Master Image -->
+            <div class="field-group">
+                <label class="field-label">Gold Master OS Image</label>
+                <input type="hidden" name="GOLD_MASTER_OS_FILE" id="GOLD_MASTER_OS_FILE" value="<%c++ $$ << goldMasterFile; %>">
+                
+                <!-- Image Browser -->
+                <div class="image-browser-container">
+                    <div class="image-browser-header">
+                        <h4>Available Images</h4>
+                        <div class="image-browser-actions">
+                            <button type="button" class="image-upload-btn" onclick="toggleImageUpload()">Upload New Image</button>
+                        </div>
+                    </div>
+                    
+                    <!-- Upload Zone (hidden by default) -->
+                    <div id="image-upload-container" style="display: none;">
+                        <div class="image-upload-zone" id="image-upload-zone">
+                            <div>Drop an .img file here or click to browse</div>
+                            <div style="font-size: 0.8rem; color: #888; margin-top: 8px;">Uncompressed disk image (.img)</div>
+                            <input type="file" id="image-file-input" accept=".img" style="display: none;">
+                        </div>
+                        <div id="image-upload-progress" class="image-upload-progress" style="display: none;">
+                            <div class="image-upload-progress-bar">
+                                <div class="image-upload-progress-fill" id="image-upload-fill" style="width: 0%;"></div>
+                            </div>
+                            <div class="image-upload-progress-text" id="image-upload-text">Uploading...</div>
+                        </div>
+                    </div>
+                    
+                    <!-- Two-column browser content -->
+                    <div class="firmware-browser-content">
+                        <div class="firmware-list-container">
+                            <div class="firmware-list-header">
+                                <h4>Images</h4>
+                                <div class="firmware-loading" id="image-loading">Loading...</div>
+                            </div>
+                            <div class="image-list" id="image-list">
+                                <!-- Populated by JavaScript -->
+                            </div>
+                        </div>
+                        <div class="firmware-notes-container">
+                            <h4>Image Details</h4>
+                            <div class="firmware-notes" id="image-details">
+                                <div class="firmware-notes-placeholder">
+                                    Select an image to view details
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="inline-help">
+                    <span class="inline-help-icon">&#9432;</span>
+                    <span>Select a base OS image. Images are stored in /srv/rpi-sb-provisioner/images/ and must be uncompressed .img files.</span>
+                </div>
+            </div>
+            
+            <!-- Firmware Selection - Inline Browser -->
+            <div class="field-group">
+                <label class="field-label">Device Firmware <span class="optional-badge">Optional</span></label>
+                <input type="hidden" id="RPI_DEVICE_FIRMWARE_FILE" name="RPI_DEVICE_FIRMWARE_FILE" value="<%c++ $$ << firmwareFile; %>">
+                
+                <!-- Expand/Collapse Button -->
+                <button type="button" class="firmware-expand-btn" id="firmware-expand-btn" onclick="toggleFirmwareBrowser()">
+                    <span class="expand-icon" id="expand-icon">&#9660;</span>
+                    Browse Available Firmware
+                </button>
+                
+                <!-- Expandable Firmware Browser -->
+                <div class="firmware-browser" id="firmware-browser" style="display: none;">
+                    <div class="firmware-browser-content">
+                        <div class="firmware-list-container">
+                            <div class="firmware-list-header">
+                                <h4>Available Versions</h4>
+                                <div class="firmware-loading" id="firmware-loading">Loading...</div>
+                            </div>
+                            <div class="firmware-list" id="firmware-list">
+                                <!-- Populated by JavaScript -->
+                            </div>
+                        </div>
+                        <div class="firmware-notes-container">
+                            <h4>Release Notes</h4>
+                            <div class="firmware-notes" id="firmware-notes">
+                                <div class="firmware-notes-placeholder">
+                                    Select a firmware version to view release notes
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Bootloader Config -->
+            <div class="field-group">
+                <label class="field-label" for="RPI_DEVICE_BOOTLOADER_CONFIG_FILE">Bootloader Configuration <span class="optional-badge">Optional</span></label>
+                <input type="text" class="field-input" id="RPI_DEVICE_BOOTLOADER_CONFIG_FILE" name="RPI_DEVICE_BOOTLOADER_CONFIG_FILE" 
+                       value="<%c++ $$ << bootloaderConfig; %>" 
+                       placeholder="Leave blank to use default"
+                       onblur="validateAndSaveField('RPI_DEVICE_BOOTLOADER_CONFIG_FILE')">
+                <div id="feedback-RPI_DEVICE_BOOTLOADER_CONFIG_FILE" class="field-feedback"></div>
+                
+                <div class="inline-help">
+                    <span class="inline-help-icon">&#9432;</span>
+                    <span>Custom bootloader configuration file. A sensible default is provided if not specified.</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- ===== SECTION 4: Storage & Output ===== -->
+        <div class="config-section">
+            <div class="section-header">
+                <h2 class="section-title">
+                    <span class="section-title-icon">&#128193;</span>
+                    Storage &amp; Output
+                </h2>
+                <p class="section-description">Configure where provisioning data and logs are stored.</p>
+            </div>
+            
+            <!-- Work Directory -->
+            <div class="field-group">
+                <label class="field-label" for="RPI_SB_WORKDIR">Work Directory <span class="optional-badge">Recommended</span></label>
+                <input type="text" class="field-input" id="RPI_SB_WORKDIR" name="RPI_SB_WORKDIR" 
+                       value="<%c++ $$ << workDir; %>" 
+                       placeholder="/srv/rpi-sb-provisioner/workdir"
+                       onblur="validateAndSaveField('RPI_SB_WORKDIR')">
+                <div id="feedback-RPI_SB_WORKDIR" class="field-feedback"></div>
+                
+                <div class="inline-help">
+                    <span class="inline-help-icon">&#9432;</span>
+                    <span>Cache location for OS assets between provisioning sessions. Recommended for production use.</span>
+                </div>
+            </div>
+            
+            <!-- Manufacturing Database -->
+            <div class="field-group">
+                <label class="field-label" for="RPI_SB_PROVISIONER_MANUFACTURING_DB">Manufacturing Database</label>
+                <input type="text" class="field-input" id="RPI_SB_PROVISIONER_MANUFACTURING_DB" name="RPI_SB_PROVISIONER_MANUFACTURING_DB" 
+                       value="<%c++ $$ << mfgDb; %>" 
+                       placeholder="/srv/rpi-sb-provisioner/manufacturing.db"
+                       onblur="validateAndSaveField('RPI_SB_PROVISIONER_MANUFACTURING_DB')">
+                <div id="feedback-RPI_SB_PROVISIONER_MANUFACTURING_DB" class="field-feedback"></div>
+                
+                <div class="inline-help">
+                    <span class="inline-help-icon">&#9432;</span>
+                    <span>SQLite database storing device info: serial numbers, MAC addresses, hardware details. Use local storage only.</span>
+                </div>
+            </div>
+            
+            <!-- Keypair Retrieval Directory -->
+            <div class="field-group">
+                <label class="field-label" for="RPI_DEVICE_RETRIEVE_KEYPAIR">Keypair Storage Directory <span class="optional-badge">Optional</span></label>
+                <input type="text" class="field-input" id="RPI_DEVICE_RETRIEVE_KEYPAIR" name="RPI_DEVICE_RETRIEVE_KEYPAIR" 
+                       value="<%c++ $$ << keypairDir; %>" 
+                       placeholder="Leave blank to store with logs"
+                       onblur="validateAndSaveField('RPI_DEVICE_RETRIEVE_KEYPAIR')">
+                <div id="feedback-RPI_DEVICE_RETRIEVE_KEYPAIR" class="field-feedback"></div>
+                
+                <div class="inline-warning">
+                    <span class="inline-warning-icon">&#9888;</span>
+                    <span>Device keypairs are sensitive material. Ensure appropriate access controls.</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- ===== SECTION 5: Hardware Security ===== -->
+        <div class="config-section">
+            <div class="section-header">
+                <h2 class="section-title">
+                    <span class="section-title-icon">&#128737;</span>
+                    Hardware Security
+                </h2>
+                <p class="section-description">Optional hardware-level security features. These settings are permanent on the device.</p>
+            </div>
+            
+            <!-- JTAG Lock Toggle -->
+            <div class="toggle-group">
+                <label class="toggle-switch">
+                    <input type="checkbox" id="RPI_DEVICE_LOCK_JTAG" name="RPI_DEVICE_LOCK_JTAG" <%c++ if(lockJtag) $$ << "checked"; %> onchange="validateAndSaveField('RPI_DEVICE_LOCK_JTAG')">
+                    <span class="toggle-slider"></span>
+                </label>
+                <div class="toggle-content">
+                    <div class="toggle-title">Lock JTAG Access</div>
+                    <div class="toggle-description">Restricts JTAG debugging access to the device. Note: This prevents Raspberry Pi engineers from assisting with hardware debugging.</div>
+                </div>
+            </div>
+            
+            <!-- EEPROM Write Protection Toggle -->
+            <div class="toggle-group">
+                <label class="toggle-switch">
+                    <input type="checkbox" id="RPI_DEVICE_EEPROM_WP_SET" name="RPI_DEVICE_EEPROM_WP_SET" <%c++ if(eepromWp) $$ << "checked"; %> onchange="validateAndSaveField('RPI_DEVICE_EEPROM_WP_SET')">
+                    <span class="toggle-slider"></span>
+                </label>
+                <div class="toggle-content">
+                    <div class="toggle-title">Enable EEPROM Write Protection</div>
+                    <div class="toggle-description">Prevents modification of the device's boot EEPROM after provisioning. Protects the secure boot configuration.</div>
+                </div>
+            </div>
+            
+            <div class="inline-warning">
+                <span class="inline-warning-icon">&#9888;</span>
+                <span><strong>Warning:</strong> These security settings are permanent and cannot be reversed. Enable only when you're certain of your configuration.</span>
+            </div>
+        </div>
+        
+        <!-- Save Button -->
+        <div class="save-section">
+            <button type="submit" class="cust-btn cust-btn-success save-btn">Save All Options</button>
+        </div>
+    </form>
 
     <script>
-        // Set up modal help sections
-        const helpButtons = document.querySelectorAll('.help-button');
-        const modals = document.querySelectorAll('.modal');
-        const closeButtons = document.querySelectorAll('.close-modal');
+        // ===== CSRF Token Management =====
+        let csrfToken = null;
         
-        helpButtons.forEach(button => {
-            button.addEventListener('click', function() {
-                const targetModalId = this.getAttribute('data-target');
-                document.getElementById(targetModalId).style.display = 'block';
-            });
-        });
+        async function fetchCsrfToken() {
+            try {
+                const response = await fetch('/options/csrf-token');
+                if (response.ok) {
+                    const data = await response.json();
+                    csrfToken = data.token;
+                    console.log('CSRF token obtained');
+                    return csrfToken;
+                }
+            } catch (error) {
+                console.error('Failed to fetch CSRF token:', error);
+            }
+            return null;
+        }
         
-        closeButtons.forEach(button => {
-            button.addEventListener('click', function() {
-                const modal = this.closest('.modal');
-                modal.style.display = 'none';
-            });
-        });
+        // Fetch CSRF token on page load
+        fetchCsrfToken();
         
-        // Close modal when clicking outside of modal content
-        window.addEventListener('click', function(event) {
-            modals.forEach(modal => {
-                if (event.target == modal) {
-                    modal.style.display = 'none';
+        // Helper to add CSRF token to fetch options
+        function addCsrfHeader(options = {}) {
+            // Ensure headers object exists
+            if (!options.headers) {
+                options.headers = {};
+            }
+            
+            // Add CSRF token if available
+            if (csrfToken) {
+                options.headers['X-CSRF-Token'] = csrfToken;
+            } else {
+                console.warn('CSRF token not available yet');
+            }
+            
+            return options;
+        }
+        
+        // ===== Tile Selection Logic =====
+        document.querySelectorAll('.tile-option').forEach(tile => {
+            tile.addEventListener('click', function() {
+                const container = this.closest('.tile-selector');
+                container.querySelectorAll('.tile-option').forEach(t => t.classList.remove('selected'));
+                this.classList.add('selected');
+                
+                const radio = this.querySelector('input[type="radio"]');
+                if (radio) {
+                    radio.checked = true;
+                    validateAndSaveField(radio.name);
+                }
+                
+                // Update cipher recommendations, provisioning options, and storage options when device family changes
+                if (radio && radio.name === 'RPI_DEVICE_FAMILY') {
+                    updateCipherRecommendations(radio.value);
+                    updateProvisioningStyleOptions(radio.value);
+                    updateStorageTypeOptions(radio.value);
+                }
+                
+                // Show/hide key config and cipher based on provisioning style
+                if (radio && radio.name === 'PROVISIONING_STYLE') {
+                    updateSecurityVisibility(radio.value);
                 }
             });
         });
         
-        // Function to show field feedback
-        function showFieldFeedback(fieldName, type, message) {
-            const feedbackDiv = document.getElementById('feedback-' + fieldName);
-            const fieldElement = document.getElementById(fieldName);
-            
-            if (!feedbackDiv) return;
-            
-            // Clear previous classes
-            feedbackDiv.className = 'field-feedback';
-            if (fieldElement) {
-                fieldElement.classList.remove('valid', 'invalid', 'validating');
-            }
-            
-            // Add appropriate class and content
-            if (type === 'error') {
-                feedbackDiv.classList.add('error');
-                feedbackDiv.innerHTML = '<span class="field-feedback-icon">✗</span>' + message;
-                if (fieldElement) fieldElement.classList.add('invalid');
-            } else if (type === 'success') {
-                feedbackDiv.classList.add('success');
-                feedbackDiv.innerHTML = '<span class="field-feedback-icon">✓</span>' + message;
-                if (fieldElement) fieldElement.classList.add('valid');
+        // ===== Key Tab Switching =====
+        document.querySelectorAll('.key-tab').forEach(tab => {
+            tab.addEventListener('click', function() {
+                const tabName = this.getAttribute('data-tab');
                 
-                // Auto-hide success message after 3 seconds
-                setTimeout(() => {
-                    feedbackDiv.style.display = 'none';
-                    if (fieldElement) fieldElement.classList.remove('valid');
-                }, 3000);
-            } else if (type === 'info') {
-                feedbackDiv.classList.add('info');
-                feedbackDiv.innerHTML = '<span class="field-feedback-icon">ⓘ</span>' + message;
-            } else if (type === 'validating') {
-                feedbackDiv.classList.add('validating');
-                feedbackDiv.innerHTML = '<span class="field-feedback-icon">⟳</span>' + message;
-                if (fieldElement) fieldElement.classList.add('validating');
-            }
+                document.querySelectorAll('.key-tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.key-panel').forEach(p => p.classList.remove('active'));
+                
+                this.classList.add('active');
+                document.querySelector(`.key-panel[data-panel="${tabName}"]`).classList.add('active');
+                
+                // Clear the other key type when switching
+                if (tabName === 'pem') {
+                    document.getElementById('CUSTOMER_KEY_PKCS11_NAME').value = '';
+                } else {
+                    document.getElementById('CUSTOMER_KEY_FILE_PEM').value = '';
+                }
+            });
+        });
+        
+        // ===== File Upload Zone =====
+        const keyUploadZone = document.getElementById('key-upload-zone');
+        const keyFileInput = document.getElementById('key-file-input');
+        
+        if (keyUploadZone) {
+            keyUploadZone.addEventListener('click', () => keyFileInput.click());
+            
+            keyUploadZone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                keyUploadZone.classList.add('dragover');
+            });
+            
+            keyUploadZone.addEventListener('dragleave', () => {
+                keyUploadZone.classList.remove('dragover');
+            });
+            
+            keyUploadZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                keyUploadZone.classList.remove('dragover');
+                if (e.dataTransfer.files.length > 0) {
+                    handleKeyFileUpload(e.dataTransfer.files[0]);
+                }
+            });
+            
+            keyFileInput.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    handleKeyFileUpload(e.target.files[0]);
+                }
+            });
         }
         
-        // Function to hide field feedback
-        function hideFieldFeedback(fieldName) {
-            const feedbackDiv = document.getElementById('feedback-' + fieldName);
-            const fieldElement = document.getElementById(fieldName);
+        async function handleKeyFileUpload(file) {
+            // Upload the file to the server
+            const formData = new FormData();
+            formData.append('keyfile', file);
             
-            if (feedbackDiv) {
-                feedbackDiv.style.display = 'none';
-                feedbackDiv.className = 'field-feedback';
-            }
-            
-            if (fieldElement) {
-                fieldElement.classList.remove('valid', 'invalid', 'validating');
-            }
-        }
-        
-        // Function to validate a single field
-        async function validateField(fieldName, fieldValue) {
             try {
-                const response = await fetch('/options/validate', {
+                // For FormData, we only add the CSRF header, not Content-Type
+                const fetchOptions = {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        field: fieldName,
-                        value: fieldValue
-                    })
-                });
-
+                    body: formData
+                };
+                if (csrfToken) {
+                    fetchOptions.headers = { 'X-CSRF-Token': csrfToken };
+                }
+                
+                const response = await fetch('/options/upload-key', fetchOptions);
+                
                 if (response.ok) {
                     const result = await response.json();
-                    return result;
+                    document.getElementById('CUSTOMER_KEY_FILE_PEM').value = result.path;
+                    
+                    // Update UI to show the file
+                    keyUploadZone.classList.add('has-file');
+                    
+                    // Create or update the file display using safe DOM methods
+                    let display = document.getElementById('current-key-display');
+                    if (!display) {
+                        display = document.createElement('div');
+                        display.id = 'current-key-display';
+                        display.className = 'current-file-display';
+                        keyUploadZone.parentNode.insertBefore(display, keyUploadZone.nextSibling);
+                    }
+                    
+                    // Build display safely with DOM methods to prevent XSS
+                    display.innerHTML = '';
+                    
+                    const icon = document.createElement('span');
+                    icon.className = 'current-file-icon';
+                    icon.innerHTML = '&#128273;';
+                    
+                    const info = document.createElement('div');
+                    info.className = 'current-file-info';
+                    
+                    const nameDiv = document.createElement('div');
+                    nameDiv.className = 'current-file-name';
+                    nameDiv.textContent = file.name; // Safe: textContent escapes HTML
+                    
+                    const pathDiv = document.createElement('div');
+                    pathDiv.className = 'current-file-path';
+                    pathDiv.textContent = result.path; // Safe: textContent escapes HTML
+                    
+                    info.appendChild(nameDiv);
+                    info.appendChild(pathDiv);
+                    
+                    const removeBtn = document.createElement('button');
+                    removeBtn.type = 'button';
+                    removeBtn.className = 'remove-file-btn';
+                    removeBtn.innerHTML = '&#10005;';
+                    removeBtn.onclick = removeKeyFile;
+                    
+                    display.appendChild(icon);
+                    display.appendChild(info);
+                    display.appendChild(removeBtn);
+                    
+                    showSuccess('Key file uploaded successfully');
                 } else {
-                    return { valid: false, error: 'Validation request failed' };
+                    const errorData = await response.json().catch(() => ({}));
+                    showError(errorData.message || 'Failed to upload key file');
                 }
             } catch (error) {
-                console.error('Validation error:', error);
-                return { valid: false, error: 'Network error during validation' };
+                console.error('Key upload error:', error);
+                showError('Failed to upload key file: ' + (error.message || 'Network error'));
             }
         }
         
-        // Function to save a single field
-        async function saveField(fieldName, fieldValue) {
-            const options = {};
-            options[fieldName] = fieldValue;
+        function removeKeyFile() {
+            document.getElementById('CUSTOMER_KEY_FILE_PEM').value = '';
+            document.getElementById('key-upload-zone').classList.remove('has-file');
+            const display = document.getElementById('current-key-display');
+            if (display) display.remove();
+            validateAndSaveField('CUSTOMER_KEY_FILE_PEM');
+        }
+        
+        // ===== PKCS#11 URI Builder =====
+        function updatePkcs11Preview() {
+            const alias = document.getElementById('pkcs11-alias').value.trim();
+            const uriElement = document.getElementById('pkcs11-uri');
+            const hiddenInput = document.getElementById('CUSTOMER_KEY_PKCS11_NAME');
             
-            try {
-                const response = await fetch('/options/set', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify(options)
-                });
-
-                return response.ok;
-            } catch (error) {
-                console.error('Save error:', error);
-                return false;
+            if (alias) {
+                const uri = `pkcs11:object=${alias};type=private`;
+                uriElement.innerHTML = uri;
+                hiddenInput.value = uri;
+            } else {
+                uriElement.innerHTML = 'pkcs11:object=<em>&lt;alias&gt;</em>;type=private';
+                hiddenInput.value = '';
             }
         }
         
-        // Main function to validate and save a field on blur
+        // Initialize PKCS11 alias from existing value
+        (function initPkcs11() {
+            const existingValue = document.getElementById('CUSTOMER_KEY_PKCS11_NAME').value;
+            if (existingValue) {
+                const match = existingValue.match(/object=([^;]+)/);
+                if (match) {
+                    document.getElementById('pkcs11-alias').value = match[1];
+                    updatePkcs11Preview();
+                }
+            }
+        })();
+        
+        // ===== Cipher Recommendations =====
+        function updateCipherRecommendations(deviceFamily, autoSelect = true) {
+            const aesBadge = document.getElementById('aes-badge');
+            const adiantumBadge = document.getElementById('adiantum-badge');
+            const aesTile = aesBadge.closest('.tile-option');
+            const adiantumTile = adiantumBadge.closest('.tile-option');
+            
+            if (deviceFamily === '5') {
+                aesBadge.textContent = 'Recommended';
+                aesBadge.className = 'tile-badge recommended';
+                adiantumBadge.textContent = 'Works, but slower';
+                adiantumBadge.className = 'tile-badge info';
+                
+                // Auto-select AES-XTS for Pi 5
+                if (autoSelect) {
+                    const aesInput = aesTile.querySelector('input[type="radio"]');
+                    aesInput.checked = true;
+                    aesTile.classList.add('selected');
+                    adiantumTile.classList.remove('selected');
+                    validateAndSaveField('RPI_DEVICE_STORAGE_CIPHER');
+                }
+            } else {
+                aesBadge.textContent = 'Works, but slower';
+                aesBadge.className = 'tile-badge info';
+                adiantumBadge.textContent = 'Recommended';
+                adiantumBadge.className = 'tile-badge recommended';
+                
+                // Auto-select Adiantum for Pi 4 / Zero 2 W
+                if (autoSelect) {
+                    const adiantumInput = adiantumTile.querySelector('input[type="radio"]');
+                    adiantumInput.checked = true;
+                    adiantumTile.classList.add('selected');
+                    aesTile.classList.remove('selected');
+                    validateAndSaveField('RPI_DEVICE_STORAGE_CIPHER');
+                }
+            }
+        }
+        
+        // ===== Security Feature Visibility =====
+        // Device families that support secure boot
+        const secureBootSupportedFamilies = ['4', '5'];
+        
+        function deviceSupportsSecureBoot(family) {
+            return secureBootSupportedFamilies.includes(family);
+        }
+        
+        function updateProvisioningStyleOptions(family) {
+            const secureBootTile = document.getElementById('secure-boot-tile');
+            const fdeTile = document.getElementById('fde-only-tile');
+            const nakedTile = document.getElementById('naked-tile');
+            const styleSelector = document.getElementById('provisioning-style-selector');
+            const noSecureBootNotice = document.getElementById('no-secure-boot-notice');
+            
+            const supportsSecureBoot = deviceSupportsSecureBoot(family);
+            
+            if (supportsSecureBoot) {
+                // Show secure boot option, use 3-column layout
+                secureBootTile.style.display = 'block';
+                styleSelector.classList.remove('two-col');
+                styleSelector.classList.add('three-col');
+                noSecureBootNotice.style.display = 'none';
+            } else {
+                // Hide secure boot option, use 2-column layout
+                secureBootTile.style.display = 'none';
+                styleSelector.classList.remove('three-col');
+                styleSelector.classList.add('two-col');
+                noSecureBootNotice.style.display = 'flex';
+                
+                // If secure boot was selected, switch to FDE-only
+                const selectedStyle = document.querySelector('input[name="PROVISIONING_STYLE"]:checked');
+                if (selectedStyle && selectedStyle.value === 'secure-boot') {
+                    // Select FDE-only instead
+                    const fdeInput = fdeTile.querySelector('input[type="radio"]');
+                    fdeInput.checked = true;
+                    
+                    // Update tile selection styling
+                    secureBootTile.classList.remove('selected');
+                    fdeTile.classList.add('selected');
+                    
+                    // Save the new value
+                    validateAndSaveField('PROVISIONING_STYLE');
+                    
+                    // Update visibility for FDE-only
+                    updateSecurityVisibility('fde-only');
+                }
+            }
+        }
+        
+        // Device families that support NVMe (have PCIe interface)
+        const nvmeSupportedFamilies = ['4', '5'];
+        
+        function deviceSupportsNvme(family) {
+            return nvmeSupportedFamilies.includes(family);
+        }
+        
+        function updateStorageTypeOptions(family) {
+            const nvmeTile = document.getElementById('nvme-tile');
+            const sdTile = document.getElementById('sd-tile');
+            const storageSelector = document.getElementById('storage-type-selector');
+            
+            const supportsNvme = deviceSupportsNvme(family);
+            
+            if (supportsNvme) {
+                // Show NVMe option, use 3-column layout
+                nvmeTile.style.display = 'block';
+                storageSelector.classList.remove('two-col');
+                storageSelector.classList.add('three-col');
+            } else {
+                // Hide NVMe option, use 2-column layout
+                nvmeTile.style.display = 'none';
+                storageSelector.classList.remove('three-col');
+                storageSelector.classList.add('two-col');
+                
+                // If NVMe was selected, switch to SD card
+                const selectedStorage = document.querySelector('input[name="RPI_DEVICE_STORAGE_TYPE"]:checked');
+                if (selectedStorage && selectedStorage.value === 'nvme') {
+                    // Select SD card instead
+                    const sdInput = sdTile.querySelector('input[type="radio"]');
+                    sdInput.checked = true;
+                    
+                    // Update tile selection styling
+                    nvmeTile.classList.remove('selected');
+                    sdTile.classList.add('selected');
+                    
+                    // Save the new value
+                    validateAndSaveField('RPI_DEVICE_STORAGE_TYPE');
+                }
+            }
+        }
+        
+        function updateSecurityVisibility(style) {
+            const keyConfigGroup = document.getElementById('key-config-group');
+            const cipherGroup = document.getElementById('cipher-group');
+            
+            // Check if current device family even supports secure boot
+            const selectedFamily = document.querySelector('input[name="RPI_DEVICE_FAMILY"]:checked');
+            const supportsSecureBoot = selectedFamily && deviceSupportsSecureBoot(selectedFamily.value);
+            
+            if (style === 'naked') {
+                keyConfigGroup.style.display = 'none';
+                cipherGroup.style.display = 'none';
+            } else if (style === 'fde-only' || !supportsSecureBoot) {
+                keyConfigGroup.style.display = 'none';
+                cipherGroup.style.display = 'block';
+            } else {
+                // secure-boot
+                keyConfigGroup.style.display = 'block';
+                cipherGroup.style.display = 'block';
+            }
+        }
+        
+        // Initialize visibility based on current device family and provisioning style
+        (function initVisibility() {
+            const selectedFamily = document.querySelector('input[name="RPI_DEVICE_FAMILY"]:checked');
+            if (selectedFamily) {
+                updateProvisioningStyleOptions(selectedFamily.value);
+                updateStorageTypeOptions(selectedFamily.value);
+                // Don't auto-select cipher on page load - preserve user's saved preference
+                updateCipherRecommendations(selectedFamily.value, false);
+            }
+            
+            const selectedStyle = document.querySelector('input[name="PROVISIONING_STYLE"]:checked');
+            if (selectedStyle) {
+                updateSecurityVisibility(selectedStyle.value);
+            }
+        })();
+        
+        // ===== Field Validation & Save =====
         async function validateAndSaveField(fieldName) {
             const fieldElement = document.getElementById(fieldName);
             if (!fieldElement) return;
@@ -568,75 +1919,961 @@
             let fieldValue;
             if (fieldElement.type === 'checkbox') {
                 fieldValue = fieldElement.checked ? "1" : "";
+            } else if (fieldElement.type === 'radio') {
+                fieldValue = document.querySelector(`input[name="${fieldName}"]:checked`)?.value || "";
             } else {
                 fieldValue = fieldElement.value;
             }
             
+            const feedbackDiv = document.getElementById('feedback-' + fieldName);
+            
             // Show validating state
-            showFieldFeedback(fieldName, 'validating', 'Validating...');
-            
-            // Validate the field
-            const validationResult = await validateField(fieldName, fieldValue);
-            
-            if (!validationResult.valid) {
-                // Show validation error
-                showFieldFeedback(fieldName, 'error', validationResult.error || 'Validation failed');
-                return;
+            if (feedbackDiv) {
+                feedbackDiv.className = 'field-feedback validating';
+                feedbackDiv.textContent = 'Validating...';
             }
             
-            // If validation passed, save the field
-            showFieldFeedback(fieldName, 'validating', 'Saving...');
-            const saveSuccess = await saveField(fieldName, fieldValue);
-            
-            if (saveSuccess) {
-                // Show success message
-                let successMessage = 'Saved successfully';
-                if (validationResult.message) {
-                    successMessage += ' - ' + validationResult.message;
+            try {
+                // Validate
+                const validateResponse = await fetch('/options/validate', addCsrfHeader({
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ field: fieldName, value: fieldValue })
+                }));
+                
+                if (validateResponse.ok) {
+                    const result = await validateResponse.json();
+                    if (!result.valid) {
+                        if (feedbackDiv) {
+                            feedbackDiv.className = 'field-feedback error';
+                            feedbackDiv.textContent = result.error || 'Validation failed';
+                        }
+                        if (fieldElement.classList) fieldElement.classList.add('invalid');
+                        return;
+                    }
                 }
-                showFieldFeedback(fieldName, 'success', successMessage);
-            } else {
-                showFieldFeedback(fieldName, 'error', 'Failed to save value');
+                
+                // Save
+                const options = {};
+                options[fieldName] = fieldValue;
+                
+                const saveResponse = await fetch('/options/set', addCsrfHeader({
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(options)
+                }));
+                
+                if (saveResponse.ok) {
+                    if (feedbackDiv) {
+                        feedbackDiv.className = 'field-feedback success';
+                        feedbackDiv.textContent = 'Saved';
+                        setTimeout(() => {
+                            feedbackDiv.className = 'field-feedback';
+                            feedbackDiv.textContent = '';
+                        }, 2000);
+                    }
+                    if (fieldElement.classList) {
+                        fieldElement.classList.remove('invalid');
+                        fieldElement.classList.add('valid');
+                        setTimeout(() => fieldElement.classList.remove('valid'), 2000);
+                    }
+                } else {
+                    if (feedbackDiv) {
+                        feedbackDiv.className = 'field-feedback error';
+                        feedbackDiv.textContent = 'Failed to save';
+                    }
+                }
+            } catch (error) {
+                console.error('Validation/save error:', error);
+                if (feedbackDiv) {
+                    feedbackDiv.className = 'field-feedback error';
+                    feedbackDiv.textContent = 'Network error';
+                }
             }
         }
         
-        async function saveOptions() {
+        // ===== Save All Options =====
+        async function saveAllOptions() {
             const form = document.getElementById('optionsForm');
-            const formData = new FormData(form);
             const options = {};
             
-            // Get all form elements to handle checkboxes properly
-            const formElements = form.elements;
-            for (let i = 0; i < formElements.length; i++) {
-                const element = formElements[i];
-                if (element.name && element.name !== '') {
+            // Collect all form values
+            form.querySelectorAll('input, select').forEach(element => {
+                if (element.name) {
                     if (element.type === 'checkbox') {
                         options[element.name] = element.checked ? "1" : "";
+                    } else if (element.type === 'radio') {
+                        if (element.checked) {
+                            options[element.name] = element.value;
+                        }
                     } else {
                         options[element.name] = element.value;
                     }
                 }
-            }
-
+            });
+            
             try {
-                const response = await fetch('/options/set', {
+                const response = await fetch('/options/set', addCsrfHeader({
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(options)
-                });
-
+                }));
+                
                 if (response.ok) {
-                    showSuccess();
+                    showSuccess('Options saved successfully!');
+                } else if (response.status === 403) {
+                    // CSRF token expired - refresh it and retry
+                    await fetchCsrfToken();
+                    showError('Security token expired. Please try again.');
                 } else {
-                    alert('Failed to save options');
+                    showError('Failed to save options');
                 }
             } catch (error) {
-                console.error('Error:', error);
-                alert('Failed to save options');
+                console.error('Save error:', error);
+                showError('Failed to save options');
+            }
+        }
+        
+        // ===== Messages =====
+        function showSuccess(message) {
+            const successEl = document.getElementById('success-message');
+            successEl.querySelector('span:last-child') || (successEl.innerHTML = '<span>&#10003;</span> ' + message);
+            successEl.classList.add('show');
+            setTimeout(() => successEl.classList.remove('show'), 3000);
+        }
+        
+        function showError(message) {
+            const errorEl = document.getElementById('error-message');
+            document.getElementById('error-text').textContent = message;
+            errorEl.classList.add('show');
+            setTimeout(() => errorEl.classList.remove('show'), 5000);
+        }
+        
+        // ===== Inline Firmware Browser =====
+        let firmwareListData = [];
+        let currentViewingFirmware = null;
+        
+        function toggleFirmwareBrowser() {
+            const browser = document.getElementById('firmware-browser');
+            const btn = document.getElementById('firmware-expand-btn');
+            const isExpanded = browser.style.display !== 'none';
+            
+            if (isExpanded) {
+                browser.style.display = 'none';
+                btn.classList.remove('expanded');
+            } else {
+                browser.style.display = 'block';
+                btn.classList.add('expanded');
+                loadFirmwareList();
+            }
+        }
+        
+        async function loadFirmwareList() {
+            const listEl = document.getElementById('firmware-list');
+            const loadingEl = document.getElementById('firmware-loading');
+            
+            loadingEl.textContent = 'Loading...';
+            loadingEl.style.display = 'block';
+            
+            try {
+                const response = await fetch('/options/firmware/list');
+                if (response.ok) {
+                    const data = await response.json();
+                    firmwareListData = data.firmwareList || [];
+                    renderFirmwareList(data.selectedFirmwareFile);
+                    loadingEl.style.display = 'none';
+                } else {
+                    listEl.innerHTML = '<div class="firmware-empty"><div class="firmware-empty-icon">&#9888;</div>Failed to load firmware list</div>';
+                    loadingEl.style.display = 'none';
+                }
+            } catch (error) {
+                console.error('Error loading firmware:', error);
+                listEl.innerHTML = '<div class="firmware-empty"><div class="firmware-empty-icon">&#9888;</div>Failed to load firmware list</div>';
+                loadingEl.style.display = 'none';
+            }
+        }
+        
+        function renderFirmwareList(selectedPath) {
+            const listEl = document.getElementById('firmware-list');
+            
+            if (firmwareListData.length === 0) {
+                listEl.innerHTML = `
+                    <div class="firmware-empty">
+                        <div class="firmware-empty-icon">&#128190;</div>
+                        <div>No firmware versions found</div>
+                        <div style="font-size: 0.8rem; margin-top: 5px;">Check device family configuration</div>
+                    </div>
+                `;
+                return;
+            }
+            
+            // Clear and rebuild with proper DOM methods to prevent XSS
+            listEl.innerHTML = '';
+            
+            firmwareListData.forEach((fw, index) => {
+                const isSelected = selectedPath && fw.filepath === selectedPath;
+                const sizeKB = Math.round(parseInt(fw.size) / 1024);
+                
+                const item = document.createElement('div');
+                item.className = 'firmware-item' + (isSelected ? ' selected' : '');
+                item.dataset.path = fw.filepath;
+                item.dataset.version = fw.version;
+                item.dataset.index = index;
+                item.onclick = () => viewFirmware(fw.version, fw.filepath);
+                
+                const info = document.createElement('div');
+                info.className = 'firmware-item-info';
+                
+                const versionDiv = document.createElement('div');
+                versionDiv.className = 'firmware-item-version';
+                versionDiv.textContent = fw.version + ' ';
+                
+                const channelBadge = document.createElement('span');
+                channelBadge.className = 'firmware-item-channel ' + fw.releaseChannel;
+                channelBadge.textContent = fw.releaseChannel;
+                versionDiv.appendChild(channelBadge);
+                
+                if (isSelected) {
+                    const selectedBadge = document.createElement('span');
+                    selectedBadge.className = 'firmware-selected-badge';
+                    selectedBadge.textContent = 'Selected';
+                    versionDiv.appendChild(selectedBadge);
+                }
+                
+                const metaDiv = document.createElement('div');
+                metaDiv.className = 'firmware-item-meta';
+                metaDiv.textContent = fw.filename + ' • ' + sizeKB + ' KB';
+                
+                info.appendChild(versionDiv);
+                info.appendChild(metaDiv);
+                
+                const selectBtn = document.createElement('button');
+                selectBtn.type = 'button';
+                selectBtn.className = 'firmware-item-select';
+                selectBtn.innerHTML = isSelected ? '&#10003; Selected' : 'Select';
+                selectBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    selectFirmware(fw.filepath, fw.version);
+                };
+                
+                item.appendChild(info);
+                item.appendChild(selectBtn);
+                listEl.appendChild(item);
+            });
+        }
+        
+        async function viewFirmware(version, path) {
+            // Update viewing state
+            document.querySelectorAll('.firmware-item').forEach(el => {
+                el.classList.remove('viewing');
+                if (el.dataset.path === path) {
+                    el.classList.add('viewing');
+                }
+            });
+            
+            currentViewingFirmware = { version, path };
+            
+            const notesEl = document.getElementById('firmware-notes');
+            const currentFirmware = document.getElementById('RPI_DEVICE_FIRMWARE_FILE')?.value || '';
+            const isSelected = currentFirmware === path;
+            
+            // Build content
+            let content = '';
+            
+            // Version header
+            content += `<h3>Version ${escapeHtml(version)}</h3>`;
+            
+            // Metadata
+            content += `<dl style="margin: 0 0 16px 0; font-size: 0.9rem;">`;
+            content += `<dt style="font-weight: 600; color: #555;">Path</dt>`;
+            content += `<dd style="margin: 4px 0 12px 0; font-family: monospace; word-break: break-all;">${escapeHtml(path)}</dd>`;
+            content += `</dl>`;
+            
+            // Action buttons
+            content += `<div style="display: flex; flex-direction: column; gap: 8px; margin-top: 16px; padding-top: 16px; border-top: 1px solid #e0e0e0;">`;
+            
+            if (isSelected) {
+                content += `<div style="padding: 8px 12px; background: #d4edda; color: #155724; border-radius: 4px; text-align: center;">&#10003; Currently selected</div>`;
+                content += `<button type="button" onclick="clearFirmwareSelection()" style="padding: 8px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">Use Default Firmware</button>`;
+            } else {
+                content += `<button type="button" onclick="selectFirmware('${escapeHtml(path)}', '${escapeHtml(version)}')" class="image-upload-btn">Use This Firmware</button>`;
+                if (currentFirmware) {
+                    content += `<button type="button" onclick="clearFirmwareSelection()" style="padding: 8px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">Use Default Firmware</button>`;
+                }
+            }
+            
+            content += `</div>`;
+            
+            // Release notes section
+            content += `<div style="margin-top: 20px; padding-top: 16px; border-top: 1px solid #e0e0e0;">`;
+            content += `<dt style="font-weight: 600; color: #555; margin-bottom: 8px;">Release Notes</dt>`;
+            
+            notesEl.innerHTML = content + `<dd style="margin: 0;"><span style="color: #888;">Loading...</span></dd></div>`;
+            
+            try {
+                const response = await fetch(`/options/firmware/notes/${version}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.notes && data.notes.trim()) {
+                        notesEl.innerHTML = content + `<dd style="margin: 0;"><pre style="white-space: pre-wrap; word-wrap: break-word; font-family: inherit; margin: 0; background: none; border: none; padding: 0;">${escapeHtml(data.notes)}</pre></dd></div>`;
+                    } else {
+                        notesEl.innerHTML = content + `<dd style="margin: 0; color: #888;">No release notes available for this version.</dd></div>`;
+                    }
+                } else {
+                    notesEl.innerHTML = content + `<dd style="margin: 0; color: #888;">No release notes available.</dd></div>`;
+                }
+            } catch (error) {
+                console.error('Error loading release notes:', error);
+                notesEl.innerHTML = content + `<dd style="margin: 0; color: #dc3545;">Failed to load release notes.</dd></div>`;
+            }
+        }
+        
+        async function selectFirmware(path, version) {
+            console.log('Selecting firmware:', { path, version });
+            
+            const requestBody = { firmware_path: path };
+            console.log('Request body object:', requestBody);
+            console.log('Request body JSON:', JSON.stringify(requestBody));
+            
+            try {
+                // Build headers explicitly
+                const headers = {
+                    'Content-Type': 'application/json'
+                };
+                if (csrfToken) {
+                    headers['X-CSRF-Token'] = csrfToken;
+                }
+                console.log('Request headers:', headers);
+                
+                const response = await fetch('/options/firmware/set', {
+                    method: 'POST',
+                    headers: headers,
+                    body: JSON.stringify(requestBody)
+                });
+                
+                console.log('Response status:', response.status);
+                
+                if (response.ok) {
+                    // Update hidden input
+                    document.getElementById('RPI_DEVICE_FIRMWARE_FILE').value = path;
+                    
+                    // Re-render list to show selection
+                    renderFirmwareList(path);
+                    
+                    // Refresh details panel if viewing this firmware
+                    if (currentViewingFirmware && currentViewingFirmware.path === path) {
+                        viewFirmware(version, path);
+                    }
+                    
+                    showSuccess(`Firmware ${version} selected`);
+                } else {
+                    // Try to get error details from response
+                    let errorMsg = 'Failed to select firmware';
+                    try {
+                        const errorData = await response.json();
+                        console.error('Server error response:', errorData);
+                        errorMsg = errorData.error || errorData.message || errorMsg;
+                    } catch (e) {
+                        const errorText = await response.text();
+                        console.error('Server error (text):', errorText);
+                    }
+                    showError(errorMsg);
+                }
+            } catch (error) {
+                console.error('Network/fetch error:', error);
+                showError('Failed to select firmware: ' + error.message);
+            }
+        }
+        
+        async function clearFirmwareSelection() {
+            try {
+                const response = await fetch('/options/firmware/set', addCsrfHeader({
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ firmware_path: '' })
+                }));
+                
+                if (response.ok) {
+                    document.getElementById('RPI_DEVICE_FIRMWARE_FILE').value = '';
+                    renderFirmwareList('');
+                    
+                    // Refresh details panel if viewing the previously selected firmware
+                    if (currentViewingFirmware) {
+                        viewFirmware(currentViewingFirmware.version, currentViewingFirmware.path);
+                    }
+                    
+                    showSuccess('Reverted to default firmware');
+                } else {
+                    showError('Failed to clear firmware selection');
+                }
+            } catch (error) {
+                console.error('Error clearing firmware:', error);
+                showError('Failed to clear firmware selection');
+            }
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // Reload firmware list when device family changes
+        const originalTileClick = document.querySelectorAll('.tile-option');
+        originalTileClick.forEach(tile => {
+            const radio = tile.querySelector('input[name="RPI_DEVICE_FAMILY"]');
+            if (radio) {
+                tile.addEventListener('click', function() {
+                    // If firmware browser is open, reload it after a short delay (to let the config save)
+                    const browser = document.getElementById('firmware-browser');
+                    if (browser && browser.style.display !== 'none') {
+                        setTimeout(loadFirmwareList, 500);
+                    }
+                });
+            }
+        });
+        
+        // ===== Image Browser Functions =====
+        let imageList = [];
+        let currentImageSelection = document.getElementById('GOLD_MASTER_OS_FILE')?.value || '';
+        
+        // Load images on page load
+        document.addEventListener('DOMContentLoaded', loadImageList);
+        
+        async function loadImageList() {
+            const listEl = document.getElementById('image-list');
+            listEl.innerHTML = '<div class="image-empty">Loading images...</div>';
+            
+            try {
+                const response = await fetch('/images/list');
+                if (response.ok) {
+                    const data = await response.json();
+                    imageList = data.images || [];
+                    renderImageList();
+                } else {
+                    listEl.innerHTML = '<div class="image-empty">Failed to load images</div>';
+                }
+            } catch (error) {
+                console.error('Error loading images:', error);
+                listEl.innerHTML = '<div class="image-empty">Failed to load images</div>';
+            }
+        }
+        
+        let currentViewingImage = null;
+        
+        function renderImageList() {
+            const listEl = document.getElementById('image-list');
+            const loadingEl = document.getElementById('image-loading');
+            const currentValue = document.getElementById('GOLD_MASTER_OS_FILE')?.value || '';
+            
+            if (loadingEl) loadingEl.style.display = 'none';
+            
+            if (imageList.length === 0) {
+                listEl.innerHTML = '<div class="image-empty">No images found. Upload an image to get started.</div>';
+                return;
+            }
+            
+            listEl.innerHTML = '';
+            
+            imageList.forEach(img => {
+                const isSelected = currentValue && currentValue.includes(img.name);
+                const isViewing = currentViewingImage && currentViewingImage.name === img.name;
+                
+                const item = document.createElement('div');
+                item.className = 'firmware-item' + (isSelected ? ' selected' : '') + (isViewing ? ' viewing' : '');
+                item.dataset.name = img.name;
+                item.onclick = () => viewImage(img);
+                
+                const info = document.createElement('div');
+                info.className = 'firmware-item-info';
+                
+                const nameDiv = document.createElement('div');
+                nameDiv.className = 'firmware-item-version';
+                nameDiv.textContent = img.name;
+                
+                if (isSelected) {
+                    const selectedBadge = document.createElement('span');
+                    selectedBadge.className = 'firmware-selected-badge';
+                    selectedBadge.textContent = 'Selected';
+                    selectedBadge.style.marginLeft = '8px';
+                    nameDiv.appendChild(selectedBadge);
+                }
+                
+                const metaDiv = document.createElement('div');
+                metaDiv.className = 'firmware-item-meta';
+                const sizeMB = img.size_mb ? img.size_mb.toFixed(1) + ' MB' : 'Unknown size';
+                metaDiv.textContent = sizeMB;
+                
+                info.appendChild(nameDiv);
+                info.appendChild(metaDiv);
+                
+                item.appendChild(info);
+                listEl.appendChild(item);
+            });
+        }
+        
+        function viewImage(img) {
+            currentViewingImage = img;
+            
+            // Update viewing state in list
+            document.querySelectorAll('#image-list .firmware-item').forEach(el => {
+                el.classList.remove('viewing');
+                if (el.dataset.name === img.name) {
+                    el.classList.add('viewing');
+                }
+            });
+            
+            // Show image details
+            const detailsEl = document.getElementById('image-details');
+            const currentValue = document.getElementById('GOLD_MASTER_OS_FILE')?.value || '';
+            const isSelected = currentValue && currentValue.includes(img.name);
+            
+            const sizeMB = img.size_mb ? img.size_mb.toFixed(1) + ' MB' : 'Unknown size';
+            const sha256Display = img.sha256 && img.sha256.length > 10 && !img.sha256.includes('Calculating')
+                ? img.sha256 
+                : (img.sha256 || 'Calculating...');
+            
+            detailsEl.innerHTML = '';
+            
+            // Image name header
+            const header = document.createElement('h3');
+            header.textContent = img.name;
+            header.style.marginTop = '0';
+            detailsEl.appendChild(header);
+            
+            // Metadata
+            const metaList = document.createElement('dl');
+            metaList.style.cssText = 'margin: 0; font-size: 0.9rem;';
+            
+            const addMeta = (label, value, id) => {
+                const dt = document.createElement('dt');
+                dt.textContent = label;
+                dt.style.cssText = 'font-weight: 600; margin-top: 12px; color: #555;';
+                const dd = document.createElement('dd');
+                dd.textContent = value;
+                dd.style.cssText = 'margin: 4px 0 0 0; font-family: monospace; word-break: break-all;';
+                if (id) dd.id = id;
+                metaList.appendChild(dt);
+                metaList.appendChild(dd);
+            };
+            
+            addMeta('Size', sizeMB);
+            addMeta('SHA256', sha256Display);
+            addMeta('Path', img.path || '/srv/rpi-sb-provisioner/images/' + img.name);
+            
+            detailsEl.appendChild(metaList);
+            
+            // Boot Package section
+            const bootSection = document.createElement('div');
+            bootSection.style.cssText = 'margin-top: 16px; padding-top: 16px; border-top: 1px solid #e0e0e0;';
+            
+            const bootHeader = document.createElement('dt');
+            bootHeader.textContent = 'Boot Package';
+            bootHeader.style.cssText = 'font-weight: 600; color: #555;';
+            bootSection.appendChild(bootHeader);
+            
+            const bootStatus = document.createElement('dd');
+            bootStatus.id = 'boot-package-status-' + img.name.replace(/[^a-zA-Z0-9]/g, '_');
+            bootStatus.style.cssText = 'margin: 4px 0 0 0;';
+            bootStatus.innerHTML = '<span style="color: #888;">Checking...</span>';
+            bootSection.appendChild(bootStatus);
+            
+            detailsEl.appendChild(bootSection);
+            
+            // Check boot package status
+            checkBootPackageStatus(img.name);
+            
+            // Action buttons
+            const actions = document.createElement('div');
+            actions.style.cssText = 'margin-top: 20px; display: flex; flex-direction: column; gap: 8px;';
+            
+            if (!isSelected) {
+                const selectBtn = document.createElement('button');
+                selectBtn.type = 'button';
+                selectBtn.className = 'image-upload-btn';
+                selectBtn.textContent = 'Use This Image';
+                selectBtn.onclick = () => selectImage(img.name, img.path);
+                actions.appendChild(selectBtn);
+            } else {
+                const selectedNotice = document.createElement('div');
+                selectedNotice.style.cssText = 'padding: 8px 12px; background: #d4edda; color: #155724; border-radius: 4px; text-align: center;';
+                selectedNotice.innerHTML = '&#10003; Currently selected';
+                actions.appendChild(selectedNotice);
+            }
+            
+            const generateBootBtn = document.createElement('button');
+            generateBootBtn.type = 'button';
+            generateBootBtn.id = 'generate-boot-btn-' + img.name.replace(/[^a-zA-Z0-9]/g, '_');
+            generateBootBtn.style.cssText = 'padding: 8px 12px; background: #17a2b8; color: white; border: none; border-radius: 4px; cursor: pointer;';
+            generateBootBtn.textContent = 'Generate Boot Package';
+            generateBootBtn.onclick = () => generateBootPackage(img.name);
+            actions.appendChild(generateBootBtn);
+            
+            const clearCacheBtn = document.createElement('button');
+            clearCacheBtn.type = 'button';
+            clearCacheBtn.style.cssText = 'padding: 8px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;';
+            clearCacheBtn.textContent = 'Clear Cached Files';
+            clearCacheBtn.onclick = () => clearImageCache(img.name);
+            actions.appendChild(clearCacheBtn);
+            
+            const deleteBtn = document.createElement('button');
+            deleteBtn.type = 'button';
+            deleteBtn.style.cssText = 'padding: 8px 12px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;';
+            deleteBtn.textContent = 'Delete Image';
+            deleteBtn.onclick = () => deleteImage(img.name);
+            if (isSelected) {
+                deleteBtn.disabled = true;
+                deleteBtn.style.opacity = '0.5';
+                deleteBtn.style.cursor = 'not-allowed';
+                deleteBtn.title = 'Cannot delete the selected image';
+            }
+            actions.appendChild(deleteBtn);
+            
+            detailsEl.appendChild(actions);
+        }
+        
+        async function checkBootPackageStatus(name) {
+            const statusId = 'boot-package-status-' + name.replace(/[^a-zA-Z0-9]/g, '_');
+            const statusEl = document.getElementById(statusId);
+            if (!statusEl) return;
+            
+            try {
+                const response = await fetch('/get-boot-package-info?name=' + encodeURIComponent(name));
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.exists) {
+                        statusEl.innerHTML = '<span style="color: #28a745;">&#10003; Available</span>';
+                        if (data.version) {
+                            statusEl.innerHTML += '<br><span style="font-size: 0.85rem; color: #666;">Version: ' + data.version + '</span>';
+                        }
+                    } else if (data.generating) {
+                        statusEl.innerHTML = '<span style="color: #ffc107;">Generating...</span>';
+                        // Poll for updates
+                        setTimeout(() => checkBootPackageStatus(name), 2000);
+                    } else {
+                        statusEl.innerHTML = '<span style="color: #888;">Not generated</span>';
+                    }
+                } else {
+                    statusEl.innerHTML = '<span style="color: #888;">Not generated</span>';
+                }
+            } catch (error) {
+                console.error('Error checking boot package status:', error);
+                statusEl.innerHTML = '<span style="color: #888;">Unknown</span>';
+            }
+        }
+        
+        async function generateBootPackage(name) {
+            if (!confirm('Generate boot package for "' + name + '"?\n\nThis will create a Debian package with boot.img and boot.sig files.')) {
+                return;
+            }
+            
+            const statusId = 'boot-package-status-' + name.replace(/[^a-zA-Z0-9]/g, '_');
+            const statusEl = document.getElementById(statusId);
+            const btnId = 'generate-boot-btn-' + name.replace(/[^a-zA-Z0-9]/g, '_');
+            const btn = document.getElementById(btnId);
+            
+            if (statusEl) {
+                statusEl.innerHTML = '<span style="color: #ffc107;">Generating...</span>';
+            }
+            if (btn) {
+                btn.disabled = true;
+                btn.style.opacity = '0.5';
+                btn.textContent = 'Generating...';
+            }
+            
+            try {
+                const response = await fetch('/generate-boot-package?name=' + encodeURIComponent(name), {
+                    method: 'GET'
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    showSuccess(result.message || 'Boot package generation started');
+                    
+                    // Poll for completion
+                    let checkCount = 0;
+                    const maxChecks = 60;
+                    
+                    const checkInterval = setInterval(async () => {
+                        checkCount++;
+                        
+                        try {
+                            const statusResponse = await fetch('/get-boot-package-info?name=' + encodeURIComponent(name));
+                            if (statusResponse.ok) {
+                                const data = await statusResponse.json();
+                                if (data.exists) {
+                                    clearInterval(checkInterval);
+                                    if (statusEl) {
+                                        statusEl.innerHTML = '<span style="color: #28a745;">&#10003; Available</span>';
+                                    }
+                                    if (btn) {
+                                        btn.disabled = false;
+                                        btn.style.opacity = '1';
+                                        btn.textContent = 'Regenerate Boot Package';
+                                    }
+                                    showSuccess('Boot package generated successfully');
+                                } else if (checkCount >= maxChecks) {
+                                    clearInterval(checkInterval);
+                                    if (statusEl) {
+                                        statusEl.innerHTML = '<span style="color: #dc3545;">Generation timed out</span>';
+                                    }
+                                    if (btn) {
+                                        btn.disabled = false;
+                                        btn.style.opacity = '1';
+                                        btn.textContent = 'Retry Generation';
+                                    }
+                                    showError('Boot package generation timed out');
+                                }
+                            }
+                        } catch (e) {
+                            console.error('Error polling boot package status:', e);
+                        }
+                    }, 2000);
+                } else {
+                    const error = await response.json().catch(() => ({}));
+                    showError(error.message || 'Failed to start boot package generation');
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.style.opacity = '1';
+                        btn.textContent = 'Generate Boot Package';
+                    }
+                    if (statusEl) {
+                        statusEl.innerHTML = '<span style="color: #dc3545;">Generation failed</span>';
+                    }
+                }
+            } catch (error) {
+                console.error('Error generating boot package:', error);
+                showError('Failed to generate boot package');
+                if (btn) {
+                    btn.disabled = false;
+                    btn.style.opacity = '1';
+                    btn.textContent = 'Generate Boot Package';
+                }
+            }
+        }
+        
+        async function selectImage(name, path) {
+            const fullPath = path || '/srv/rpi-sb-provisioner/images/' + name;
+            
+            try {
+                const response = await fetch('/options/set', addCsrfHeader({
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 'GOLD_MASTER_OS_FILE': fullPath })
+                }));
+                
+                if (response.ok) {
+                    // Update hidden input
+                    document.getElementById('GOLD_MASTER_OS_FILE').value = fullPath;
+                    
+                    // Re-render list to show updated selection
+                    renderImageList();
+                    
+                    // Refresh details panel if viewing this image
+                    if (currentViewingImage && currentViewingImage.name === name) {
+                        viewImage(currentViewingImage);
+                    }
+                    
+                    // Clear workdir since image changed
+                    try {
+                        await fetch('/options/clear-workdir', addCsrfHeader({
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' }
+                        }));
+                    } catch (e) {
+                        console.warn('Could not clear workdir:', e);
+                    }
+                    
+                    showSuccess('Image "' + name + '" selected');
+                } else {
+                    showError('Failed to select image');
+                }
+            } catch (error) {
+                console.error('Error selecting image:', error);
+                showError('Failed to select image');
+            }
+        }
+        
+        async function clearImageSelection() {
+            try {
+                const response = await fetch('/options/set', addCsrfHeader({
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 'GOLD_MASTER_OS_FILE': '' })
+                }));
+                
+                if (response.ok) {
+                    document.getElementById('GOLD_MASTER_OS_FILE').value = '';
+                    renderImageList();
+                    showSuccess('Image selection cleared');
+                } else {
+                    showError('Failed to clear image selection');
+                }
+            } catch (error) {
+                console.error('Error clearing image:', error);
+                showError('Failed to clear image selection');
+            }
+        }
+        
+        async function clearImageCache(name) {
+            if (!confirm('Clear cached files for "' + name + '"?\n\nThis will remove any pre-processed boot files for this image.')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch('/options/clear-workdir', addCsrfHeader({
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                }));
+                
+                if (response.ok) {
+                    showSuccess('Cache cleared for "' + name + '"');
+                } else {
+                    showError('Failed to clear cache');
+                }
+            } catch (error) {
+                console.error('Error clearing cache:', error);
+                showError('Failed to clear cache');
+            }
+        }
+        
+        async function deleteImage(name) {
+            if (!confirm('Delete image "' + name + '"?\n\nThis cannot be undone.')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch('/images/delete?name=' + encodeURIComponent(name), addCsrfHeader({
+                    method: 'DELETE'
+                }));
+                
+                if (response.ok) {
+                    showSuccess('Image "' + name + '" deleted');
+                    currentViewingImage = null;
+                    
+                    // Reset details panel
+                    const detailsEl = document.getElementById('image-details');
+                    detailsEl.innerHTML = '<div class="firmware-notes-placeholder">Select an image to view details</div>';
+                    
+                    // Reload image list
+                    await loadImageList();
+                } else {
+                    const errorData = await response.json().catch(() => ({}));
+                    showError(errorData.message || 'Failed to delete image');
+                }
+            } catch (error) {
+                console.error('Error deleting image:', error);
+                showError('Failed to delete image');
+            }
+        }
+        
+        // Image display is now handled inline in the list
+        
+        function toggleImageUpload() {
+            const container = document.getElementById('image-upload-container');
+            container.style.display = container.style.display === 'none' ? 'block' : 'none';
+        }
+        
+        // Image upload handling
+        const imageUploadZone = document.getElementById('image-upload-zone');
+        const imageFileInput = document.getElementById('image-file-input');
+        
+        if (imageUploadZone) {
+            imageUploadZone.addEventListener('click', () => imageFileInput.click());
+            
+            imageUploadZone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                imageUploadZone.classList.add('dragover');
+            });
+            
+            imageUploadZone.addEventListener('dragleave', () => {
+                imageUploadZone.classList.remove('dragover');
+            });
+            
+            imageUploadZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                imageUploadZone.classList.remove('dragover');
+                const files = e.dataTransfer.files;
+                if (files.length > 0) {
+                    uploadImage(files[0]);
+                }
+            });
+        }
+        
+        if (imageFileInput) {
+            imageFileInput.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    uploadImage(e.target.files[0]);
+                }
+            });
+        }
+        
+        async function uploadImage(file) {
+            if (!file.name.endsWith('.img')) {
+                showError('Please select a .img file');
+                return;
+            }
+            
+            const uploadZone = document.getElementById('image-upload-zone');
+            const progressContainer = document.getElementById('image-upload-progress');
+            const progressFill = document.getElementById('image-upload-fill');
+            const progressText = document.getElementById('image-upload-text');
+            
+            uploadZone.style.display = 'none';
+            progressContainer.style.display = 'block';
+            progressFill.style.width = '0%';
+            progressText.textContent = 'Uploading ' + file.name + '...';
+            
+            try {
+                const formData = new FormData();
+                formData.append('image', file);
+                
+                const xhr = new XMLHttpRequest();
+                
+                xhr.upload.addEventListener('progress', (e) => {
+                    if (e.lengthComputable) {
+                        const percent = Math.round((e.loaded / e.total) * 100);
+                        progressFill.style.width = percent + '%';
+                        progressText.textContent = 'Uploading ' + file.name + '... ' + percent + '%';
+                    }
+                });
+                
+                xhr.onload = function() {
+                    uploadZone.style.display = 'block';
+                    progressContainer.style.display = 'none';
+                    
+                    if (xhr.status === 200) {
+                        showSuccess('Image uploaded successfully');
+                        loadImageList();
+                        toggleImageUpload(); // Hide upload zone
+                    } else {
+                        try {
+                            const error = JSON.parse(xhr.responseText);
+                            showError(error.message || 'Upload failed');
+                        } catch (e) {
+                            showError('Upload failed');
+                        }
+                    }
+                };
+                
+                xhr.onerror = function() {
+                    uploadZone.style.display = 'block';
+                    progressContainer.style.display = 'none';
+                    showError('Upload failed');
+                };
+                
+                xhr.open('POST', '/images/upload');
+                if (csrfToken) {
+                    xhr.setRequestHeader('X-CSRF-Token', csrfToken);
+                }
+                xhr.send(formData);
+            } catch (error) {
+                uploadZone.style.display = 'block';
+                progressContainer.style.display = 'none';
+                console.error('Error uploading image:', error);
+                showError('Upload failed');
             }
         }
     </script>
 </body>
-</html> 
+</html>
