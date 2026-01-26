@@ -1,3 +1,37 @@
+rpi-sb-provisioner (2.2.0) unstable; urgency=medium
+
+  * Features:
+    - Add PKCS#11 HSM signing support for secure signing operations
+    - Add USB speed attribute detection for better device capability
+      identification
+    - Add CSRF token validation for critical endpoints to improve security
+    - Add kernel_modules.list for configurable kernel module inclusion
+    - Integrate rpi-modcopy for improved kernel module handling and
+      dependency resolution
+
+  * Provisioning Improvements:
+    - Refactor signing infrastructure into rpi-sb-common.sh for better
+      modularity and reuse
+    - Enhance cleanup process with guard against multiple invocations
+    - Fix temporary directory creation path to /srv/rpi-sb-provisioner,
+      avoiding Trixie tmpfs issue
+    - Improve orphan cleanup logic to preserve base temp directory
+
+  * WebUI:
+    - Add JSON endpoints for firmware listing and management
+    - Improve device visualization with edge avoidance force and better
+      link rendering
+    - Conditionally display firmware select button for cleaner interface
+
+  * Documentation:
+    - Revise provisioning capacity and throughput metrics
+
+  * Packaging:
+    - Add rpi-modcopy dependency for kernel module handling
+    - Fix CMake configuration for jsoncpp dependency
+
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Mon, 26 Jan 2026 17:25:00 +0000
+
 rpi-sb-provisioner (2.1.3) unstable; urgency=medium
 
   * Features:
