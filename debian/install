@@ -5,6 +5,7 @@ service/rpi-sb-bootstrap.sh                     /usr/bin
 service/rpi-sb-triage.sh                        /usr/bin
 service/rpi-sb-common.sh                        /usr/bin
 service/rpi-sb-image-bootimg-generator.sh       /usr/bin
+service/rpi-sb-pkcs11-sign.sh                   /usr/bin
 fetch-repo-package-list/fetch-repo-package-list /usr/bin
 rpi-package-download/rpi-package-download       /usr/bin
 

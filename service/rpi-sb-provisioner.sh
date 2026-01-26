@@ -21,25 +21,15 @@ export PROVISIONER_STARTED="SB-PROVISIONER-STARTED"
 
 read_config
 
+# Initialize signing context (validates key config, derives public key if needed)
+if ! init_signing_context; then
+    echo "Failed to initialize signing context" >&2
+    exit 1
+fi
+
 : "${RPI_DEVICE_STORAGE_CIPHER:=aes-xts-plain64}"
 
-get_signing_directives() {
-    if [ -n "${CUSTOMER_KEY_PKCS11_NAME}" ]; then
-        echo "${CUSTOMER_KEY_PKCS11_NAME} -engine pkcs11 -keyform engine"
-    else
-        if [ -n "${CUSTOMER_KEY_FILE_PEM}" ]; then
-            if [ -f "${CUSTOMER_KEY_FILE_PEM}" ]; then
-                echo "${CUSTOMER_KEY_FILE_PEM} -keyform PEM"
-            else
-                echo "RSA private key \"${CUSTOMER_KEY_FILE_PEM}\" not a file. Aborting." >&2
-                exit 1
-            fi
-        else
-            echo "Neither PKCS11 key name, or PEM key file specified. Aborting." >&2
-            exit 1
-        fi
-    fi
-}
+# NOTE: get_signing_directives() is now provided by rpi-sb-common.sh
 die() {
     record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "${TARGET_USB_PATH}"
     # shellcheck disable=SC2086
@@ -157,9 +147,9 @@ writeSig() {
    # Include the update-timestamp
    echo "ts: $(date -u +%s)" >> "${OUTPUT}"
 
-   if [ -n "$(get_signing_directives)" ]; then
+   if signing_available; then
       # shellcheck disable=SC2046
-      "${OPENSSL}" dgst -sign $(get_signing_directives) -sha256 -out "${SIG_TMP}" "${IMAGE}"
+      "${OPENSSL}" dgst -sign $(get_openssl_sign_args) -sha256 -out "${SIG_TMP}" "${IMAGE}"
       echo "rsa2048: $(xxd -c 4096 -p < "${SIG_TMP}")" >> "${OUTPUT}"
    fi
    rm "${SIG_TMP}"
@@ -521,7 +511,7 @@ prepare_pre_boot_auth_images() {
         sha256sum "${TMP_DIR}"/boot.img | awk '{print $1}' > "${TMP_DIR}"/boot.sig
         printf 'rsa2048: ' >> "${TMP_DIR}"/boot.sig
         # shellcheck disable=SC2046
-        ${OPENSSL} dgst -sign $(get_signing_directives) -sha256 "${TMP_DIR}"/boot.img | xxd -c 4096 -p >> "${TMP_DIR}"/boot.sig
+        ${OPENSSL} dgst -sign $(get_openssl_sign_args) -sha256 "${TMP_DIR}"/boot.img | xxd -c 4096 -p >> "${TMP_DIR}"/boot.sig
         announce_stop "boot.img signing"
 
         announce_start "Boot Image partition extraction"
