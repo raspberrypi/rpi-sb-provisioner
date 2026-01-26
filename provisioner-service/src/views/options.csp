@@ -2147,17 +2147,21 @@
                 info.appendChild(versionDiv);
                 info.appendChild(metaDiv);
                 
-                const selectBtn = document.createElement('button');
-                selectBtn.type = 'button';
-                selectBtn.className = 'firmware-item-select';
-                selectBtn.innerHTML = isSelected ? '&#10003; Selected' : 'Select';
-                selectBtn.onclick = (e) => {
-                    e.stopPropagation();
-                    selectFirmware(fw.filepath, fw.version);
-                };
-                
                 item.appendChild(info);
-                item.appendChild(selectBtn);
+                
+                // Only show select button if not already selected
+                if (!isSelected) {
+                    const selectBtn = document.createElement('button');
+                    selectBtn.type = 'button';
+                    selectBtn.className = 'firmware-item-select';
+                    selectBtn.textContent = 'Select';
+                    selectBtn.onclick = (e) => {
+                        e.stopPropagation();
+                        selectFirmware(fw.filepath, fw.version);
+                    };
+                    item.appendChild(selectBtn);
+                }
+                
                 listEl.appendChild(item);
             });
         }
