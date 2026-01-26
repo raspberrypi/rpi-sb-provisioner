@@ -4,6 +4,7 @@ set -e
 # Create necessary directories
 mkdir -p /etc/rpi-sb-provisioner
 mkdir -p /srv/rpi-sb-provisioner
+mkdir -p /srv/rpi-sb-bootstrap
 mkdir -p /var/log/rpi-sb-provisioner
 
 # Default manufacturing DB path

@@ -34,6 +34,7 @@ log() {
 read_config
 
 TMP_DIR=""
+CLEANUP_DONE=0
 
 # check_file_is_expected ${path_to_file} ${expected_file_extension}
 # Checks if a file exists, is not a directory, is not zero and has the right extension.
@@ -126,6 +127,10 @@ timeout_fatal() {
 }
 
 cleanup() {
+    # Guard against multiple invocations (signal + EXIT trap)
+    [ "$CLEANUP_DONE" -eq 1 ] && return
+    CLEANUP_DONE=1
+
     return_value=$?
     if [ -d "${TMP_DIR}" ]; then
         rm -rf "${TMP_DIR}"
@@ -134,14 +139,14 @@ cleanup() {
     if [ -n "${DELETE_PRIVATE_TMPDIR}" ]; then
         announce_start "Deleting customised intermediates"
         # shellcheck disable=SC2086
-        rm -rf "${DELETE_PRIVATE_TMPDIR}" ${DEBUG}
+        rm -rf "${RPI_SB_WORKDIR}" ${DEBUG}
         DELETE_PRIVATE_TMPDIR=
         announce_stop "Deleting customised intermediates"
     fi
 
     exit ${return_value}
 }
-trap cleanup INT TERM
+trap cleanup EXIT INT TERM
 
 # Start the provisioner phase
 
@@ -168,7 +173,7 @@ setup_fastboot_and_id_vars "$1"
 
 record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_STARTED}" "${TARGET_USB_PATH}"
 
-TMP_DIR=$(mktemp -d)
+TMP_DIR=$(mktemp -d -p /srv/rpi-sb-provisioner)
 RPI_DEVICE_STORAGE_TYPE="$(check_pidevice_storage_type "${RPI_DEVICE_STORAGE_TYPE}")"
 DELETE_PRIVATE_TMPDIR=
 announce_start "Finding the cache directory"
@@ -222,4 +227,3 @@ log "Provisioning completed. Remove the device from this machine."
 systemd-notify --status="Provisioning completed successfully" STOPPING=1
 
 true
-cleanup
