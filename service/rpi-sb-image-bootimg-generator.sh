@@ -51,23 +51,8 @@ announce_stop() {
     log "================================================================================"
 }
 
-get_signing_directives() {
-    if [ -n "${CUSTOMER_KEY_PKCS11_NAME}" ]; then
-        echo "${CUSTOMER_KEY_PKCS11_NAME} -engine pkcs11 -keyform engine"
-    else
-        if [ -n "${CUSTOMER_KEY_FILE_PEM}" ]; then
-            if [ -f "${CUSTOMER_KEY_FILE_PEM}" ]; then
-                echo "${CUSTOMER_KEY_FILE_PEM} -keyform PEM"
-            else
-                echo "RSA private key \"${CUSTOMER_KEY_FILE_PEM}\" not a file. Aborting." >&2
-                exit 1
-            fi
-        else
-            echo "Neither PKCS11 key name, or PEM key file specified. Aborting." >&2
-            exit 1
-        fi
-    fi
-}
+# NOTE: get_signing_directives() is now provided by rpi-sb-common.sh
+# Use init_signing_context() to initialize, then get_openssl_sign_args() for signing
 
 get_fastboot_config_file() {
     if [ -f /etc/rpi-sb-provisioner/boot_ramdisk_config.txt ]; then
@@ -115,15 +100,15 @@ if [ "${PROVISIONING_STYLE}" != "secure-boot" ]; then
     exit 0
 fi
 
-# Check if key material is available
-if [ -z "${CUSTOMER_KEY_FILE_PEM}" ] && [ -z "${CUSTOMER_KEY_PKCS11_NAME}" ]; then
-    log "No customer key material configured. Skipping boot.img generation."
-    exit 0
+# Initialize signing context - validates key and derives public key if needed
+if ! init_signing_context; then
+    die "Failed to initialize signing context"
 fi
 
-# Verify key file exists if PEM is used
-if [ -n "${CUSTOMER_KEY_FILE_PEM}" ] && [ ! -f "${CUSTOMER_KEY_FILE_PEM}" ]; then
-    die "Customer key file does not exist: ${CUSTOMER_KEY_FILE_PEM}"
+# Check if signing is available (key material configured)
+if ! signing_available; then
+    log "No signing key configured. Skipping boot.img generation."
+    exit 0
 fi
 
 # Check if RPI_DEVICE_FAMILY is set
@@ -225,7 +210,7 @@ BOOT_SIG="${TMP_DIR}/boot.sig"
 sha256sum "${BOOT_IMG}" | awk '{print $1}' > "${BOOT_SIG}"
 printf 'rsa2048: ' >> "${BOOT_SIG}"
 # shellcheck disable=SC2046
-${OPENSSL} dgst -sign $(get_signing_directives) -sha256 "${BOOT_IMG}" | xxd -c 4096 -p >> "${BOOT_SIG}"
+${OPENSSL} dgst -sign $(get_openssl_sign_args) -sha256 "${BOOT_IMG}" | xxd -c 4096 -p >> "${BOOT_SIG}"
 
 log "Created boot.sig: ${BOOT_SIG}"
 announce_stop "boot.img signing"
