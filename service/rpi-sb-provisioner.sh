@@ -407,43 +407,14 @@ augment_initramfs() {
     rm -rf "${initramfs_dir}usr/lib/modules"
     mkdir -p "${initramfs_dir}usr/lib/modules"
 
-    # Insert required kernel modules
-    cd "${rootfs_mount}"
-    find usr/lib/modules \
-        \( \
-            -name 'dm-mod.*' \
-            -o \
-            -name 'dm-crypt.*' \
-            -o \
-            -name 'af_alg.*' \
-            -o \
-            -name 'algif_skcipher.*' \
-            -o \
-            -name 'libaes.*' \
-            -o \
-            -name 'aes_generic.*' \
-            -o \
-            -name 'aes-arm64.*' \
-            -o \
-            -name 'libpoly1305.*' \
-            -o \
-            -name 'nhpoly1305.*' \
-            -o \
-            -name 'adiantum.*' \
-            -o \
-            -name 'libchacha.*' \
-            -o \
-            -name 'chacha-neon.*' \
-            -o \
-            -name 'chacha_generic.*' \
-        \) \
-        -exec cp -r --parents "{}" "${initramfs_dir}" \;
-    cd -
-
-    # Generate depmod information
-    find "${initramfs_dir}usr/lib/modules" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | while read -r kernel; do
-        depmod --basedir "${initramfs_dir}" "${kernel}"
-    done
+    # Insert required kernel modules with automatic dependency resolution
+    # Find kernel version from the rootfs modules directory (checks both lib/modules and usr/lib/modules)
+    _kernel_version=$(find_kernel_version "${rootfs_mount}")
+    if [ -n "${_kernel_version}" ]; then
+        copy_kernel_modules_with_deps "${rootfs_mount}" "${initramfs_dir}" "${_kernel_version}"
+    else
+        log "WARNING: Could not determine kernel version from rootfs, skipping module copy"
+    fi
 
     # Configure the cryptroot script to use the correct storage device
     sed -i "s/mmcblk0/${RPI_DEVICE_STORAGE_TYPE}/g" "${initramfs_dir}usr/bin/init_cryptroot.sh"

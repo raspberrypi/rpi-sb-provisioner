@@ -1,0 +1,35 @@
+# Kernel modules required for initramfs during secure boot provisioning
+#
+# This file lists kernel module names (without .ko extension) that should be
+# included in the initramfs. Dependencies are automatically resolved using
+# modinfo, so you only need to list the top-level modules you require.
+#
+# Lines starting with # are comments and are ignored.
+# Empty lines are ignored.
+#
+# To override this list, copy it to /etc/rpi-sb-provisioner/kernel_modules.list
+
+# Device mapper modules (required for encrypted root filesystem)
+dm-mod
+dm-crypt
+
+# Crypto API modules (kernel crypto interface)
+af_alg
+algif_skcipher
+
+# AES encryption modules
+libaes
+aes_generic
+aes-arm64
+
+# Poly1305 authentication modules (used by Adiantum)
+libpoly1305
+nhpoly1305
+
+# Adiantum cipher (fast encryption for ARM devices without AES-NI)
+adiantum
+
+# ChaCha cipher modules (used by Adiantum)
+libchacha
+chacha-neon
+chacha_generic
