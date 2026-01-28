@@ -8,6 +8,8 @@ rpi-sb-provisioner (2.2.0) unstable; urgency=medium
     - Add kernel_modules.list for configurable kernel module inclusion
     - Integrate rpi-modcopy for improved kernel module handling and
       dependency resolution
+    - Add RPI_DEVICE_RPIBOOT_GPIO configuration for Pi 4 family secure-boot
+      provisioning (fixes GitHub issue #242)
 
   * Provisioning Improvements:
     - Refactor signing infrastructure into rpi-sb-common.sh for better
@@ -16,21 +18,27 @@ rpi-sb-provisioner (2.2.0) unstable; urgency=medium
     - Fix temporary directory creation path to /srv/rpi-sb-provisioner,
       avoiding Trixie tmpfs issue
     - Improve orphan cleanup logic to preserve base temp directory
+    - Fix Pi 4/CM4 secure-boot provisioning by programming RPIBOOT GPIO
+      into OTP alongside the secure boot public key
 
   * WebUI:
     - Add JSON endpoints for firmware listing and management
     - Improve device visualization with edge avoidance force and better
       link rendering
     - Conditionally display firmware select button for cleaner interface
+    - Add RPIBOOT GPIO configuration field for Pi 4 secure-boot provisioning
+      with validation and clear guidance recommending GPIO 8
 
   * Documentation:
     - Revise provisioning capacity and throughput metrics
+    - Update Pi 4 device guidance with RPIBOOT GPIO requirements
+    - Add RPI_DEVICE_RPIBOOT_GPIO to configuration variables documentation
 
   * Packaging:
     - Add rpi-modcopy dependency for kernel module handling
     - Fix CMake configuration for jsoncpp dependency
 
- -- Tom Dewey <tom.dewey@raspberrypi.com>  Mon, 26 Jan 2026 17:25:00 +0000
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Wed, 28 Jan 2026 17:25:00 +0000
 
 rpi-sb-provisioner (2.1.3) unstable; urgency=medium
 
