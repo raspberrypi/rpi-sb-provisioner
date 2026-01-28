@@ -1209,17 +1209,329 @@ namespace provisioner {
             }
             config_write.close();
 
-            // Return success with the path
+            // Parse the key to extract metadata
+            auto keyInfo = utils::parseKeyFile(destPath);
+            
+            // Return success with the path and key metadata
             Json::Value jsonResponse;
             jsonResponse["success"] = true;
             jsonResponse["path"] = destPath;
             jsonResponse["filename"] = safeFilename;
+            
+            // Include key metadata
+            jsonResponse["keyInfo"]["algorithm"] = keyInfo.algorithm;
+            jsonResponse["keyInfo"]["keySize"] = keyInfo.keySize;
+            jsonResponse["keyInfo"]["isPrivateKey"] = keyInfo.isPrivateKey;
+            jsonResponse["keyInfo"]["fingerprint"] = keyInfo.fingerprint;
+            jsonResponse["keyInfo"]["isFitForPurpose"] = keyInfo.isFitForPurpose;
+            jsonResponse["keyInfo"]["statusMessage"] = keyInfo.statusMessage;
+            jsonResponse["keyInfo"]["statusLevel"] = keyInfo.statusLevel;
+            jsonResponse["keyInfo"]["valid"] = keyInfo.success;
+            if (!keyInfo.errorMessage.empty()) {
+                jsonResponse["keyInfo"]["errorMessage"] = keyInfo.errorMessage;
+            }
             
             auto resp = HttpResponse::newHttpResponse();
             resp->setStatusCode(k200OK);
             resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
             resp->setBody(Json::FastWriter().write(jsonResponse));
             callback(resp);
+        });
+
+        // Key validation handler (for PKCS#11 and PEM validation)
+        app.registerHandler(OPTIONS_PATH + "/validate-key", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
+            LOG_INFO << "Options::validate-key";
+            
+            AuditLog::logHandlerAccess(req, "/options/validate-key");
+
+            // SECURITY: Restrict to POST method only
+            if (req->getMethod() != HttpMethod::Post) {
+                LOG_WARN << "SECURITY: Rejected non-POST request to /options/validate-key from " << AuditLog::getClientIP(req);
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "This endpoint only accepts POST requests",
+                    drogon::k405MethodNotAllowed,
+                    "Method Not Allowed",
+                    "METHOD_NOT_ALLOWED"
+                );
+                callback(resp);
+                return;
+            }
+
+            // SECURITY: Validate CSRF token for browser requests
+            if (!req->getHeader("X-CSRF-Token").empty()) {
+                if (!utils::validateCsrfToken(req)) {
+                    LOG_WARN << "SECURITY: CSRF validation failed for /options/validate-key from " << AuditLog::getClientIP(req);
+                    auto resp = provisioner::utils::createErrorResponse(
+                        req,
+                        "Invalid or expired security token. Please refresh the page and try again.",
+                        drogon::k403Forbidden,
+                        "Security Error",
+                        "CSRF_VALIDATION_FAILED"
+                    );
+                    callback(resp);
+                    return;
+                }
+            }
+
+            // Parse JSON body
+            auto jsonBody = req->getJsonObject();
+            if (!jsonBody) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Invalid JSON body",
+                    drogon::k400BadRequest,
+                    "Invalid Request",
+                    "INVALID_JSON"
+                );
+                callback(resp);
+                return;
+            }
+
+            utils::KeyInfo keyInfo;
+            std::string keyType;
+
+            // Check if validating PKCS#11 or PEM
+            if (jsonBody->isMember("uri")) {
+                // PKCS#11 validation
+                std::string uri = (*jsonBody)["uri"].asString();
+                
+                // Basic URI format validation
+                if (uri.find("pkcs11:") != 0) {
+                    auto resp = provisioner::utils::createErrorResponse(
+                        req,
+                        "Invalid PKCS#11 URI format. Must start with 'pkcs11:'",
+                        drogon::k400BadRequest,
+                        "Invalid URI",
+                        "INVALID_PKCS11_URI"
+                    );
+                    callback(resp);
+                    return;
+                }
+                
+                // Get optional PIN for validation (if provided)
+                std::string pin;
+                if (jsonBody->isMember("pin")) {
+                    pin = (*jsonBody)["pin"].asString();
+                }
+                
+                keyInfo = utils::parsePkcs11Key(uri, pin);
+                keyType = "pkcs11";
+                
+            } else if (jsonBody->isMember("path")) {
+                // PEM file validation
+                std::string path = (*jsonBody)["path"].asString();
+                
+                // Security: Validate path is within allowed directory
+                std::string keyStorageDir = "/etc/rpi-sb-provisioner/keys";
+                try {
+                    auto canonicalPath = std::filesystem::canonical(path);
+                    auto canonicalDir = std::filesystem::canonical(keyStorageDir);
+                    
+                    // Check if path is within the keys directory
+                    auto relative = std::filesystem::relative(canonicalPath, canonicalDir);
+                    if (relative.string().find("..") == 0) {
+                        LOG_WARN << "SECURITY: Rejected path outside keys directory: " << path;
+                        auto resp = provisioner::utils::createErrorResponse(
+                            req,
+                            "Invalid key path",
+                            drogon::k400BadRequest,
+                            "Invalid Path",
+                            "INVALID_KEY_PATH"
+                        );
+                        callback(resp);
+                        return;
+                    }
+                } catch (const std::filesystem::filesystem_error& e) {
+                    // Path doesn't exist or can't be canonicalized
+                    keyInfo.success = false;
+                    keyInfo.errorMessage = "Key file not found";
+                    keyInfo.statusLevel = "error";
+                    keyInfo.statusMessage = "Key file not found";
+                }
+                
+                if (keyInfo.errorMessage.empty()) {
+                    keyInfo = utils::parseKeyFile(path);
+                }
+                keyType = "pem";
+                
+            } else {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Request must contain either 'uri' (for PKCS#11) or 'path' (for PEM)",
+                    drogon::k400BadRequest,
+                    "Invalid Request",
+                    "MISSING_KEY_IDENTIFIER"
+                );
+                callback(resp);
+                return;
+            }
+
+            // Build response
+            Json::Value jsonResponse;
+            jsonResponse["keyType"] = keyType;
+            jsonResponse["keyInfo"]["algorithm"] = keyInfo.algorithm;
+            jsonResponse["keyInfo"]["keySize"] = keyInfo.keySize;
+            jsonResponse["keyInfo"]["isPrivateKey"] = keyInfo.isPrivateKey;
+            jsonResponse["keyInfo"]["fingerprint"] = keyInfo.fingerprint;
+            jsonResponse["keyInfo"]["isFitForPurpose"] = keyInfo.isFitForPurpose;
+            jsonResponse["keyInfo"]["statusMessage"] = keyInfo.statusMessage;
+            jsonResponse["keyInfo"]["statusLevel"] = keyInfo.statusLevel;
+            jsonResponse["keyInfo"]["valid"] = keyInfo.success;
+            if (!keyInfo.errorMessage.empty()) {
+                jsonResponse["keyInfo"]["errorMessage"] = keyInfo.errorMessage;
+            }
+            
+            auto resp = HttpResponse::newHttpResponse();
+            resp->setStatusCode(k200OK);
+            resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+            resp->setBody(Json::FastWriter().write(jsonResponse));
+            callback(resp);
+        });
+
+        // PKCS#11 PIN status endpoint (GET) - returns whether PIN is configured, never the PIN itself
+        app.registerHandler(OPTIONS_PATH + "/pkcs11-pin-status", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
+            LOG_INFO << "Options::pkcs11-pin-status";
+            
+            AuditLog::logHandlerAccess(req, "/options/pkcs11-pin-status");
+
+            Json::Value jsonResponse;
+            jsonResponse["configured"] = utils::isPkcs11PinConfigured();
+            // SECURITY: Never return the actual PIN value
+            
+            auto resp = HttpResponse::newHttpResponse();
+            resp->setStatusCode(k200OK);
+            resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+            resp->setBody(Json::FastWriter().write(jsonResponse));
+            callback(resp);
+        });
+
+        // PKCS#11 PIN save endpoint (POST) - saves PIN securely
+        app.registerHandler(OPTIONS_PATH + "/set-pkcs11-pin", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
+            LOG_INFO << "Options::set-pkcs11-pin";
+            
+            AuditLog::logHandlerAccess(req, "/options/set-pkcs11-pin");
+
+            // SECURITY: Restrict to POST method only
+            if (req->getMethod() != HttpMethod::Post) {
+                LOG_WARN << "SECURITY: Rejected non-POST request to /options/set-pkcs11-pin from " << AuditLog::getClientIP(req);
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "This endpoint only accepts POST requests",
+                    drogon::k405MethodNotAllowed,
+                    "Method Not Allowed",
+                    "METHOD_NOT_ALLOWED"
+                );
+                callback(resp);
+                return;
+            }
+
+            // SECURITY: Validate CSRF token for browser requests
+            if (!req->getHeader("X-CSRF-Token").empty()) {
+                if (!utils::validateCsrfToken(req)) {
+                    LOG_WARN << "SECURITY: CSRF validation failed for /options/set-pkcs11-pin from " << AuditLog::getClientIP(req);
+                    auto resp = provisioner::utils::createErrorResponse(
+                        req,
+                        "Invalid or expired security token. Please refresh the page and try again.",
+                        drogon::k403Forbidden,
+                        "Security Error",
+                        "CSRF_VALIDATION_FAILED"
+                    );
+                    callback(resp);
+                    return;
+                }
+            }
+
+            // Parse JSON body
+            auto jsonBody = req->getJsonObject();
+            if (!jsonBody) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Invalid JSON body",
+                    drogon::k400BadRequest,
+                    "Invalid Request",
+                    "INVALID_JSON"
+                );
+                callback(resp);
+                return;
+            }
+
+            // Get PIN from request
+            if (!jsonBody->isMember("pin")) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "PIN is required",
+                    drogon::k400BadRequest,
+                    "Invalid Request",
+                    "MISSING_PIN"
+                );
+                callback(resp);
+                return;
+            }
+
+            std::string pin = (*jsonBody)["pin"].asString();
+            
+            // Handle empty PIN as a request to remove the PIN
+            if (pin.empty()) {
+                if (utils::removePkcs11Pin()) {
+                    Json::Value jsonResponse;
+                    jsonResponse["success"] = true;
+                    jsonResponse["configured"] = false;
+                    jsonResponse["message"] = "PIN removed";
+                    
+                    auto resp = HttpResponse::newHttpResponse();
+                    resp->setStatusCode(k200OK);
+                    resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+                    resp->setBody(Json::FastWriter().write(jsonResponse));
+                    callback(resp);
+                } else {
+                    auto resp = provisioner::utils::createErrorResponse(
+                        req,
+                        "Failed to remove PIN",
+                        drogon::k500InternalServerError,
+                        "Storage Error",
+                        "PIN_REMOVE_ERROR"
+                    );
+                    callback(resp);
+                }
+                return;
+            }
+            
+            // SECURITY: Basic PIN validation (not empty, reasonable length)
+            if (pin.length() > 256) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "PIN is too long (max 256 characters)",
+                    drogon::k400BadRequest,
+                    "Invalid PIN",
+                    "PIN_TOO_LONG"
+                );
+                callback(resp);
+                return;
+            }
+
+            // Save the PIN securely
+            if (utils::savePkcs11Pin(pin)) {
+                Json::Value jsonResponse;
+                jsonResponse["success"] = true;
+                jsonResponse["configured"] = true;
+                // SECURITY: Never return the actual PIN value
+                
+                auto resp = HttpResponse::newHttpResponse();
+                resp->setStatusCode(k200OK);
+                resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+                resp->setBody(Json::FastWriter().write(jsonResponse));
+                callback(resp);
+            } else {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Failed to save PIN securely",
+                    drogon::k500InternalServerError,
+                    "Storage Error",
+                    "PIN_SAVE_ERROR"
+                );
+                callback(resp);
+            }
         });
     }
 }

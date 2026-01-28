@@ -15,6 +15,7 @@
 #include <openssl/err.h>
 #include <fstream>
 #include <sstream>
+#include <sys/stat.h>
 
 #include "images.h"
 #include "devices.h"
@@ -374,6 +375,20 @@ int main(int argc, char* argv[])
     // Create the certificates directory if it doesn't exist
     std::string certDir = "/tmp/rpi-sb-provisioner";
     std::filesystem::create_directories(certDir);
+    
+    // Create the private directory for temporary PIN files
+    // This is more secure than using /tmp as it's not world-readable
+    constexpr const char* pinTempDir = "/run/rpi-sb-provisioner";
+    try {
+        std::filesystem::create_directories(pinTempDir);
+        // Set directory permissions to 0700 (owner only)
+        chmod(pinTempDir, S_IRWXU);
+        LOG_INFO << "Created secure PIN temp directory: " << pinTempDir;
+    } catch (const std::filesystem::filesystem_error& e) {
+        // Non-fatal - will fall back to /tmp with per-file permissions
+        LOG_WARN << "Could not create secure PIN temp directory " << pinTempDir 
+                 << ": " << e.what() << " (will use fallback)";
+    }
     
     // Generate self-signed certificate paths
     std::string certPath = certDir + "/cert.pem";

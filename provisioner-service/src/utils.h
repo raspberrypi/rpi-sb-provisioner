@@ -33,6 +33,81 @@ namespace provisioner {
             uintmax_t size;             // File size in bytes
         };
         
+        // ===== Key Information =====
+        
+        /**
+         * Information about a cryptographic key
+         */
+        struct KeyInfo {
+            std::string algorithm;      // "RSA", "EC", "DSA", etc.
+            int keySize;                // Key size in bits (e.g., 2048, 4096)
+            bool isPrivateKey;          // Whether this is a private key
+            std::string fingerprint;    // SHA256 fingerprint of the public key
+            bool isFitForPurpose;       // Whether key meets Pi secure boot requirements (RSA-2048)
+            std::string statusMessage;  // Human-readable status message
+            std::string statusLevel;    // "valid", "warning", or "error"
+            std::string errorMessage;   // Error details if parsing failed
+            bool success;               // Whether key parsing succeeded
+            
+            KeyInfo() : keySize(0), isPrivateKey(false), isFitForPurpose(false), success(false) {}
+        };
+        
+        /**
+         * Parse a PEM key file and extract metadata
+         * 
+         * @param path Path to the PEM key file
+         * @return KeyInfo struct with key metadata
+         */
+        KeyInfo parseKeyFile(const std::string& path);
+        
+        /**
+         * Parse a PKCS#11 key and extract metadata
+         * Requires the HSM to be connected and accessible
+         * 
+         * @param uri PKCS#11 URI (e.g., pkcs11:object=mykey;type=private)
+         * @param pin Optional PIN to use for validation (if empty, uses stored PIN file)
+         * @return KeyInfo struct with key metadata
+         */
+        KeyInfo parsePkcs11Key(const std::string& uri, const std::string& pin = "");
+        
+        // ===== PKCS#11 PIN Management =====
+        
+        /**
+         * Path to the PKCS#11 PIN file
+         */
+        constexpr const char* PKCS11_PIN_FILE = "/etc/rpi-sb-provisioner/keys/pkcs11.pin";
+        
+        /**
+         * Check if a PKCS#11 PIN is configured
+         * 
+         * @return true if PIN file exists and is non-empty
+         */
+        bool isPkcs11PinConfigured();
+        
+        /**
+         * Save a PKCS#11 PIN securely
+         * The PIN is stored in a separate file with restrictive permissions (0400)
+         * 
+         * @param pin The PIN to save
+         * @return true if successful, false otherwise
+         */
+        bool savePkcs11Pin(const std::string& pin);
+        
+        /**
+         * Remove the PKCS#11 PIN file
+         * 
+         * @return true if successful or file didn't exist, false on error
+         */
+        bool removePkcs11Pin();
+        
+        /**
+         * Build a PKCS#11 URI with pin-source if PIN is configured
+         * 
+         * @param baseUri The base PKCS#11 URI without PIN
+         * @return URI with pin-source appended if PIN is configured
+         */
+        std::string buildPkcs11UriWithPinSource(const std::string& baseUri);
+        
         /**
          * Scan the firmware directory for available firmware versions
          * 

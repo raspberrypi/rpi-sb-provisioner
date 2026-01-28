@@ -323,6 +323,78 @@
             font-size: 1.2rem;
         }
         
+        /* Key Metrics Display */
+        .key-metrics {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 8px;
+            align-items: center;
+        }
+        
+        .key-metrics-container {
+            margin-top: 12px;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 6px;
+            border: 1px solid #e9ecef;
+        }
+        
+        .key-metrics-loading {
+            color: #6c757d;
+            font-style: italic;
+            font-size: 0.85rem;
+        }
+        
+        .key-algorithm {
+            display: inline-block;
+            padding: 3px 8px;
+            background: #e9ecef;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: #495057;
+        }
+        
+        .key-status {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+        
+        .key-status.valid {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .key-status.warning {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeeba;
+        }
+        
+        .key-status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .key-fingerprint {
+            display: inline-block;
+            padding: 3px 8px;
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 0.75rem;
+            color: #6c757d;
+            cursor: help;
+        }
+        
         /* PKCS11 Helper */
         .pkcs11-builder {
             margin-top: 15px;
@@ -362,6 +434,100 @@
             color: #666;
             margin-bottom: 5px;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+        
+        /* PKCS#11 PIN Section */
+        .pkcs11-pin-section {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #e0e0e0;
+        }
+        
+        .pin-input-wrapper {
+            display: flex;
+            gap: 8px;
+            align-items: stretch;
+        }
+        
+        .pin-input-wrapper input {
+            flex: 1;
+        }
+        
+        .pin-toggle-visibility {
+            background: #f0f0f0;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            padding: 8px 12px;
+            cursor: pointer;
+            font-size: 1.1rem;
+            transition: background 0.2s;
+        }
+        
+        .pin-toggle-visibility:hover {
+            background: #e0e0e0;
+        }
+        
+        .pin-status {
+            margin-top: 8px;
+            font-size: 0.85rem;
+        }
+        
+        .pin-status-loading {
+            color: #6c757d;
+            font-style: italic;
+        }
+        
+        .pin-status-configured {
+            color: #28a745;
+            font-weight: 500;
+        }
+        
+        .pin-status-configured::before {
+            content: "\\2713 ";
+        }
+        
+        .pin-status-not-configured {
+            color: #6c757d;
+        }
+        
+        .pin-status-error {
+            color: #dc3545;
+        }
+        
+        .pin-save-btn,
+        .pin-remove-btn {
+            margin-top: 12px;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+        
+        .pin-save-btn {
+            background: #007bff;
+            color: white;
+            margin-right: 10px;
+        }
+        
+        .pin-save-btn:hover {
+            background: #0056b3;
+        }
+        
+        .pin-save-btn:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+        
+        .pin-remove-btn {
+            background: #dc3545;
+            color: white;
+        }
+        
+        .pin-remove-btn:hover {
+            background: #c82333;
         }
         
         /* ===== Inline Help & Warnings ===== */
@@ -1189,6 +1355,9 @@
                             <div class="current-file-info">
                                 <div class="current-file-name">Key file configured</div>
                                 <div class="current-file-path"><%c++ $$ << keyFilePem; %></div>
+                                <div class="key-metrics" id="pem-key-metrics">
+                                    <span class="key-metrics-loading">Validating key...</span>
+                                </div>
                             </div>
                             <button type="button" class="remove-file-btn" onclick="removeKeyFile()">&#10005;</button>
                         </div>
@@ -1214,17 +1383,42 @@
                                 <code id="pkcs11-uri">pkcs11:object=<em>&lt;alias&gt;</em>;type=private</code>
                             </div>
                             
+                            <div class="key-metrics-container" id="pkcs11-key-metrics-container" style="display: none;">
+                                <div class="key-metrics" id="pkcs11-key-metrics">
+                                    <span class="key-metrics-loading">Validating key...</span>
+                                </div>
+                            </div>
+                            
                             <input type="hidden" name="CUSTOMER_KEY_PKCS11_NAME" id="CUSTOMER_KEY_PKCS11_NAME" value="<%c++ $$ << keyPkcs11; %>">
+                        </div>
+                        
+                        <!-- PKCS#11 PIN Input -->
+                        <div class="pkcs11-pin-section">
+                            <div class="pkcs11-input-group">
+                                <label for="pkcs11-pin">HSM PIN</label>
+                                <div class="pin-input-wrapper">
+                                    <input type="password" id="pkcs11-pin" placeholder="Enter HSM PIN" autocomplete="off">
+                                    <button type="button" class="pin-toggle-visibility" onclick="togglePinVisibility()" title="Toggle visibility">
+                                        <span id="pin-visibility-icon">&#128065;</span>
+                                    </button>
+                                </div>
+                                <div id="pin-status" class="pin-status">
+                                    <span class="pin-status-loading">Checking PIN status...</span>
+                                </div>
+                                <div id="feedback-pkcs11-pin" class="field-feedback"></div>
+                            </div>
+                            <button type="button" class="pin-save-btn" id="pin-save-btn" onclick="savePkcs11Pin()">Save PIN &amp; Validate</button>
+                            <button type="button" class="pin-remove-btn" id="pin-remove-btn" onclick="removePkcs11Pin()" style="display: none;">Remove PIN</button>
                         </div>
                         
                         <div class="inline-warning">
                             <span class="inline-warning-icon">&#9888;</span>
-                            <span>The HSM and PKCS#11 provider should be protected according to your threat model.</span>
+                            <span>The HSM PIN is stored securely on this server. Never share it or enter it on untrusted systems.</span>
                         </div>
                         
                         <div class="inline-help">
                             <span class="inline-help-icon">&#9432;</span>
-                            <span>PKCS#11 keys are typically stored on a Hardware Security Module (HSM). Enter only the keypair alias - the full URI will be generated automatically.</span>
+                            <span>PKCS#11 keys are typically stored on a Hardware Security Module (HSM). Enter the keypair alias and PIN - the full URI will be generated automatically and the key will be validated.</span>
                         </div>
                     </div>
                 </div>
@@ -1542,6 +1736,75 @@
             });
         });
         
+        // ===== Key Metrics Display Helper =====
+        function buildKeyMetricsDisplay(keyInfo) {
+            const metricsDiv = document.createElement('div');
+            metricsDiv.className = 'key-metrics';
+            
+            if (!keyInfo || !keyInfo.valid) {
+                // Key parsing failed
+                const errorSpan = document.createElement('span');
+                errorSpan.className = 'key-status error';
+                errorSpan.textContent = keyInfo?.errorMessage || 'Unable to validate key';
+                metricsDiv.appendChild(errorSpan);
+                return metricsDiv;
+            }
+            
+            // Algorithm and key size badge
+            const algorithmSpan = document.createElement('span');
+            algorithmSpan.className = 'key-algorithm';
+            algorithmSpan.textContent = keyInfo.algorithm + '-' + keyInfo.keySize;
+            metricsDiv.appendChild(algorithmSpan);
+            
+            // Status indicator
+            const statusSpan = document.createElement('span');
+            statusSpan.className = 'key-status ' + (keyInfo.statusLevel || 'error');
+            statusSpan.textContent = keyInfo.statusMessage || 'Unknown status';
+            metricsDiv.appendChild(statusSpan);
+            
+            // Fingerprint (truncated) if available
+            if (keyInfo.fingerprint) {
+                const fpSpan = document.createElement('span');
+                fpSpan.className = 'key-fingerprint';
+                fpSpan.title = 'SHA256: ' + keyInfo.fingerprint;
+                fpSpan.textContent = 'SHA256: ' + keyInfo.fingerprint.substring(0, 16) + '...';
+                metricsDiv.appendChild(fpSpan);
+            }
+            
+            return metricsDiv;
+        }
+        
+        // Validate existing PEM key on page load
+        async function validateExistingPemKey() {
+            const keyPath = document.getElementById('CUSTOMER_KEY_FILE_PEM')?.value;
+            const metricsContainer = document.getElementById('pem-key-metrics');
+            
+            if (!keyPath || !metricsContainer) return;
+            
+            try {
+                const response = await fetch('/options/validate-key', addCsrfHeader({
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path: keyPath })
+                }));
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    const newMetrics = buildKeyMetricsDisplay(result.keyInfo);
+                    newMetrics.id = 'pem-key-metrics';
+                    metricsContainer.replaceWith(newMetrics);
+                } else {
+                    metricsContainer.innerHTML = '<span class="key-status error">Failed to validate key</span>';
+                }
+            } catch (error) {
+                console.error('Key validation error:', error);
+                metricsContainer.innerHTML = '<span class="key-status error">Failed to validate key</span>';
+            }
+        }
+        
+        // Validate existing key on page load
+        validateExistingPemKey();
+        
         // ===== File Upload Zone =====
         const keyUploadZone = document.getElementById('key-upload-zone');
         const keyFileInput = document.getElementById('key-file-input');
@@ -1627,6 +1890,13 @@
                     info.appendChild(nameDiv);
                     info.appendChild(pathDiv);
                     
+                    // Add key metrics display
+                    if (result.keyInfo) {
+                        const metricsDiv = buildKeyMetricsDisplay(result.keyInfo);
+                        metricsDiv.id = 'pem-key-metrics';
+                        info.appendChild(metricsDiv);
+                    }
+                    
                     const removeBtn = document.createElement('button');
                     removeBtn.type = 'button';
                     removeBtn.className = 'remove-file-btn';
@@ -1691,7 +1961,14 @@
         async function savePkcs11Value() {
             const hiddenInput = document.getElementById('CUSTOMER_KEY_PKCS11_NAME');
             const feedbackDiv = document.getElementById('feedback-CUSTOMER_KEY_PKCS11_NAME');
+            const metricsContainer = document.getElementById('pkcs11-key-metrics-container');
+            const metricsDiv = document.getElementById('pkcs11-key-metrics');
             const value = hiddenInput.value;
+            
+            // Hide metrics if no value
+            if (!value && metricsContainer) {
+                metricsContainer.style.display = 'none';
+            }
             
             try {
                 // If we have a value, validate it first
@@ -1728,6 +2005,14 @@
                             feedbackDiv.textContent = '';
                         }, 2000);
                     }
+                    
+                    // If we have a value, validate the PKCS#11 key and show metrics
+                    if (value && metricsContainer && metricsDiv) {
+                        metricsContainer.style.display = 'block';
+                        metricsDiv.innerHTML = '<span class="key-metrics-loading">Validating key...</span>';
+                        
+                        await validatePkcs11Key(value);
+                    }
                 } else {
                     if (feedbackDiv) {
                         feedbackDiv.className = 'field-feedback error';
@@ -1743,8 +2028,45 @@
             }
         }
         
+        // Validate a PKCS#11 key and update the metrics display
+        // If pin is provided, it's used for validation (when setting a new PIN)
+        async function validatePkcs11Key(uri, pin = null) {
+            const metricsContainer = document.getElementById('pkcs11-key-metrics-container');
+            const metricsDiv = document.getElementById('pkcs11-key-metrics');
+            
+            if (!metricsContainer || !metricsDiv) return { success: false };
+            
+            try {
+                const requestBody = { uri: uri };
+                if (pin !== null) {
+                    requestBody.pin = pin;
+                }
+                
+                const response = await fetch('/options/validate-key', addCsrfHeader({
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(requestBody)
+                }));
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    const newMetrics = buildKeyMetricsDisplay(result.keyInfo);
+                    newMetrics.id = 'pkcs11-key-metrics';
+                    metricsDiv.replaceWith(newMetrics);
+                    return { success: result.keyInfo?.valid || false, keyInfo: result.keyInfo };
+                } else {
+                    metricsDiv.innerHTML = '<span class="key-status error">Failed to validate key</span>';
+                    return { success: false };
+                }
+            } catch (error) {
+                console.error('PKCS11 key validation error:', error);
+                metricsDiv.innerHTML = '<span class="key-status error">Failed to validate key</span>';
+                return { success: false };
+            }
+        }
+        
         // Initialize PKCS11 alias from existing value
-        (function initPkcs11() {
+        (async function initPkcs11() {
             const existingValue = document.getElementById('CUSTOMER_KEY_PKCS11_NAME').value;
             if (existingValue) {
                 const match = existingValue.match(/object=([^;]+)/);
@@ -1752,8 +2074,204 @@
                     document.getElementById('pkcs11-alias').value = match[1];
                     updatePkcs11Preview();
                 }
+                
+                // Validate existing PKCS#11 key and show metrics
+                const metricsContainer = document.getElementById('pkcs11-key-metrics-container');
+                const metricsDiv = document.getElementById('pkcs11-key-metrics');
+                if (metricsContainer && metricsDiv) {
+                    metricsContainer.style.display = 'block';
+                    metricsDiv.innerHTML = '<span class="key-metrics-loading">Validating key...</span>';
+                    await validatePkcs11Key(existingValue);
+                }
             }
+            
+            // Check PIN status on load
+            await checkPkcs11PinStatus();
         })();
+        
+        // ===== PKCS#11 PIN Management =====
+        
+        // Toggle PIN visibility
+        function togglePinVisibility() {
+            const pinInput = document.getElementById('pkcs11-pin');
+            const icon = document.getElementById('pin-visibility-icon');
+            
+            if (pinInput.type === 'password') {
+                pinInput.type = 'text';
+                icon.innerHTML = '&#128064;';  // Eye with line
+            } else {
+                pinInput.type = 'password';
+                icon.innerHTML = '&#128065;';  // Eye
+            }
+        }
+        
+        // Check PIN status (without revealing the PIN)
+        async function checkPkcs11PinStatus() {
+            const statusDiv = document.getElementById('pin-status');
+            const removeBtn = document.getElementById('pin-remove-btn');
+            
+            if (!statusDiv) return;
+            
+            try {
+                const response = await fetch('/options/pkcs11-pin-status');
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    
+                    if (result.configured) {
+                        statusDiv.innerHTML = '<span class="pin-status-configured">PIN is configured</span>';
+                        if (removeBtn) removeBtn.style.display = 'inline-block';
+                    } else {
+                        statusDiv.innerHTML = '<span class="pin-status-not-configured">No PIN configured</span>';
+                        if (removeBtn) removeBtn.style.display = 'none';
+                    }
+                } else {
+                    statusDiv.innerHTML = '<span class="pin-status-error">Failed to check PIN status</span>';
+                }
+            } catch (error) {
+                console.error('PIN status check error:', error);
+                statusDiv.innerHTML = '<span class="pin-status-error">Failed to check PIN status</span>';
+            }
+        }
+        
+        // Save PIN and validate it works with the configured key
+        async function savePkcs11Pin() {
+            const pinInput = document.getElementById('pkcs11-pin');
+            const feedbackDiv = document.getElementById('feedback-pkcs11-pin');
+            const saveBtn = document.getElementById('pin-save-btn');
+            const uri = document.getElementById('CUSTOMER_KEY_PKCS11_NAME').value;
+            const metricsContainer = document.getElementById('pkcs11-key-metrics-container');
+            const metricsDiv = document.getElementById('pkcs11-key-metrics');
+            
+            const pin = pinInput.value;
+            
+            if (!pin) {
+                if (feedbackDiv) {
+                    feedbackDiv.className = 'field-feedback error';
+                    feedbackDiv.textContent = 'Please enter a PIN';
+                }
+                return;
+            }
+            
+            // Disable button during operation
+            if (saveBtn) saveBtn.disabled = true;
+            
+            try {
+                // First, validate the PIN works with the key (if a key is configured)
+                if (uri) {
+                    if (feedbackDiv) {
+                        feedbackDiv.className = 'field-feedback';
+                        feedbackDiv.textContent = 'Validating PIN with HSM...';
+                    }
+                    
+                    // Show metrics container and loading state
+                    if (metricsContainer) metricsContainer.style.display = 'block';
+                    if (metricsDiv) metricsDiv.innerHTML = '<span class="key-metrics-loading">Validating key with PIN...</span>';
+                    
+                    // Validate with the provided PIN
+                    const validationResult = await validatePkcs11Key(uri, pin);
+                    
+                    if (!validationResult.success) {
+                        if (feedbackDiv) {
+                            feedbackDiv.className = 'field-feedback error';
+                            feedbackDiv.textContent = validationResult.keyInfo?.statusMessage || 'PIN validation failed - check your PIN';
+                        }
+                        if (saveBtn) saveBtn.disabled = false;
+                        return;
+                    }
+                }
+                
+                // PIN validated successfully - now save it
+                if (feedbackDiv) {
+                    feedbackDiv.className = 'field-feedback';
+                    feedbackDiv.textContent = 'Saving PIN...';
+                }
+                
+                const response = await fetch('/options/set-pkcs11-pin', addCsrfHeader({
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ pin: pin })
+                }));
+                
+                if (response.ok) {
+                    // Clear the PIN input (never keep it in the form)
+                    pinInput.value = '';
+                    
+                    if (feedbackDiv) {
+                        feedbackDiv.className = 'field-feedback success';
+                        feedbackDiv.textContent = 'PIN saved and validated successfully';
+                        setTimeout(() => {
+                            feedbackDiv.className = 'field-feedback';
+                            feedbackDiv.textContent = '';
+                        }, 3000);
+                    }
+                    
+                    // Update PIN status
+                    await checkPkcs11PinStatus();
+                    
+                    showSuccess('HSM PIN saved and validated');
+                } else {
+                    const errorData = await response.json().catch(() => ({}));
+                    if (feedbackDiv) {
+                        feedbackDiv.className = 'field-feedback error';
+                        feedbackDiv.textContent = errorData.message || 'Failed to save PIN';
+                    }
+                }
+            } catch (error) {
+                console.error('PIN save error:', error);
+                if (feedbackDiv) {
+                    feedbackDiv.className = 'field-feedback error';
+                    feedbackDiv.textContent = 'Network error';
+                }
+            } finally {
+                if (saveBtn) saveBtn.disabled = false;
+            }
+        }
+        
+        // Remove the saved PIN
+        async function removePkcs11Pin() {
+            const feedbackDiv = document.getElementById('feedback-pkcs11-pin');
+            
+            if (!confirm('Are you sure you want to remove the HSM PIN? You will need to re-enter it to use the PKCS#11 key.')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch('/options/set-pkcs11-pin', addCsrfHeader({
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ pin: '' })  // Empty PIN = remove
+                }));
+                
+                if (response.ok) {
+                    if (feedbackDiv) {
+                        feedbackDiv.className = 'field-feedback success';
+                        feedbackDiv.textContent = 'PIN removed';
+                        setTimeout(() => {
+                            feedbackDiv.className = 'field-feedback';
+                            feedbackDiv.textContent = '';
+                        }, 2000);
+                    }
+                    
+                    // Update PIN status
+                    await checkPkcs11PinStatus();
+                    
+                    showSuccess('HSM PIN removed');
+                } else {
+                    const errorData = await response.json().catch(() => ({}));
+                    if (feedbackDiv) {
+                        feedbackDiv.className = 'field-feedback error';
+                        feedbackDiv.textContent = errorData.message || 'Failed to remove PIN';
+                    }
+                }
+            } catch (error) {
+                console.error('PIN remove error:', error);
+                if (feedbackDiv) {
+                    feedbackDiv.className = 'field-feedback error';
+                    feedbackDiv.textContent = 'Network error';
+                }
+            }
+        }
         
         // ===== Cipher Recommendations =====
         function updateCipherRecommendations(deviceFamily, autoSelect = true) {
