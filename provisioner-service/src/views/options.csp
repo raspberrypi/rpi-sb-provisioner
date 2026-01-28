@@ -1012,6 +1012,7 @@
                         <span class="tile-badge warning">No secure boot</span>
                     </label>
                 </div>
+                <div id="feedback-RPI_DEVICE_FAMILY" class="field-feedback"></div>
             </div>
             
             <!-- Storage Type Tiles -->
@@ -1045,6 +1046,7 @@
                         <p class="tile-description">NVMe SSD storage. Requires Pi 5 or HAT.</p>
                     </label>
                 </div>
+                <div id="feedback-RPI_DEVICE_STORAGE_TYPE" class="field-feedback"></div>
             </div>
             
             <!-- RPIBOOT GPIO (Raspberry Pi 4 family only) -->
@@ -1062,6 +1064,7 @@
                     <option value="4" <%c++ if(rpibootGpio == "4") $$ << "selected"; %>>GPIO 4</option>
                     <option value="2" <%c++ if(rpibootGpio == "2") $$ << "selected"; %>>GPIO 2</option>
                 </select>
+                <div id="feedback-RPI_DEVICE_RPIBOOT_GPIO" class="field-feedback"></div>
                 <div class="inline-info" style="margin-top: 8px;">
                     <span class="inline-info-icon">&#9432;</span>
                     <span>Raspberry Pi 4 family devices require a GPIO pin to enter RPIBOOT mode (unlike Raspberry Pi 5 which has a power button). This pin is programmed into OTP alongside the secure boot key. <strong>GPIO 8 is strongly recommended</strong> for consistency across your fleet.</span>
@@ -1122,6 +1125,7 @@
                         </div>
                     </label>
                 </div>
+                <div id="feedback-PROVISIONING_STYLE" class="field-feedback"></div>
                 
                 <!-- Notice when secure boot is unavailable -->
                 <div class="inline-help" id="no-secure-boot-notice" <%c++ if(deviceFamily != "2W") $$ << "style=\"display: none;\""; %>>
@@ -1154,6 +1158,7 @@
                         <span class="tile-badge recommended" id="adiantum-badge">Best for Pi 4 / Zero 2</span>
                     </label>
                 </div>
+                <div id="feedback-RPI_DEVICE_STORAGE_CIPHER" class="field-feedback"></div>
             </div>
             
             <!-- Key Configuration (Secure Boot only) -->
@@ -1425,6 +1430,7 @@
                     <div class="toggle-title">Lock JTAG Access</div>
                     <div class="toggle-description">Restricts JTAG debugging access to the device. Note: This prevents Raspberry Pi engineers from assisting with hardware debugging.</div>
                 </div>
+                <div id="feedback-RPI_DEVICE_LOCK_JTAG" class="field-feedback"></div>
             </div>
             
             <!-- EEPROM Write Protection Toggle -->
@@ -1437,6 +1443,7 @@
                     <div class="toggle-title">Enable EEPROM Write Protection</div>
                     <div class="toggle-description">Prevents modification of the device's boot EEPROM after provisioning. Protects the secure boot configuration.</div>
                 </div>
+                <div id="feedback-RPI_DEVICE_EEPROM_WP_SET" class="field-feedback"></div>
             </div>
             
             <div class="inline-warning">
@@ -1641,12 +1648,27 @@
             }
         }
         
-        function removeKeyFile() {
-            document.getElementById('CUSTOMER_KEY_FILE_PEM').value = '';
-            document.getElementById('key-upload-zone').classList.remove('has-file');
-            const display = document.getElementById('current-key-display');
-            if (display) display.remove();
-            validateAndSaveField('CUSTOMER_KEY_FILE_PEM');
+        async function removeKeyFile() {
+            try {
+                const response = await fetch('/options/set', addCsrfHeader({
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 'CUSTOMER_KEY_FILE_PEM': '' })
+                }));
+                
+                if (response.ok) {
+                    document.getElementById('CUSTOMER_KEY_FILE_PEM').value = '';
+                    document.getElementById('key-upload-zone').classList.remove('has-file');
+                    const display = document.getElementById('current-key-display');
+                    if (display) display.remove();
+                    showSuccess('Key file removed');
+                } else {
+                    showError('Failed to remove key file');
+                }
+            } catch (error) {
+                console.error('Error removing key file:', error);
+                showError('Failed to remove key file');
+            }
         }
         
         // ===== PKCS#11 URI Builder =====
@@ -1920,16 +1942,27 @@
         
         // ===== Field Validation & Save =====
         async function validateAndSaveField(fieldName) {
-            const fieldElement = document.getElementById(fieldName);
-            if (!fieldElement) return;
-            
+            // Try to get element by ID first
+            let fieldElement = document.getElementById(fieldName);
             let fieldValue;
-            if (fieldElement.type === 'checkbox') {
-                fieldValue = fieldElement.checked ? "1" : "";
-            } else if (fieldElement.type === 'radio') {
+            
+            // Check if this is a radio button group (no element with that ID, but has named inputs)
+            const radioInput = document.querySelector(`input[name="${fieldName}"][type="radio"]`);
+            if (radioInput) {
+                // It's a radio group - get checked value
                 fieldValue = document.querySelector(`input[name="${fieldName}"]:checked`)?.value || "";
+                fieldElement = radioInput; // Use first radio for classList operations (though we won't use them for radios)
+            } else if (fieldElement) {
+                // Regular element found by ID
+                if (fieldElement.type === 'checkbox') {
+                    fieldValue = fieldElement.checked ? "1" : "";
+                } else {
+                    fieldValue = fieldElement.value;
+                }
             } else {
-                fieldValue = fieldElement.value;
+                // No element found
+                console.warn('validateAndSaveField: No element found for', fieldName);
+                return;
             }
             
             const feedbackDiv = document.getElementById('feedback-' + fieldName);
