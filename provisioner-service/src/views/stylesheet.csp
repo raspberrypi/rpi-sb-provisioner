@@ -1,5 +1,56 @@
+<!-- Favicon -->
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+
 <style>
 /* Common Styles for rpi-sb-provisioner */
+
+/* Security Warning Banner */
+.security-warning-banner {
+    background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+    color: white;
+    padding: 12px 20px;
+    margin-bottom: 15px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3);
+    animation: warningPulse 3s ease-in-out infinite;
+}
+
+@keyframes warningPulse {
+    0%, 100% { box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3); }
+    50% { box-shadow: 0 2px 16px rgba(220, 53, 69, 0.5); }
+}
+
+.security-warning-banner .warning-icon {
+    font-size: 24px;
+    flex-shrink: 0;
+}
+
+.security-warning-banner .warning-content {
+    flex: 1;
+}
+
+.security-warning-banner .warning-title {
+    font-weight: bold;
+    font-size: 14px;
+    margin-bottom: 2px;
+}
+
+.security-warning-banner .warning-text {
+    font-size: 13px;
+    opacity: 0.95;
+}
+
+.security-warning-banner a {
+    color: #ffcccc;
+    text-decoration: underline;
+}
+
+.security-warning-banner a:hover {
+    color: white;
+}
 
 body {
     font-family: Arial, sans-serif;

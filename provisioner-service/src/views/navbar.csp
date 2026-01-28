@@ -102,6 +102,22 @@
 }
 </style>
 
+<!-- Security Warning Banner for Public Binding -->
+<%c++ extern bool g_isPublicBinding; %>
+<%c++ extern std::string g_listenerAddress; %>
+<%c++ if(g_isPublicBinding) { %>
+<div class="security-warning-banner">
+    <span class="warning-icon">⚠️</span>
+    <div class="warning-content">
+        <div class="warning-title">Security Warning: Public Network Binding Detected</div>
+        <div class="warning-text">
+            This provisioner is bound to <strong><%c++ $$ << g_listenerAddress; %></strong> and may be accessible from external networks. 
+            This service is intended for local use only. Consider binding to 127.0.0.1 or implementing authentication.
+        </div>
+    </div>
+</div>
+<%c++ } %>
+
 <!-- Navigation Bar -->
 <div class="rpi-navbar">
     <div class="rpi-nav-items">

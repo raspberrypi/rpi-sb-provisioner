@@ -147,6 +147,8 @@ VersionInfo checkForNewerRelease(const std::string& current_version) {
 std::string g_packageVersion;
 bool g_hasNewerVersion = false;
 std::string g_releaseUrl;
+std::string g_listenerAddress;
+bool g_isPublicBinding = false;
 
 // Print help message
 void printHelp(const char* programName) {
@@ -408,6 +410,13 @@ int main(int argc, char* argv[])
     VersionInfo versionInfo = checkForNewerRelease(g_packageVersion);
     g_hasNewerVersion = versionInfo.has_newer;
     g_releaseUrl = versionInfo.release_url;
+    
+    // Set listener address for security warning in UI
+    g_listenerAddress = listenerAddress;
+    // Check if binding to a non-localhost address (potential security risk)
+    g_isPublicBinding = (listenerAddress != "127.0.0.1" && 
+                         listenerAddress != "localhost" && 
+                         listenerAddress != "::1");
 
     // Add CORS support for all responses
     app.registerPostHandlingAdvice([](const drogon::HttpRequestPtr &req, const drogon::HttpResponsePtr &resp) {

@@ -39,7 +39,7 @@ This tells the provisioner which GPIO pin to program into OTP for RPIBOOT mode e
 
 === Part 1: Provisioner Configuration (Required for Secure Boot)
 
-Before provisioning Pi 4 devices with secure boot, configure the RPIBOOT GPIO in your provisioner:
+Before provisioning Raspberry Pi 4 family devices with secure boot, configure the RPIBOOT GPIO in your provisioner:
 
 1. Edit `/etc/rpi-sb-provisioner/config`
 

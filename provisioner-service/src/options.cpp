@@ -358,16 +358,12 @@ namespace provisioner {
                 }
             } else if (fieldName == "RPI_DEVICE_RPIBOOT_GPIO") {
                 if (!fieldValue.empty()) {
-                    // Validate GPIO pin number is a valid integer in range 0-27 (BCM GPIO range)
-                    try {
-                        int gpioPin = std::stoi(fieldValue);
-                        if (gpioPin < 0 || gpioPin > 27) {
-                            jsonResponse["valid"] = false;
-                            jsonResponse["error"] = "GPIO pin must be between 0 and 27";
-                        }
-                    } catch (const std::exception&) {
+                    // Valid GPIO pins for RPIBOOT on Raspberry Pi 4 family: 2, 4, 5, 6, 7, 8
+                    // These GPIOs are high by default and can enable RPIBOOT when pulled low
+                    std::set<std::string> validGpioPins = {"2", "4", "5", "6", "7", "8"};
+                    if (validGpioPins.find(fieldValue) == validGpioPins.end()) {
                         jsonResponse["valid"] = false;
-                        jsonResponse["error"] = "GPIO pin must be a valid integer";
+                        jsonResponse["error"] = "GPIO pin must be one of: 2, 4, 5, 6, 7, or 8. GPIO 8 is recommended.";
                     }
                 }
             }

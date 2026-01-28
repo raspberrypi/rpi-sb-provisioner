@@ -37,6 +37,10 @@ rpi-sb-provisioner (2.2.0) unstable; urgency=medium
   * Packaging:
     - Add rpi-modcopy dependency for kernel module handling
     - Fix CMake configuration for jsoncpp dependency
+    - Improve upgrade experience by shipping config defaults to
+      /usr/share/rpi-sb-provisioner/defaults/ with user overrides in
+      /etc/rpi-sb-provisioner/. This eliminates dpkg conffile prompts
+      during upgrades when configuration has been modified.
 
  -- Tom Dewey <tom.dewey@raspberrypi.com>  Wed, 28 Jan 2026 17:25:00 +0000
 
