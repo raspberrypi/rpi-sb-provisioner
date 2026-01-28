@@ -10,7 +10,6 @@
 namespace provisioner {
     namespace utils {
         
-        constexpr const char* CONFIG_FILE_PATH = "/etc/rpi-sb-provisioner/config";
         constexpr const char* FIRMWARE_BASE_PATH = "/lib/firmware/raspberrypi/bootloader-";
         
         // ===== Firmware Scanning Implementation =====
@@ -263,78 +262,102 @@ namespace provisioner {
         }
         
         std::optional<std::string> getConfigValue(const std::string& key, bool logAccessToAudit) {
-            std::ifstream configFile(CONFIG_FILE_PATH);
-            std::string line;
+            std::optional<std::string> result = std::nullopt;
             
-            if (!configFile.is_open()) {
-                LOG_ERROR << "Failed to open config file: " << CONFIG_FILE_PATH;
-                
-                if (logAccessToAudit) {
-                    AuditLog::logFileSystemAccess("READ", CONFIG_FILE_PATH, false);
+            // Helper lambda to search a config file for a key
+            auto searchFile = [&key](const std::string& filepath) -> std::optional<std::string> {
+                std::ifstream configFile(filepath);
+                if (!configFile.is_open()) {
+                    return std::nullopt;
                 }
                 
+                std::string line;
+                while (std::getline(configFile, line)) {
+                    // Skip commented lines
+                    if (!line.empty() && line[0] == '#') {
+                        continue;
+                    }
+                    
+                    size_t delimiter_pos = line.find('=');
+                    if (delimiter_pos != std::string::npos) {
+                        std::string current_key = line.substr(0, delimiter_pos);
+                        if (current_key == key) {
+                            return line.substr(delimiter_pos + 1);
+                        }
+                    }
+                }
                 return std::nullopt;
+            };
+            
+            // Read from defaults first
+            result = searchFile(CONFIG_DEFAULTS_PATH);
+            if (logAccessToAudit && std::filesystem::exists(CONFIG_DEFAULTS_PATH)) {
+                AuditLog::logFileSystemAccess("READ", CONFIG_DEFAULTS_PATH, true);
+            }
+            
+            // Override with user config if present
+            auto userValue = searchFile(CONFIG_USER_PATH);
+            if (userValue.has_value()) {
+                result = userValue;
             }
             
             if (logAccessToAudit) {
-                AuditLog::logFileSystemAccess("READ", CONFIG_FILE_PATH, true);
-            }
-            
-            while (std::getline(configFile, line)) {
-                // Skip commented lines
-                if (!line.empty() && line[0] == '#') {
-                    continue;
-                }
-                
-                size_t delimiter_pos = line.find('=');
-                if (delimiter_pos != std::string::npos) {
-                    std::string current_key = line.substr(0, delimiter_pos);
-                    if (current_key == key) {
-                        std::string value = line.substr(delimiter_pos + 1);
-                        configFile.close();
-                        return value;
-                    }
+                if (std::filesystem::exists(CONFIG_USER_PATH)) {
+                    AuditLog::logFileSystemAccess("READ", CONFIG_USER_PATH, true);
                 }
             }
             
-            configFile.close();
-            return std::nullopt;
+            if (!result.has_value()) {
+                LOG_DEBUG << "Config key not found: " << key;
+            }
+            
+            return result;
         }
         
         std::map<std::string, std::string> getAllConfigValues(bool logAccessToAudit) {
             std::map<std::string, std::string> configValues;
-            std::ifstream configFile(CONFIG_FILE_PATH);
-            std::string line;
             
-            if (!configFile.is_open()) {
-                LOG_ERROR << "Failed to open config file: " << CONFIG_FILE_PATH;
-                
-                if (logAccessToAudit) {
-                    AuditLog::logFileSystemAccess("READ", CONFIG_FILE_PATH, false);
+            // Helper lambda to read all values from a config file
+            auto readFile = [](const std::string& filepath, std::map<std::string, std::string>& values) -> bool {
+                std::ifstream configFile(filepath);
+                if (!configFile.is_open()) {
+                    return false;
                 }
                 
-                return configValues;
-            }
+                std::string line;
+                while (std::getline(configFile, line)) {
+                    // Skip commented lines
+                    if (!line.empty() && line[0] == '#') {
+                        continue;
+                    }
+                    
+                    size_t delimiter_pos = line.find('=');
+                    if (delimiter_pos != std::string::npos) {
+                        std::string key = line.substr(0, delimiter_pos);
+                        std::string value = line.substr(delimiter_pos + 1);
+                        values[key] = value;
+                    }
+                }
+                return true;
+            };
             
+            // Read defaults first
+            bool defaultsRead = readFile(CONFIG_DEFAULTS_PATH, configValues);
             if (logAccessToAudit) {
-                AuditLog::logFileSystemAccess("READ", CONFIG_FILE_PATH, true);
+                AuditLog::logFileSystemAccess("READ", CONFIG_DEFAULTS_PATH, defaultsRead);
+            }
+            if (!defaultsRead) {
+                LOG_WARN << "Failed to open defaults config file: " << CONFIG_DEFAULTS_PATH;
             }
             
-            while (std::getline(configFile, line)) {
-                // Skip commented lines
-                if (!line.empty() && line[0] == '#') {
-                    continue;
-                }
-                
-                size_t delimiter_pos = line.find('=');
-                if (delimiter_pos != std::string::npos) {
-                    std::string key = line.substr(0, delimiter_pos);
-                    std::string value = line.substr(delimiter_pos + 1);
-                    configValues[key] = value;
+            // Override with user config values (if file exists)
+            if (std::filesystem::exists(CONFIG_USER_PATH)) {
+                bool userRead = readFile(CONFIG_USER_PATH, configValues);
+                if (logAccessToAudit) {
+                    AuditLog::logFileSystemAccess("READ", CONFIG_USER_PATH, userRead);
                 }
             }
             
-            configFile.close();
             return configValues;
         }
         

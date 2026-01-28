@@ -88,7 +88,11 @@ fi
 # Read configuration
 read_config
 
-# Read package metadata configuration if it exists
+# Read package metadata configuration (defaults first, then user overrides)
+if [ -f /usr/share/rpi-sb-provisioner/defaults/bootimg-package-config ]; then
+    # shellcheck disable=SC1091
+    . /usr/share/rpi-sb-provisioner/defaults/bootimg-package-config
+fi
 if [ -f /etc/rpi-sb-provisioner/bootimg-package-config ]; then
     # shellcheck disable=SC1091
     . /etc/rpi-sb-provisioner/bootimg-package-config

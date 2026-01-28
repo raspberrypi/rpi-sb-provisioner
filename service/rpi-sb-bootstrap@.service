@@ -6,4 +6,5 @@ After=%i.device
 Type=notify
 ExecStart=/usr/bin/rpi-sb-bootstrap.sh /%I
 # '/' is needed - otherwise triage does not use correct address of device
-EnvironmentFile=/etc/rpi-sb-provisioner/config
+EnvironmentFile=/usr/share/rpi-sb-provisioner/defaults/config
+EnvironmentFile=-/etc/rpi-sb-provisioner/config

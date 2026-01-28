@@ -11,20 +11,23 @@ mkdir -p /var/log/rpi-sb-provisioner
 MFG_DB_PATH="/srv/rpi-sb-provisioner/manufacturing.db"
 STATE_DB_PATH="/srv/rpi-sb-provisioner/state.db"
 
-# Check if config file exists and try to get manufacturing DB path from it
-if [ -f "/etc/rpi-sb-provisioner/config" ]; then
-    # Source the config file to get shell variables
-    . /etc/rpi-sb-provisioner/config
-    
-    # Use the RPI_SB_PROVISIONER_MANUFACTURING_DB variable if it exists
-    if [ -n "$RPI_SB_PROVISIONER_MANUFACTURING_DB" ]; then
-        MFG_DB_PATH="$RPI_SB_PROVISIONER_MANUFACTURING_DB"
-    fi
+# Source package defaults first
+if [ -f "/usr/share/rpi-sb-provisioner/defaults/config" ]; then
+    . /usr/share/rpi-sb-provisioner/defaults/config
+fi
 
-    # Use the RPI_SB_PROVISIONER_STATE_DB variable if it exists
-    if [ -n "$RPI_SB_PROVISIONER_STATE_DB" ]; then
-        STATE_DB_PATH="$RPI_SB_PROVISIONER_STATE_DB"
-    fi
+# Source user config overrides if present
+if [ -f "/etc/rpi-sb-provisioner/config" ]; then
+    . /etc/rpi-sb-provisioner/config
+fi
+
+# Use the configured paths if set
+if [ -n "$RPI_SB_PROVISIONER_MANUFACTURING_DB" ]; then
+    MFG_DB_PATH="$RPI_SB_PROVISIONER_MANUFACTURING_DB"
+fi
+
+if [ -n "$RPI_SB_PROVISIONER_STATE_DB" ]; then
+    STATE_DB_PATH="$RPI_SB_PROVISIONER_STATE_DB"
 fi
 
 # Create directory for state DB if needed

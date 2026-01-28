@@ -100,12 +100,19 @@ announce_stop() {
 }
 
 read_config() {
+    # Source package defaults first
+    if [ -f /usr/share/rpi-sb-provisioner/defaults/config ]; then
+        # shellcheck disable=SC1091
+        . /usr/share/rpi-sb-provisioner/defaults/config
+    else
+        printf "%s\n" "Failed to load package defaults. Package may be corrupted." >&2
+        return 1
+    fi
+    
+    # Source user overrides (optional - user config takes precedence)
     if [ -f /etc/rpi-sb-provisioner/config ]; then
         # shellcheck disable=SC1091
         . /etc/rpi-sb-provisioner/config
-    else
-        printf "%s\n" "Failed to load config. Please use configuration tool." >&2
-        return 1
     fi
 }
 
