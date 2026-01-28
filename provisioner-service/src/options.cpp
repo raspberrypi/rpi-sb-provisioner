@@ -356,6 +356,20 @@ namespace provisioner {
                         jsonResponse["error"] = "PKCS11 name must include 'type=private' parameter";
                     }
                 }
+            } else if (fieldName == "RPI_DEVICE_RPIBOOT_GPIO") {
+                if (!fieldValue.empty()) {
+                    // Validate GPIO pin number is a valid integer in range 0-27 (BCM GPIO range)
+                    try {
+                        int gpioPin = std::stoi(fieldValue);
+                        if (gpioPin < 0 || gpioPin > 27) {
+                            jsonResponse["valid"] = false;
+                            jsonResponse["error"] = "GPIO pin must be between 0 and 27";
+                        }
+                    } catch (const std::exception&) {
+                        jsonResponse["valid"] = false;
+                        jsonResponse["error"] = "GPIO pin must be a valid integer";
+                    }
+                }
             }
 
             auto resp = HttpResponse::newHttpResponse();

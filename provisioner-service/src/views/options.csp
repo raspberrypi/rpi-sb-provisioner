@@ -958,6 +958,7 @@
     std::string keypairDir = options.count("RPI_DEVICE_RETRIEVE_KEYPAIR") ? options["RPI_DEVICE_RETRIEVE_KEYPAIR"] : "";
     bool lockJtag = options.count("RPI_DEVICE_LOCK_JTAG") && !options["RPI_DEVICE_LOCK_JTAG"].empty();
     bool eepromWp = options.count("RPI_DEVICE_EEPROM_WP_SET") && !options["RPI_DEVICE_EEPROM_WP_SET"].empty();
+    std::string rpibootGpio = options.count("RPI_DEVICE_RPIBOOT_GPIO") ? options["RPI_DEVICE_RPIBOOT_GPIO"] : "";
     %>
 
     <form id="optionsForm" onsubmit="event.preventDefault(); saveAllOptions();">
@@ -1405,6 +1406,29 @@
                 </div>
             </div>
             
+            <!-- RPIBOOT GPIO (Pi 4 family only) -->
+            <div class="form-group pi4-only-setting" id="rpibootGpioGroup">
+                <label for="RPI_DEVICE_RPIBOOT_GPIO" class="form-label">RPIBOOT GPIO Pin (Pi 4 only)</label>
+                <input type="number" 
+                       id="RPI_DEVICE_RPIBOOT_GPIO" 
+                       name="RPI_DEVICE_RPIBOOT_GPIO" 
+                       class="form-control" 
+                       min="0" 
+                       max="27" 
+                       placeholder="8"
+                       value="<%c++ $$ << rpibootGpio; %>"
+                       onchange="validateAndSaveField('RPI_DEVICE_RPIBOOT_GPIO')">
+                <small class="form-text"><strong>Required</strong> for Pi 4/CM4 secure-boot provisioning. <strong>Strongly recommended: use GPIO 8.</strong></small>
+                <div class="inline-info" style="margin-top: 8px;">
+                    <span class="inline-info-icon">&#9432;</span>
+                    <span>This GPIO pin is programmed into OTP alongside the secure boot key. You must physically connect this pin to ground to enter RPIBOOT mode during provisioning. <strong>GPIO 8 is the standard choice</strong> and is recommended for consistency across your fleet.</span>
+                </div>
+                <div class="inline-warning" style="margin-top: 8px;">
+                    <span class="inline-warning-icon">&#9888;</span>
+                    <span><strong>Warning:</strong> This value is permanently written to OTP and cannot be changed. Ensure you use the same GPIO pin you will physically wire to ground.</span>
+                </div>
+            </div>
+            
             <div class="inline-warning">
                 <span class="inline-warning-icon">&#9888;</span>
                 <span><strong>Warning:</strong> These security settings are permanent and cannot be reversed. Enable only when you're certain of your configuration.</span>
@@ -1474,11 +1498,13 @@
                     updateCipherRecommendations(radio.value);
                     updateProvisioningStyleOptions(radio.value);
                     updateStorageTypeOptions(radio.value);
+                    updateRpibootGpioVisibility();
                 }
                 
                 // Show/hide key config and cipher based on provisioning style
                 if (radio && radio.name === 'PROVISIONING_STYLE') {
                     updateSecurityVisibility(radio.value);
+                    updateRpibootGpioVisibility();
                 }
             });
         });
@@ -1796,6 +1822,21 @@
             }
         }
         
+        // ===== RPIBOOT GPIO Visibility (Pi 4 secure-boot only) =====
+        function updateRpibootGpioVisibility() {
+            const gpioGroup = document.getElementById('rpibootGpioGroup');
+            if (!gpioGroup) return;
+            
+            const selectedFamily = document.querySelector('input[name="RPI_DEVICE_FAMILY"]:checked');
+            const selectedStyle = document.querySelector('input[name="PROVISIONING_STYLE"]:checked');
+            
+            // Show GPIO field only for Pi 4 family with secure-boot provisioning
+            const showGpio = selectedFamily && selectedFamily.value === '4' && 
+                             selectedStyle && selectedStyle.value === 'secure-boot';
+            
+            gpioGroup.style.display = showGpio ? 'block' : 'none';
+        }
+        
         // Initialize visibility based on current device family and provisioning style
         (function initVisibility() {
             const selectedFamily = document.querySelector('input[name="RPI_DEVICE_FAMILY"]:checked');
@@ -1810,6 +1851,9 @@
             if (selectedStyle) {
                 updateSecurityVisibility(selectedStyle.value);
             }
+            
+            // Initialize RPIBOOT GPIO visibility
+            updateRpibootGpioVisibility();
         })();
         
         // ===== Field Validation & Save =====

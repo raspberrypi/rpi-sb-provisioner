@@ -554,6 +554,20 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                     echo "eeprom_write_protect=1" >> "${SECURE_BOOTLOADER_DIRECTORY}/config.txt"
                 fi
 
+                # Pi 4 family (2711) requires program_rpiboot_gpio to program the RPIBOOT GPIO into OTP
+                # alongside the secure boot public key. Without this, recovery.bin fails with:
+                # "Failed to set RPIBOOT OTP gpio0 c800 -> 0"
+                if [ "${TARGET_DEVICE_FAMILY}" = "2711" ]; then
+                    if [ -n "${RPI_DEVICE_RPIBOOT_GPIO}" ]; then
+                        echo "program_rpiboot_gpio=${RPI_DEVICE_RPIBOOT_GPIO}" >> "${SECURE_BOOTLOADER_DIRECTORY}/config.txt"
+                        log "Programming RPIBOOT GPIO ${RPI_DEVICE_RPIBOOT_GPIO} into OTP for Pi 4 device"
+                    else
+                        log "WARNING: RPI_DEVICE_RPIBOOT_GPIO is not set for Pi 4 device."
+                        log "WARNING: Secure boot provisioning may fail with 'Failed to set RPIBOOT OTP gpio0' error."
+                        log "WARNING: Set RPI_DEVICE_RPIBOOT_GPIO=8 (or your chosen GPIO) in the configuration."
+                    fi
+                fi
+
                 log "Writing key and EEPROM configuration to the device"
                 if [ -f "/etc/rpi-sb-provisioner/special-reprovision-device/${TARGET_DEVICE_SERIAL}" ]; then
                     if [ "${TARGET_DEVICE_FAMILY}" = "2712" ]; then

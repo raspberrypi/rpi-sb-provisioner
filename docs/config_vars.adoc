@@ -106,6 +106,32 @@ Raspberry Pi devices that use an EEPROM as part of their boot flow can configure
 
 Set to any value to enable EEPROM write protection.
 
+[#rpi_device_rpiboot_gpio]
+=== RPI_DEVICE_RPIBOOT_GPIO
+*Required for Raspberry Pi 4 family secure-boot provisioning*
+
+Specifies the GPIO pin number to program into OTP for RPIBOOT mode on Raspberry Pi 4 family devices (including Compute Module 4).
+
+When secure-boot provisioning a Pi 4 device, the bootloader must program both the secure boot public key AND the RPIBOOT GPIO configuration into OTP. Without this setting, provisioning will fail with the error:
+
+----
+Failed to set RPIBOOT OTP gpio0 c800 -> 0
+BOOT ERROR: code 34
+----
+
+*Recommended value:* `8` (GPIO 8 is the standard RPIBOOT pin)
+
+*Example:*
+----
+RPI_DEVICE_RPIBOOT_GPIO=8
+----
+
+NOTE: This setting is only required for Raspberry Pi 4 family devices. Raspberry Pi 5 family devices do not require this setting as they have a built-in power button for RPIBOOT mode entry.
+
+WARNING: This value is programmed into OTP (one-time programmable memory) and cannot be changed once set. Ensure you use the same GPIO pin that you will physically connect to ground when entering RPIBOOT mode.
+
+See the link:device-guidance/pi4.adoc[Raspberry Pi 4 Connection Guide] for more information about GPIO configuration.
+
 [#rpi_sb_provisioner_manufacturing_db]
 === RPI_SB_PROVISIONER_MANUFACTURING_DB
 *Optional*

@@ -11,13 +11,55 @@ Raspberry Pi 4 differs from Raspberry Pi 5 in its boot mode entry method:
 
 Each Raspberry Pi 4 device requires one-time GPIO configuration before it can be provisioned.
 
-This configuration is permanent and stored in the device EEPROM.
+This configuration is permanent and stored in the device OTP (one-time programmable) memory.
+
+== Critical: Secure Boot GPIO Configuration
+
+[IMPORTANT]
+====
+**For secure-boot provisioning of Raspberry Pi 4 family devices (including CM4), you MUST configure the `RPI_DEVICE_RPIBOOT_GPIO` setting in your provisioner configuration.**
+
+Without this setting, secure boot provisioning will fail with:
+
+----
+Failed to set RPIBOOT OTP gpio0 c800 -> 0
+BOOT ERROR: code 34
+----
+
+Set the following in `/etc/rpi-sb-provisioner/config`:
+
+----
+RPI_DEVICE_RPIBOOT_GPIO=8
+----
+
+This tells the provisioner which GPIO pin to program into OTP for RPIBOOT mode entry.
+====
 
 == Step-by-Step Guide
 
-=== Part 1: One-time GPIO configuration
+=== Part 1: Provisioner Configuration (Required for Secure Boot)
 
-Before provisioning, configure the device to use GPIO pin 8 for RPIBOOT mode.
+Before provisioning Pi 4 devices with secure boot, configure the RPIBOOT GPIO in your provisioner:
+
+1. Edit `/etc/rpi-sb-provisioner/config`
+
+2. Add the following line:
++
+----
+RPI_DEVICE_RPIBOOT_GPIO=8
+----
+
+3. Save the file
+
+This setting tells `rpi-sb-provisioner` to program GPIO 8 as the RPIBOOT pin into the device's OTP during secure boot provisioning. The GPIO configuration and secure boot public key are programmed together.
+
+*Recommended GPIO Pin:* GPIO 8
+
+NOTE: If you are using a different GPIO pin for RPIBOOT mode, change `8` to your chosen pin number.
+
+=== Part 2: Manual GPIO Configuration (Alternative Method)
+
+If you need to configure the RPIBOOT GPIO manually (for example, on a device that was already provisioned without the `RPI_DEVICE_RPIBOOT_GPIO` setting), you can use the `recovery.bin` tool.
 
 *Requirements:*
 
@@ -34,11 +76,9 @@ https://github.com/raspberrypi/usbboot/tree/master/secure-boot-recovery#step-2--
 
 3. Verify the configuration (see verification procedure below)
 
-This configuration persists permanently in the device EEPROM and does not need to be repeated.
+This configuration persists permanently in the device OTP and does not need to be repeated.
 
-*Recommended GPIO Pin:* GPIO 8
-
-=== Part 2: Verifying GPIO Configuration
+=== Part 3: Verifying GPIO Configuration
 
 After GPIO configuration, verify the settings were applied correctly.
 
@@ -63,7 +103,7 @@ If these lines are present, the configuration is correct and the device is ready
 
 If these lines are not present, repeat the recovery.bin configuration procedure.
 
-=== Part 3: Provisioning Connection Procedure
+=== Part 4: Provisioning Connection Procedure
 
 After GPIO 8 configuration is complete, the device can be provisioned.
 
