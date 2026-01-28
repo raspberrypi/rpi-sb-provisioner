@@ -112,14 +112,18 @@ Set to any value to enable EEPROM write protection.
 
 Specifies the GPIO pin number to program into OTP for RPIBOOT mode on Raspberry Pi 4 family devices (including Compute Module 4).
 
-When secure-boot provisioning a Pi 4 device, the bootloader must program both the secure boot public key AND the RPIBOOT GPIO configuration into OTP. Without this setting, provisioning will fail with the error:
+When secure-boot provisioning a Raspberry Pi 4 family device, the bootloader must program both the secure boot public key AND the RPIBOOT GPIO configuration into OTP. Without this setting, provisioning will fail with the error:
 
 ----
 Failed to set RPIBOOT OTP gpio0 c800 -> 0
 BOOT ERROR: code 34
 ----
 
+*Valid values:* `2`, `4`, `5`, `6`, `7`, `8`
+
 *Recommended value:* `8` (GPIO 8 is the standard RPIBOOT pin)
+
+These GPIO pins are valid because they are high by default, allowing them to enable RPIBOOT mode when pulled low.
 
 *Example:*
 ----

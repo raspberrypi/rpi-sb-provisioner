@@ -1039,6 +1039,31 @@
                     </label>
                 </div>
             </div>
+            
+            <!-- RPIBOOT GPIO (Raspberry Pi 4 family only) -->
+            <div class="field-group" id="rpibootGpioGroup" style="display: none;">
+                <label class="field-label">RPIBOOT GPIO Pin</label>
+                <select id="RPI_DEVICE_RPIBOOT_GPIO" 
+                        name="RPI_DEVICE_RPIBOOT_GPIO" 
+                        class="form-control" 
+                        style="font-size: 1.1em; padding: 12px; width: 100%; max-width: 400px;"
+                        onchange="validateAndSaveField('RPI_DEVICE_RPIBOOT_GPIO')">
+                    <option value="8" <%c++ if(rpibootGpio.empty() || rpibootGpio == "8") $$ << "selected"; %>>GPIO 8 (Recommended)</option>
+                    <option value="7" <%c++ if(rpibootGpio == "7") $$ << "selected"; %>>GPIO 7</option>
+                    <option value="6" <%c++ if(rpibootGpio == "6") $$ << "selected"; %>>GPIO 6</option>
+                    <option value="5" <%c++ if(rpibootGpio == "5") $$ << "selected"; %>>GPIO 5</option>
+                    <option value="4" <%c++ if(rpibootGpio == "4") $$ << "selected"; %>>GPIO 4</option>
+                    <option value="2" <%c++ if(rpibootGpio == "2") $$ << "selected"; %>>GPIO 2</option>
+                </select>
+                <div class="inline-info" style="margin-top: 8px;">
+                    <span class="inline-info-icon">&#9432;</span>
+                    <span>Raspberry Pi 4 family devices require a GPIO pin to enter RPIBOOT mode (unlike Raspberry Pi 5 which has a power button). This pin is programmed into OTP alongside the secure boot key. <strong>GPIO 8 is strongly recommended</strong> for consistency across your fleet.</span>
+                </div>
+                <div class="inline-warning" style="margin-top: 8px;">
+                    <span class="inline-warning-icon">&#9888;</span>
+                    <span>This value is permanently written to OTP and cannot be changed. Ensure you use the same GPIO pin you will physically wire to ground during provisioning.</span>
+                </div>
+            </div>
         </div>
         
         <!-- ===== SECTION 2: Security Configuration ===== -->
@@ -1403,29 +1428,6 @@
                 <div class="toggle-content">
                     <div class="toggle-title">Enable EEPROM Write Protection</div>
                     <div class="toggle-description">Prevents modification of the device's boot EEPROM after provisioning. Protects the secure boot configuration.</div>
-                </div>
-            </div>
-            
-            <!-- RPIBOOT GPIO (Pi 4 family only) -->
-            <div class="form-group pi4-only-setting" id="rpibootGpioGroup">
-                <label for="RPI_DEVICE_RPIBOOT_GPIO" class="form-label">RPIBOOT GPIO Pin (Pi 4 only)</label>
-                <input type="number" 
-                       id="RPI_DEVICE_RPIBOOT_GPIO" 
-                       name="RPI_DEVICE_RPIBOOT_GPIO" 
-                       class="form-control" 
-                       min="0" 
-                       max="27" 
-                       placeholder="8"
-                       value="<%c++ $$ << rpibootGpio; %>"
-                       onchange="validateAndSaveField('RPI_DEVICE_RPIBOOT_GPIO')">
-                <small class="form-text"><strong>Required</strong> for Pi 4/CM4 secure-boot provisioning. <strong>Strongly recommended: use GPIO 8.</strong></small>
-                <div class="inline-info" style="margin-top: 8px;">
-                    <span class="inline-info-icon">&#9432;</span>
-                    <span>This GPIO pin is programmed into OTP alongside the secure boot key. You must physically connect this pin to ground to enter RPIBOOT mode during provisioning. <strong>GPIO 8 is the standard choice</strong> and is recommended for consistency across your fleet.</span>
-                </div>
-                <div class="inline-warning" style="margin-top: 8px;">
-                    <span class="inline-warning-icon">&#9888;</span>
-                    <span><strong>Warning:</strong> This value is permanently written to OTP and cannot be changed. Ensure you use the same GPIO pin you will physically wire to ground.</span>
                 </div>
             </div>
             
