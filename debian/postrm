@@ -1,4 +1,11 @@
 #!/bin/sh
 set -e
 
+# Clean up user configuration directory on purge
+# Note: /etc/rpi-sb-provisioner/config is user data, not a conffile,
+# so dpkg won't remove it automatically
+if [ "$1" = "purge" ]; then
+    rm -rf /etc/rpi-sb-provisioner
+fi
+
 #DEBHELPER# 

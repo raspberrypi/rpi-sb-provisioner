@@ -9,8 +9,8 @@
 #   Output: PKCS#1 v1.5 RSA-2048 SHA-256 signature in hex format (stdout)
 #   Exit:   0 = success, non-zero = failure
 #
-# The PKCS#11 key URI is read from /etc/rpi-sb-provisioner/config
-# (CUSTOMER_KEY_PKCS11_NAME variable)
+# The PKCS#11 key URI is read from configuration
+# (CUSTOMER_KEY_PKCS11_NAME variable from /etc/rpi-sb-provisioner/config)
 
 set -e
 
@@ -28,16 +28,24 @@ if [ ! -f "${INPUT_FILE}" ]; then
     exit 1
 fi
 
-# Read configuration
-CONFIG_FILE="/etc/rpi-sb-provisioner/config"
-if [ ! -f "${CONFIG_FILE}" ]; then
-    echo "Error: Configuration file not found: ${CONFIG_FILE}" >&2
+# Read configuration (defaults first, then user overrides)
+DEFAULTS_FILE="/usr/share/rpi-sb-provisioner/defaults/config"
+USER_CONFIG_FILE="/etc/rpi-sb-provisioner/config"
+
+if [ ! -f "${DEFAULTS_FILE}" ]; then
+    echo "Error: Package defaults not found: ${DEFAULTS_FILE}" >&2
     exit 1
 fi
 
-# Source the config to get CUSTOMER_KEY_PKCS11_NAME
+# Source defaults first
 # shellcheck disable=SC1090
-. "${CONFIG_FILE}"
+. "${DEFAULTS_FILE}"
+
+# Source user overrides if present
+if [ -f "${USER_CONFIG_FILE}" ]; then
+    # shellcheck disable=SC1090
+    . "${USER_CONFIG_FILE}"
+fi
 
 if [ -z "${CUSTOMER_KEY_PKCS11_NAME}" ]; then
     echo "Error: CUSTOMER_KEY_PKCS11_NAME not set in ${CONFIG_FILE}" >&2

@@ -423,8 +423,8 @@ namespace provisioner {
                 // Merge with new values from request
                 existing_options[key] = body->get(key, "").asString();
 
-                // Write back merged config
-                std::ofstream config_write("/etc/rpi-sb-provisioner/config");
+                // Write back merged config to user config file
+                std::ofstream config_write(utils::CONFIG_USER_PATH);
                 if (!config_write.is_open()) {
                     LOG_ERROR << "Failed to open config file for writing";
                     auto resp = provisioner::utils::createErrorResponse(
@@ -855,8 +855,8 @@ namespace provisioner {
             std::map<std::string, std::string> existing_options = utils::getAllConfigValues();
             existing_options["RPI_DEVICE_FIRMWARE_FILE"] = selectedFirmware;
 
-            // Write back the updated config
-            std::ofstream config_write("/etc/rpi-sb-provisioner/config");
+            // Write back the updated config to user config file
+            std::ofstream config_write(utils::CONFIG_USER_PATH);
             if (!config_write.is_open()) {
                 auto resp = provisioner::utils::createErrorResponse(
                     req,
@@ -1194,9 +1194,9 @@ namespace provisioner {
             // Clear PKCS11 setting when uploading a PEM key
             existing_options["CUSTOMER_KEY_PKCS11_NAME"] = "";
 
-            std::ofstream config_write("/etc/rpi-sb-provisioner/config");
+            std::ofstream config_write(utils::CONFIG_USER_PATH);
             if (!config_write.is_open()) {
-                LOG_ERROR << "Failed to open config file for writing";
+                LOG_ERROR << "Failed to open config file for writing: " << utils::CONFIG_USER_PATH;
                 auto resp = provisioner::utils::createErrorResponse(
                     req,
                     "Failed to update configuration",

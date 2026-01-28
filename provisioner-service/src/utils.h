@@ -15,6 +15,11 @@
 namespace provisioner {
     namespace utils {
         
+        // ===== Configuration Paths =====
+        // Package defaults are read first, then user config overrides
+        constexpr const char* CONFIG_DEFAULTS_PATH = "/usr/share/rpi-sb-provisioner/defaults/config";
+        constexpr const char* CONFIG_USER_PATH = "/etc/rpi-sb-provisioner/config";
+        
         // ===== Firmware Information =====
         
         /**

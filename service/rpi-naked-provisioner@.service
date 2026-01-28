@@ -4,4 +4,5 @@ Description=Provision a Raspberry Pi Device with an OS that you supply
 [Service]
 Type=notify
 ExecStart=/usr/bin/rpi-naked-provisioner.sh %I
-EnvironmentFile=/etc/rpi-sb-provisioner/config
+EnvironmentFile=/usr/share/rpi-sb-provisioner/defaults/config
+EnvironmentFile=-/etc/rpi-sb-provisioner/config

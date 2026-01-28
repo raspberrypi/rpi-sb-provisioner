@@ -30,5 +30,5 @@ host-support/manufacturing-data                     /var/lib/rpi-sb-provisioner
 host-support/state-recording                        /var/lib/rpi-sb-provisioner
 host-support/kernel_modules.list                    /var/lib/rpi-sb-provisioner
 
-host-support/config                                 /etc/rpi-sb-provisioner
-host-support/bootimg-package-config                 /etc/rpi-sb-provisioner
+host-support/config                                 /usr/share/rpi-sb-provisioner/defaults
+host-support/bootimg-package-config                 /usr/share/rpi-sb-provisioner/defaults
