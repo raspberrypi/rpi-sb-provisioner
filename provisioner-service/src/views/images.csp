@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <title>System Images</title>
     <%view stylesheet %>
@@ -125,7 +125,7 @@
                             clearInterval(checkInterval);
                             const cell = document.querySelector(`.boot-package-cell[data-image="${name}"]`);
                             if (cell && cell.textContent === 'Generating...') {
-                                cell.innerHTML = `<span style="color: #f44336;">Generation failed or timed out</span> <button class="generate-btn" onclick="generateBootPackage('${name.replace(/'/g, "\\'")}')">Retry</button>`;
+                                cell.innerHTML = `<span style="color: #f44336;" role="alert">Generation failed or timed out</span> <button class="generate-btn" onclick="generateBootPackage('${name.replace(/'/g, "\\'")}')" aria-label="Retry generating boot package for ${name}">Retry</button>`;
                                 showMessage('Boot package generation failed or timed out. Check logs for details.', true);
                             }
                         }
@@ -605,7 +605,7 @@
                 cell.innerHTML = `<span style="color: #666;" title="Boot packages are only available in secure-boot or fde-only provisioning modes">Unsupported</span>`;
                 pendingBootPackageRequests.delete(imageName);
             } else if (response.exists && response.package_name) {
-                cell.innerHTML = `<a href="/download-boot-package?name=${encodeURIComponent(imageName)}" class="download-link" download title="${response.package_name}">Download</a>`;
+                cell.innerHTML = `<a href="/download-boot-package?name=${encodeURIComponent(imageName)}" class="download-link" download title="${response.package_name}" aria-label="Download boot package for ${imageName}">Download</a>`;
                 pendingBootPackageRequests.delete(imageName);
                 
                 // Clear any polling interval for this image
@@ -616,7 +616,7 @@
             } else if (response.status === 'generating') {
                 cell.textContent = 'Generating...';
             } else {
-                cell.innerHTML = `<button class="generate-btn" onclick="generateBootPackage('${imageName.replace(/'/g, "\\'")}')">Generate</button>`;
+                cell.innerHTML = `<button class="generate-btn" onclick="generateBootPackage('${imageName.replace(/'/g, "\\'")}')" aria-label="Generate boot package for ${imageName}">Generate</button>`;
                 pendingBootPackageRequests.delete(imageName);
                 
                 // Clear any polling interval for this image if generation failed
@@ -857,10 +857,11 @@
 <body>
     <%view navbar %>
 
+    <main id="main-content">
     <h1>System Images</h1>
 
-    <div id="success-message" class="success-message"></div>
-    <div id="error-message" class="error-message"></div>
+    <div id="success-message" class="success-message" role="status" aria-live="polite"></div>
+    <div id="error-message" class="error-message" role="alert" aria-live="assertive"></div>
 
     <div class="upload-section">
         <h2>Upload New Image</h2>
@@ -880,13 +881,14 @@
     </div>
 
     <table class="image-list">
+        <caption class="sr-only">System images available for provisioning</caption>
         <thead>
             <tr>
-                <th>Image Name</th>
-                <th>SHA256</th>
-                <th>Status</th>
-                <th>Boot Package</th>
-                <th>Actions</th>
+                <th scope="col">Image Name</th>
+                <th scope="col">SHA256</th>
+                <th scope="col">Status</th>
+                <th scope="col">Boot Package</th>
+                <th scope="col">Actions</th>
             </tr>
         </thead>
         <tbody>
@@ -901,11 +903,11 @@
                     <td class="boot-package-cell" data-image="<%c++ $$ << image.at("name"); %>">Checking...</td>
                     <td>
                         <%c++ if (image.at("is_gold_master") == "true") { %>
-                            <button class="clear-cache-btn" onclick="clearCaches()">Clear Caches</button>
+                            <button class="clear-cache-btn" onclick="clearCaches()" aria-label="Clear cached files for <%c++ $$ << image.at("name"); %>">Clear Caches</button>
                         <%c++ } else { %>
-                            <button class="use-btn" onclick="useImage('<%c++ $$ << image.at("name"); %>')">Use</button>
+                            <button class="use-btn" onclick="useImage('<%c++ $$ << image.at("name"); %>')" aria-label="Use <%c++ $$ << image.at("name"); %> as gold master image">Use</button>
                         <%c++ } %>
-                        <button class="delete-btn" onclick="deleteImage('<%c++ $$ << image.at("name"); %>')">Delete</button>
+                        <button class="delete-btn" onclick="deleteImage('<%c++ $$ << image.at("name"); %>')" aria-label="Delete <%c++ $$ << image.at("name"); %>">Delete</button>
                     </td>
                 </tr>
             <%c++ } %>
@@ -1218,8 +1220,8 @@
                             <td></td>
                             <td class="boot-package-cell" data-image="${data.filename}">Checking...</td>
                             <td>
-                                <button class="use-btn" onclick="useImage('${data.filename}')">Use</button>
-                                <button class="delete-btn" onclick="deleteImage('${data.filename}')">Delete</button>
+                                <button class="use-btn" onclick="useImage('${data.filename}')" aria-label="Use ${data.filename} as gold master image">Use</button>
+                                <button class="delete-btn" onclick="deleteImage('${data.filename}')" aria-label="Delete ${data.filename}">Delete</button>
                             </td>
                         `;
                         
@@ -1265,5 +1267,6 @@
             });
         });
     </script>
+    </main>
 </body>
 </html> 
