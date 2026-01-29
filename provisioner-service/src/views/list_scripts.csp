@@ -13,7 +13,7 @@ std::string currentPage = "customisation";
 %>
 
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <title>Customisation Scripts</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -164,22 +164,23 @@ std::string currentPage = "customisation";
 <body>
     <%view navbar %>
     
+    <main id="main-content">
     <div class="container mt-4">
         <div class="customisation-container">
           <h1>Customisation Scripts</h1>
           <p>Create and manage scripts that run at different stages during provisioning.</p>
           
           <div class="tabs">
-            <div class="tab-buttons">
+            <div class="tab-buttons" role="tablist" aria-label="Provisioner script categories">
               <%c++ for (const auto& [provisioner, stages] : provisioner_stages) { %>
-                <button class="tab-button" onclick="openTab(event, '<%c++ $$ << provisioner; %>')" id="<%c++ $$ << provisioner; %>-tab">
+                <button class="tab-button" onclick="openTab(event, '<%c++ $$ << provisioner; %>')" id="<%c++ $$ << provisioner; %>-tab" role="tab" aria-selected="false" aria-controls="<%c++ $$ << provisioner; %>">
                   <%c++ $$ << provisioner; %>
                 </button>
               <%c++ } %>
             </div>
             
             <%c++ for (const auto& [provisioner, validStages] : provisioner_stages) { %>
-              <div id="<%c++ $$ << provisioner; %>" class="tab-content">
+              <div id="<%c++ $$ << provisioner; %>" class="tab-content" role="tabpanel" aria-labelledby="<%c++ $$ << provisioner; %>-tab">
                 <h3><%c++ $$ << provisioner; %> scripts</h3>
                 
                 <div class="hook-grid">
@@ -236,17 +237,17 @@ std::string currentPage = "customisation";
                       
                       <div class="hook-actions">
                         <%c++ if (hookExists) { %>
-                          <a href="/customisation/get-script?script=<%c++ $$ << hookFilename; %>" class="cust-btn cust-btn-primary cust-btn-sm">Edit</a>
+                          <a href="/customisation/get-script?script=<%c++ $$ << hookFilename; %>" class="cust-btn cust-btn-primary cust-btn-sm" aria-label="Edit <%c++ $$ << hookFilename; %> script">Edit</a>
                           
                           <%c++ if (hookEnabled) { %>
-                            <button onclick="disableScript('<%c++ $$ << hookFilename; %>')" class="cust-btn cust-btn-warning cust-btn-sm">Disable</button>
+                            <button onclick="disableScript('<%c++ $$ << hookFilename; %>')" class="cust-btn cust-btn-warning cust-btn-sm" aria-label="Disable <%c++ $$ << hookFilename; %> script">Disable</button>
                           <%c++ } else { %>
-                            <button onclick="enableScript('<%c++ $$ << hookFilename; %>')" class="cust-btn cust-btn-success cust-btn-sm">Enable</button>
+                            <button onclick="enableScript('<%c++ $$ << hookFilename; %>')" class="cust-btn cust-btn-success cust-btn-sm" aria-label="Enable <%c++ $$ << hookFilename; %> script">Enable</button>
                           <%c++ } %>
                           
-                          <button onclick="deleteScript('<%c++ $$ << hookFilename; %>')" class="cust-btn cust-btn-danger cust-btn-sm">Delete</button>
+                          <button onclick="deleteScript('<%c++ $$ << hookFilename; %>')" class="cust-btn cust-btn-danger cust-btn-sm" aria-label="Delete <%c++ $$ << hookFilename; %> script">Delete</button>
                         <%c++ } else { %>
-                          <a href="/customisation/create-script?script=<%c++ $$ << hookFilename; %>" class="cust-btn cust-btn-success cust-btn-sm">Create Script</a>
+                          <a href="/customisation/create-script?script=<%c++ $$ << hookFilename; %>" class="cust-btn cust-btn-success cust-btn-sm" aria-label="Create <%c++ $$ << hookFilename; %> script">Create Script</a>
                         <%c++ } %>
                       </div>
                     </div>
@@ -363,21 +364,25 @@ function openTab(evt, tabName) {
   // Store active tab
   window.activeTab = tabName;
   
-  // Hide all tab content
+  // Hide all tab content and update ARIA
   var tabContents = document.querySelectorAll('.tab-content');
   for (var i = 0; i < tabContents.length; i++) {
     tabContents[i].classList.remove("active");
+    tabContents[i].setAttribute('hidden', '');
   }
   
-  // Deactivate all tab buttons
+  // Deactivate all tab buttons and update ARIA
   var tabButtons = document.querySelectorAll('.tab-button');
   for (var i = 0; i < tabButtons.length; i++) {
     tabButtons[i].classList.remove("active");
+    tabButtons[i].setAttribute('aria-selected', 'false');
   }
   
   // Show the current tab and activate the button
   document.getElementById(tabName).classList.add("active");
+  document.getElementById(tabName).removeAttribute('hidden');
   evt.currentTarget.classList.add("active");
+  evt.currentTarget.setAttribute('aria-selected', 'true');
 }
 
 // Update edit links to include activeTab parameter
@@ -460,6 +465,7 @@ function disableScript(filename) {
       const enableButton = document.createElement('button');
       enableButton.className = 'cust-btn cust-btn-success cust-btn-sm';
       enableButton.textContent = 'Enable';
+      enableButton.setAttribute('aria-label', `Enable ${filename} script`);
       enableButton.onclick = function() { enableScript(filename); };
       
       // Find and replace the disable button
@@ -573,6 +579,7 @@ function enableScript(filename) {
       const disableButton = document.createElement('button');
       disableButton.className = 'cust-btn cust-btn-warning cust-btn-sm';
       disableButton.textContent = 'Disable';
+      disableButton.setAttribute('aria-label', `Disable ${filename} script`);
       disableButton.onclick = function() { disableScript(filename); };
       
       // Find and replace the enable button
@@ -678,7 +685,7 @@ function deleteScript(filename) {
         if (actionsDiv) {
           // Replace with a single "Create Script" button
           actionsDiv.innerHTML = `
-            <a href="/customisation/create-script?script=${encodeURIComponent(filename)}" class="cust-btn cust-btn-success cust-btn-sm">Create Script</a>
+            <a href="/customisation/create-script?script=${encodeURIComponent(filename)}" class="cust-btn cust-btn-success cust-btn-sm" aria-label="Create ${filename} script">Create Script</a>
           `;
         }
       } else {
@@ -698,5 +705,6 @@ function deleteScript(filename) {
 }
 </script>
 <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    </main>
 </body>
 </html>

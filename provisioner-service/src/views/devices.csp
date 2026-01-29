@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <title>USB Topology</title>
     <%view stylesheet %>
@@ -1153,6 +1153,7 @@
 <body>
     <%view navbar %>
     
+    <main id="main-content">
     <!-- Secret Test Panel (Ctrl+Shift+T to toggle) -->
     <div id="test-panel" class="test-panel">
         <div class="test-panel-header">
@@ -1184,15 +1185,18 @@
     </div>
     
     <h1>Devices</h1>
-    <div class="view-tabs">
-        <button id="tab-rel" class="view-tab active">Relational</button>
-        <button id="tab-topo" class="view-tab">Detail</button>
+    <div class="view-tabs" role="tablist" aria-label="Device view options">
+        <button id="tab-rel" class="view-tab active" role="tab" aria-selected="true" aria-controls="rel-view">Relational</button>
+        <button id="tab-topo" class="view-tab" role="tab" aria-selected="false" aria-controls="topo-view">Detail</button>
     </div>
-    <div id="rel-view" class="view-container active">
-        <div class="mindmap-container"><svg id="d3-graph-svg"></svg></div>
+    <div id="rel-view" class="view-container active" role="tabpanel" aria-labelledby="tab-rel">
+        <div class="mindmap-container" role="img" aria-label="Interactive USB device topology graph showing connected devices and their relationships">
+            <svg id="d3-graph-svg" aria-hidden="true"></svg>
+            <p class="sr-only">This visualization shows USB devices connected to the provisioning server. Use the Detail tab for an accessible text-based view of the same information.</p>
+        </div>
     </div>
-    <div id="topo-view" class="view-container">
-        <div class="topology-container">
+    <div id="topo-view" class="view-container" role="tabpanel" aria-labelledby="tab-topo" hidden>
+        <div class="topology-container" role="region" aria-label="Detailed USB device topology">
             <div id="topology-root"></div>
         </div>
     </div>
@@ -1209,8 +1213,25 @@
         const relView = document.getElementById('rel-view');
         const topoView = document.getElementById('topo-view');
         function setActive(which){
-            if (which==='rel'){ tabRel.classList.add('active'); tabTopo.classList.remove('active'); relView.classList.add('active'); topoView.classList.remove('active'); }
-            else { tabTopo.classList.add('active'); tabRel.classList.remove('active'); topoView.classList.add('active'); relView.classList.remove('active'); }
+            if (which==='rel'){ 
+                tabRel.classList.add('active'); 
+                tabTopo.classList.remove('active'); 
+                relView.classList.add('active'); 
+                topoView.classList.remove('active');
+                tabRel.setAttribute('aria-selected', 'true');
+                tabTopo.setAttribute('aria-selected', 'false');
+                relView.removeAttribute('hidden');
+                topoView.setAttribute('hidden', '');
+            } else { 
+                tabTopo.classList.add('active'); 
+                tabRel.classList.remove('active'); 
+                topoView.classList.add('active'); 
+                relView.classList.remove('active');
+                tabTopo.setAttribute('aria-selected', 'true');
+                tabRel.setAttribute('aria-selected', 'false');
+                topoView.removeAttribute('hidden');
+                relView.setAttribute('hidden', '');
+            }
         }
         tabRel.addEventListener('click', ()=>setActive('rel'));
         tabTopo.addEventListener('click', ()=>setActive('topo'));
@@ -1276,5 +1297,6 @@
             toggleTestPanel();
         }
     </script>
+    </main>
 </body>
 </html> 

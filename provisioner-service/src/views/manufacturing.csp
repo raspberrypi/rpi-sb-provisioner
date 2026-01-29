@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <title>Manufacturing Database</title>
     <%view stylesheet %>
@@ -159,6 +159,7 @@
 <body>
     <%view navbar %>
 
+    <main id="main-content">
     <%c++ 
     bool hasWarning = false;
     std::string warningMessage;
@@ -171,7 +172,7 @@
     
     if (hasWarning) { 
     %>
-    <div class="warning-block">
+    <div class="warning-block" role="alert">
         <%c++ $$ << warningMessage; %>
     </div>
     <%c++ } %>
@@ -198,16 +199,16 @@
     </div>
 
     <script>
-        // Function to format security field values
+        // Function to format security field values with accessibility
         function formatSecurityField(value) {
             if (value === null || value === undefined || value === '') {
-                return '<span class="security-unknown">?</span>';
+                return '<span class="security-unknown" aria-label="Unknown" title="Unknown">?</span>';
             } else if (value === '1') {
-                return '<span class="security-enabled">✓</span>';
+                return '<span class="security-enabled" aria-label="Yes" title="Yes">✓</span>';
             } else if (value === '0') {
-                return '<span class="security-disabled">✗</span>';
+                return '<span class="security-disabled" aria-label="No" title="No">✗</span>';
             } else {
-                return '<span class="security-unknown">?</span>';
+                return '<span class="security-unknown" aria-label="Unknown" title="Unknown">?</span>';
             }
         }
 
@@ -268,30 +269,31 @@
                 // Create a new table with the updated data
                 let tableHtml = `
                     <table id="manufacturingTable">
+                        <caption class="sr-only">Manufacturing database showing provisioned device information</caption>
                         <thead>
                             <tr>
-                                <th>Provision Time</th>
-                                <th>ID</th>
-                                <th>Board</th>
-                                <th>Serial</th>
-                                <th>Ethernet MAC</th>
-                                <th>WiFi MAC</th>
-                                <th>Bluetooth MAC</th>
-                                <th>eMMC Size</th>
-                                <th>eMMC CID</th>
-                                <th>RPi DUID</th>
-                                <th>Revision</th>
-                                <th>Processor</th>
-                                <th>Memory</th>
-                                <th>Manufacturer</th>
-                                <th>Secure</th>
-                                <th>JTAG Locked</th>
-                                <th>EEPROM WP</th>
-                                <th>Pubkey Prog.</th>
-                                <th>Devkey Revoked</th>
-                                <th>Signed Boot</th>
-                                <th>OS Image Filename</th>
-                                <th>OS Image SHA256</th>
+                                <th scope="col">Provision Time</th>
+                                <th scope="col">ID</th>
+                                <th scope="col">Board</th>
+                                <th scope="col">Serial</th>
+                                <th scope="col">Ethernet MAC</th>
+                                <th scope="col">WiFi MAC</th>
+                                <th scope="col">Bluetooth MAC</th>
+                                <th scope="col">eMMC Size</th>
+                                <th scope="col">eMMC CID</th>
+                                <th scope="col">RPi DUID</th>
+                                <th scope="col">Revision</th>
+                                <th scope="col">Processor</th>
+                                <th scope="col">Memory</th>
+                                <th scope="col">Manufacturer</th>
+                                <th scope="col">Secure</th>
+                                <th scope="col">JTAG Locked</th>
+                                <th scope="col">EEPROM WP</th>
+                                <th scope="col">Pubkey Prog.</th>
+                                <th scope="col">Devkey Revoked</th>
+                                <th scope="col">Signed Boot</th>
+                                <th scope="col">OS Image Filename</th>
+                                <th scope="col">OS Image SHA256</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -460,5 +462,6 @@
             stopRefresh();
         });
     </script>
+    </main>
 </body>
 </html> 

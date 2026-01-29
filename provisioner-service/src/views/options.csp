@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <title>Configuration Options</title>
     <%view stylesheet %>
@@ -1098,19 +1098,20 @@
 <body>
     <%view navbar %>
 
+    <main id="main-content">
     <h1>Configuration Options</h1>
     
-    <div class="auto-save-notice">
-        <span class="auto-save-notice-icon">&#128190;</span>
+    <div class="auto-save-notice" role="note">
+        <span class="auto-save-notice-icon" aria-hidden="true">&#128190;</span>
         <span>Changes are saved automatically as you make them.</span>
     </div>
     
-    <div id="success-message" class="page-message success">
-        <span>&#10003;</span> <span id="success-text">Changes saved</span>
+    <div id="success-message" class="page-message success" role="status" aria-live="polite">
+        <span aria-hidden="true">&#10003;</span> <span id="success-text">Changes saved</span>
     </div>
     
-    <div id="error-message" class="page-message error">
-        <span>&#10007;</span> <span id="error-text">Failed to save changes</span>
+    <div id="error-message" class="page-message error" role="alert" aria-live="assertive">
+        <span aria-hidden="true">&#10007;</span> <span id="error-text">Failed to save changes</span>
     </div>
 
     <%c++ 
@@ -3384,5 +3385,6 @@
             }
         }
     </script>
+    </main>
 </body>
 </html>

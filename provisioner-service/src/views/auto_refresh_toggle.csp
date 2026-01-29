@@ -54,12 +54,13 @@
 </style>
 
 <div class="toggle-container">
-    <label class="toggle-switch">
-        <input type="checkbox" id="auto-refresh" checked>
-        <span class="toggle-slider"></span>
+    <label class="toggle-switch" for="auto-refresh">
+        <input type="checkbox" id="auto-refresh" checked aria-describedby="refresh-status">
+        <span class="toggle-slider" aria-hidden="true"></span>
+        <span class="sr-only">Auto Refresh</span>
     </label>
-    <span>Auto Refresh</span>
-    <span id="refresh-status">(Enabled - refreshing every 1s)</span>
+    <span id="toggle-label" aria-hidden="true">Auto Refresh</span>
+    <span id="refresh-status" aria-live="polite">(Enabled - refreshing every 1s)</span>
 </div>
 
 <script>

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <title>Device Details - [[device.serial]]</title>
     <%view stylesheet %>
@@ -7,10 +7,11 @@
 <body>
     <%view navbar %>
 
+    <main id="main-content">
     <h1>Device Details</h1>
     
-    <div id="success-message" class="success-message"></div>
-    <div id="error-message" class="error-message"></div>
+    <div id="success-message" class="success-message" role="status" aria-live="polite"></div>
+    <div id="error-message" class="error-message" role="alert" aria-live="assertive"></div>
     
     <div class="device-info">
         <div class="info-row">
@@ -49,5 +50,6 @@
         <h2>Triage Log</h2>
         <div class="log-content">[[triage_log]]</div>
     </div>
+    </main>
 </body>
 </html> 

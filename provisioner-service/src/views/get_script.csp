@@ -30,7 +30,7 @@ try {
 %>
 
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <title>Edit Customisation Script</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -234,6 +234,7 @@ try {
 <body>
     <%view navbar %>
     
+    <main id="main-content">
     <div class="container mt-4">
         <div class="container script-editor-container">
             <a href="/customisation/list-scripts" class="mb-3 d-inline-block"><i class="fas fa-arrow-left"></i> Back to Scripts</a>
@@ -399,5 +400,6 @@ try {
         }
     });
 </script>
+    </main>
 </body>
 </html> 

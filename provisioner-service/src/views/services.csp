@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <title>Services</title>
     <%view stylesheet %>
@@ -7,6 +7,7 @@
 <body>
     <%view navbar %>
 
+    <main id="main-content">
     <%c++ 
     bool hasWarning = false;
     std::string warningMessage;
@@ -19,7 +20,7 @@
     
     if (hasWarning) { 
     %>
-    <div class="warning-block">
+    <div class="warning-block" role="alert">
         [[warning]]
     </div>
     <%c++ } %>
@@ -46,13 +47,14 @@
         </div>
         <%c++ } else { %>
         <table>
+            <caption class="sr-only">System services status and controls</caption>
             <thead>
                 <tr>
-                    <th>Service Name</th>
-                    <th>Status</th>
-                    <th>Active</th>
-                    <th>Last Updated</th>
-                    <th>Actions</th>
+                    <th scope="col">Service Name</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Active</th>
+                    <th scope="col">Last Updated</th>
+                    <th scope="col">Actions</th>
                 </tr>
             </thead>
             <tbody>
@@ -82,7 +84,7 @@
                         %>"><%c++ $$ << service.at("active"); %></td>
                         <td class="timestamp-cell" data-timestamp="0">Loading...</td>
                         <td>
-                            <a href="/service-log/<%c++ $$ << service.at("full_name"); %>" class="log-link">View Logs</a>
+                            <a href="/service-log/<%c++ $$ << service.at("full_name"); %>" class="log-link" aria-label="View logs for <%c++ $$ << service.at("full_name"); %>">View Logs</a>
                         </td>
                     </tr>
                 <%c++ } %>
@@ -141,13 +143,14 @@
                 // Create a new table with the updated data
                 let tableHtml = `
                     <table>
+                        <caption class="sr-only">System services status and controls</caption>
                         <thead>
                             <tr>
-                                <th>Service Name</th>
-                                <th>Status</th>
-                                <th>Active</th>
-                                <th>Last Updated</th>
-                                <th>Actions</th>
+                                <th scope="col">Service Name</th>
+                                <th scope="col">Status</th>
+                                <th scope="col">Active</th>
+                                <th scope="col">Last Updated</th>
+                                <th scope="col">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -169,7 +172,7 @@
                                 <td class="${activeStateToClass(service.active)}">${service.active}</td>
                                 <td class="timestamp-cell">${formattedTimestamp}</td>
                                 <td>
-                                    <a href="/service-log/${service.full_name}" class="log-link">View Logs</a>
+                                    <a href="/service-log/${service.full_name}" class="log-link" aria-label="View logs for ${service.full_name}">View Logs</a>
                                 </td>
                             </tr>
                         `;
@@ -222,5 +225,6 @@
             }
         });
     </script>
+    </main>
 </body>
 </html> 

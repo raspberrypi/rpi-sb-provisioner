@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <title>QR Code Scanner</title>
     <meta charset="utf-8">
@@ -173,18 +173,19 @@
 <body>
     <%view navbar %>
     
+    <main id="main-content">
     <div class="container">
         <h1>QR Code Scanner</h1>
         
         <div id="results">
-            <div id="success-container" class="message-container success">
+            <div id="success-container" class="message-container success" role="status" aria-live="polite">
                 <h2>Success</h2>
                 <p>Code Value: <span id="code-value"></span></p>
                 <p>Status: <span id="code-status"></span></p>
                 <p>Message: <span id="code-message"></span></p>
             </div>
             
-            <div id="error-container" class="message-container error">
+            <div id="error-container" class="message-container error" role="alert" aria-live="assertive">
                 <h2>Error</h2>
                 <p>Message: <span id="error-message"></span></p>
             </div>
@@ -650,5 +651,6 @@
             }
         });
     </script>
+    </main>
 </body>
 </html> 

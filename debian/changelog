@@ -11,6 +11,18 @@ rpi-sb-provisioner (2.2.0) unstable; urgency=medium
     - Add RPI_DEVICE_RPIBOOT_GPIO configuration for Pi 4 family secure-boot
       provisioning (fixes GitHub issue #242)
 
+  * WebUI Accessibility:
+    - Add lang="en" attribute to all page templates for screen readers
+    - Add semantic HTML structure with <main> landmark and skip navigation
+    - Add ARIA roles and live regions to status/error messages
+    - Add table captions and scope attributes for screen reader navigation
+    - Add aria-label attributes to action buttons with contextual information
+    - Add accessible tab interfaces with proper ARIA roles and keyboard support
+    - Add screen-reader-only descriptions for D3 visualizations
+    - Add role="log" and aria-live to service log container
+    - Improve focus visibility with enhanced CSS outline styles
+    - Add aria-hidden to decorative icons and emojis
+
   * Provisioning Improvements:
     - Refactor signing infrastructure into rpi-sb-common.sh for better
       modularity and reuse
@@ -42,7 +54,7 @@ rpi-sb-provisioner (2.2.0) unstable; urgency=medium
       /etc/rpi-sb-provisioner/. This eliminates dpkg conffile prompts
       during upgrades when configuration has been modified.
 
- -- Tom Dewey <tom.dewey@raspberrypi.com>  Wed, 28 Jan 2026 17:25:00 +0000
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Thu, 29 Jan 2026 17:25:00 +0000
 
 rpi-sb-provisioner (2.1.3) unstable; urgency=medium
 

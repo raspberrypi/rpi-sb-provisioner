@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <title>Firmware Selection</title>
     <%view stylesheet %>
@@ -188,13 +188,14 @@
 <body>
     <%view navbar %>
 
+    <main id="main-content">
     <h1>Firmware Selection</h1>
     
-    <div id="success-message" class="success-message">
+    <div id="success-message" class="success-message" role="status" aria-live="polite">
         Firmware selection saved successfully!
     </div>
     
-    <div id="error-message" class="error-message"></div>
+    <div id="error-message" class="error-message" role="alert" aria-live="assertive"></div>
 
     <%c++ 
     auto deviceFamily = @@.get<std::string>("deviceFamily");
@@ -240,14 +241,14 @@
                         <div class="firmware-details">
                             <small><%c++ $$ << firmware.at("filename"); %></small>
                         </div>
-                        <button class="select-button" onclick="selectFirmware('<%c++ $$ << firmware.at("filepath"); %>')">Select This Version</button>
+                        <button class="select-button" onclick="selectFirmware('<%c++ $$ << firmware.at("filepath"); %>')" aria-label="Select firmware version <%c++ $$ << firmware.at("version"); %>">Select This Version</button>
                     </div>
                 <%c++ } %>
             </div>
             
             <div class="firmware-notes">
-                <h3>Release Notes</h3>
-                <div class="notes-container">
+                <h3 id="release-notes-heading">Release Notes</h3>
+                <div class="notes-container" role="region" aria-labelledby="release-notes-heading" aria-live="polite">
                     <div class="no-selection">
                         Click on a firmware version to view release notes
                     </div>
@@ -409,5 +410,6 @@
             }, 5000);
         }
     </script>
+    </main>
 </body>
 </html> 
