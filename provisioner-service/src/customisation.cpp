@@ -20,7 +20,7 @@ namespace provisioner {
         const std::map<std::string, std::vector<std::string>> PROVISIONER_STAGES = {
             {"sb-provisioner", {"bootstrap", "bootfs-mounted", "rootfs-mounted", "post-flash"}},
             {"fde-provisioner", {"bootstrap", "bootfs-mounted", "rootfs-mounted", "post-flash"}},
-            {"naked-provisioner", {"bootstrap", "post-flash"}}
+            {"naked-provisioner", {"bootstrap", "bootfs-mounted", "rootfs-mounted", "post-flash"}}
         };
 
         // Description of each stage for display in the UI
@@ -139,6 +139,7 @@ namespace provisioner {
          * Where <provisioner-name> is one of:
          * - "sb-provisioner" for secure boot provisioning
          * - "fde-provisioner" for full disk encryption provisioning
+         * - "naked-provisioner" for naked (unencrypted) provisioning
          *
          * bootfs-mounted and rootfs-mounted scripts receive two arguments:
          * 1. Path to the mounted boot image

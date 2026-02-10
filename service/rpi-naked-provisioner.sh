@@ -90,6 +90,60 @@ check_pidevice_storage_type() {
     esac
 }
 
+# Lifted from pi-gen/scripts/common, unsure under what circumstances this would be necessary
+ensure_next_loopdev() {
+    set +e
+    loopdev="$(losetup -f)"
+    loopmaj="$(echo "$loopdev" | sed -E 's/.*[0-9]*?([0-9]+)$/\1/')"
+    [ -b "$loopdev" ] || mknod "$loopdev" b 7 "$loopmaj"
+    set -e
+}
+
+# Lifted from pi-gen/scripts/common, unsure under what circumstances this would be necessary
+ensure_loopdev_partitions() {
+    set +e
+    lsblk -r -n -o "NAME,MAJ:MIN" "$1" | grep -v "^${1#/dev/}" | while read -r line; do
+        partition="${line%% *}"
+        majmin="${line#* }"
+        if [ ! -b "/dev/$partition" ]; then
+            mknod "/dev/$partition" b "${majmin%:*}" "${majmin#*:}"
+        fi
+    done
+    set -e
+}
+
+unmount() {
+    for DIR in "$@"; do
+        if findmnt -n "$DIR" > /dev/null 2>&1; then
+            locs=$(mount | grep "$DIR" | cut -f 3 -d ' ' | sort -r)
+            for loc in $locs; do
+                umount "$loc"
+            done
+        fi
+    done
+}
+
+# Lifted from pi-gen/scripts/common
+unmount_image() {
+    sync
+    sleep 1
+    LOOP_DEVICE=$(losetup --list | grep "$1" | cut -f1 -d' ')
+    if [ -n "$LOOP_DEVICE" ]; then
+        for part in "$LOOP_DEVICE"p*; do
+            if DIR=$(findmnt -n -o target -S "$part"); then
+                unmount "$DIR"
+            fi
+        done
+        losetup -d "$LOOP_DEVICE"
+    fi
+}
+
+# Check if a customisation script exists and is executable
+customisation_script_is_runnable() {
+    SCRIPT_PATH="/etc/rpi-sb-provisioner/scripts/$1-$2.sh"
+    [ -x "${SCRIPT_PATH}" ]
+}
+
 # TODO: Refactor these two functions to use the same logic, but with different consequences for failure.
 timeout_nonfatal() {
     command="$*"
@@ -132,6 +186,20 @@ cleanup() {
     CLEANUP_DONE=1
 
     return_value=$?
+
+    # Unmount any mounted partitions from image customisation
+    [ -d "${TMP_DIR}/rpi-boot-img-mount" ] && umount "${TMP_DIR}"/rpi-boot-img-mount 2>/dev/null && sync
+    [ -d "${TMP_DIR}/rpi-rootfs-img-mount" ] && umount "${TMP_DIR}"/rpi-rootfs-img-mount 2>/dev/null && sync
+
+    # Detach any loop devices associated with the gold master image
+    if [ -n "${GOLD_MASTER_OS_FILE}" ]; then
+        unmount_image "${GOLD_MASTER_OS_FILE}" 2>/dev/null
+    fi
+    # Also clean up the modified copy if it exists
+    if [ -n "${TMP_DIR}" ] && [ -f "${TMP_DIR}/gold-master-modified.img" ]; then
+        unmount_image "${TMP_DIR}/gold-master-modified.img" 2>/dev/null
+    fi
+
     if [ -d "${TMP_DIR}" ]; then
         rm -rf "${TMP_DIR}"
     fi
@@ -195,6 +263,72 @@ systemd-notify --ready --status="Provisioning started"
 
 announce_start "Writing OS images"
 
+# Determine which image to flash. If bootfs-mounted or rootfs-mounted customisation
+# scripts are present and executable, we need to mount the image, run the scripts,
+# and flash the modified copy. Otherwise, flash the gold master directly.
+FLASH_IMAGE="${GOLD_MASTER_OS_FILE}"
+
+if customisation_script_is_runnable "naked-provisioner" "bootfs-mounted" || \
+   customisation_script_is_runnable "naked-provisioner" "rootfs-mounted"; then
+
+    announce_start "OS Image Customisation"
+
+    announce_start "Copying gold master image for customisation (potentially slow)"
+    cp "${GOLD_MASTER_OS_FILE}" "${TMP_DIR}"/gold-master-modified.img
+    announce_stop "Copying gold master image for customisation (potentially slow)"
+
+    announce_start "OS Image Mounting"
+
+    # Mount the image as a series of partitions via loop device
+    cnt=0
+    until ensure_next_loopdev && LOOP_DEV="$(losetup --show --find --partscan "${TMP_DIR}/gold-master-modified.img")"; do
+        if [ $cnt -lt 5 ]; then
+            cnt=$((cnt + 1))
+            log "Error in losetup.  Retrying..."
+            sleep 5
+        else
+            log "ERROR: losetup failed; exiting"
+            die "Failed to set up loop device for image customisation"
+        fi
+    done
+
+    ensure_loopdev_partitions "$LOOP_DEV"
+    BOOT_DEV="${LOOP_DEV}"p1
+    ROOT_DEV="${LOOP_DEV}"p2
+
+    # shellcheck disable=SC2086
+    mkdir -p "${TMP_DIR}"/rpi-boot-img-mount ${DEBUG}
+    # shellcheck disable=SC2086
+    mkdir -p "${TMP_DIR}"/rpi-rootfs-img-mount ${DEBUG}
+
+    # OS Images are, by convention, packed as a MBR whole-disk file,
+    # containing two partitions: A FAT boot partition, which contains the kernel, command line,
+    # and supporting boot infrastructure for the Raspberry Pi Device.
+    # And in partition 2, the OS rootfs itself.
+    # shellcheck disable=SC2086
+    mount -t vfat "${BOOT_DEV}" "${TMP_DIR}"/rpi-boot-img-mount ${DEBUG}
+    # shellcheck disable=SC2086
+    mount -t ext4 "${ROOT_DEV}" "${TMP_DIR}"/rpi-rootfs-img-mount ${DEBUG}
+
+    announce_stop "OS Image Mounting"
+
+    # Run customisation script for bootfs-mounted stage
+    run_customisation_script "naked-provisioner" "bootfs-mounted" "${TMP_DIR}/rpi-boot-img-mount" "${TMP_DIR}/rpi-rootfs-img-mount"
+
+    # Run customisation script for rootfs-mounted stage
+    run_customisation_script "naked-provisioner" "rootfs-mounted" "${TMP_DIR}/rpi-boot-img-mount" "${TMP_DIR}/rpi-rootfs-img-mount"
+
+    announce_start "OS Image Unmounting"
+    umount "${TMP_DIR}"/rpi-boot-img-mount
+    umount "${TMP_DIR}"/rpi-rootfs-img-mount
+    sync; sync; sync;
+    losetup -d "${LOOP_DEV}"
+    announce_stop "OS Image Unmounting"
+
+    FLASH_IMAGE="${TMP_DIR}/gold-master-modified.img"
+    announce_stop "OS Image Customisation"
+fi
+
 announce_start "Erase Device Storage"
 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" erase "${RPI_DEVICE_STORAGE_TYPE}"
 sleep 3
@@ -203,7 +337,7 @@ announce_stop "Erase Device Storage"
 # Re-check the fastboot devices specifier, as it may take a while for a device to gain IP connectivity
 setup_fastboot_and_id_vars "${FASTBOOT_DEVICE_SPECIFIER}"
 
-fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}" "${GOLD_MASTER_OS_FILE}"
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}" "${FLASH_IMAGE}"
 announce_stop "Writing OS images"
 
 announce_start "Set LED status"
