@@ -1,6 +1,7 @@
 <%inc
 #include <string>
 #include <vector>
+#include <json/json.h>
 %>
 
 <%c++ 
@@ -10,6 +11,7 @@ bool script_exists = false;
 bool script_enabled = false;
 std::string script_content = "";
 std::string currentPage = "customisation";
+Json::Value copy_sources(Json::arrayValue);
 
 // Use try/catch to handle missing values
 try {
@@ -26,6 +28,10 @@ try {
 
 try {
     script_content = @@.get<std::string>("script_content");
+} catch (...) {}
+
+try {
+    copy_sources = @@.get<Json::Value>("copy_sources");
 } catch (...) {}
 %>
 
@@ -229,6 +235,42 @@ try {
             color: #495057;
             font-style: italic;
         }
+
+        /* Copy-from dropdown */
+        .copy-from-wrapper {
+            position: relative;
+            display: inline-block;
+        }
+
+        .copy-from-menu {
+            display: none;
+            position: absolute;
+            bottom: 100%;
+            left: 0;
+            background: #fff;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            min-width: 200px;
+            z-index: 100;
+            margin-bottom: 4px;
+        }
+
+        .copy-from-menu.open {
+            display: block;
+        }
+
+        .copy-from-menu a {
+            display: block;
+            padding: 8px 14px;
+            color: #333;
+            text-decoration: none;
+            font-size: 14px;
+        }
+
+        .copy-from-menu a:hover {
+            background-color: #f0f0f0;
+        }
     </style>
 </head>
 <body>
@@ -252,9 +294,27 @@ try {
 
             <div class="mt-3 d-flex justify-content-between">
                 <button id="save-btn" class="btn btn-success">Save</button>
-                <button id="script-help-btn" class="btn btn-info">
-                    <i class="fas fa-question-circle"></i> Help
-                </button>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <%c++ if (copy_sources.size() > 0) { %>
+                    <div class="copy-from-wrapper">
+                        <button id="copy-from-btn" class="btn btn-secondary" type="button">
+                            <i class="fas fa-copy"></i> Copy from&hellip;
+                        </button>
+                        <div id="copy-from-menu" class="copy-from-menu">
+                            <%c++ for (Json::ArrayIndex i = 0; i < copy_sources.size(); i++) { %>
+                            <a href="#" class="copy-from-item"
+                               data-source="<%c++ $$ << copy_sources[i]["filename"].asString(); %>"
+                               data-provisioner="<%c++ $$ << copy_sources[i]["provisioner"].asString(); %>">
+                                <%c++ $$ << copy_sources[i]["provisioner"].asString(); %>
+                            </a>
+                            <%c++ } %>
+                        </div>
+                    </div>
+                    <%c++ } %>
+                    <button id="script-help-btn" class="btn btn-info">
+                        <i class="fas fa-question-circle"></i> Help
+                    </button>
+                </div>
             </div>
 
             <!-- Help Modal -->
@@ -350,6 +410,62 @@ try {
                 e.preventDefault();
                 window.location.href = '/customisation/list-scripts?activeTab=' + encodeURIComponent(activeTab);
             }
+        });
+        
+        // Copy-from dropdown toggle
+        $("#copy-from-btn").click(function(e) {
+            e.stopPropagation();
+            $("#copy-from-menu").toggleClass("open");
+        });
+        
+        // Close dropdown when clicking elsewhere
+        $(document).click(function() {
+            $("#copy-from-menu").removeClass("open");
+        });
+        
+        // Prevent clicks inside the menu from closing it prematurely
+        $("#copy-from-menu").click(function(e) {
+            e.stopPropagation();
+        });
+        
+        // Copy-from item click handler
+        $(".copy-from-item").click(function(e) {
+            e.preventDefault();
+            $("#copy-from-menu").removeClass("open");
+            
+            var sourceFilename = $(this).data("source");
+            var sourceProvisioner = $(this).data("provisioner");
+            
+            if (!confirm("Replace current editor contents with the script from " + sourceProvisioner + "? Any unsaved changes will be lost.")) {
+                return;
+            }
+            
+            $.ajax({
+                url: '/customisation/get-script?script=' + encodeURIComponent(sourceFilename),
+                type: 'GET',
+                headers: { 'Accept': 'application/json' },
+                dataType: 'json',
+                success: function(response) {
+                    if (response && response.content !== undefined) {
+                        editor.setValue(response.content, -1);
+                        console.log("Loaded script content from " + sourceProvisioner);
+                    } else {
+                        console.error("Response missing content field", response);
+                        alert("Failed to load script from " + sourceProvisioner + ": unexpected response format.");
+                    }
+                },
+                error: function(xhr) {
+                    console.error("Error loading script from " + sourceProvisioner, xhr);
+                    var errorMsg = "Failed to load script from " + sourceProvisioner + ".";
+                    try {
+                        var errResponse = JSON.parse(xhr.responseText);
+                        if (errResponse.error) {
+                            errorMsg += " " + errResponse.error;
+                        }
+                    } catch(e) {}
+                    alert(errorMsg);
+                }
+            });
         });
         
         // Save button

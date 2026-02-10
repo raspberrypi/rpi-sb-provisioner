@@ -31,6 +31,33 @@ namespace provisioner {
             {"post-flash", "Executed after bootfs and rootfs have been flashed to the device"}
         };
 
+        // Helper function to find copy sources for a given provisioner+stage.
+        // Returns a JSON array of {provisioner, filename} for other provisioners
+        // that have an existing script for the same stage on disk.
+        Json::Value getCopySources(const std::string& currentProvisioner, const std::string& stage) {
+            namespace fs = std::filesystem;
+            Json::Value sources(Json::arrayValue);
+
+            for (const auto& [prov, validStages] : PROVISIONER_STAGES) {
+                // Skip the current provisioner
+                if (prov == currentProvisioner) continue;
+
+                // Check if this provisioner supports the same stage
+                if (std::find(validStages.begin(), validStages.end(), stage) == validStages.end()) continue;
+
+                // Check if the script file actually exists on disk
+                std::string scriptPath = SCRIPTS_DIR + prov + "-" + stage + ".sh";
+                if (fs::exists(scriptPath) && fs::is_regular_file(scriptPath)) {
+                    Json::Value source;
+                    source["provisioner"] = prov;
+                    source["filename"] = prov + "-" + stage;
+                    sources.append(source);
+                }
+            }
+
+            return sources;
+        }
+
         // Helper function to get script metadata
         Json::Value getScriptMetadata(const std::string& filepath, bool includeContent = false) {
             namespace fs = std::filesystem;
@@ -363,6 +390,9 @@ namespace provisioner {
                         
                     }
                     
+                    // Find copy sources from other provisioners with the same stage
+                    Json::Value copySources = getCopySources(provisioner, stage);
+
                     auto acceptHeader = req->getHeader("accept");
                     if (acceptHeader.find("text/html") != std::string::npos) {
                         drogon::HttpViewData data;
@@ -370,6 +400,7 @@ namespace provisioner {
                         data.insert("script_name", filename);
                         data.insert("script_exists", false);
                         data.insert("script_enabled", false);
+                        data.insert("copy_sources", copySources);
                         data.insert("currentPage", std::string("customisation"));
                         callback(HttpResponse::newHttpViewResponse("get_script.csp", data));
                         return;
@@ -433,6 +464,18 @@ namespace provisioner {
             // Get script metadata
             Json::Value scriptMetadata = getScriptMetadata(scriptPath, true);
 
+            // Find copy sources from other provisioners with the same stage
+            Json::Value copySources(Json::arrayValue);
+            for (const auto& [prov, validStages] : PROVISIONER_STAGES) {
+                if (filename.find(prov + "-") == 0) {
+                    std::string stage = filename.substr(prov.length() + 1);
+                    if (std::find(validStages.begin(), validStages.end(), stage) != validStages.end()) {
+                        copySources = getCopySources(prov, stage);
+                    }
+                    break;
+                }
+            }
+
             auto acceptHeader = req->getHeader("accept");
             if (acceptHeader.find("text/html") != std::string::npos) {
                 drogon::HttpViewData data;
@@ -440,6 +483,7 @@ namespace provisioner {
                 data.insert("script_name", filename);
                 data.insert("script_exists", true);
                 data.insert("script_enabled", scriptMetadata["enabled"].asBool());
+                data.insert("copy_sources", copySources);
                 data.insert("currentPage", std::string("customisation"));
                 callback(HttpResponse::newHttpViewResponse("get_script.csp", data));
             } else {
@@ -1211,6 +1255,9 @@ namespace provisioner {
                 defaultContent += "# Exit with success\nexit 0\n";
             }
             
+            // Find copy sources from other provisioners with the same stage
+            Json::Value copySources = getCopySources(provisioner, stage);
+
             auto acceptHeader = req->getHeader("accept");
             if (acceptHeader.find("text/html") != std::string::npos) {
                 drogon::HttpViewData data;
@@ -1218,6 +1265,7 @@ namespace provisioner {
                 data.insert("script_name", filename);
                 data.insert("script_exists", false);
                 data.insert("script_enabled", false);
+                data.insert("copy_sources", copySources);
                 data.insert("currentPage", std::string("customisation"));
                 callback(HttpResponse::newHttpViewResponse("get_script.csp", data));
             } else {
