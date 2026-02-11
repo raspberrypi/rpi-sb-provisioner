@@ -143,11 +143,7 @@ cleanup() {
     [ -d "${TMP_DIR}/rpi-boot-img-mount" ] && umount "${TMP_DIR}"/rpi-boot-img-mount 2>/dev/null && sync
     [ -d "${TMP_DIR}/rpi-rootfs-img-mount" ] && umount "${TMP_DIR}"/rpi-rootfs-img-mount 2>/dev/null && sync
 
-    # Detach any loop devices associated with the gold master image
-    if [ -n "${GOLD_MASTER_OS_FILE}" ]; then
-        unmount_image "${GOLD_MASTER_OS_FILE}" 2>/dev/null
-    fi
-    # Also clean up the modified copy if it exists
+    # Detach any loop devices associated with the modified image copy
     if [ -n "${TMP_DIR}" ] && [ -f "${TMP_DIR}/gold-master-modified.img" ]; then
         unmount_image "${TMP_DIR}/gold-master-modified.img" 2>/dev/null
     fi
@@ -184,8 +180,6 @@ check_command_exists fastboot
 check_command_exists blockdev
 
 check_command_exists grep
-
-check_command_exists img2simg
 
 check_command_exists systemd-notify
 
@@ -225,9 +219,9 @@ if customisation_script_is_runnable "naked-provisioner" "bootfs-mounted" || \
 
     announce_start "OS Image Customisation"
 
-    announce_start "Copying gold master image for customisation (potentially slow)"
-    cp "${GOLD_MASTER_OS_FILE}" "${TMP_DIR}"/gold-master-modified.img
-    announce_stop "Copying gold master image for customisation (potentially slow)"
+    announce_start "Copying gold master image for customisation"
+    cp --reflink=auto "${GOLD_MASTER_OS_FILE}" "${TMP_DIR}"/gold-master-modified.img
+    announce_stop "Copying gold master image for customisation"
 
     announce_start "OS Image Mounting"
 
