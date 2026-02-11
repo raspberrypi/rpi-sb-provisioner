@@ -46,6 +46,36 @@ rpi-sb-provisioner (2.2.0) unstable; urgency=medium
     - Update Pi 4 device guidance with RPIBOOT GPIO requirements
     - Add RPI_DEVICE_RPIBOOT_GPIO to configuration variables documentation
 
+  * Naked Provisioner & Image Customisation:
+    - Expand naked-provisioner stages to include bootfs-mounted and
+      rootfs-mounted phases for full image customisation support
+      (fixes GitHub issue #258)
+    - Use cp --reflink=auto for image copying, optimising performance
+      and reducing disk usage on btrfs/xfs hosts
+    - Add checks to ensure customisation scripts are executable before
+      running
+    - Flash modified image when customisation scripts are executed
+
+  * Provisioning Hooks:
+    - Add provision-started stage and hook, allowing actions (e.g. LED
+      control, rig signaling) to execute at the start of provisioning
+
+  * Customisation WebUI:
+    - Add copy-sources functionality allowing users to select and copy
+      scripts from other provisioners during stage editing
+    - Display dropdown for available scripts from other provisioners,
+      improving usability and efficiency
+
+  * Provisioning Improvements:
+    - Consolidate loop device management functions (ensure_next_loopdev,
+      ensure_loopdev_partitions, unmount, unmount_image) into
+      rpi-sb-common.sh for better code reuse and maintainability
+    - Improve cleanup logic in provisioner scripts to properly unmount
+      images before deletion, preventing dangling loop devices
+    - Enhance error handling in losetup operations with clearer exit
+      messages on failure
+    - Remove redundant get_variable function from rpi-fde-provisioner.sh
+
   * Packaging:
     - Add rpi-modcopy dependency for kernel module handling
     - Fix CMake configuration for jsoncpp dependency
@@ -54,7 +84,7 @@ rpi-sb-provisioner (2.2.0) unstable; urgency=medium
       /etc/rpi-sb-provisioner/. This eliminates dpkg conffile prompts
       during upgrades when configuration has been modified.
 
- -- Tom Dewey <tom.dewey@raspberrypi.com>  Thu, 29 Jan 2026 17:25:00 +0000
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Tue, 11 Feb 2026 12:00:00 +0000
 
 rpi-sb-provisioner (2.1.3) unstable; urgency=medium
 
