@@ -228,16 +228,20 @@ cleanup() {
     CLEANUP_DONE=1
 
     returnvalue=$?
-    [ -d "${TMP_DIR}/rpi-boot-img-mount" ] && umount "${TMP_DIR}"/rpi-boot-img-mount && sync
-    [ -d "${TMP_DIR}/rpi-rootfs-img-mount" ] && umount "${TMP_DIR}"/rpi-rootfs-img-mount && sync
-    [ -d "${TMP_DIR}" ] && rm -rf "${TMP_DIR}" && sync
-    rm -f "${CUSTOMER_PUBLIC_KEY_FILE}"
 
-    unmount_image "${GOLD_MASTER_OS_FILE}"
+    # Unmount partitions first, then detach loop device, then delete files.
+    # Wrong order (delete before unmount) leaves dangling loop devices.
+    [ -d "${TMP_DIR}/rpi-boot-img-mount" ] && umount "${TMP_DIR}"/rpi-boot-img-mount 2>/dev/null && sync
+    [ -d "${TMP_DIR}/rpi-rootfs-img-mount" ] && umount "${TMP_DIR}"/rpi-rootfs-img-mount 2>/dev/null && sync
+    [ -d "${TMP_DIR}/rpi-cryptroot-bootfs-img-mount" ] && umount "${TMP_DIR}"/rpi-cryptroot-bootfs-img-mount 2>/dev/null && sync
+    unmount_image "${GOLD_MASTER_OS_FILE}" 2>/dev/null
+
+    rm -f "${CUSTOMER_PUBLIC_KEY_FILE}"
     [ -d "${TMP_DIR}" ] && rm -rf "${TMP_DIR}" && sync
 
     if [ -n "${DELETE_PRIVATE_TMPDIR}" ]; then
         announce_start "Deleting customised intermediates"
+        # shellcheck disable=SC2086
         rm -rf "${RPI_SB_WORKDIR}" ${DEBUG}
         sync
         DELETE_PRIVATE_TMPDIR=
@@ -286,10 +290,6 @@ check_command_exists mkfs.fat
 check_command_exists truncate
 
 check_command_exists systemd-notify
-
-get_variable() {
-    fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar "$1" 2>&1 | grep -oP "${1}"': \K[^\r\n]*'
-}
 
 setup_fastboot_and_id_vars "$1"
 
@@ -368,8 +368,7 @@ prepare_pre_boot_auth_images_as_filesystems() {
                 log "Error in losetup.  Retrying..."
                 sleep 5
             else
-                log "ERROR: losetup failed; exiting"
-                sleep 5
+                die "ERROR: losetup failed after ${cnt} retries; exiting"
             fi
         done
 
@@ -473,8 +472,7 @@ prepare_pre_boot_auth_images_as_bootimg() {
                 log "Error in losetup.  Retrying..."
                 sleep 5
             else
-                log "ERROR: losetup failed; exiting"
-                sleep 5
+                die "ERROR: losetup failed after ${cnt} retries; exiting"
             fi
         done
 
