@@ -90,54 +90,6 @@ check_pidevice_storage_type() {
     esac
 }
 
-# Lifted from pi-gen/scripts/common, unsure under what circumstances this would be necessary
-ensure_next_loopdev() {
-    set +e
-    loopdev="$(losetup -f)"
-    loopmaj="$(echo "$loopdev" | sed -E 's/.*[0-9]*?([0-9]+)$/\1/')"
-    [ -b "$loopdev" ] || mknod "$loopdev" b 7 "$loopmaj"
-    set -e
-}
-
-# Lifted from pi-gen/scripts/common, unsure under what circumstances this would be necessary
-ensure_loopdev_partitions() {
-    set +e
-    lsblk -r -n -o "NAME,MAJ:MIN" "$1" | grep -v "^${1#/dev/}" | while read -r line; do
-        partition="${line%% *}"
-        majmin="${line#* }"
-        if [ ! -b "/dev/$partition" ]; then
-            mknod "/dev/$partition" b "${majmin%:*}" "${majmin#*:}"
-        fi
-    done
-    set -e
-}
-
-unmount() {
-    for DIR in "$@"; do
-        if findmnt -n "$DIR" > /dev/null 2>&1; then
-            locs=$(mount | grep "$DIR" | cut -f 3 -d ' ' | sort -r)
-            for loc in $locs; do
-                umount "$loc"
-            done
-        fi
-    done
-}
-
-# Lifted from pi-gen/scripts/common
-unmount_image() {
-    sync
-    sleep 1
-    LOOP_DEVICE=$(losetup --list | grep "$1" | cut -f1 -d' ')
-    if [ -n "$LOOP_DEVICE" ]; then
-        for part in "$LOOP_DEVICE"p*; do
-            if DIR=$(findmnt -n -o target -S "$part"); then
-                unmount "$DIR"
-            fi
-        done
-        losetup -d "$LOOP_DEVICE"
-    fi
-}
-
 # Check if a customisation script exists and is executable
 customisation_script_is_runnable() {
     SCRIPT_PATH="/etc/rpi-sb-provisioner/scripts/$1-$2.sh"
@@ -338,6 +290,14 @@ announce_stop "Erase Device Storage"
 setup_fastboot_and_id_vars "${FASTBOOT_DEVICE_SPECIFIER}"
 
 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}" "${FLASH_IMAGE}"
+
+# If we customised the image, delete the modified copy immediately after flash.
+# The bootfs-mounted/rootfs-mounted scripts may have injected per-device material
+# (keys, certificates, unique configs), so the modified image must not linger on disk.
+if [ "${FLASH_IMAGE}" != "${GOLD_MASTER_OS_FILE}" ]; then
+    rm -f "${FLASH_IMAGE}"
+    log "Deleted per-device customised image"
+fi
 announce_stop "Writing OS images"
 
 announce_start "Set LED status"
