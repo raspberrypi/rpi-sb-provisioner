@@ -252,16 +252,19 @@ cleanup() {
     CLEANUP_DONE=1
 
     returnvalue=$?
-    [ -d "${TMP_DIR}/rpi-boot-img-mount" ] && umount "${TMP_DIR}"/rpi-boot-img-mount && sync
-    [ -d "${TMP_DIR}/rpi-rootfs-img-mount" ] && umount "${TMP_DIR}"/rpi-rootfs-img-mount && sync
-    [ -d "${TMP_DIR}" ] && rm -rf "${TMP_DIR}" && sync
-    rm -f "${CUSTOMER_PUBLIC_KEY_FILE}"
 
-    unmount_image "${GOLD_MASTER_OS_FILE}"
+    # Unmount partitions first, then detach loop device, then delete files.
+    # Wrong order (delete before unmount) leaves dangling loop devices.
+    [ -d "${TMP_DIR}/rpi-boot-img-mount" ] && umount "${TMP_DIR}"/rpi-boot-img-mount 2>/dev/null && sync
+    [ -d "${TMP_DIR}/rpi-rootfs-img-mount" ] && umount "${TMP_DIR}"/rpi-rootfs-img-mount 2>/dev/null && sync
+    unmount_image "${GOLD_MASTER_OS_FILE}" 2>/dev/null
+
+    rm -f "${CUSTOMER_PUBLIC_KEY_FILE}"
     [ -d "${TMP_DIR}" ] && rm -rf "${TMP_DIR}" && sync
 
     if [ -n "${DELETE_PRIVATE_TMPDIR}" ]; then
         announce_start "Deleting customised intermediates"
+        # shellcheck disable=SC2086
         rm -rf "${RPI_SB_WORKDIR}" ${DEBUG}
         sync
         DELETE_PRIVATE_TMPDIR=
@@ -387,8 +390,7 @@ prepare_pre_boot_auth_images() {
                 log "Error in losetup.  Retrying..."
                 sleep 5
             else
-                log "ERROR: losetup failed; exiting"
-                sleep 5
+                die "ERROR: losetup failed after ${cnt} retries; exiting"
             fi
         done
 
