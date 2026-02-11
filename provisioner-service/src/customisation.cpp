@@ -18,14 +18,15 @@ namespace provisioner {
 
         // Define available provisioners and stages using a map
         const std::map<std::string, std::vector<std::string>> PROVISIONER_STAGES = {
-            {"sb-provisioner", {"bootstrap", "bootfs-mounted", "rootfs-mounted", "post-flash"}},
-            {"fde-provisioner", {"bootstrap", "bootfs-mounted", "rootfs-mounted", "post-flash"}},
-            {"naked-provisioner", {"bootstrap", "bootfs-mounted", "rootfs-mounted", "post-flash"}}
+            {"sb-provisioner", {"bootstrap", "provision-started", "bootfs-mounted", "rootfs-mounted", "post-flash"}},
+            {"fde-provisioner", {"bootstrap", "provision-started", "bootfs-mounted", "rootfs-mounted", "post-flash"}},
+            {"naked-provisioner", {"bootstrap", "provision-started", "bootfs-mounted", "rootfs-mounted", "post-flash"}}
         };
 
         // Description of each stage for display in the UI
         const std::map<std::string, std::string> STAGE_DESCRIPTIONS = {
             {"bootstrap", "Executed when a device is detected, before provisioning begins"},
+            {"provision-started", "Executed at the start of provisioning, before image preparation. Use for LED control or rig signalling"},
             {"bootfs-mounted", "Executed after boot image is mounted, before modifications"},
             {"rootfs-mounted", "Executed after rootfs is mounted, before final packaging"},
             {"post-flash", "Executed after bootfs and rootfs have been flashed to the device"}
