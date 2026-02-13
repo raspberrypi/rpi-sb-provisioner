@@ -209,17 +209,87 @@ namespace provisioner {
                         jsonResponse["error"] = "Invalid or unsafe file path";
                     } else if (!std::filesystem::exists(*canonicalPath)) {
                         jsonResponse["valid"] = false;
-                        jsonResponse["error"] = "Image file does not exist at specified path";
-                    } else if (!std::filesystem::is_regular_file(*canonicalPath)) {
-                        jsonResponse["valid"] = false;
-                        jsonResponse["error"] = "Path exists but is not a regular file";
-                    } else {
-                        // Check file extension - should be .img
+                        jsonResponse["error"] = "Image file or IDP artefact directory does not exist at specified path";
+                    } else if (std::filesystem::is_directory(*canonicalPath)) {
+                        // Directory: validate as IDP artefact
+                        // Check for exactly one .json file
+                        int jsonCount = 0;
+                        std::string jsonFileName;
+                        try {
+                            for (const auto& entry : std::filesystem::directory_iterator(*canonicalPath)) {
+                                if (entry.is_regular_file() && entry.path().extension() == ".json") {
+                                    jsonCount++;
+                                    jsonFileName = entry.path().filename().string();
+                                }
+                            }
+                        } catch (const std::exception& e) {
+                            jsonResponse["valid"] = false;
+                            jsonResponse["error"] = std::string("Cannot read IDP artefact directory: ") + e.what();
+                        }
+
+                        if (jsonResponse["valid"].asBool()) {
+                            if (jsonCount == 0) {
+                                jsonResponse["valid"] = false;
+                                jsonResponse["error"] = "IDP artefact directory contains no JSON description file";
+                            } else if (jsonCount > 1) {
+                                jsonResponse["valid"] = false;
+                                jsonResponse["error"] = "IDP artefact directory contains multiple JSON files (expected exactly one)";
+                            } else {
+                                // JSON exists -- validate it's parseable
+                                std::filesystem::path jsonPath = std::filesystem::path(*canonicalPath) / jsonFileName;
+                                std::ifstream jsonFile(jsonPath);
+                                if (!jsonFile.is_open()) {
+                                    jsonResponse["valid"] = false;
+                                    jsonResponse["error"] = "Cannot open JSON description file: " + jsonFileName;
+                                } else {
+                                    Json::Value json;
+                                    Json::CharReaderBuilder builder;
+                                    std::string errors;
+                                    if (!Json::parseFromStream(builder, jsonFile, &json, &errors)) {
+                                        jsonResponse["valid"] = false;
+                                        jsonResponse["error"] = "JSON description file is not valid JSON: " + errors;
+                                    } else {
+                                        // Check all referenced .simg files exist
+                                        std::vector<std::string> missingFiles;
+                                        if (json.isMember("layout") && json["layout"].isMember("partitionimages")) {
+                                            const auto& pimages = json["layout"]["partitionimages"];
+                                            for (const auto& key : pimages.getMemberNames()) {
+                                                if (pimages[key].isMember("simage")) {
+                                                    std::string simgName = pimages[key]["simage"].asString();
+                                                    std::filesystem::path simgPath = std::filesystem::path(*canonicalPath) / simgName;
+                                                    if (!std::filesystem::exists(simgPath)) {
+                                                        missingFiles.push_back(simgName);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        if (!missingFiles.empty()) {
+                                            std::string missing;
+                                            for (const auto& f : missingFiles) {
+                                                if (!missing.empty()) missing += ", ";
+                                                missing += f;
+                                            }
+                                            jsonResponse["valid"] = false;
+                                            jsonResponse["error"] = "IDP artefact is incomplete. Missing sparse images: " + missing;
+                                        } else {
+                                            // Valid IDP artefact
+                                            jsonResponse["message"] = "Valid IDP artefact directory (" + jsonFileName + ")";
+                                            jsonResponse["is_idp"] = true;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else if (std::filesystem::is_regular_file(*canonicalPath)) {
+                        // Traditional .img file validation
                         std::string ext = std::filesystem::path(*canonicalPath).extension().string();
                         if (ext != ".img") {
                             jsonResponse["valid"] = false;
                             jsonResponse["error"] = "File should have .img extension (uncompressed image)";
                         }
+                    } else {
+                        jsonResponse["valid"] = false;
+                        jsonResponse["error"] = "Path exists but is not a regular file or directory";
                     }
                 }
             } else if (fieldName == "RPI_SB_WORKDIR") {

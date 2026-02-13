@@ -12,6 +12,67 @@
             padding: 24px;
             margin-bottom: 24px;
             box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            transition: opacity 0.3s ease;
+        }
+
+        /* IDP progressive disclosure: greyed-out sections */
+        .config-section.idp-disabled {
+            opacity: 0.4;
+            pointer-events: none;
+            position: relative;
+        }
+        .config-section.idp-disabled::after {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(255,255,255,0.5);
+            border-radius: 8px;
+            z-index: 10;
+        }
+
+        /* IDP locked field styling */
+        .idp-locked-badge {
+            display: inline-block;
+            font-size: 0.75rem;
+            padding: 2px 8px;
+            border-radius: 12px;
+            background: #e8f4f8;
+            color: #0c5460;
+            margin-left: 8px;
+            font-weight: 500;
+        }
+        .idp-locked .tile-option {
+            pointer-events: none;
+            opacity: 0.7;
+        }
+        .idp-locked .tile-option.selected {
+            opacity: 1;
+            border-color: #17a2b8;
+        }
+
+        /* IDP info banner */
+        .idp-info-banner {
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            border-radius: 6px;
+            padding: 12px 16px;
+            margin-bottom: 16px;
+            color: #0c5460;
+            font-size: 0.9rem;
+        }
+        .idp-info-banner strong { color: #0a4c54; }
+
+        /* IDP badge in image list */
+        .idp-badge {
+            display: inline-block;
+            font-size: 0.7rem;
+            padding: 1px 6px;
+            border-radius: 10px;
+            background: #17a2b8;
+            color: #fff;
+            margin-left: 6px;
+            font-weight: 600;
+            vertical-align: middle;
         }
         
         .section-header {
@@ -1138,7 +1199,7 @@
     <form id="optionsForm" onsubmit="event.preventDefault();">
         
         <!-- ===== SECTION 1: Target Device ===== -->
-        <div class="config-section">
+        <div class="config-section" id="section-target-device">
             <div class="section-header">
                 <h2 class="section-title">
                     <span class="section-title-icon">&#128421;</span>
@@ -1244,7 +1305,7 @@
         </div>
         
         <!-- ===== SECTION 2: Security Configuration ===== -->
-        <div class="config-section">
+        <div class="config-section" id="section-security">
             <div class="section-header">
                 <h2 class="section-title">
                     <span class="section-title-icon">&#128274;</span>
@@ -1432,7 +1493,7 @@
         </div>
         
         <!-- ===== SECTION 3: OS Image & Firmware ===== -->
-        <div class="config-section">
+        <div class="config-section" id="section-os-image">
             <div class="section-header">
                 <h2 class="section-title">
                     <span class="section-title-icon">&#128190;</span>
@@ -1458,9 +1519,9 @@
                     <!-- Upload Zone (hidden by default) -->
                     <div id="image-upload-container" style="display: none;">
                         <div class="image-upload-zone" id="image-upload-zone">
-                            <div>Drop an .img file here or click to browse</div>
-                            <div style="font-size: 0.8rem; color: #888; margin-top: 8px;">Uncompressed disk image (.img)</div>
-                            <input type="file" id="image-file-input" accept=".img" style="display: none;">
+                            <div>Drop an image file here or click to browse</div>
+                            <div style="font-size: 0.8rem; color: #888; margin-top: 8px;">Traditional image (.img) or IDP artefact archive (.tar.gz, .tgz, .zip)</div>
+                            <input type="file" id="image-file-input" accept=".img,.tar.gz,.tgz,.zip" style="display: none;">
                         </div>
                         <div id="image-upload-progress" class="image-upload-progress" style="display: none;">
                             <div class="image-upload-progress-bar">
@@ -1494,7 +1555,7 @@
                 
                 <div class="inline-help">
                     <span class="inline-help-icon">&#9432;</span>
-                    <span>Select a base OS image. Images are stored in /srv/rpi-sb-provisioner/images/ and must be uncompressed .img files.</span>
+                    <span>Select a base OS image or IDP artefact. Traditional images (.img) require manual configuration. IDP artefacts (from rpi-image-gen) carry their own configuration and will auto-fill settings below.</span>
                 </div>
             </div>
             
@@ -1550,7 +1611,7 @@
         </div>
         
         <!-- ===== SECTION 4: Storage & Output ===== -->
-        <div class="config-section">
+        <div class="config-section" id="section-storage-output">
             <div class="section-header">
                 <h2 class="section-title">
                     <span class="section-title-icon">&#128193;</span>
@@ -1606,7 +1667,7 @@
         </div>
         
         <!-- ===== SECTION 5: Hardware Security ===== -->
-        <div class="config-section">
+        <div class="config-section" id="section-hardware-security">
             <div class="section-header">
                 <h2 class="section-title">
                     <span class="section-title-icon">&#128737;</span>
@@ -2901,6 +2962,13 @@
                 nameDiv.className = 'firmware-item-version';
                 nameDiv.textContent = img.name;
                 
+                if (img.is_idp) {
+                    const idpBadge = document.createElement('span');
+                    idpBadge.className = 'idp-badge';
+                    idpBadge.textContent = 'IDP';
+                    nameDiv.appendChild(idpBadge);
+                }
+                
                 if (isSelected) {
                     const selectedBadge = document.createElement('span');
                     selectedBadge.className = 'firmware-selected-badge';
@@ -2912,7 +2980,7 @@
                 const metaDiv = document.createElement('div');
                 metaDiv.className = 'firmware-item-meta';
                 const sizeMB = img.size_mb ? img.size_mb.toFixed(1) + ' MB' : 'Unknown size';
-                metaDiv.textContent = sizeMB;
+                metaDiv.textContent = img.is_idp ? sizeMB + ' (IDP Artefact)' : sizeMB;
                 
                 info.appendChild(nameDiv);
                 info.appendChild(metaDiv);
@@ -2967,31 +3035,70 @@
                 metaList.appendChild(dd);
             };
             
+            if (img.is_idp) {
+                addMeta('Type', 'IDP Artefact');
+            } else {
+                addMeta('Type', 'Traditional Image');
+            }
             addMeta('Size', sizeMB);
-            addMeta('SHA256', sha256Display);
+            if (!img.is_idp) {
+                addMeta('SHA256', sha256Display);
+            }
             addMeta('Path', img.path || '/srv/rpi-sb-provisioner/images/' + img.name);
             
             detailsEl.appendChild(metaList);
+
+            // If IDP, fetch and show analysis
+            if (img.is_idp) {
+                const idpSection = document.createElement('div');
+                idpSection.style.cssText = 'margin-top: 16px; padding-top: 16px; border-top: 1px solid #e0e0e0;';
+                idpSection.innerHTML = '<span style="color: #888;">Analysing IDP artefact...</span>';
+                detailsEl.appendChild(idpSection);
+
+                fetch('/analyze-image?name=' + encodeURIComponent(img.name))
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.error) {
+                            idpSection.innerHTML = '<span style="color: #dc3545;">Error: ' + data.error + '</span>';
+                            return;
+                        }
+                        let html = '<h4 style="margin: 0 0 8px 0; color: #0c5460;">IDP Metadata</h4><dl style="margin:0; font-size: 0.9rem;">';
+                        if (data.image_name) html += '<dt style="font-weight:600; margin-top:8px; color:#555;">Image Name</dt><dd style="margin:4px 0 0 0;">' + data.image_name + '</dd>';
+                        if (data.image_version) html += '<dt style="font-weight:600; margin-top:8px; color:#555;">Version</dt><dd style="margin:4px 0 0 0;">' + data.image_version + '</dd>';
+                        if (data.device_class) html += '<dt style="font-weight:600; margin-top:8px; color:#555;">Device Family</dt><dd style="margin:4px 0 0 0;">' + data.device_class + ' <span style="color:#888;">(from ' + (data.device_class_raw || '?') + ')</span></dd>';
+                        if (data.storage_type) html += '<dt style="font-weight:600; margin-top:8px; color:#555;">Storage Type</dt><dd style="margin:4px 0 0 0;">' + data.storage_type + '</dd>';
+                        html += '<dt style="font-weight:600; margin-top:8px; color:#555;">Encryption</dt><dd style="margin:4px 0 0 0;">' + (data.encryption ? 'Yes' : 'No') + '</dd>';
+                        if (data.cipher) html += '<dt style="font-weight:600; margin-top:8px; color:#555;">Cipher</dt><dd style="margin:4px 0 0 0;">' + data.cipher + '</dd>';
+                        if (data.partition_count !== undefined) html += '<dt style="font-weight:600; margin-top:8px; color:#555;">Partitions</dt><dd style="margin:4px 0 0 0;">' + data.partition_count + '</dd>';
+                        html += '</dl>';
+                        idpSection.innerHTML = html;
+                    })
+                    .catch(e => {
+                        idpSection.innerHTML = '<span style="color: #dc3545;">Failed to analyse artefact</span>';
+                    });
+            }
             
-            // Boot Package section
-            const bootSection = document.createElement('div');
-            bootSection.style.cssText = 'margin-top: 16px; padding-top: 16px; border-top: 1px solid #e0e0e0;';
-            
-            const bootHeader = document.createElement('dt');
-            bootHeader.textContent = 'Boot Package';
-            bootHeader.style.cssText = 'font-weight: 600; color: #555;';
-            bootSection.appendChild(bootHeader);
-            
-            const bootStatus = document.createElement('dd');
-            bootStatus.id = 'boot-package-status-' + img.name.replace(/[^a-zA-Z0-9]/g, '_');
-            bootStatus.style.cssText = 'margin: 4px 0 0 0;';
-            bootStatus.innerHTML = '<span style="color: #888;">Checking...</span>';
-            bootSection.appendChild(bootStatus);
-            
-            detailsEl.appendChild(bootSection);
-            
-            // Check boot package status
-            checkBootPackageStatus(img.name);
+            // Boot Package section (traditional images only)
+            if (!img.is_idp) {
+                const bootSection = document.createElement('div');
+                bootSection.style.cssText = 'margin-top: 16px; padding-top: 16px; border-top: 1px solid #e0e0e0;';
+                
+                const bootHeader = document.createElement('dt');
+                bootHeader.textContent = 'Boot Package';
+                bootHeader.style.cssText = 'font-weight: 600; color: #555;';
+                bootSection.appendChild(bootHeader);
+                
+                const bootStatus = document.createElement('dd');
+                bootStatus.id = 'boot-package-status-' + img.name.replace(/[^a-zA-Z0-9]/g, '_');
+                bootStatus.style.cssText = 'margin: 4px 0 0 0;';
+                bootStatus.innerHTML = '<span style="color: #888;">Checking...</span>';
+                bootSection.appendChild(bootStatus);
+                
+                detailsEl.appendChild(bootSection);
+                
+                // Check boot package status
+                checkBootPackageStatus(img.name);
+            }
             
             // Action buttons
             const actions = document.createElement('div');
@@ -3011,20 +3118,22 @@
                 actions.appendChild(selectedNotice);
             }
             
-            const generateBootBtn = document.createElement('button');
-            generateBootBtn.type = 'button';
-            generateBootBtn.id = 'generate-boot-btn-' + img.name.replace(/[^a-zA-Z0-9]/g, '_');
-            generateBootBtn.style.cssText = 'padding: 8px 12px; background: #17a2b8; color: white; border: none; border-radius: 4px; cursor: pointer;';
-            generateBootBtn.textContent = 'Generate Boot Package';
-            generateBootBtn.onclick = () => generateBootPackage(img.name);
-            actions.appendChild(generateBootBtn);
-            
-            const clearCacheBtn = document.createElement('button');
-            clearCacheBtn.type = 'button';
-            clearCacheBtn.style.cssText = 'padding: 8px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;';
-            clearCacheBtn.textContent = 'Clear Cached Files';
-            clearCacheBtn.onclick = () => clearImageCache(img.name);
-            actions.appendChild(clearCacheBtn);
+            if (!img.is_idp) {
+                const generateBootBtn = document.createElement('button');
+                generateBootBtn.type = 'button';
+                generateBootBtn.id = 'generate-boot-btn-' + img.name.replace(/[^a-zA-Z0-9]/g, '_');
+                generateBootBtn.style.cssText = 'padding: 8px 12px; background: #17a2b8; color: white; border: none; border-radius: 4px; cursor: pointer;';
+                generateBootBtn.textContent = 'Generate Boot Package';
+                generateBootBtn.onclick = () => generateBootPackage(img.name);
+                actions.appendChild(generateBootBtn);
+                
+                const clearCacheBtn = document.createElement('button');
+                clearCacheBtn.type = 'button';
+                clearCacheBtn.style.cssText = 'padding: 8px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;';
+                clearCacheBtn.textContent = 'Clear Cached Files';
+                clearCacheBtn.onclick = () => clearImageCache(img.name);
+                actions.appendChild(clearCacheBtn);
+            }
             
             const deleteBtn = document.createElement('button');
             deleteBtn.type = 'button';
@@ -3166,15 +3275,41 @@
             const fullPath = path || '/srv/rpi-sb-provisioner/images/' + name;
             
             try {
+                // Analyse the image first to determine type
+                const analyzeResp = await fetch('/analyze-image?name=' + encodeURIComponent(name));
+                let imageAnalysis = null;
+                if (analyzeResp.ok) {
+                    imageAnalysis = await analyzeResp.json();
+                }
+
+                // Build the config update payload
+                const configUpdate = { 'GOLD_MASTER_OS_FILE': fullPath };
+
+                // If IDP, also auto-populate device family and storage type from the artefact
+                if (imageAnalysis && imageAnalysis.type === 'idp') {
+                    if (imageAnalysis.device_class) {
+                        configUpdate['RPI_DEVICE_FAMILY'] = imageAnalysis.device_class;
+                    }
+                    if (imageAnalysis.storage_type) {
+                        configUpdate['RPI_DEVICE_STORAGE_TYPE'] = imageAnalysis.storage_type;
+                    }
+                    if (imageAnalysis.cipher) {
+                        configUpdate['RPI_DEVICE_STORAGE_CIPHER'] = imageAnalysis.cipher;
+                    }
+                }
+
                 const response = await fetch('/options/set', addCsrfHeader({
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 'GOLD_MASTER_OS_FILE': fullPath })
+                    body: JSON.stringify(configUpdate)
                 }));
                 
                 if (response.ok) {
                     // Update hidden input
                     document.getElementById('GOLD_MASTER_OS_FILE').value = fullPath;
+                    
+                    // Apply progressive disclosure based on image type
+                    applyIdpDisclosure(imageAnalysis);
                     
                     // Re-render list to show updated selection
                     renderImageList();
@@ -3204,6 +3339,135 @@
             }
         }
         
+        // ===== IDP Progressive Disclosure =====
+        // Applies or removes IDP-specific UI state based on image analysis results
+        function applyIdpDisclosure(analysis) {
+            const isIdp = analysis && analysis.type === 'idp';
+            
+            // Remove any existing IDP info banners
+            document.querySelectorAll('.idp-info-banner').forEach(el => el.remove());
+            
+            // Remove any existing IDP locked badges
+            document.querySelectorAll('.idp-locked-badge').forEach(el => el.remove());
+            
+            // Remove IDP locked class from all field groups
+            document.querySelectorAll('.idp-locked').forEach(el => el.classList.remove('idp-locked'));
+            
+            // Remove IDP disabled class from all sections
+            document.querySelectorAll('.idp-disabled').forEach(el => el.classList.remove('idp-disabled'));
+            
+            if (!isIdp) {
+                // Traditional image: ensure all sections are visible and enabled
+                return;
+            }
+            
+            // --- IDP image selected ---
+            
+            // 1. Auto-fill and lock Device Family
+            const deviceSection = document.getElementById('section-target-device');
+            if (deviceSection && analysis.device_class) {
+                // Add IDP info banner at the top of the section
+                const banner = document.createElement('div');
+                banner.className = 'idp-info-banner';
+                banner.innerHTML = '<strong>IDP Artefact Selected.</strong> Device family, storage type, and encryption settings are defined by the image and cannot be changed here.';
+                deviceSection.querySelector('.section-header').after(banner);
+                
+                // Select the correct device family radio
+                const familyRadio = deviceSection.querySelector('input[name="RPI_DEVICE_FAMILY"][value="' + analysis.device_class + '"]');
+                if (familyRadio) {
+                    familyRadio.checked = true;
+                    familyRadio.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                
+                // Lock the device family field group
+                const familyGroup = familyRadio ? familyRadio.closest('.field-group') : null;
+                if (familyGroup) {
+                    familyGroup.classList.add('idp-locked');
+                    const label = familyGroup.querySelector('.field-label');
+                    if (label) {
+                        const badge = document.createElement('span');
+                        badge.className = 'idp-locked-badge';
+                        badge.textContent = 'Set by image';
+                        label.appendChild(badge);
+                    }
+                }
+                
+                // Select and lock storage type
+                if (analysis.storage_type) {
+                    const storageRadio = deviceSection.querySelector('input[name="RPI_DEVICE_STORAGE_TYPE"][value="' + analysis.storage_type + '"]');
+                    if (storageRadio) {
+                        storageRadio.checked = true;
+                        storageRadio.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                    const storageGroup = storageRadio ? storageRadio.closest('.field-group') : null;
+                    if (storageGroup) {
+                        storageGroup.classList.add('idp-locked');
+                        const label = storageGroup.querySelector('.field-label');
+                        if (label) {
+                            const badge = document.createElement('span');
+                            badge.className = 'idp-locked-badge';
+                            badge.textContent = 'Set by image';
+                            label.appendChild(badge);
+                        }
+                    }
+                }
+            }
+            
+            // 2. Security section: collapse to just secure-boot toggle for IDP
+            const securitySection = document.getElementById('section-security');
+            if (securitySection) {
+                // Add IDP info banner
+                const banner = document.createElement('div');
+                banner.className = 'idp-info-banner';
+                banner.innerHTML = '<strong>Encryption is defined by the IDP artefact.</strong> Only the secure boot setting applies here. Choose whether to program this device for secure boot (OTP key + signed EEPROM).';
+                securitySection.querySelector('.section-header').after(banner);
+                
+                // Hide the FDE-only tile (meaningless for IDP)
+                const fdeTile = document.getElementById('fde-only-tile');
+                if (fdeTile) fdeTile.style.display = 'none';
+                
+                // Lock/hide the cipher selector (IDP defines encryption)
+                const cipherGroup = document.getElementById('cipher-group');
+                if (cipherGroup) {
+                    cipherGroup.classList.add('idp-locked');
+                    if (analysis.cipher) {
+                        const cipherRadio = cipherGroup.querySelector('input[name="RPI_DEVICE_STORAGE_CIPHER"][value="' + analysis.cipher + '"]');
+                        if (cipherRadio) {
+                            cipherRadio.checked = true;
+                        }
+                    }
+                    const label = cipherGroup.querySelector('.field-label');
+                    if (label) {
+                        const badge = document.createElement('span');
+                        badge.className = 'idp-locked-badge';
+                        badge.textContent = 'Set by image';
+                        label.appendChild(badge);
+                    }
+                }
+            }
+        }
+        
+        // On page load, check if current image is IDP and apply disclosure
+        document.addEventListener('DOMContentLoaded', async function() {
+            const goldMaster = document.getElementById('GOLD_MASTER_OS_FILE')?.value || '';
+            if (!goldMaster) return;
+            
+            // Extract the image name from the path
+            const parts = goldMaster.split('/');
+            const imageName = parts[parts.length - 1];
+            if (!imageName) return;
+            
+            try {
+                const resp = await fetch('/analyze-image?name=' + encodeURIComponent(imageName));
+                if (resp.ok) {
+                    const analysis = await resp.json();
+                    applyIdpDisclosure(analysis);
+                }
+            } catch (e) {
+                console.warn('Could not analyze current image for IDP disclosure:', e);
+            }
+        });
+        
         async function clearImageSelection() {
             try {
                 const response = await fetch('/options/set', addCsrfHeader({
@@ -3214,6 +3478,11 @@
                 
                 if (response.ok) {
                     document.getElementById('GOLD_MASTER_OS_FILE').value = '';
+                    // Clear any IDP progressive disclosure
+                    applyIdpDisclosure(null);
+                    // Restore hidden FDE tile
+                    const fdeTile = document.getElementById('fde-only-tile');
+                    if (fdeTile) fdeTile.style.display = '';
                     renderImageList();
                     showSuccess('Image selection cleared');
                 } else {
@@ -3253,8 +3522,8 @@
             }
             
             try {
-                const response = await fetch('/images/delete?name=' + encodeURIComponent(name), addCsrfHeader({
-                    method: 'DELETE'
+                const response = await fetch('/delete-image?name=' + encodeURIComponent(name), addCsrfHeader({
+                    method: 'POST'
                 }));
                 
                 if (response.ok) {
@@ -3319,8 +3588,11 @@
         }
         
         async function uploadImage(file) {
-            if (!file.name.endsWith('.img')) {
-                showError('Please select a .img file');
+            const lowerName = file.name.toLowerCase();
+            const validExtensions = ['.img', '.tar.gz', '.tgz', '.zip'];
+            const isValid = validExtensions.some(ext => lowerName.endsWith(ext));
+            if (!isValid) {
+                showError('Please select a .img file or IDP artefact archive (.tar.gz, .tgz, .zip)');
                 return;
             }
             
@@ -3372,7 +3644,7 @@
                     showError('Upload failed');
                 };
                 
-                xhr.open('POST', '/images/upload');
+                xhr.open('POST', '/upload-image');
                 if (csrfToken) {
                     xhr.setRequestHeader('X-CSRF-Token', csrfToken);
                 }

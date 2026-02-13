@@ -1,3 +1,66 @@
+rpi-sb-provisioner (2.3.0) unstable; urgency=medium
+
+  * IDP (Image Description Provisioning) Support:
+    - Add support for consuming IDP-style artefacts from rpi-image-gen,
+      enabling pre-built partition layouts, encryption, and sparse image
+      provisioning via the device-side fastboot IDP protocol
+    - Add new rpi-idp-provisioner.sh orchestrator implementing the full
+      IDP protocol: erase, stage JSON, idpinit, idpwrite, idpgetblk/flash
+      loop, and idpdone, with timeout_fatal wrappers on all fastboot
+      commands
+    - Add rpi-idp-provisioner@.service systemd template unit
+    - Extend triage to detect IDP artefact directories
+      (GOLD_MASTER_OS_FILE pointing to a directory) and route to the
+      IDP provisioner automatically
+    - IDP pre-flight validation: JSON syntax, referenced .simg file
+      existence, device class and storage type cross-checks against
+      host configuration
+
+  * IDP WebUI:
+    - Add image-first progressive disclosure UI: selecting an IDP
+      artefact auto-populates device family, storage type, and cipher
+      from the artefact's JSON metadata, locking those fields with
+      "Set by image" badges
+    - Hide the FDE-only provisioning style tile for IDP artefacts, as
+      encryption is defined by the IDP JSON; provisioning style collapses
+      to a binary Secure Boot / Naked choice
+    - Support upload of .tar.gz, .tgz, and .zip archives containing IDP
+      artefacts, with security validation (path traversal checks, disk
+      space checks, atomic extraction)
+    - Add /analyze-image endpoint returning IDP metadata (device class,
+      storage type, encryption, cipher, partition count, image version)
+    - Display IDP badge in the image list for artefact directories
+
+  * Image SHA256 Improvements:
+    - Compute SHA256 of IDP archives before extraction, capturing the
+      fingerprint of the exact artefact uploaded
+    - Store IDP archive hash in a .sha256 sidecar file alongside the
+      extracted artefact directory, reusing the existing sidecar pattern
+    - Update /get-image-sha256 to return sidecar hash directly for IDP
+      artefact directories, avoiding unnecessary background calculation
+    - Add is_idp flag to ImageInfo struct for reliable IDP detection
+      in image listings, replacing fragile sha256 string comparison
+    - Clean up sidecar files when deleting IDP artefact directories
+
+  * Bug Fixes:
+    - Fix image deletion from the Options page: frontend was calling
+      /images/delete (non-existent) instead of /delete-image (the
+      documented and registered endpoint)
+    - Fix HTTP method for image deletion: changed from DELETE to POST
+      to match the backend handler
+
+  * IDP Validation in provisioner-service:
+    - Extend GOLD_MASTER_OS_FILE validation in options.cpp to support
+      directories: validates exactly one .json file exists, JSON is
+      syntactically valid, and all referenced .simg files are present
+
+  * Packaging:
+    - Add rpi-idp-provisioner.sh to /usr/bin and
+      rpi-idp-provisioner@.service to /usr/lib/systemd/system in
+      debian/install
+
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Fri, 13 Feb 2026 12:00:00 +0000
+
 rpi-sb-provisioner (2.2.0) unstable; urgency=medium
 
   * Features:
