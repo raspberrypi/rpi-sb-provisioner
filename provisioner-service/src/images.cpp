@@ -7,6 +7,7 @@
 #include <drogon/HttpTypes.h>
 #include <drogon/WebSocketController.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/inotify.h>
@@ -31,6 +32,8 @@
 #include <chrono>
 #include <cmath>
 #include <random>
+#include <cstdlib>
+#include <array>
 
 #include <images.h>
 #include "utils.h"
@@ -357,6 +360,162 @@ namespace provisioner {
         std::condition_variable queueCV;
         std::atomic<bool> workerRunning{false};
         std::thread workerThread;
+
+        // ---- IDP artefact helpers ----
+
+        // Check if a directory is an IDP artefact (contains exactly one .json file)
+        bool isIdpArtefactDirectory(const std::filesystem::path& dirPath) {
+            if (!std::filesystem::is_directory(dirPath)) return false;
+            int jsonCount = 0;
+            try {
+                for (const auto& entry : std::filesystem::directory_iterator(dirPath)) {
+                    if (entry.is_regular_file() && entry.path().extension() == ".json") {
+                        jsonCount++;
+                    }
+                }
+            } catch (...) {
+                return false;
+            }
+            return jsonCount == 1;
+        }
+
+        // Find the single .json file in an IDP artefact directory
+        std::filesystem::path findIdpJsonFile(const std::filesystem::path& dirPath) {
+            for (const auto& entry : std::filesystem::directory_iterator(dirPath)) {
+                if (entry.is_regular_file() && entry.path().extension() == ".json") {
+                    return entry.path();
+                }
+            }
+            return {};
+        }
+
+        // Translate IDP device class (e.g., "pi5", "cm4") to provisioner RPI_DEVICE_FAMILY convention
+        std::string mapIdpDeviceClassToFamily(const std::string& idpClass) {
+            if (idpClass == "pi5" || idpClass == "cm5") return "5";
+            if (idpClass == "pi4" || idpClass == "cm4") return "4";
+            if (idpClass == "pi2w") return "2W";
+            return idpClass; // pass through unknown values
+        }
+
+        // Translate IDP storage type to provisioner RPI_DEVICE_STORAGE_TYPE convention
+        std::string mapIdpStorageType(const std::string& idpStorage) {
+            // IDP uses the same values as the provisioner: "sd", "emmc", "nvme"
+            return idpStorage;
+        }
+
+        // Parse an IDP JSON file and return analysis metadata
+        Json::Value analyzeIdpArtefact(const std::filesystem::path& dirPath) {
+            Json::Value result;
+            result["type"] = "idp";
+
+            auto jsonPath = findIdpJsonFile(dirPath);
+            if (jsonPath.empty()) {
+                result["error"] = "No JSON description file found";
+                return result;
+            }
+
+            std::ifstream jsonFile(jsonPath);
+            if (!jsonFile.is_open()) {
+                result["error"] = "Cannot open JSON description file";
+                return result;
+            }
+
+            Json::Value json;
+            Json::CharReaderBuilder builder;
+            std::string errors;
+            if (!Json::parseFromStream(builder, jsonFile, &json, &errors)) {
+                result["error"] = "JSON parse error: " + errors;
+                return result;
+            }
+
+            // Extract IGmeta fields
+            if (json.isMember("IGmeta")) {
+                const auto& meta = json["IGmeta"];
+                if (meta.isMember("IGconf_device_class")) {
+                    std::string rawClass = meta["IGconf_device_class"].asString();
+                    result["device_class_raw"] = rawClass;
+                    result["device_class"] = mapIdpDeviceClassToFamily(rawClass);
+                }
+                if (meta.isMember("IGconf_device_storage_type")) {
+                    std::string rawStorage = meta["IGconf_device_storage_type"].asString();
+                    result["storage_type_raw"] = rawStorage;
+                    result["storage_type"] = mapIdpStorageType(rawStorage);
+                }
+                if (meta.isMember("IGconf_image_version")) {
+                    result["image_version"] = meta["IGconf_image_version"].asString();
+                }
+            }
+
+            // Extract attributes
+            if (json.isMember("attributes")) {
+                const auto& attrs = json["attributes"];
+                if (attrs.isMember("image-name")) {
+                    result["image_name"] = attrs["image-name"].asString();
+                }
+            }
+
+            // Check encryption -- look for encrypted partitions in the provisionmap
+            bool hasEncryption = false;
+            std::string cipher;
+            if (json.isMember("layout")) {
+                const auto& layout = json["layout"];
+                if (layout.isMember("provisionmap")) {
+                    const auto& pmap = layout["provisionmap"];
+                    for (const auto& entry : pmap) {
+                        if (entry.isMember("encrypted") && entry["encrypted"].asBool()) {
+                            hasEncryption = true;
+                        }
+                        if (entry.isMember("cipher") && !entry["cipher"].asString().empty()) {
+                            cipher = entry["cipher"].asString();
+                        }
+                    }
+                }
+
+                // Count partitions
+                if (layout.isMember("partitionimages")) {
+                    result["partition_count"] = static_cast<Json::UInt>(layout["partitionimages"].size());
+                }
+            }
+            result["encryption"] = hasEncryption;
+            if (!cipher.empty()) {
+                result["cipher"] = cipher;
+            }
+
+            // Count .simg files in the directory
+            int simgCount = 0;
+            for (const auto& entry : std::filesystem::directory_iterator(dirPath)) {
+                if (entry.is_regular_file() && entry.path().extension() == ".simg") {
+                    simgCount++;
+                }
+            }
+            result["simg_file_count"] = simgCount;
+
+            return result;
+        }
+
+        // Validate archive entry path for security (no path traversal)
+        bool isArchivePathSafe(const std::string& entryPath) {
+            // Reject absolute paths
+            if (!entryPath.empty() && entryPath[0] == '/') return false;
+            // Reject path traversal
+            if (entryPath.find("..") != std::string::npos) return false;
+            return true;
+        }
+
+        // Check available disk space at a path (returns bytes available)
+        std::uintmax_t getAvailableDiskSpace(const std::string& path) {
+            struct statvfs stat;
+            if (statvfs(path.c_str(), &stat) != 0) {
+                return 0;
+            }
+            return static_cast<std::uintmax_t>(stat.f_bavail) * stat.f_frsize;
+        }
+
+        // Run an external command and return exit code
+        int runCommand(const std::string& cmd) {
+            return std::system(cmd.c_str());
+        }
+
     } // namespace anonymous
     
     // In-memory cache for SHA256 results
@@ -1224,6 +1383,37 @@ namespace provisioner {
             LOG_INFO << "Scanning directory: " << IMAGES_PATH;
             for (const auto &entry : std::filesystem::directory_iterator(IMAGES_PATH)) {
                 LOG_INFO << "Found entry: " << entry.path().string();
+
+                // Include IDP artefact directories (directories containing a .json file)
+                if (entry.is_directory()) {
+                    // Skip hidden directories (used for in-progress extraction)
+                    if (entry.path().filename().string()[0] == '.') continue;
+                    if (isIdpArtefactDirectory(entry.path())) {
+                        ImageInfo info;
+                        info.name = entry.path().filename().string();
+                        info.is_idp = true;
+                        // Read SHA256 from sidecar file (hash of the original archive)
+                        info.sha256 = "IDP Artefact";
+                        try {
+                            std::filesystem::path sidecarPath = entry.path();
+                            sidecarPath += ".sha256";
+                            if (std::filesystem::exists(sidecarPath)) {
+                                std::ifstream in(sidecarPath);
+                                std::string line;
+                                if (in && std::getline(in, line)) {
+                                    while (!line.empty() && (line.back()==' ' || line.back()=='\t' || line.back()=='\n' || line.back()=='\r')) {
+                                        line.pop_back();
+                                    }
+                                    if (!line.empty()) info.sha256 = line;
+                                }
+                            }
+                        } catch (...) {}
+                        imageInfos.push_back(info);
+                        LOG_INFO << "Added IDP artefact: " << info.name;
+                    }
+                    continue;
+                }
+
                 if (entry.is_regular_file()) {
                     std::filesystem::path imagePath = entry.path();
                     // Skip SHA256 sidecar files from the listing
@@ -1343,6 +1533,44 @@ namespace provisioner {
             
             try {
                 for (const auto &entry : std::filesystem::directory_iterator(IMAGES_PATH)) {
+                    // Include IDP artefact directories
+                    if (entry.is_directory()) {
+                        if (entry.path().filename().string()[0] == '.') continue;
+                        if (isIdpArtefactDirectory(entry.path())) {
+                            ImageInfo info;
+                            info.name = entry.path().filename().string();
+                            info.is_idp = true;
+                            // Read SHA256 from sidecar file (hash of the original archive)
+                            info.sha256 = "IDP Artefact";
+                            try {
+                                std::filesystem::path sidecarPath = entry.path();
+                                sidecarPath += ".sha256";
+                                if (std::filesystem::exists(sidecarPath)) {
+                                    std::ifstream in(sidecarPath);
+                                    std::string line;
+                                    if (in && std::getline(in, line)) {
+                                        while (!line.empty() && (line.back()==' ' || line.back()=='\t' || line.back()=='\n' || line.back()=='\r')) {
+                                            line.pop_back();
+                                        }
+                                        if (!line.empty()) info.sha256 = line;
+                                    }
+                                }
+                            } catch (...) {}
+                            // Sum up directory size
+                            try {
+                                std::uintmax_t totalSize = 0;
+                                for (const auto& f : std::filesystem::recursive_directory_iterator(entry.path())) {
+                                    if (f.is_regular_file()) totalSize += std::filesystem::file_size(f);
+                                }
+                                info.size = totalSize;
+                            } catch (...) {
+                                info.size = 0;
+                            }
+                            imageInfos.push_back(info);
+                        }
+                        continue;
+                    }
+
                     if (entry.is_regular_file()) {
                         std::filesystem::path imagePath = entry.path();
                         // Skip SHA256 sidecar files from the listing
@@ -1416,6 +1644,8 @@ namespace provisioner {
                 imageObj["sha256"] = info.sha256;
                 imageObj["size_mb"] = info.size / (1024.0 * 1024.0);
                 imageObj["is_gold_master"] = (currentGoldMaster.find(info.name) != std::string::npos);
+                imageObj["is_idp"] = info.is_idp;
+                imageObj["type"] = info.is_idp ? "idp" : "traditional";
                 imageArray.append(imageObj);
             }
             
@@ -1460,6 +1690,45 @@ namespace provisioner {
                     "IMAGE_NOT_FOUND",
                     "Requested image: " + imageName
                 );
+                callback(resp);
+                return;
+            }
+
+            // For IDP artefact directories, return the sidecar hash immediately
+            if (std::filesystem::is_directory(imagePath)) {
+                auto resp = drogon::HttpResponse::newHttpResponse();
+                resp->setStatusCode(drogon::k200OK);
+                resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+                Json::Value result;
+                result["name"] = imageName;
+
+                std::filesystem::path sidecarPath = imagePath;
+                sidecarPath += ".sha256";
+                if (std::filesystem::exists(sidecarPath)) {
+                    try {
+                        std::ifstream in(sidecarPath);
+                        std::string line;
+                        if (in && std::getline(in, line)) {
+                            while (!line.empty() && (line.back()==' ' || line.back()=='\t' || line.back()=='\n' || line.back()=='\r')) {
+                                line.pop_back();
+                            }
+                            result["sha256"] = line;
+                            result["status"] = "complete";
+                        } else {
+                            result["sha256"] = "IDP Artefact";
+                            result["status"] = "complete";
+                        }
+                    } catch (...) {
+                        result["sha256"] = "IDP Artefact";
+                        result["status"] = "error";
+                    }
+                } else {
+                    result["sha256"] = "IDP Artefact";
+                    result["status"] = "complete";
+                    result["message"] = "No archive hash available (sidecar file missing).";
+                }
+
+                resp->setBody(result.toStyledString());
                 callback(resp);
                 return;
             }
@@ -1588,73 +1857,270 @@ namespace provisioner {
                 
                 return nameOnly.string() + "_" + std::to_string(timestamp) + "_" + std::to_string(random) + extension.string();
             };
-            
-            // Generate unique filename to avoid conflicts
-            std::string finalFilename = generateUniqueFilename(originalFilename, IMAGES_PATH);
-            
-            // Create target path with unique filename
-            std::filesystem::path targetPath(IMAGES_PATH);
-            targetPath /= finalFilename;
 
-            try {
-                // Move uploaded file to target location with unique name
-                file.saveAs(targetPath);
-                
-                // Log successful file upload
-                AuditLog::logFileSystemAccess("UPLOAD", targetPath.string(), true, "", 
-                    "Original filename: " + originalFilename + (originalFilename != finalFilename ? ", renamed to: " + finalFilename : ""));
-                
-                // Clear any stale cache entry for this filename
-                {
-                    std::lock_guard<std::mutex> lock(sha256Cache_mutex);
-                    sha256Cache.erase(finalFilename);
+            // Detect if this is an IDP artefact archive (.tar.gz, .tgz, or .zip)
+            std::string lowerFilename = originalFilename;
+            std::transform(lowerFilename.begin(), lowerFilename.end(), lowerFilename.begin(), ::tolower);
+            bool isArchive = (lowerFilename.size() > 7 && lowerFilename.substr(lowerFilename.size() - 7) == ".tar.gz") ||
+                             (lowerFilename.size() > 4 && lowerFilename.substr(lowerFilename.size() - 4) == ".tgz") ||
+                             (lowerFilename.size() > 4 && lowerFilename.substr(lowerFilename.size() - 4) == ".zip");
+
+            if (isArchive) {
+                // --- IDP artefact archive upload ---
+                LOG_INFO << "Detected archive upload (IDP artefact): " << originalFilename;
+
+                // Determine artefact directory name by stripping archive extensions
+                std::string artefactName = originalFilename;
+                if (lowerFilename.size() > 7 && lowerFilename.substr(lowerFilename.size() - 7) == ".tar.gz") {
+                    artefactName = originalFilename.substr(0, originalFilename.size() - 7);
+                } else if (lowerFilename.size() > 4 && (lowerFilename.substr(lowerFilename.size() - 4) == ".tgz" ||
+                           lowerFilename.substr(lowerFilename.size() - 4) == ".zip")) {
+                    artefactName = originalFilename.substr(0, originalFilename.size() - 4);
                 }
-                
-                // Start SHA256 calculation in the background
-                requestSHA256Calculation(finalFilename);
-                
-                // Trigger boot.img generation for secure-boot configurations
-                triggerBootImgGeneration(finalFilename);
-                
-                // Set success response with JSON payload
-                resp->setStatusCode(drogon::k200OK);
-                resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
-                Json::Value result;
-                result["success"] = true;
-                
-                // Include both original and final filenames in response
-                if (originalFilename != finalFilename) {
-                    result["message"] = "File uploaded successfully (renamed to avoid conflict)";
-                    result["original_filename"] = originalFilename;
-                    result["filename"] = finalFilename;
-                    result["renamed"] = true;
-                } else {
-                    result["message"] = "File uploaded successfully";
-                    result["filename"] = finalFilename;
+
+                std::filesystem::path finalDir = std::filesystem::path(IMAGES_PATH) / artefactName;
+                std::filesystem::path tempDir = std::filesystem::path(IMAGES_PATH) / ("." + artefactName + ".extracting");
+                std::filesystem::path tempArchive = std::filesystem::path(IMAGES_PATH) / ("." + originalFilename + ".uploading");
+
+                try {
+                    // Save the archive to a temporary file first
+                    file.saveAs(tempArchive);
+
+                    // Compute SHA256 of the archive before extraction.
+                    // The archive is the canonical artefact -- hashing it before
+                    // extract gives us a fingerprint of exactly what the user uploaded.
+                    auto archiveCancellationToken = std::make_shared<SHA256CancellationToken>();
+                    std::string archiveSha256 = calculateSHA256(tempArchive, "", archiveCancellationToken);
+                    LOG_INFO << "IDP archive SHA256 (pre-extraction): " << archiveSha256;
+
+                    // Check disk space -- archive contents may be much larger than the compressed file
+                    auto archiveSize = std::filesystem::file_size(tempArchive);
+                    auto availableSpace = getAvailableDiskSpace(IMAGES_PATH);
+                    // Estimate: archives can expand up to 10x (sparse images compress well)
+                    if (availableSpace < archiveSize * 3) {
+                        std::filesystem::remove(tempArchive);
+                        auto resp = provisioner::utils::createErrorResponse(
+                            req,
+                            "Insufficient disk space for archive extraction",
+                            drogon::k507InsufficientStorage,
+                            "Disk Space Error",
+                            "INSUFFICIENT_DISK_SPACE"
+                        );
+                        callback(resp);
+                        return;
+                    }
+
+                    // Create temporary extraction directory
+                    std::filesystem::create_directories(tempDir);
+
+                    // Extract based on archive type
+                    int extractResult;
+                    bool isTarGz = (lowerFilename.size() > 7 && lowerFilename.substr(lowerFilename.size() - 7) == ".tar.gz") ||
+                                   (lowerFilename.size() > 4 && lowerFilename.substr(lowerFilename.size() - 4) == ".tgz");
+
+                    if (isTarGz) {
+                        // Use tar with --no-same-owner and strip components for safety
+                        // The command validates paths during extraction
+                        std::string cmd = "tar xzf " + tempArchive.string() +
+                                          " -C " + tempDir.string() +
+                                          " --no-same-owner 2>&1";
+                        extractResult = runCommand(cmd);
+                    } else {
+                        // ZIP extraction
+                        std::string cmd = "unzip -o " + tempArchive.string() +
+                                          " -d " + tempDir.string() + " 2>&1";
+                        extractResult = runCommand(cmd);
+                    }
+
+                    // Remove the temporary archive file
+                    std::filesystem::remove(tempArchive);
+
+                    if (extractResult != 0) {
+                        std::filesystem::remove_all(tempDir);
+                        auto resp = provisioner::utils::createErrorResponse(
+                            req,
+                            "Failed to extract archive",
+                            drogon::k500InternalServerError,
+                            "Extraction Error",
+                            "ARCHIVE_EXTRACT_ERROR"
+                        );
+                        callback(resp);
+                        return;
+                    }
+
+                    // Security: validate all extracted paths (no path traversal)
+                    for (const auto& entry : std::filesystem::recursive_directory_iterator(tempDir)) {
+                        auto relativePath = std::filesystem::relative(entry.path(), tempDir).string();
+                        if (!isArchivePathSafe(relativePath)) {
+                            LOG_ERROR << "Archive contains unsafe path: " << relativePath;
+                            std::filesystem::remove_all(tempDir);
+                            auto resp = provisioner::utils::createErrorResponse(
+                                req,
+                                "Archive contains unsafe paths (path traversal detected)",
+                                drogon::k400BadRequest,
+                                "Security Error",
+                                "ARCHIVE_PATH_TRAVERSAL"
+                            );
+                            callback(resp);
+                            return;
+                        }
+                    }
+
+                    // If the archive extracted into a single top-level directory, use its contents directly
+                    int topLevelEntries = 0;
+                    std::filesystem::path singleSubdir;
+                    for (const auto& entry : std::filesystem::directory_iterator(tempDir)) {
+                        topLevelEntries++;
+                        if (entry.is_directory()) {
+                            singleSubdir = entry.path();
+                        }
+                    }
+                    if (topLevelEntries == 1 && !singleSubdir.empty()) {
+                        // Archive had a single top-level directory, promote its contents
+                        std::filesystem::path promotedTemp = std::filesystem::path(IMAGES_PATH) / ("." + artefactName + ".promoted");
+                        std::filesystem::rename(singleSubdir, promotedTemp);
+                        std::filesystem::remove_all(tempDir);
+                        tempDir = promotedTemp;
+                    }
+
+                    // Atomically replace any existing artefact directory
+                    if (std::filesystem::exists(finalDir)) {
+                        std::filesystem::remove_all(finalDir);
+                    }
+                    std::filesystem::rename(tempDir, finalDir);
+
+                    AuditLog::logFileSystemAccess("UPLOAD_ARCHIVE", finalDir.string(), true, "",
+                        "IDP artefact archive extracted: " + originalFilename + " -> " + artefactName);
+
+                    // Write the archive SHA256 as a sidecar file next to the directory.
+                    // e.g., /srv/rpi-sb-provisioner/images/my-artefact.sha256 for
+                    //        /srv/rpi-sb-provisioner/images/my-artefact/
+                    // This reuses the same sidecar pattern as traditional .img files.
+                    if (!archiveSha256.empty() && archiveSha256 != "file-read-error") {
+                        std::filesystem::path sidecarPath = finalDir;
+                        sidecarPath += ".sha256";
+                        try {
+                            std::ofstream sidecarFile(sidecarPath, std::ios::out | std::ios::trunc);
+                            if (sidecarFile.is_open()) {
+                                sidecarFile << archiveSha256 << "\n";
+                                sidecarFile.close();
+                                LOG_INFO << "Wrote IDP archive SHA256 sidecar: " << sidecarPath.string();
+                                AuditLog::logFileSystemAccess("WRITE", sidecarPath.string(), true, "",
+                                    "Wrote SHA256 sidecar for IDP artefact archive: " + artefactName);
+                            }
+                        } catch (const std::exception& e) {
+                            LOG_ERROR << "Failed to write IDP SHA256 sidecar: " << e.what();
+                        }
+                    }
+
+                    // Build success response
+                    resp->setStatusCode(drogon::k200OK);
+                    resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+                    Json::Value result;
+                    result["success"] = true;
+                    result["message"] = "IDP artefact uploaded and extracted successfully";
+                    result["filename"] = artefactName;
+                    result["is_idp"] = true;
                     result["renamed"] = false;
+                    result["sha256"] = archiveSha256;
+
+                    // If it's a valid IDP artefact, include analysis
+                    if (isIdpArtefactDirectory(finalDir)) {
+                        result["analysis"] = analyzeIdpArtefact(finalDir);
+                    }
+
+                    resp->setBody(result.toStyledString());
+                } catch (const std::exception& e) {
+                    LOG_ERROR << "Failed to process archive upload: " << e.what();
+                    // Clean up on failure
+                    if (std::filesystem::exists(tempArchive)) std::filesystem::remove(tempArchive);
+                    if (std::filesystem::exists(tempDir)) std::filesystem::remove_all(tempDir);
+
+                    AuditLog::logFileSystemAccess("UPLOAD_ARCHIVE", finalDir.string(), false, "",
+                        "Archive upload failed: " + std::string(e.what()));
+
+                    auto resp = provisioner::utils::createErrorResponse(
+                        req,
+                        "Failed to process archive upload",
+                        drogon::k500InternalServerError,
+                        "Upload Error",
+                        "ARCHIVE_UPLOAD_ERROR",
+                        e.what()
+                    );
+                    callback(resp);
+                    return;
                 }
+            } else {
+                // --- Traditional .img file upload (existing behaviour) ---
+
+                // Generate unique filename to avoid conflicts
+                std::string finalFilename = generateUniqueFilename(originalFilename, IMAGES_PATH);
                 
-                result["sha256"] = "Calculating..."; // SHA256 calculation in progress
-                resp->setBody(result.toStyledString());
-            } catch (const std::filesystem::filesystem_error& e) {
-                LOG_ERROR << "Failed to save uploaded file (filesystem): " << e.what();
-            } catch (const std::exception& e) {
-                LOG_ERROR << "Failed to save uploaded file: " << e.what();
-                
-                // Log failed file upload
-                AuditLog::logFileSystemAccess("UPLOAD", targetPath.string(), false, "", 
-                    "Upload failed: " + std::string(e.what()) + ", Original filename: " + originalFilename);
-                
-                auto resp = provisioner::utils::createErrorResponse(
-                    req,
-                    "Failed to save uploaded file",
-                    drogon::k500InternalServerError,
-                    "Upload Error",
-                    "UPLOAD_SAVE_ERROR",
-                    e.what()
-                );
-                callback(resp);
-                return;
+                // Create target path with unique filename
+                std::filesystem::path targetPath(IMAGES_PATH);
+                targetPath /= finalFilename;
+
+                try {
+                    // Move uploaded file to target location with unique name
+                    file.saveAs(targetPath);
+                    
+                    // Log successful file upload
+                    AuditLog::logFileSystemAccess("UPLOAD", targetPath.string(), true, "", 
+                        "Original filename: " + originalFilename + (originalFilename != finalFilename ? ", renamed to: " + finalFilename : ""));
+                    
+                    // Clear any stale cache entry for this filename
+                    {
+                        std::lock_guard<std::mutex> lock(sha256Cache_mutex);
+                        sha256Cache.erase(finalFilename);
+                    }
+                    
+                    // Start SHA256 calculation in the background
+                    requestSHA256Calculation(finalFilename);
+                    
+                    // Trigger boot.img generation for secure-boot configurations
+                    triggerBootImgGeneration(finalFilename);
+                    
+                    // Set success response with JSON payload
+                    resp->setStatusCode(drogon::k200OK);
+                    resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+                    Json::Value result;
+                    result["success"] = true;
+                    result["is_idp"] = false;
+                    
+                    // Include both original and final filenames in response
+                    if (originalFilename != finalFilename) {
+                        result["message"] = "File uploaded successfully (renamed to avoid conflict)";
+                        result["original_filename"] = originalFilename;
+                        result["filename"] = finalFilename;
+                        result["renamed"] = true;
+                    } else {
+                        result["message"] = "File uploaded successfully";
+                        result["filename"] = finalFilename;
+                        result["renamed"] = false;
+                    }
+                    
+                    result["sha256"] = "Calculating..."; // SHA256 calculation in progress
+                    resp->setBody(result.toStyledString());
+                } catch (const std::filesystem::filesystem_error& e) {
+                    LOG_ERROR << "Failed to save uploaded file (filesystem): " << e.what();
+                } catch (const std::exception& e) {
+                    LOG_ERROR << "Failed to save uploaded file: " << e.what();
+                    
+                    // Log failed file upload
+                    AuditLog::logFileSystemAccess("UPLOAD", targetPath.string(), false, "", 
+                        "Upload failed: " + std::string(e.what()) + ", Original filename: " + originalFilename);
+                    
+                    auto resp = provisioner::utils::createErrorResponse(
+                        req,
+                        "Failed to save uploaded file",
+                        drogon::k500InternalServerError,
+                        "Upload Error",
+                        "UPLOAD_SAVE_ERROR",
+                        e.what()
+                    );
+                    callback(resp);
+                    return;
+                }
             }
 
             callback(resp);
@@ -1896,6 +2362,69 @@ namespace provisioner {
             }
         });
 
+        // Analyze an image: returns type (traditional or IDP) and metadata for IDP artefacts
+        app.registerHandler("/analyze-image", [](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
+            LOG_INFO << "Images::analyzeImage";
+            AuditLog::logHandlerAccess(req, "/analyze-image");
+
+            std::string imageName = req->getParameter("name");
+            if (imageName.empty()) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Image name is required",
+                    drogon::k400BadRequest,
+                    "Missing Parameter",
+                    "MISSING_IMAGE_NAME"
+                );
+                callback(resp);
+                return;
+            }
+
+            std::filesystem::path imagePath(IMAGES_PATH);
+            imagePath /= imageName;
+
+            if (!std::filesystem::exists(imagePath)) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "The requested image was not found",
+                    drogon::k404NotFound,
+                    "Image Not Found",
+                    "IMAGE_NOT_FOUND",
+                    "Requested image: " + imageName
+                );
+                callback(resp);
+                return;
+            }
+
+            Json::Value result;
+            result["name"] = imageName;
+
+            if (std::filesystem::is_directory(imagePath) && isIdpArtefactDirectory(imagePath)) {
+                // IDP artefact directory
+                result = analyzeIdpArtefact(imagePath);
+                result["name"] = imageName;
+                result["path"] = imagePath.string();
+            } else if (std::filesystem::is_regular_file(imagePath)) {
+                // Traditional .img file
+                result["type"] = "traditional";
+                result["path"] = imagePath.string();
+                try {
+                    result["size_bytes"] = static_cast<Json::UInt64>(std::filesystem::file_size(imagePath));
+                } catch (...) {}
+            } else if (std::filesystem::is_directory(imagePath)) {
+                // Directory but not a valid IDP artefact
+                result["type"] = "unknown_directory";
+                result["error"] = "Directory does not contain exactly one JSON file";
+                result["path"] = imagePath.string();
+            } else {
+                result["type"] = "unknown";
+                result["path"] = imagePath.string();
+            }
+
+            auto resp = drogon::HttpResponse::newHttpJsonResponse(result);
+            callback(resp);
+        });
+
         app.registerHandler("/delete-image", [](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
             LOG_INFO << "Images::deleteImage";
             
@@ -1932,11 +2461,28 @@ namespace provisioner {
                         sha256Cache.erase(imageName);
                     }
                     
-                    std::filesystem::remove(imagePath);
-                    
-                    // Log successful file deletion
-                    AuditLog::logFileSystemAccess("DELETE", imagePath.string(), true, "", 
-                        "Image file deleted: " + imageName);
+                    if (std::filesystem::is_directory(imagePath)) {
+                        // IDP artefact directory -- remove recursively
+                        std::filesystem::remove_all(imagePath);
+                        // Also remove the sidecar .sha256 file if it exists
+                        std::filesystem::path sidecarPath = imagePath;
+                        sidecarPath += ".sha256";
+                        if (std::filesystem::exists(sidecarPath)) {
+                            std::filesystem::remove(sidecarPath);
+                        }
+                        AuditLog::logFileSystemAccess("DELETE", imagePath.string(), true, "", 
+                            "IDP artefact directory deleted: " + imageName);
+                    } else {
+                        std::filesystem::remove(imagePath);
+                        // Also remove the sidecar .sha256 file if it exists
+                        std::filesystem::path sidecarPath = imagePath;
+                        sidecarPath += ".sha256";
+                        if (std::filesystem::exists(sidecarPath)) {
+                            std::filesystem::remove(sidecarPath);
+                        }
+                        AuditLog::logFileSystemAccess("DELETE", imagePath.string(), true, "", 
+                            "Image file deleted: " + imageName);
+                    }
                     
                     resp->setStatusCode(drogon::k200OK);
                     callback(resp);

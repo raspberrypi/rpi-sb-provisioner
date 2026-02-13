@@ -107,6 +107,7 @@ namespace provisioner {
         std::string name;
         std::string sha256;
         std::uintmax_t size = 0;  // File size in bytes
+        bool is_idp = false;      // True if this is an IDP artefact directory
     };
 
     class Images {

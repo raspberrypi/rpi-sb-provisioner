@@ -1,0 +1,8 @@
+[Unit]
+Description=Provision a Raspberry Pi Device using IDP artefacts from rpi-image-gen
+
+[Service]
+Type=notify
+ExecStart=/usr/bin/rpi-idp-provisioner.sh %I
+EnvironmentFile=/usr/share/rpi-sb-provisioner/defaults/config
+EnvironmentFile=-/etc/rpi-sb-provisioner/config
