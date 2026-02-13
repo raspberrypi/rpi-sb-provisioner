@@ -199,7 +199,7 @@ run_customisation_script() {
             return 0
         fi
         
-        # Temporarily disable error exit to prevent script failures from aborting the provisioning process
+        # Temporarily disable error exit so we can capture the script's exit code
         # Save current error exit setting and disable it
         ERROR_EXIT_WAS_SET=0
         case $- in
@@ -223,16 +223,18 @@ run_customisation_script() {
             ROOTFS_MOUNT="$4"
             "${SCRIPT_PATH}" "${BOOT_MOUNT}" "${ROOTFS_MOUNT}"
         fi
+        # Capture exit code immediately, before restoring set -e
+        SCRIPT_EXIT_CODE=$?
         if [ "${ERROR_EXIT_WAS_SET}" -eq 1 ]; then
             set -e
         fi
-        SCRIPT_EXIT_CODE=$?
         
         if [ $SCRIPT_EXIT_CODE -eq 0 ]; then
             announce_stop "Customisation script ${SCRIPT_NAME} completed successfully"
         else
             announce_stop "Customisation script ${SCRIPT_NAME} failed with exit code ${SCRIPT_EXIT_CODE}"
-            log "WARNING: Customisation script ${SCRIPT_NAME} failed with exit code ${SCRIPT_EXIT_CODE}"
+            log "ERROR: Customisation script ${SCRIPT_NAME} failed with exit code ${SCRIPT_EXIT_CODE}"
+            return $SCRIPT_EXIT_CODE
         fi
     else
         log "No customisation script found for ${PROVISIONER_NAME} at stage ${STAGE_NAME}"
