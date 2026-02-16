@@ -572,7 +572,8 @@ copy_kernel_modules_with_deps() {
     fi
 
     # Find where modules are located (lib/modules or usr/lib/modules)
-    _modules_rel_dir=$(find_modules_dir "${_src_basedir}")
+    # Use || true to prevent set -e from killing the script before the error check below
+    _modules_rel_dir=$(find_modules_dir "${_src_basedir}") || true
     if [ -z "${_modules_rel_dir}" ]; then
         log "ERROR: No modules directory found in ${_src_basedir} (checked lib/modules and usr/lib/modules)"
         return 1
