@@ -68,6 +68,10 @@ cleanup() {
         announce_stop "Deleting public key"
     fi
 
+    if [ -n "${FASTBOOT_STAGING_DIR}" ] && [ -d "${FASTBOOT_STAGING_DIR}" ]; then
+        rm -rf "${FASTBOOT_STAGING_DIR}"
+    fi
+
     if [ -n "${DELETE_PRIVATE_TMPDIR}" ]; then
         announce_start "Deleting customised intermediates"
         # shellcheck disable=SC2086
@@ -449,6 +453,12 @@ fi
 # Ensure work directory has proper permissions
 chmod 700 "$RPI_SB_WORKDIR"
 
+# Create a per-run staging directory inside the persistent workdir for fastboot
+# assets. This prevents concurrent device bootstraps from colliding and ensures
+# rpiboot always finds a clean set of bootcode files, while the parent workdir
+# retains cached data (signed bootloader images, EEPROM configs) across runs.
+FASTBOOT_STAGING_DIR=$(mktemp -d "${RPI_SB_WORKDIR}/fastboot.XXXXXX")
+
 ALLOW_SIGNED_BOOT=0
 case $TARGET_DEVICE_FAMILY in
     2712 | 2711)
@@ -640,7 +650,13 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                 log "No key specified, skipping eeprom update"
             fi
             log "Keywriting completed. Silently rebooting for next phase."
+        fi
 
+        # Cache signed fastboot assets in the persistent workdir so that
+        # subsequent runs (which take the cached-bootloader path above) do
+        # not need to re-sign them.  Only recreate when the cache is missing
+        # (e.g. after a workdir clear).
+        if [ ! -f "${RPI_SB_WORKDIR}/bootfiles.bin" ]; then
             case $TARGET_DEVICE_FAMILY in
                 2712)
                     FASTBOOT_SIGN_DIR=$(mktemp -d)
@@ -654,21 +670,26 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                     rm -rf "${FASTBOOT_SIGN_DIR}"
                     ;;
                 *)
-                    # Raspberry Pi 4-class devices do not use signed bootcode files, so just copy the file into the relevant place.
                     cp /usr/share/rpiboot/mass-storage-gadget64/bootfiles.bin "${RPI_SB_WORKDIR}/bootfiles.bin"
                     ;;
             esac
+        fi
 
+        if [ ! -f "${RPI_SB_WORKDIR}/boot.img" ] || [ ! -f "${RPI_SB_WORKDIR}/boot.sig" ]; then
             announce_start "Signing fastboot image"
             cp "$(get_fastboot_gadget)" "${RPI_SB_WORKDIR}"/boot.img
             sha256sum "${RPI_SB_WORKDIR}"/boot.img | awk '{print $1}' > "${RPI_SB_WORKDIR}"/boot.sig
             printf 'rsa2048: ' >> "${RPI_SB_WORKDIR}"/boot.sig
-            # Prefer PKCS11 over PEM keyfiles, if both are specified.
             # shellcheck disable=SC2046
             ${OPENSSL} dgst -sign $(get_signing_directives) -sha256 "${RPI_SB_WORKDIR}"/boot.img | xxd -c 4096 -p >> "${RPI_SB_WORKDIR}"/boot.sig
-            cp "$(get_fastboot_config_file)" "${RPI_SB_WORKDIR}"/config.txt
             announce_stop "Signing fastboot image"
         fi
+
+        # Stage cached assets into the per-run fastboot directory
+        cp "${RPI_SB_WORKDIR}/bootfiles.bin" "${FASTBOOT_STAGING_DIR}/bootfiles.bin"
+        cp "${RPI_SB_WORKDIR}/boot.img" "${FASTBOOT_STAGING_DIR}/boot.img"
+        cp "${RPI_SB_WORKDIR}/boot.sig" "${FASTBOOT_STAGING_DIR}/boot.sig"
+        cp "$(get_fastboot_config_file)" "${FASTBOOT_STAGING_DIR}/config.txt"
     else # !PROVISIONING_STYLE=secure-boot
         # For non-secure-boot provisioning on 2711/2712, still update EEPROM but without signing
         case ${TARGET_DEVICE_FAMILY} in
@@ -752,25 +773,25 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                 fi
                 
                 # Prepare fastboot files
-                cp /usr/share/rpiboot/mass-storage-gadget64/bootfiles.bin "${RPI_SB_WORKDIR}/bootfiles.bin"
-                cp "$(get_fastboot_gadget)" "${RPI_SB_WORKDIR}"/boot.img
-                cp "$(get_fastboot_config_file)" "${RPI_SB_WORKDIR}"/config.txt
+                cp /usr/share/rpiboot/mass-storage-gadget64/bootfiles.bin "${FASTBOOT_STAGING_DIR}/bootfiles.bin"
+                cp "$(get_fastboot_gadget)" "${FASTBOOT_STAGING_DIR}"/boot.img
+                cp "$(get_fastboot_config_file)" "${FASTBOOT_STAGING_DIR}"/config.txt
                 ;;
             *)
-                cp "$(get_fastboot_gadget_2710)" "${RPI_SB_WORKDIR}/bootfiles.bin"
+                cp "$(get_fastboot_gadget_2710)" "${FASTBOOT_STAGING_DIR}/bootfiles.bin"
                 ;;
         esac
     fi
 else # !ALLOW_SIGNED_BOOT
     # No allowed signed boot? Must be pre-Pi4!
-    cp "$(get_fastboot_gadget_2710)" "${RPI_SB_WORKDIR}/bootfiles.bin"
+    cp "$(get_fastboot_gadget_2710)" "${FASTBOOT_STAGING_DIR}/bootfiles.bin"
 fi
 record_state "${TARGET_DEVICE_SERIAL}" "bootstrap-firmware-updated" "${TARGET_USB_PATH}"
 
 announce_start "fastboot initialisation"
 record_state "${TARGET_DEVICE_SERIAL}" "bootstrap-fastboot-initialisation-started" "${TARGET_USB_PATH}"
 
-timeout_fatal rpiboot -v -d "${RPI_SB_WORKDIR}" -p "${TARGET_USB_PATH}"
+timeout_fatal rpiboot -v -d "${FASTBOOT_STAGING_DIR}" -p "${TARGET_USB_PATH}"
 set +e
 
 if [ -n "${TARGET_DEVICE_SERIAL}" ] && [ "${TARGET_DEVICE_SERIAL}" != "${TARGET_DEVICE_PATH}" ]; then
