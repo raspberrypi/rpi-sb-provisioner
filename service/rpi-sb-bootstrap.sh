@@ -132,6 +132,41 @@ die() {
     cleanup
 }
 
+# Snapshot special flags into variables so they can be checked multiple times
+# without re-reading the filesystem. One-time flags are consumed at the end
+# of the bootstrap process (see consume_onetime_special_flags below).
+SPECIAL_FLAG_SKIP_EEPROM=0
+SPECIAL_FLAG_REPROVISION_DEVICE=0
+
+_flag_path="/etc/rpi-sb-provisioner/special-skip-eeprom/${TARGET_DEVICE_SERIAL}"
+if [ -f "${_flag_path}" ]; then
+    SPECIAL_FLAG_SKIP_EEPROM=1
+    log "Special flag active: skip-eeprom for ${TARGET_DEVICE_SERIAL}"
+fi
+
+_flag_path="/etc/rpi-sb-provisioner/special-reprovision-device/${TARGET_DEVICE_SERIAL}"
+if [ -f "${_flag_path}" ]; then
+    SPECIAL_FLAG_REPROVISION_DEVICE=1
+    log "Special flag active: reprovision-device for ${TARGET_DEVICE_SERIAL}"
+fi
+
+# Consume any one-time special flags. Called at the end of the bootstrap process.
+# One-time flags have "once" as their file content; persistent flags are left intact.
+consume_onetime_special_flags() {
+    for _flag_dir in \
+        "/etc/rpi-sb-provisioner/special-skip-eeprom" \
+        "/etc/rpi-sb-provisioner/special-reprovision-device"; do
+        _fp="${_flag_dir}/${TARGET_DEVICE_SERIAL}"
+        if [ -f "${_fp}" ]; then
+            _content=$(head -n1 "${_fp}" 2>/dev/null | tr -d '[:space:]') || true
+            if [ "${_content}" = "once" ]; then
+                log "Consuming one-time special flag: ${_fp}"
+                rm -f "${_fp}"
+            fi
+        fi
+    done
+}
+
 read_config
 
 # Initialize signing context (validates key config, derives public key)
@@ -438,7 +473,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
         mkdir -p "${SECURE_BOOTLOADER_DIRECTORY}"
         if [ -f "${SECURE_BOOTLOADER_DIRECTORY}/config.txt" ]; then
             log "Secure bootloader directory already exists, skipping setup"
-            if [ -f "/etc/rpi-sb-provisioner/special-reprovision-device/${TARGET_DEVICE_SERIAL}" ]; then
+            if [ "${SPECIAL_FLAG_REPROVISION_DEVICE}" -eq 1 ]; then
                 # This only makes sense if you're re-provisioning a device that's already been provisioned.
                 # It's a special case, and should not be used in normal operation.
                 # Additionally, this only works on Raspberry Pi 5-family devices.
@@ -461,7 +496,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
             else
                 log "Normal provisioning mode (reusing cached bootloader)"
             fi
-            if [ ! -f "/etc/rpi-sb-provisioner/special-reprovision-device/${TARGET_DEVICE_SERIAL}" ]; then
+            if [ "${SPECIAL_FLAG_REPROVISION_DEVICE}" -eq 0 ]; then
                 # Normal case: reuse cached bootcode
                 case ${TARGET_DEVICE_FAMILY} in
                     2712)
@@ -474,7 +509,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                         ;;
                 esac
             fi
-            [ ! -f "/etc/rpi-sb-provisioner/special-skip-eeprom/${TARGET_DEVICE_SERIAL}" ] && timeout_fatal rpiboot -d "${SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
+            [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal rpiboot -d "${SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
         else
             log "Creating secure bootloader for future reuse"
             touch "${SECURE_BOOTLOADER_DIRECTORY}/config.txt"
@@ -570,7 +605,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                 fi
 
                 log "Writing key and EEPROM configuration to the device"
-                if [ -f "/etc/rpi-sb-provisioner/special-reprovision-device/${TARGET_DEVICE_SERIAL}" ]; then
+                if [ "${SPECIAL_FLAG_REPROVISION_DEVICE}" -eq 1 ]; then
                     if [ "${TARGET_DEVICE_FAMILY}" = "2712" ]; then
                         # This only makes sense if you're re-provisioning a device that's already been provisioned.
                         # It's a special case, and should not be used in normal operation.
@@ -584,7 +619,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                 else
                     log "Normal provisioning mode (not re-provisioning)"
                 fi
-                [ ! -f "/etc/rpi-sb-provisioner/special-skip-eeprom/${TARGET_DEVICE_SERIAL}" ] && timeout_fatal rpiboot -d "${SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
+                [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal rpiboot -d "${SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
             else
                 log "No key specified, skipping eeprom update"
             fi
@@ -694,7 +729,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                     echo "recovery_reboot=1" > "${NON_SECURE_BOOTLOADER_DIRECTORY}/config.txt"
                     
                     log "Updating EEPROM to latest version"
-                    [ ! -f "/etc/rpi-sb-provisioner/special-skip-eeprom/${TARGET_DEVICE_SERIAL}" ] && timeout_fatal rpiboot -d "${NON_SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
+                    [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal rpiboot -d "${NON_SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
                     log "EEPROM update completed. Device rebooted."
                 else
                     log "Reusing existing non-secure bootloader configuration"
@@ -739,6 +774,9 @@ fi
 announce_stop "fastboot initialisation"
 record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_FINISHED}" "${TARGET_USB_PATH}"
 set -e
+
+# Consume any one-time special flags now that bootstrap has completed successfully
+consume_onetime_special_flags
 
 # Exit with success code for systemd
 true

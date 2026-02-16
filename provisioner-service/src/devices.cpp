@@ -1334,11 +1334,51 @@ namespace provisioner {
                     AuditLog::logFileSystemAccess("READ", logPath, false);
                 }
 
+                // Read special flag status for this device
+                std::string sanitizedSerial = provisioner::utils::sanitize_path_component(device.serial);
+                std::vector<std::map<std::string, std::string>> flagsList;
+                struct FlagDef {
+                    std::string id;
+                    std::string label;
+                    std::string description;
+                    std::string constraint;
+                };
+                std::vector<FlagDef> flagDefs = {
+                    {"skip-eeprom", "Skip EEPROM Update",
+                     "Skips writing the EEPROM/bootloader during bootstrap. Use for devices that already have the correct EEPROM or have been signed.", ""},
+                    {"reprovision-device", "Re-provision Device",
+                     "Re-provisions an already-provisioned device by re-signing bootcode from original firmware. Only works on Pi 5 family.", "Pi 5 only (BCM2712)"},
+                };
+                for (const auto &fd : flagDefs) {
+                    std::string filePath = "/etc/rpi-sb-provisioner/special-" + fd.id + "/" + sanitizedSerial;
+                    std::map<std::string, std::string> flagMap;
+                    flagMap["id"] = fd.id;
+                    flagMap["label"] = fd.label;
+                    flagMap["description"] = fd.description;
+                    flagMap["constraint"] = fd.constraint;
+                    if (std::filesystem::exists(filePath)) {
+                        flagMap["active"] = "true";
+                        std::ifstream ff(filePath);
+                        std::string content;
+                        if (ff.is_open()) {
+                            std::getline(ff, content);
+                            while (!content.empty() && (content.back() == '\n' || content.back() == '\r' || content.back() == ' '))
+                                content.pop_back();
+                        }
+                        flagMap["mode"] = (content == "once") ? "once" : "persistent";
+                    } else {
+                        flagMap["active"] = "false";
+                        flagMap["mode"] = "off";
+                    }
+                    flagsList.push_back(flagMap);
+                }
+
                 HttpViewData viewData;
                 viewData.insert("device", device);
                 viewData.insert("provisioner_log", provisioner_log);
                 viewData.insert("bootstrap_log", bootstrap_log);
                 viewData.insert("triage_log", triage_log);
+                viewData.insert("flags", flagsList);
                 viewData.insert("currentPage", std::string("devices"));
                 resp = HttpResponse::newHttpViewResponse("device_detail.csp", viewData);
             } else {
@@ -1671,6 +1711,216 @@ namespace provisioner {
             resp->setBody(writer.write(result));
             callback(resp);
         }); // devices/_test/{scenario} handler
+
+        // ===== Special Flags Management =====
+        // Known special flags and their descriptions
+        struct SpecialFlagInfo {
+            std::string id;           // directory name suffix (e.g., "skip-eeprom")
+            std::string label;        // human-readable label
+            std::string description;  // what this flag does
+            std::string constraint;   // any device constraint (empty = all devices)
+        };
+
+        static const std::vector<SpecialFlagInfo> knownFlags = {
+            {"skip-eeprom",
+             "Skip EEPROM Update",
+             "Skips writing the EEPROM/bootloader during the bootstrap phase. "
+             "Use this for devices that already have the correct EEPROM configuration, "
+             "or devices that have already been signed.",
+             ""},
+            {"reprovision-device",
+             "Re-provision Device",
+             "Re-provisions a device that has already been provisioned. "
+             "This re-signs the bootcode using the original firmware recovery.bin "
+             "instead of the cached signed bootcode. Only works on Raspberry Pi 5 family devices.",
+             "Pi 5 only (BCM2712)"},
+        };
+
+        // GET /devices/{serialno}/flags - Read current flag status
+        app.registerHandler("/devices/{serialno}/flags",
+            [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback, const std::string &serialno) {
+            auto resp = HttpResponse::newHttpResponse();
+            LOG_INFO << "Flags request for serial: '" << serialno << "'";
+
+            AuditLog::logHandlerAccess(req, "/devices/" + serialno + "/flags");
+
+            if (serialno.empty()) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req, "Serial number is required",
+                    drogon::k400BadRequest, "Missing Parameter", "MISSING_SERIAL");
+                callback(resp);
+                return;
+            }
+
+            std::string sanitizedSerial = provisioner::utils::sanitize_path_component(serialno);
+
+            Json::Value root;
+            Json::Value flagsArray(Json::arrayValue);
+
+            for (const auto &fi : knownFlags) {
+                std::string dirPath = "/etc/rpi-sb-provisioner/special-" + fi.id;
+                std::string filePath = dirPath + "/" + sanitizedSerial;
+
+                Json::Value flag;
+                flag["id"] = fi.id;
+                flag["label"] = fi.label;
+                flag["description"] = fi.description;
+                if (!fi.constraint.empty()) flag["constraint"] = fi.constraint;
+
+                if (std::filesystem::exists(filePath)) {
+                    flag["active"] = true;
+                    // Read file content to determine mode
+                    std::ifstream f(filePath);
+                    std::string content;
+                    if (f.is_open()) {
+                        std::getline(f, content);
+                        // Trim whitespace
+                        while (!content.empty() && (content.back() == '\n' || content.back() == '\r' || content.back() == ' '))
+                            content.pop_back();
+                    }
+                    flag["mode"] = (content == "once") ? "once" : "persistent";
+                } else {
+                    flag["active"] = false;
+                    flag["mode"] = "off";
+                }
+
+                flagsArray.append(flag);
+            }
+
+            root["serial"] = serialno;
+            root["flags"] = flagsArray;
+
+            Json::FastWriter writer;
+            resp->setStatusCode(k200OK);
+            resp->setContentTypeCode(CT_APPLICATION_JSON);
+            resp->setBody(writer.write(root));
+            callback(resp);
+        }, {Get});
+
+        // POST /devices/{serialno}/flags - Set a flag
+        app.registerHandler("/devices/{serialno}/flags",
+            [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback, const std::string &serialno) {
+            auto resp = HttpResponse::newHttpResponse();
+            LOG_INFO << "Set flag request for serial: '" << serialno << "'";
+
+            AuditLog::logHandlerAccess(req, "/devices/" + serialno + "/flags");
+
+            if (serialno.empty()) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req, "Serial number is required",
+                    drogon::k400BadRequest, "Missing Parameter", "MISSING_SERIAL");
+                callback(resp);
+                return;
+            }
+
+            auto body = req->getJsonObject();
+            if (!body) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req, "Invalid JSON request body",
+                    drogon::k400BadRequest, "Invalid Request", "INVALID_JSON");
+                callback(resp);
+                return;
+            }
+
+            std::string flagId = body->get("flag", "").asString();
+            std::string mode = body->get("mode", "").asString();
+
+            if (flagId.empty()) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req, "Flag name is required",
+                    drogon::k400BadRequest, "Missing Parameter", "MISSING_FLAG");
+                callback(resp);
+                return;
+            }
+
+            if (mode != "once" && mode != "persistent" && mode != "off") {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req, "Mode must be 'once', 'persistent', or 'off'",
+                    drogon::k400BadRequest, "Invalid Parameter", "INVALID_MODE");
+                callback(resp);
+                return;
+            }
+
+            // Validate flag is a known flag
+            bool validFlag = false;
+            for (const auto &fi : knownFlags) {
+                if (fi.id == flagId) { validFlag = true; break; }
+            }
+            if (!validFlag) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req, "Unknown flag: " + flagId,
+                    drogon::k400BadRequest, "Invalid Parameter", "UNKNOWN_FLAG");
+                callback(resp);
+                return;
+            }
+
+            std::string sanitizedSerial = provisioner::utils::sanitize_path_component(serialno);
+            std::string dirPath = "/etc/rpi-sb-provisioner/special-" + flagId;
+            std::string filePath = dirPath + "/" + sanitizedSerial;
+
+            if (mode == "off") {
+                // Remove the flag file
+                if (std::filesystem::exists(filePath)) {
+                    try {
+                        std::filesystem::remove(filePath);
+                        AuditLog::logFileSystemAccess("DELETE_FLAG", filePath, true, "",
+                            "Special flag removed: " + flagId + " for device " + serialno);
+                        LOG_INFO << "Removed special flag: " << flagId << " for device " << serialno;
+                    } catch (const std::exception &e) {
+                        LOG_ERROR << "Failed to remove flag file: " << e.what();
+                        auto resp = provisioner::utils::createErrorResponse(
+                            req, "Failed to remove flag file",
+                            drogon::k500InternalServerError, "File Error", "FLAG_REMOVE_ERROR");
+                        callback(resp);
+                        return;
+                    }
+                }
+            } else {
+                // Create directory if it doesn't exist
+                try {
+                    if (!std::filesystem::exists(dirPath)) {
+                        std::filesystem::create_directories(dirPath);
+                    }
+                } catch (const std::exception &e) {
+                    LOG_ERROR << "Failed to create flag directory: " << e.what();
+                    auto resp = provisioner::utils::createErrorResponse(
+                        req, "Failed to create flag directory",
+                        drogon::k500InternalServerError, "File Error", "FLAG_DIR_ERROR");
+                    callback(resp);
+                    return;
+                }
+
+                // Write the flag file with mode content
+                std::ofstream f(filePath);
+                if (!f.is_open()) {
+                    LOG_ERROR << "Failed to write flag file: " << filePath;
+                    auto resp = provisioner::utils::createErrorResponse(
+                        req, "Failed to write flag file",
+                        drogon::k500InternalServerError, "File Error", "FLAG_WRITE_ERROR");
+                    callback(resp);
+                    return;
+                }
+                f << mode << "\n";
+                f.close();
+
+                AuditLog::logFileSystemAccess("SET_FLAG", filePath, true, "",
+                    "Special flag set: " + flagId + " (" + mode + ") for device " + serialno);
+                LOG_INFO << "Set special flag: " << flagId << " (" << mode << ") for device " << serialno;
+            }
+
+            // Return the updated flag status
+            Json::Value result;
+            result["success"] = true;
+            result["flag"] = flagId;
+            result["mode"] = mode;
+            result["serial"] = serialno;
+
+            Json::FastWriter writer;
+            resp->setStatusCode(k200OK);
+            resp->setContentTypeCode(CT_APPLICATION_JSON);
+            resp->setBody(writer.write(result));
+            callback(resp);
+        }, {Post});
 
         // Test mode status endpoint
         app.registerHandler("/devices/_test", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
