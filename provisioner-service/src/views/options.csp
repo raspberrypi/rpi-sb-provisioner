@@ -3426,6 +3426,22 @@
                 const fdeTile = document.getElementById('fde-only-tile');
                 if (fdeTile) fdeTile.style.display = 'none';
                 
+                // If FDE-only was selected, switch to naked (the IDP artefact
+                // handles encryption itself, so "naked" is the correct non-secure
+                // counterpart).
+                const selectedStyle = document.querySelector('input[name="PROVISIONING_STYLE"]:checked');
+                if (selectedStyle && selectedStyle.value === 'fde-only') {
+                    const nakedTile = document.getElementById('naked-tile');
+                    const nakedInput = nakedTile ? nakedTile.querySelector('input[type="radio"]') : null;
+                    if (nakedInput) {
+                        nakedInput.checked = true;
+                        fdeTile.classList.remove('selected');
+                        nakedTile.classList.add('selected');
+                        validateAndSaveField('PROVISIONING_STYLE');
+                        updateSecurityVisibility('naked');
+                    }
+                }
+                
                 // Lock/hide the cipher selector (IDP defines encryption)
                 const cipherGroup = document.getElementById('cipher-group');
                 if (cipherGroup) {
