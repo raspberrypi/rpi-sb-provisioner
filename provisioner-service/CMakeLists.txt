@@ -184,6 +184,11 @@ unset(CURL_DISABLE_SOCKETPAIR)
 # unset(CURL_DISABLE_AWS)
 # unset(CURL_DISABLE_NTLM)
 
+# Vendored compression libraries + libarchive (for streaming archive extraction)
+include(dependencies/zstd.cmake)
+include(dependencies/xz.cmake)
+include(dependencies/libarchive.cmake)
+
 # Download the ZXing library for barcode scanning
 set(ZXING_JS_URL "https://cdn.jsdelivr.net/npm/@zxing/library/umd/index.min.js")
 set(ZXING_JS_PATH "${CMAKE_SOURCE_DIR}/static/js/zxing.js")
@@ -286,6 +291,7 @@ target_include_directories(rpi-provisioner-ui
     ${SQLite3_INCLUDE_DIR}
     ${CSP_OUTPUT_DIR}  # Include the compiled templates
     ${curl_SOURCE_DIR}/include  # Add curl headers
+    ${LibArchive_INCLUDE_DIR}  # libarchive headers
 )
 
 target_link_libraries(rpi-provisioner-ui
@@ -297,6 +303,9 @@ target_link_libraries(rpi-provisioner-ui
     libcurl
     OpenSSL::SSL
     OpenSSL::Crypto
+    ${LibArchive_LIBRARIES}
+    ${ZSTD_LIBRARIES}
+    ${LIBLZMA_LIBRARIES}
 )
 
 # Install directives

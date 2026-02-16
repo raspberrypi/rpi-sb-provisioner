@@ -6,6 +6,7 @@
 #include <drogon/HttpSimpleController.h>
 #include <drogon/HttpTypes.h>
 #include <drogon/WebSocketController.h>
+#include <drogon/RequestStream.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <unistd.h>
@@ -16,6 +17,9 @@
 #include <systemd/sd-bus.h>
 #include "utils.h"
 
+#include <archive.h>
+#include <archive_entry.h>
+
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -23,9 +27,11 @@
 #include <sstream>
 #include <iomanip>
 #include <openssl/evp.h>
+#include <openssl/sha.h>
 #include <mutex>
 #include <unordered_map>
 #include <queue>
+#include <deque>
 #include <thread>
 #include <condition_variable>
 #include <atomic>
@@ -1797,333 +1803,552 @@ namespace provisioner {
             callback(resp);
         });
 
-        app.registerHandler("/upload-image", [](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
+        app.registerHandler("/upload-image", [](const drogon::HttpRequestPtr &req, drogon::RequestStreamPtr &&stream, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
             LOG_INFO << "Images::uploadImage";
-            
-            // Add audit log entry for handler access
+
             AuditLog::logHandlerAccess(req, "/upload-image");
-            
-            auto resp = drogon::HttpResponse::newHttpResponse();
 
-            // Get the file from the request
-            drogon::MultiPartParser parser;
-            if (parser.parse(req) != 0 || parser.getFiles().size() != 1) {
-                auto resp = provisioner::utils::createErrorResponse(
-                    req,
-                    "Invalid request: Expected exactly one file in multipart form data",
-                    drogon::k400BadRequest,
-                    "Invalid Request",
-                    "INVALID_UPLOAD_REQUEST"
-                );
-                callback(resp);
-                return;
-            }
-            auto files = parser.getFiles();
+            // Helper: case-insensitive suffix check
+            auto endsWith = [](const std::string& s, const std::string& suffix) -> bool {
+                return s.size() >= suffix.size() &&
+                       s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
+            };
 
-            const auto& file = files[0];
-            std::string originalFilename = file.getFileName();
-            
-            // Function to generate a unique filename (race-condition safe with timestamp fallback)
+            // Helper: generate a unique filename (race-condition safe with timestamp fallback)
             auto generateUniqueFilename = [](const std::string& originalName, const std::string& basePath) -> std::string {
                 std::filesystem::path targetDir(basePath);
                 std::filesystem::path originalPath = targetDir / originalName;
-                
-                // If file doesn't exist, use original name
+
                 if (!std::filesystem::exists(originalPath)) {
                     return originalName;
                 }
-                
-                // Extract filename parts for numbered variants
+
                 std::filesystem::path nameOnly = originalPath.stem();
                 std::filesystem::path extension = originalPath.extension();
-                
-                // Try numbered variants
+
                 for (int i = 1; i <= 9999; ++i) {
                     std::string newName = nameOnly.string() + "_" + std::to_string(i) + extension.string();
-                    std::filesystem::path newPath = targetDir / newName;
-                    
-                    if (!std::filesystem::exists(newPath)) {
+                    if (!std::filesystem::exists(targetDir / newName)) {
                         return newName;
                     }
                 }
-                
-                // If we can't find a unique name after 9999 attempts, use timestamp + random
+
                 auto now = std::chrono::system_clock::now();
                 auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
                 std::random_device rd;
                 std::mt19937 gen(rd());
                 std::uniform_int_distribution<> dis(1000, 9999);
-                int random = dis(gen);
-                
-                return nameOnly.string() + "_" + std::to_string(timestamp) + "_" + std::to_string(random) + extension.string();
+                return nameOnly.string() + "_" + std::to_string(timestamp) + "_" + std::to_string(dis(gen)) + extension.string();
             };
 
-            // Detect if this is an IDP artefact archive (.tar.gz, .tgz, or .zip)
-            std::string lowerFilename = originalFilename;
-            std::transform(lowerFilename.begin(), lowerFilename.end(), lowerFilename.begin(), ::tolower);
-            bool isArchive = (lowerFilename.size() > 7 && lowerFilename.substr(lowerFilename.size() - 7) == ".tar.gz") ||
-                             (lowerFilename.size() > 4 && lowerFilename.substr(lowerFilename.size() - 4) == ".tgz") ||
-                             (lowerFilename.size() > 4 && lowerFilename.substr(lowerFilename.size() - 4) == ".zip");
+            // Helper: strip archive extension to get the artefact name
+            auto stripArchiveExtension = [&endsWith](const std::string& filename, const std::string& lowerFilename) -> std::string {
+                if (endsWith(lowerFilename, ".tar.gz"))  return filename.substr(0, filename.size() - 7);
+                if (endsWith(lowerFilename, ".tar.xz"))  return filename.substr(0, filename.size() - 7);
+                if (endsWith(lowerFilename, ".tar.zst")) return filename.substr(0, filename.size() - 8);
+                if (endsWith(lowerFilename, ".tgz"))     return filename.substr(0, filename.size() - 4);
+                return filename;
+            };
 
-            if (isArchive) {
-                // --- IDP artefact archive upload ---
-                LOG_INFO << "Detected archive upload (IDP artefact): " << originalFilename;
+            // ---- Non-stream fallback (if streaming is disabled) ----
+            if (!stream) {
+                LOG_WARN << "Request stream not available, falling back to buffered upload";
+                auto resp = drogon::HttpResponse::newHttpResponse();
 
-                // Determine artefact directory name by stripping archive extensions
-                std::string artefactName = originalFilename;
-                if (lowerFilename.size() > 7 && lowerFilename.substr(lowerFilename.size() - 7) == ".tar.gz") {
-                    artefactName = originalFilename.substr(0, originalFilename.size() - 7);
-                } else if (lowerFilename.size() > 4 && (lowerFilename.substr(lowerFilename.size() - 4) == ".tgz" ||
-                           lowerFilename.substr(lowerFilename.size() - 4) == ".zip")) {
-                    artefactName = originalFilename.substr(0, originalFilename.size() - 4);
-                }
-
-                std::filesystem::path finalDir = std::filesystem::path(IMAGES_PATH) / artefactName;
-                std::filesystem::path tempDir = std::filesystem::path(IMAGES_PATH) / ("." + artefactName + ".extracting");
-                std::filesystem::path tempArchive = std::filesystem::path(IMAGES_PATH) / ("." + originalFilename + ".uploading");
-
-                try {
-                    // Save the archive to a temporary file first
-                    file.saveAs(tempArchive);
-
-                    // Compute SHA256 of the archive before extraction.
-                    // The archive is the canonical artefact -- hashing it before
-                    // extract gives us a fingerprint of exactly what the user uploaded.
-                    auto archiveCancellationToken = std::make_shared<SHA256CancellationToken>();
-                    std::string archiveSha256 = calculateSHA256(tempArchive, "", archiveCancellationToken);
-                    LOG_INFO << "IDP archive SHA256 (pre-extraction): " << archiveSha256;
-
-                    // Check disk space -- archive contents may be much larger than the compressed file
-                    auto archiveSize = std::filesystem::file_size(tempArchive);
-                    auto availableSpace = getAvailableDiskSpace(IMAGES_PATH);
-                    // Estimate: archives can expand up to 10x (sparse images compress well)
-                    if (availableSpace < archiveSize * 3) {
-                        std::filesystem::remove(tempArchive);
-                        auto resp = provisioner::utils::createErrorResponse(
-                            req,
-                            "Insufficient disk space for archive extraction",
-                            drogon::k507InsufficientStorage,
-                            "Disk Space Error",
-                            "INSUFFICIENT_DISK_SPACE"
-                        );
-                        callback(resp);
-                        return;
-                    }
-
-                    // Create temporary extraction directory
-                    std::filesystem::create_directories(tempDir);
-
-                    // Extract based on archive type
-                    int extractResult;
-                    bool isTarGz = (lowerFilename.size() > 7 && lowerFilename.substr(lowerFilename.size() - 7) == ".tar.gz") ||
-                                   (lowerFilename.size() > 4 && lowerFilename.substr(lowerFilename.size() - 4) == ".tgz");
-
-                    if (isTarGz) {
-                        // Use tar with --no-same-owner and strip components for safety
-                        // The command validates paths during extraction
-                        std::string cmd = "tar xzf " + tempArchive.string() +
-                                          " -C " + tempDir.string() +
-                                          " --no-same-owner 2>&1";
-                        extractResult = runCommand(cmd);
-                    } else {
-                        // ZIP extraction
-                        std::string cmd = "unzip -o " + tempArchive.string() +
-                                          " -d " + tempDir.string() + " 2>&1";
-                        extractResult = runCommand(cmd);
-                    }
-
-                    // Remove the temporary archive file
-                    std::filesystem::remove(tempArchive);
-
-                    if (extractResult != 0) {
-                        std::filesystem::remove_all(tempDir);
-                        auto resp = provisioner::utils::createErrorResponse(
-                            req,
-                            "Failed to extract archive",
-                            drogon::k500InternalServerError,
-                            "Extraction Error",
-                            "ARCHIVE_EXTRACT_ERROR"
-                        );
-                        callback(resp);
-                        return;
-                    }
-
-                    // Security: validate all extracted paths (no path traversal)
-                    for (const auto& entry : std::filesystem::recursive_directory_iterator(tempDir)) {
-                        auto relativePath = std::filesystem::relative(entry.path(), tempDir).string();
-                        if (!isArchivePathSafe(relativePath)) {
-                            LOG_ERROR << "Archive contains unsafe path: " << relativePath;
-                            std::filesystem::remove_all(tempDir);
-                            auto resp = provisioner::utils::createErrorResponse(
-                                req,
-                                "Archive contains unsafe paths (path traversal detected)",
-                                drogon::k400BadRequest,
-                                "Security Error",
-                                "ARCHIVE_PATH_TRAVERSAL"
-                            );
-                            callback(resp);
-                            return;
-                        }
-                    }
-
-                    // If the archive extracted into a single top-level directory, use its contents directly
-                    int topLevelEntries = 0;
-                    std::filesystem::path singleSubdir;
-                    for (const auto& entry : std::filesystem::directory_iterator(tempDir)) {
-                        topLevelEntries++;
-                        if (entry.is_directory()) {
-                            singleSubdir = entry.path();
-                        }
-                    }
-                    if (topLevelEntries == 1 && !singleSubdir.empty()) {
-                        // Archive had a single top-level directory, promote its contents
-                        std::filesystem::path promotedTemp = std::filesystem::path(IMAGES_PATH) / ("." + artefactName + ".promoted");
-                        std::filesystem::rename(singleSubdir, promotedTemp);
-                        std::filesystem::remove_all(tempDir);
-                        tempDir = promotedTemp;
-                    }
-
-                    // Atomically replace any existing artefact directory
-                    if (std::filesystem::exists(finalDir)) {
-                        std::filesystem::remove_all(finalDir);
-                    }
-                    std::filesystem::rename(tempDir, finalDir);
-
-                    AuditLog::logFileSystemAccess("UPLOAD_ARCHIVE", finalDir.string(), true, "",
-                        "IDP artefact archive extracted: " + originalFilename + " -> " + artefactName);
-
-                    // Write the archive SHA256 as a sidecar file next to the directory.
-                    // e.g., /srv/rpi-sb-provisioner/images/my-artefact.sha256 for
-                    //        /srv/rpi-sb-provisioner/images/my-artefact/
-                    // This reuses the same sidecar pattern as traditional .img files.
-                    if (!archiveSha256.empty() && archiveSha256 != "file-read-error") {
-                        std::filesystem::path sidecarPath = finalDir;
-                        sidecarPath += ".sha256";
-                        try {
-                            std::ofstream sidecarFile(sidecarPath, std::ios::out | std::ios::trunc);
-                            if (sidecarFile.is_open()) {
-                                sidecarFile << archiveSha256 << "\n";
-                                sidecarFile.close();
-                                LOG_INFO << "Wrote IDP archive SHA256 sidecar: " << sidecarPath.string();
-                                AuditLog::logFileSystemAccess("WRITE", sidecarPath.string(), true, "",
-                                    "Wrote SHA256 sidecar for IDP artefact archive: " + artefactName);
-                            }
-                        } catch (const std::exception& e) {
-                            LOG_ERROR << "Failed to write IDP SHA256 sidecar: " << e.what();
-                        }
-                    }
-
-                    // Build success response
-                    resp->setStatusCode(drogon::k200OK);
-                    resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
-                    Json::Value result;
-                    result["success"] = true;
-                    result["message"] = "IDP artefact uploaded and extracted successfully";
-                    result["filename"] = artefactName;
-                    result["is_idp"] = true;
-                    result["renamed"] = false;
-                    result["sha256"] = archiveSha256;
-
-                    // If it's a valid IDP artefact, include analysis
-                    if (isIdpArtefactDirectory(finalDir)) {
-                        result["analysis"] = analyzeIdpArtefact(finalDir);
-                    }
-
-                    resp->setBody(result.toStyledString());
-                } catch (const std::exception& e) {
-                    LOG_ERROR << "Failed to process archive upload: " << e.what();
-                    // Clean up on failure
-                    if (std::filesystem::exists(tempArchive)) std::filesystem::remove(tempArchive);
-                    if (std::filesystem::exists(tempDir)) std::filesystem::remove_all(tempDir);
-
-                    AuditLog::logFileSystemAccess("UPLOAD_ARCHIVE", finalDir.string(), false, "",
-                        "Archive upload failed: " + std::string(e.what()));
-
+                drogon::MultiPartParser parser;
+                if (parser.parse(req) != 0 || parser.getFiles().size() != 1) {
                     auto resp = provisioner::utils::createErrorResponse(
-                        req,
-                        "Failed to process archive upload",
-                        drogon::k500InternalServerError,
-                        "Upload Error",
-                        "ARCHIVE_UPLOAD_ERROR",
-                        e.what()
-                    );
+                        req, "Invalid request: Expected exactly one file in multipart form data",
+                        drogon::k400BadRequest, "Invalid Request", "INVALID_UPLOAD_REQUEST");
                     callback(resp);
                     return;
                 }
-            } else {
-                // --- Traditional .img file upload (existing behaviour) ---
-
-                // Generate unique filename to avoid conflicts
+                const auto& file = parser.getFiles()[0];
+                std::string originalFilename = file.getFileName();
                 std::string finalFilename = generateUniqueFilename(originalFilename, IMAGES_PATH);
-                
-                // Create target path with unique filename
-                std::filesystem::path targetPath(IMAGES_PATH);
-                targetPath /= finalFilename;
+                std::filesystem::path targetPath = std::filesystem::path(IMAGES_PATH) / finalFilename;
 
                 try {
-                    // Move uploaded file to target location with unique name
                     file.saveAs(targetPath);
-                    
-                    // Log successful file upload
-                    AuditLog::logFileSystemAccess("UPLOAD", targetPath.string(), true, "", 
+                    AuditLog::logFileSystemAccess("UPLOAD", targetPath.string(), true, "",
                         "Original filename: " + originalFilename + (originalFilename != finalFilename ? ", renamed to: " + finalFilename : ""));
-                    
-                    // Clear any stale cache entry for this filename
                     {
                         std::lock_guard<std::mutex> lock(sha256Cache_mutex);
                         sha256Cache.erase(finalFilename);
                     }
-                    
-                    // Start SHA256 calculation in the background
                     requestSHA256Calculation(finalFilename);
-                    
-                    // Trigger boot.img generation for secure-boot configurations
                     triggerBootImgGeneration(finalFilename);
-                    
-                    // Set success response with JSON payload
+
                     resp->setStatusCode(drogon::k200OK);
                     resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
                     Json::Value result;
                     result["success"] = true;
                     result["is_idp"] = false;
-                    
-                    // Include both original and final filenames in response
-                    if (originalFilename != finalFilename) {
-                        result["message"] = "File uploaded successfully (renamed to avoid conflict)";
-                        result["original_filename"] = originalFilename;
-                        result["filename"] = finalFilename;
-                        result["renamed"] = true;
-                    } else {
-                        result["message"] = "File uploaded successfully";
-                        result["filename"] = finalFilename;
-                        result["renamed"] = false;
-                    }
-                    
-                    result["sha256"] = "Calculating..."; // SHA256 calculation in progress
+                    result["filename"] = finalFilename;
+                    result["renamed"] = (originalFilename != finalFilename);
+                    if (originalFilename != finalFilename) result["original_filename"] = originalFilename;
+                    result["message"] = result["renamed"].asBool() ? "File uploaded successfully (renamed to avoid conflict)" : "File uploaded successfully";
+                    result["sha256"] = "Calculating...";
                     resp->setBody(result.toStyledString());
-                } catch (const std::filesystem::filesystem_error& e) {
-                    LOG_ERROR << "Failed to save uploaded file (filesystem): " << e.what();
                 } catch (const std::exception& e) {
                     LOG_ERROR << "Failed to save uploaded file: " << e.what();
-                    
-                    // Log failed file upload
-                    AuditLog::logFileSystemAccess("UPLOAD", targetPath.string(), false, "", 
-                        "Upload failed: " + std::string(e.what()) + ", Original filename: " + originalFilename);
-                    
+                    AuditLog::logFileSystemAccess("UPLOAD", targetPath.string(), false, "",
+                        "Upload failed: " + std::string(e.what()));
                     auto resp = provisioner::utils::createErrorResponse(
-                        req,
-                        "Failed to save uploaded file",
-                        drogon::k500InternalServerError,
-                        "Upload Error",
-                        "UPLOAD_SAVE_ERROR",
-                        e.what()
-                    );
+                        req, "Failed to save uploaded file", drogon::k500InternalServerError,
+                        "Upload Error", "UPLOAD_SAVE_ERROR", e.what());
+                    callback(resp);
+                    return;
+                }
+                callback(resp);
+                return;
+            }
+
+            // ---- Streaming upload path ----
+
+            // Early disk space check using Content-Length header
+            size_t contentLength = req->realContentLength();
+            if (contentLength > 0) {
+                auto availableSpace = getAvailableDiskSpace(IMAGES_PATH);
+                if (availableSpace < contentLength) {
+                    LOG_ERROR << "Insufficient disk space for upload: need " << contentLength
+                              << " bytes, have " << availableSpace;
+                    stream->setStreamReader(drogon::RequestStreamReader::newNullReader());
+                    auto resp = provisioner::utils::createErrorResponse(
+                        req, "Insufficient disk space for upload",
+                        drogon::k507InsufficientStorage, "Disk Space Error", "INSUFFICIENT_DISK_SPACE");
                     callback(resp);
                     return;
                 }
             }
 
-            callback(resp);
+            // Shared context for streaming callbacks
+            struct UploadContext {
+                // Common
+                std::string originalFilename;
+                std::string finalFilename;
+                bool isArchive = false;
+                bool hadError = false;
+                std::string errorMessage;
+                drogon::HttpStatusCode errorCode = drogon::k500InternalServerError;
+
+                // .img direct-write state
+                int fd = -1;
+                size_t totalBytesWritten = 0;
+                std::string targetPath;
+
+                // Archive extraction state (libarchive producer-consumer)
+                std::string artefactName;
+                std::filesystem::path tempDir;
+                std::filesystem::path finalDir;
+                std::mutex bufferMutex;
+                std::condition_variable bufferCv;
+                std::deque<std::vector<char>> chunks;
+                std::vector<char> currentReadChunk;
+                bool streamFinished = false;
+                std::thread extractionThread;
+                bool extractionOk = false;
+                std::string extractionError;
+
+                // SHA256 computed inline on the raw upload data
+                SHA256_CTX sha256Ctx;
+                bool sha256Initialized = false;
+
+                // Response plumbing
+                std::function<void(const drogon::HttpResponsePtr &)> callback;
+                drogon::HttpRequestPtr req;
+                size_t contentLength = 0;
+
+                ~UploadContext() {
+                    if (fd >= 0) ::close(fd);
+                    if (extractionThread.joinable()) extractionThread.join();
+                }
+            };
+
+            auto ctx = std::make_shared<UploadContext>();
+            ctx->callback = std::move(callback);
+            ctx->req = req;
+            ctx->contentLength = contentLength;
+
+            // libarchive custom read callback: blocks on the producer-consumer buffer
+            auto archiveReadCb = [](struct archive*, void* clientData, const void** buffer) -> la_ssize_t {
+                auto* c = static_cast<UploadContext*>(clientData);
+                std::unique_lock<std::mutex> lock(c->bufferMutex);
+                c->bufferCv.wait(lock, [&] { return !c->chunks.empty() || c->streamFinished; });
+                if (c->chunks.empty()) return 0; // EOF
+                c->currentReadChunk = std::move(c->chunks.front());
+                c->chunks.pop_front();
+                *buffer = c->currentReadChunk.data();
+                return static_cast<la_ssize_t>(c->currentReadChunk.size());
+            };
+
+            auto reader = drogon::RequestStreamReader::newMultipartReader(
+                req,
+                // ---- headerCb: called when a new multipart part header is parsed ----
+                [ctx, endsWith, generateUniqueFilename, stripArchiveExtension, archiveReadCb](drogon::MultipartHeader &&header) {
+                    if (ctx->hadError) return;
+
+                    ctx->originalFilename = header.filename;
+                    if (ctx->originalFilename.empty()) return;
+
+                    std::string lowerFilename = ctx->originalFilename;
+                    std::transform(lowerFilename.begin(), lowerFilename.end(), lowerFilename.begin(), ::tolower);
+
+                    ctx->isArchive = endsWith(lowerFilename, ".tar.gz") ||
+                                     endsWith(lowerFilename, ".tgz") ||
+                                     endsWith(lowerFilename, ".tar.xz") ||
+                                     endsWith(lowerFilename, ".tar.zst");
+
+                    // Initialize inline SHA256
+                    SHA256_Init(&ctx->sha256Ctx);
+                    ctx->sha256Initialized = true;
+
+                    if (ctx->isArchive) {
+                        // --- Archive streaming path ---
+                        ctx->artefactName = stripArchiveExtension(ctx->originalFilename, lowerFilename);
+                        ctx->finalDir = std::filesystem::path(IMAGES_PATH) / ctx->artefactName;
+                        ctx->tempDir = std::filesystem::path(IMAGES_PATH) / ("." + ctx->artefactName + ".extracting");
+
+                        LOG_INFO << "Streaming archive upload (IDP artefact): " << ctx->originalFilename;
+
+                        try {
+                            std::filesystem::create_directories(ctx->tempDir);
+                        } catch (const std::exception& e) {
+                            ctx->hadError = true;
+                            ctx->errorMessage = "Failed to create extraction directory: " + std::string(e.what());
+                            return;
+                        }
+
+                        // Spawn worker thread for libarchive extraction
+                        std::string tempDirStr = ctx->tempDir.string();
+                        ctx->extractionThread = std::thread([ctx, archiveReadCb, tempDirStr]() {
+                            struct archive *a = archive_read_new();
+                            archive_read_support_filter_gzip(a);
+                            archive_read_support_filter_xz(a);
+                            archive_read_support_filter_zstd(a);
+                            archive_read_support_format_tar(a);
+
+                            if (archive_read_open(a, ctx.get(), nullptr, archiveReadCb, nullptr) != ARCHIVE_OK) {
+                                ctx->extractionError = "Failed to open archive stream: " + std::string(archive_error_string(a));
+                                archive_read_free(a);
+                                return;
+                            }
+
+                            struct archive *ext = archive_write_disk_new();
+                            archive_write_disk_set_options(ext,
+                                ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM | ARCHIVE_EXTRACT_NO_OVERWRITE);
+                            archive_write_disk_set_standard_lookup(ext);
+
+                            struct archive_entry *entry;
+                            int r;
+                            while ((r = archive_read_next_header(a, &entry)) == ARCHIVE_OK) {
+                                std::string entryPath = archive_entry_pathname(entry);
+                                if (!isArchivePathSafe(entryPath)) {
+                                    ctx->extractionError = "Archive contains unsafe path: " + entryPath;
+                                    break;
+                                }
+
+                                std::string fullPath = tempDirStr + "/" + entryPath;
+                                archive_entry_set_pathname(entry, fullPath.c_str());
+
+                                r = archive_write_header(ext, entry);
+                                if (r != ARCHIVE_OK) {
+                                    ctx->extractionError = "Failed to write header: " + std::string(archive_error_string(ext));
+                                    break;
+                                }
+
+                                if (archive_entry_size(entry) > 0) {
+                                    const void *buff;
+                                    size_t size;
+                                    la_int64_t offset;
+                                    while ((r = archive_read_data_block(a, &buff, &size, &offset)) == ARCHIVE_OK) {
+                                        if (archive_write_data_block(ext, buff, size, offset) != ARCHIVE_OK) {
+                                            ctx->extractionError = "Failed to write data: " + std::string(archive_error_string(ext));
+                                            break;
+                                        }
+                                    }
+                                    if (!ctx->extractionError.empty()) break;
+                                    if (r != ARCHIVE_EOF) {
+                                        ctx->extractionError = "Error reading data: " + std::string(archive_error_string(a));
+                                        break;
+                                    }
+                                }
+                                archive_write_finish_entry(ext);
+                            }
+
+                            if (ctx->extractionError.empty() && r != ARCHIVE_EOF && r != ARCHIVE_OK) {
+                                ctx->extractionError = "Archive read error: " + std::string(archive_error_string(a));
+                            }
+
+                            ctx->extractionOk = ctx->extractionError.empty();
+                            archive_write_free(ext);
+                            archive_read_free(a);
+                        });
+                    } else {
+                        // --- .img direct-write path ---
+                        ctx->finalFilename = generateUniqueFilename(ctx->originalFilename, IMAGES_PATH);
+                        ctx->targetPath = (std::filesystem::path(IMAGES_PATH) / ctx->finalFilename).string();
+
+                        LOG_INFO << "Streaming .img upload: " << ctx->originalFilename << " -> " << ctx->finalFilename;
+
+                        ctx->fd = ::open(ctx->targetPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                        if (ctx->fd < 0) {
+                            ctx->hadError = true;
+                            ctx->errorMessage = "Failed to open target file: " + std::string(strerror(errno));
+                            return;
+                        }
+
+                        // Pre-allocate disk space using Content-Length as an upper bound
+                        if (ctx->contentLength > 0) {
+                            int fa_ret = posix_fallocate(ctx->fd, 0, static_cast<off_t>(ctx->contentLength));
+                            if (fa_ret != 0) {
+                                ctx->hadError = true;
+                                ctx->errorCode = drogon::k507InsufficientStorage;
+                                ctx->errorMessage = "Failed to pre-allocate disk space: " + std::string(strerror(fa_ret));
+                                ::close(ctx->fd);
+                                ctx->fd = -1;
+                                ::unlink(ctx->targetPath.c_str());
+                                return;
+                            }
+                        }
+                    }
+                },
+                // ---- dataCb: called for each chunk of data ----
+                [ctx](const char *data, size_t length) {
+                    if (ctx->hadError) return;
+
+                    if (length == 0) {
+                        // Part complete
+                        if (ctx->isArchive) {
+                            // Signal EOF to the extraction thread
+                            {
+                                std::lock_guard<std::mutex> lock(ctx->bufferMutex);
+                                ctx->streamFinished = true;
+                            }
+                            ctx->bufferCv.notify_one();
+                        } else if (ctx->fd >= 0) {
+                            // Trim the pre-allocated file to actual size and close
+                            if (::ftruncate(ctx->fd, static_cast<off_t>(ctx->totalBytesWritten)) != 0) {
+                                LOG_WARN << "ftruncate failed: " << strerror(errno);
+                            }
+                            ::close(ctx->fd);
+                            ctx->fd = -1;
+                        }
+                        return;
+                    }
+
+                    // Update inline SHA256
+                    if (ctx->sha256Initialized) {
+                        SHA256_Update(&ctx->sha256Ctx, data, length);
+                    }
+
+                    if (ctx->isArchive) {
+                        // Push chunk to the producer-consumer buffer for libarchive
+                        {
+                            std::lock_guard<std::mutex> lock(ctx->bufferMutex);
+                            ctx->chunks.emplace_back(data, data + length);
+                        }
+                        ctx->bufferCv.notify_one();
+                    } else if (ctx->fd >= 0) {
+                        // Write directly to the pre-allocated file
+                        const char *ptr = data;
+                        size_t remaining = length;
+                        while (remaining > 0) {
+                            ssize_t written = ::write(ctx->fd, ptr, remaining);
+                            if (written < 0) {
+                                if (errno == EINTR) continue;
+                                ctx->hadError = true;
+                                ctx->errorMessage = "Write failed: " + std::string(strerror(errno));
+                                if (errno == ENOSPC) ctx->errorCode = drogon::k507InsufficientStorage;
+                                return;
+                            }
+                            ptr += written;
+                            remaining -= static_cast<size_t>(written);
+                        }
+                        ctx->totalBytesWritten += length;
+                    }
+                },
+                // ---- finishCb: called when the stream completes or errors ----
+                [ctx, endsWith](std::exception_ptr ex) {
+                    // Finalize inline SHA256
+                    std::string sha256Hex;
+                    if (ctx->sha256Initialized) {
+                        unsigned char hash[SHA256_DIGEST_LENGTH];
+                        SHA256_Final(hash, &ctx->sha256Ctx);
+                        std::ostringstream oss;
+                        for (int i = 0; i < SHA256_DIGEST_LENGTH; ++i)
+                            oss << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(hash[i]);
+                        sha256Hex = oss.str();
+                    }
+
+                    // Handle stream-level errors
+                    if (ex) {
+                        try { std::rethrow_exception(ex); }
+                        catch (const drogon::StreamError& e) { LOG_ERROR << "Stream error: " << e.what(); }
+                        catch (const std::exception& e) { LOG_ERROR << "Upload stream error: " << e.what(); }
+
+                        // Clean up partial files
+                        if (!ctx->isArchive && !ctx->targetPath.empty()) ::unlink(ctx->targetPath.c_str());
+                        if (ctx->isArchive && std::filesystem::exists(ctx->tempDir)) {
+                            // Signal extraction thread to stop, then clean up
+                            { std::lock_guard<std::mutex> lock(ctx->bufferMutex); ctx->streamFinished = true; }
+                            ctx->bufferCv.notify_one();
+                            if (ctx->extractionThread.joinable()) ctx->extractionThread.join();
+                            std::filesystem::remove_all(ctx->tempDir);
+                        }
+
+                        auto resp = provisioner::utils::createErrorResponse(
+                            ctx->req, "Upload stream failed", drogon::k400BadRequest,
+                            "Upload Error", "STREAM_ERROR");
+                        ctx->callback(resp);
+                        return;
+                    }
+
+                    // Handle write errors detected during streaming
+                    if (ctx->hadError) {
+                        if (!ctx->isArchive && !ctx->targetPath.empty()) ::unlink(ctx->targetPath.c_str());
+                        if (ctx->isArchive) {
+                            { std::lock_guard<std::mutex> lock(ctx->bufferMutex); ctx->streamFinished = true; }
+                            ctx->bufferCv.notify_one();
+                            if (ctx->extractionThread.joinable()) ctx->extractionThread.join();
+                            if (std::filesystem::exists(ctx->tempDir)) std::filesystem::remove_all(ctx->tempDir);
+                        }
+                        auto resp = provisioner::utils::createErrorResponse(
+                            ctx->req, ctx->errorMessage, ctx->errorCode,
+                            "Upload Error", "UPLOAD_WRITE_ERROR");
+                        ctx->callback(resp);
+                        return;
+                    }
+
+                    if (ctx->isArchive) {
+                        // ---- Archive post-processing ----
+                        // Wait for extraction thread to finish
+                        if (ctx->extractionThread.joinable()) ctx->extractionThread.join();
+
+                        if (!ctx->extractionOk) {
+                            LOG_ERROR << "Archive extraction failed: " << ctx->extractionError;
+                            if (std::filesystem::exists(ctx->tempDir)) std::filesystem::remove_all(ctx->tempDir);
+                            AuditLog::logFileSystemAccess("UPLOAD_ARCHIVE", ctx->finalDir.string(), false, "",
+                                "Archive extraction failed: " + ctx->extractionError);
+                            auto resp = provisioner::utils::createErrorResponse(
+                                ctx->req, "Failed to extract archive: " + ctx->extractionError,
+                                drogon::k500InternalServerError, "Extraction Error", "ARCHIVE_EXTRACT_ERROR");
+                            ctx->callback(resp);
+                            return;
+                        }
+
+                        // Security: validate all extracted paths
+                        try {
+                            for (const auto& entry : std::filesystem::recursive_directory_iterator(ctx->tempDir)) {
+                                auto relativePath = std::filesystem::relative(entry.path(), ctx->tempDir).string();
+                                if (!isArchivePathSafe(relativePath)) {
+                                    LOG_ERROR << "Archive contains unsafe path: " << relativePath;
+                                    std::filesystem::remove_all(ctx->tempDir);
+                                    auto resp = provisioner::utils::createErrorResponse(
+                                        ctx->req, "Archive contains unsafe paths (path traversal detected)",
+                                        drogon::k400BadRequest, "Security Error", "ARCHIVE_PATH_TRAVERSAL");
+                                    ctx->callback(resp);
+                                    return;
+                                }
+                            }
+                        } catch (const std::exception& e) {
+                            std::filesystem::remove_all(ctx->tempDir);
+                            auto resp = provisioner::utils::createErrorResponse(
+                                ctx->req, "Failed to validate extracted paths",
+                                drogon::k500InternalServerError, "Extraction Error", "ARCHIVE_VALIDATE_ERROR", e.what());
+                            ctx->callback(resp);
+                            return;
+                        }
+
+                        // If single top-level directory, promote its contents
+                        int topLevelEntries = 0;
+                        std::filesystem::path singleSubdir;
+                        for (const auto& entry : std::filesystem::directory_iterator(ctx->tempDir)) {
+                            topLevelEntries++;
+                            if (entry.is_directory()) singleSubdir = entry.path();
+                        }
+                        if (topLevelEntries == 1 && !singleSubdir.empty()) {
+                            auto promotedTemp = std::filesystem::path(IMAGES_PATH) / ("." + ctx->artefactName + ".promoted");
+                            std::filesystem::rename(singleSubdir, promotedTemp);
+                            std::filesystem::remove_all(ctx->tempDir);
+                            ctx->tempDir = promotedTemp;
+                        }
+
+                        // Atomically replace any existing artefact directory
+                        if (std::filesystem::exists(ctx->finalDir)) std::filesystem::remove_all(ctx->finalDir);
+                        std::filesystem::rename(ctx->tempDir, ctx->finalDir);
+
+                        AuditLog::logFileSystemAccess("UPLOAD_ARCHIVE", ctx->finalDir.string(), true, "",
+                            "IDP artefact archive streamed and extracted: " + ctx->originalFilename + " -> " + ctx->artefactName);
+
+                        // Write SHA256 sidecar
+                        if (!sha256Hex.empty()) {
+                            std::filesystem::path sidecarPath = ctx->finalDir;
+                            sidecarPath += ".sha256";
+                            try {
+                                std::ofstream sidecarFile(sidecarPath, std::ios::out | std::ios::trunc);
+                                if (sidecarFile.is_open()) {
+                                    sidecarFile << sha256Hex << "\n";
+                                    sidecarFile.close();
+                                    LOG_INFO << "Wrote IDP archive SHA256 sidecar: " << sidecarPath.string();
+                                }
+                            } catch (const std::exception& e) {
+                                LOG_ERROR << "Failed to write IDP SHA256 sidecar: " << e.what();
+                            }
+                        }
+
+                        // Build success response
+                        auto resp = drogon::HttpResponse::newHttpResponse();
+                        resp->setStatusCode(drogon::k200OK);
+                        resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+                        Json::Value result;
+                        result["success"] = true;
+                        result["message"] = "IDP artefact uploaded and extracted successfully";
+                        result["filename"] = ctx->artefactName;
+                        result["is_idp"] = true;
+                        result["renamed"] = false;
+                        result["sha256"] = sha256Hex;
+
+                        if (isIdpArtefactDirectory(ctx->finalDir)) {
+                            result["analysis"] = analyzeIdpArtefact(ctx->finalDir);
+                        }
+
+                        resp->setBody(result.toStyledString());
+                        ctx->callback(resp);
+                    } else {
+                        // ---- .img post-processing ----
+                        AuditLog::logFileSystemAccess("UPLOAD", ctx->targetPath, true, "",
+                            "Original filename: " + ctx->originalFilename +
+                            (ctx->originalFilename != ctx->finalFilename ? ", renamed to: " + ctx->finalFilename : ""));
+
+                        {
+                            std::lock_guard<std::mutex> lock(sha256Cache_mutex);
+                            sha256Cache.erase(ctx->finalFilename);
+                        }
+
+                        requestSHA256Calculation(ctx->finalFilename);
+                        triggerBootImgGeneration(ctx->finalFilename);
+
+                        auto resp = drogon::HttpResponse::newHttpResponse();
+                        resp->setStatusCode(drogon::k200OK);
+                        resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+                        Json::Value result;
+                        result["success"] = true;
+                        result["is_idp"] = false;
+                        result["filename"] = ctx->finalFilename;
+                        result["renamed"] = (ctx->originalFilename != ctx->finalFilename);
+                        if (ctx->originalFilename != ctx->finalFilename) result["original_filename"] = ctx->originalFilename;
+                        result["message"] = result["renamed"].asBool()
+                            ? "File uploaded successfully (renamed to avoid conflict)"
+                            : "File uploaded successfully";
+                        result["sha256"] = sha256Hex.empty() ? "Calculating..." : sha256Hex;
+                        resp->setBody(result.toStyledString());
+                        ctx->callback(resp);
+                    }
+                }
+            );
+
+            stream->setStreamReader(std::move(reader));
         });
 
         app.registerHandler("/get-boot-package-info", [](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
