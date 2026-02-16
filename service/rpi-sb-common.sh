@@ -593,6 +593,7 @@ copy_kernel_modules_with_deps() {
 
     rpi-modcopy \
         --kernel-version="${_kernel_version}" \
+        --module-dir="${_modules_rel_dir}" \
         --module-file="${_modules_list}" \
         "${_src_basedir}" \
         "${_dst_basedir}"
