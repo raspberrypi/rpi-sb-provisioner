@@ -125,6 +125,22 @@ fi
 EARLY_LOG_DIRECTORY="/var/log/rpi-sb-provisioner/early/${TARGET_DEVICE_PATH}"
 mkdir -p "${EARLY_LOG_DIRECTORY}"
 
+# Create symlinks so the web UI can find pre-fastboot logs while bootstrap is running.
+# The USB endpoint (e.g. "1-1.2") is always a clean path-safe identifier and is stored
+# in the DB, so the web UI can fall back to it when the serial-keyed directory has no logs.
+# When the serial IS a real serial (not a device-path fallback), also symlink by serial.
+# These symlinks are replaced by real files when bootstrap completes (see mv below).
+if [ -n "${TARGET_USB_PATH}" ]; then
+    _endpoint_log_dir="/var/log/rpi-sb-provisioner/${TARGET_USB_PATH}"
+    mkdir -p "${_endpoint_log_dir}"
+    ln -sf "${EARLY_LOG_DIRECTORY}/bootstrap.log" "${_endpoint_log_dir}/bootstrap.log"
+fi
+if [ -n "${TARGET_DEVICE_SERIAL}" ] && [ "${TARGET_DEVICE_SERIAL}" != "${TARGET_DEVICE_PATH}" ]; then
+    _serial_log_dir="/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}"
+    mkdir -p "${_serial_log_dir}"
+    ln -sf "${EARLY_LOG_DIRECTORY}/bootstrap.log" "${_serial_log_dir}/bootstrap.log"
+fi
+
 die() {
     # shellcheck disable=SC2086
     echo "$@" ${DEBUG}
@@ -757,7 +773,7 @@ record_state "${TARGET_DEVICE_SERIAL}" "bootstrap-fastboot-initialisation-starte
 timeout_fatal rpiboot -v -d "${RPI_SB_WORKDIR}" -p "${TARGET_USB_PATH}"
 set +e
 
-if [ -n "${TARGET_DEVICE_SERIAL}" ]; then
+if [ -n "${TARGET_DEVICE_SERIAL}" ] && [ "${TARGET_DEVICE_SERIAL}" != "${TARGET_DEVICE_PATH}" ]; then
     target_log_dir="/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}"
     early_log_dir="${EARLY_LOG_DIRECTORY}"
     
@@ -766,9 +782,25 @@ if [ -n "${TARGET_DEVICE_SERIAL}" ]; then
         mv "${early_log_dir}/metadata" "${target_log_dir}/metadata"
     fi
     mv "${early_log_dir}/bootstrap.log" "${target_log_dir}/bootstrap.log"
+    # Also link into the endpoint-keyed directory so the web UI can find it by either key
+    if [ -n "${TARGET_USB_PATH}" ]; then
+        _endpoint_log_dir="/var/log/rpi-sb-provisioner/${TARGET_USB_PATH}"
+        mkdir -p "${_endpoint_log_dir}"
+        ln -sf "${target_log_dir}/bootstrap.log" "${_endpoint_log_dir}/bootstrap.log"
+    fi
+elif [ -n "${TARGET_USB_PATH}" ]; then
+    # No real serial available - move logs to the endpoint-keyed directory instead
+    target_log_dir="/var/log/rpi-sb-provisioner/${TARGET_USB_PATH}"
+    early_log_dir="${EARLY_LOG_DIRECTORY}"
+    
+    mkdir -p "${target_log_dir}"
+    if [ -d "${early_log_dir}/metadata" ]; then
+        mv "${early_log_dir}/metadata" "${target_log_dir}/metadata"
+    fi
+    mv "${early_log_dir}/bootstrap.log" "${target_log_dir}/bootstrap.log"
 else
-    log "Warning: TARGET_DEVICE_SERIAL is empty, logs will remain in ${EARLY_LOG_DIRECTORY}"
-    echo "[$(date +"%Y-%m-%d %H:%M:%S.$(date +%N | cut -c1-3)")] Warning: TARGET_DEVICE_SERIAL is empty, logs will remain in ${EARLY_LOG_DIRECTORY}" >> "${EARLY_LOG_DIRECTORY}/bootstrap.log"
+    log "Warning: Neither serial nor USB path available, logs will remain in ${EARLY_LOG_DIRECTORY}"
+    echo "[$(date +"%Y-%m-%d %H:%M:%S.$(date +%N | cut -c1-3)")] Warning: Neither serial nor USB path available, logs remain in ${EARLY_LOG_DIRECTORY}" >> "${EARLY_LOG_DIRECTORY}/bootstrap.log"
 fi
 
 announce_stop "fastboot initialisation"

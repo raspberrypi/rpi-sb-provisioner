@@ -1289,49 +1289,58 @@ namespace provisioner {
             // Check if the client accepts HTML
             auto acceptHeader = req->getHeader("Accept");
             if (!acceptHeader.empty() && (acceptHeader.find("text/html") != std::string::npos)) {
-                // Read log files
+                // Read log files, trying serial-keyed directory first, then
+                // falling back to the endpoint/USB-path-keyed directory.
+                // This handles devices where the serial isn't available from the
+                // bootloader and we can only identify by USB path.
                 std::string provisioner_log, bootstrap_log, triage_log;
                 
-                std::string logPath = "/var/log/rpi-sb-provisioner/" + provisioner::utils::sanitize_path_component(device.serial) + "/provisioner.log";
-                std::ifstream provisionerFile(logPath);
-                if (provisionerFile.is_open()) {
-                    // Log file access to audit log
-                    AuditLog::logFileSystemAccess("READ", logPath, true);
-                    
-                    std::stringstream buffer;
-                    buffer << provisionerFile.rdbuf();
-                    provisioner_log = buffer.str();
-                } else {
-                    // Log failed file access to audit log
-                    AuditLog::logFileSystemAccess("READ", logPath, false);
-                }
+                std::string serialDir = "/var/log/rpi-sb-provisioner/" + provisioner::utils::sanitize_path_component(device.serial);
+                std::string endpointDir = "/var/log/rpi-sb-provisioner/" + provisioner::utils::sanitize_path_component(device.port);
+                
+                auto tryReadLog = [](const std::string &primaryDir, const std::string &fallbackDir, const std::string &filename) -> std::string {
+                    for (const auto &dir : {primaryDir, fallbackDir}) {
+                        if (dir.empty()) continue;
+                        std::string path = dir + "/" + filename;
+                        std::ifstream f(path);
+                        if (f.is_open()) {
+                            AuditLog::logFileSystemAccess("READ", path, true);
+                            std::stringstream buf;
+                            buf << f.rdbuf();
+                            return buf.str();
+                        }
+                        AuditLog::logFileSystemAccess("READ", path, false);
+                    }
+                    return {};
+                };
+                
+                provisioner_log = tryReadLog(serialDir, endpointDir, "provisioner.log");
+                bootstrap_log = tryReadLog(serialDir, endpointDir, "bootstrap.log");
+                triage_log = tryReadLog(serialDir, endpointDir, "triage.log");
 
-                logPath = "/var/log/rpi-sb-provisioner/" + provisioner::utils::sanitize_path_component(device.serial) + "/bootstrap.log";
-                std::ifstream bootstrapFile(logPath);
-                if (bootstrapFile.is_open()) {
-                    // Log file access to audit log
-                    AuditLog::logFileSystemAccess("READ", logPath, true);
-                    
-                    std::stringstream buffer;
-                    buffer << bootstrapFile.rdbuf();
-                    bootstrap_log = buffer.str();
-                } else {
-                    // Log failed file access to audit log
-                    AuditLog::logFileSystemAccess("READ", logPath, false);
-                }
-
-                logPath = "/var/log/rpi-sb-provisioner/" + provisioner::utils::sanitize_path_component(device.serial) + "/triage.log";
-                std::ifstream triageFile(logPath);
-                if (triageFile.is_open()) {
-                    // Log file access to audit log
-                    AuditLog::logFileSystemAccess("READ", logPath, true);
-                    
-                    std::stringstream buffer;
-                    buffer << triageFile.rdbuf();
-                    triage_log = buffer.str();
-                } else {
-                    // Log failed file access to audit log
-                    AuditLog::logFileSystemAccess("READ", logPath, false);
+                // Query last 10 state changes for this device
+                std::vector<std::map<std::string, std::string>> stateHistory;
+                {
+                    sqlite3* histDb;
+                    int histRc = sqlite3_open("/srv/rpi-sb-provisioner/state.db", &histDb);
+                    if (histRc == SQLITE_OK) {
+                        sqlite3_stmt* histStmt;
+                        const char* histSql = "SELECT state, ts FROM devices WHERE serial = ? ORDER BY ts DESC LIMIT 10";
+                        histRc = sqlite3_prepare_v2(histDb, histSql, -1, &histStmt, nullptr);
+                        if (histRc == SQLITE_OK) {
+                            sqlite3_bind_text(histStmt, 1, device.serial.c_str(), -1, SQLITE_STATIC);
+                            while (sqlite3_step(histStmt) == SQLITE_ROW) {
+                                const unsigned char* hState = sqlite3_column_text(histStmt, 0);
+                                const unsigned char* hTs = sqlite3_column_text(histStmt, 1);
+                                std::map<std::string, std::string> entry;
+                                entry["state"] = hState ? reinterpret_cast<const char*>(hState) : "";
+                                entry["timestamp"] = hTs ? reinterpret_cast<const char*>(hTs) : "";
+                                stateHistory.push_back(entry);
+                            }
+                            sqlite3_finalize(histStmt);
+                        }
+                        sqlite3_close(histDb);
+                    }
                 }
 
                 // Read special flag status for this device
@@ -1374,11 +1383,16 @@ namespace provisioner {
                 }
 
                 HttpViewData viewData;
-                viewData.insert("device", device);
+                viewData.insert("device.serial", device.serial);
+                viewData.insert("device.port", device.port);
+                viewData.insert("device.ip_address", device.ip_address);
+                viewData.insert("device.state", device.state);
+                viewData.insert("device.image", device.image);
                 viewData.insert("provisioner_log", provisioner_log);
                 viewData.insert("bootstrap_log", bootstrap_log);
                 viewData.insert("triage_log", triage_log);
                 viewData.insert("flags", flagsList);
+                viewData.insert("stateHistory", stateHistory);
                 viewData.insert("currentPage", std::string("devices"));
                 resp = HttpResponse::newHttpViewResponse("device_detail.csp", viewData);
             } else {

@@ -227,6 +227,49 @@
         </div>
     </div>
 
+    <div class="state-history-section" style="background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 24px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.08);">
+        <h2 style="margin: 0 0 6px 0; font-size: 1.25rem; font-weight: 600; color: #333;">State History</h2>
+        <p style="font-size: 0.9rem; color: #666; margin: 0 0 16px 0; padding-bottom: 12px; border-bottom: 2px solid #f0f0f0;">
+            Last 10 recorded state changes for this device.
+        </p>
+        <%c++
+            auto historyData = @@.get<std::vector<std::map<std::string, std::string>>>("stateHistory");
+            if (historyData.empty()) {
+        %>
+        <p style="color: #888; font-style: italic; text-align: center; padding: 12px 0;">No state history recorded.</p>
+        <%c++ } else { %>
+        <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+                <tr>
+                    <th style="text-align: left; padding: 10px 12px; border-bottom: 2px solid #e0e0e0; font-size: 0.85rem; color: #555; text-transform: uppercase; letter-spacing: 0.5px;">Timestamp</th>
+                    <th style="text-align: left; padding: 10px 12px; border-bottom: 2px solid #e0e0e0; font-size: 0.85rem; color: #555; text-transform: uppercase; letter-spacing: 0.5px;">State</th>
+                </tr>
+            </thead>
+            <tbody>
+            <%c++ for (size_t i = 0; i < historyData.size(); ++i) {
+                const auto &entry = historyData[i];
+                std::string hState = entry.at("state");
+                std::string hTimestamp = entry.at("timestamp");
+
+                std::string badgeColor = "#6c757d";
+                if (hState == "complete") badgeColor = "#28a745";
+                else if (hState == "error") badgeColor = "#dc3545";
+                else if (hState == "provisioning") badgeColor = "#007bff";
+                else if (hState == "bootstrap") badgeColor = "#17a2b8";
+                else if (hState == "triage") badgeColor = "#e0a800";
+            %>
+                <tr style="border-bottom: 1px solid #f0f0f0;">
+                    <td style="padding: 10px 12px; font-family: monospace; font-size: 0.9rem; color: #444;"><%c++ $$<<hTimestamp; %></td>
+                    <td style="padding: 10px 12px;">
+                        <span style="display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: 500; color: #fff; background-color: <%c++ $$<<badgeColor; %>;"><%c++ $$<<hState; %></span>
+                    </td>
+                </tr>
+            <%c++ } %>
+            </tbody>
+        </table>
+        <%c++ } %>
+    </div>
+
     <div class="flags-section">
         <h2>Special Flags</h2>
         <p class="section-description">
