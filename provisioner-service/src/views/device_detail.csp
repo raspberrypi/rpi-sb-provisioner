@@ -3,6 +3,197 @@
 <head>
     <title>Device Details - [[device.serial]]</title>
     <%view stylesheet %>
+    <style>
+        /* Special Flags Section */
+        .flags-section {
+            background: #fff;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+
+        .flags-section h2 {
+            margin: 0 0 6px 0;
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #333;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .flags-section .section-description {
+            font-size: 0.9rem;
+            color: #666;
+            margin: 0 0 20px 0;
+            padding-bottom: 12px;
+            border-bottom: 2px solid #f0f0f0;
+        }
+
+        .flag-card {
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            padding: 16px 20px;
+            margin-bottom: 12px;
+            background: #fafafa;
+            transition: border-color 0.2s ease, background-color 0.2s ease;
+        }
+
+        .flag-card.flag-active {
+            border-color: #0066cc;
+            background: #f0f7ff;
+        }
+
+        .flag-card.flag-active-once {
+            border-color: #e0a800;
+            background: #fff9e6;
+        }
+
+        .flag-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .flag-title {
+            font-weight: 600;
+            font-size: 1rem;
+            color: #333;
+        }
+
+        .flag-constraint {
+            display: inline-block;
+            font-size: 0.75rem;
+            padding: 2px 8px;
+            border-radius: 12px;
+            background: #e8f4f8;
+            color: #0c5460;
+            font-weight: 500;
+        }
+
+        .flag-description {
+            font-size: 0.875rem;
+            color: #555;
+            margin-bottom: 12px;
+            line-height: 1.4;
+        }
+
+        .flag-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .flag-mode-group {
+            display: inline-flex;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .flag-mode-group label {
+            display: inline-flex;
+            align-items: center;
+            padding: 6px 14px;
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            background: #fff;
+            border-right: 1px solid #ccc;
+            color: #555;
+            margin: 0;
+            transition: background-color 0.15s, color 0.15s;
+            user-select: none;
+        }
+
+        .flag-mode-group label:last-child {
+            border-right: none;
+        }
+
+        .flag-mode-group label:hover {
+            background: #f0f0f0;
+        }
+
+        .flag-mode-group input[type="radio"] {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .flag-mode-group input[type="radio"]:checked + span {
+            /* parent label will get the active style */
+        }
+
+        .flag-mode-group label.mode-active-off {
+            background: #f5f5f5;
+            color: #333;
+            font-weight: 600;
+        }
+
+        .flag-mode-group label.mode-active-once {
+            background: #ffc107;
+            color: #212529;
+            font-weight: 600;
+        }
+
+        .flag-mode-group label.mode-active-persistent {
+            background: #0066cc;
+            color: #fff;
+            font-weight: 600;
+        }
+
+        .flag-status-indicator {
+            font-size: 0.8rem;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-weight: 500;
+        }
+
+        .flag-status-off {
+            background: #f0f0f0;
+            color: #666;
+        }
+
+        .flag-status-once {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .flag-status-persistent {
+            background: #cce5ff;
+            color: #004085;
+        }
+
+        .flag-saving {
+            opacity: 0.6;
+            pointer-events: none;
+        }
+
+        .flag-feedback {
+            font-size: 0.8rem;
+            margin-left: 8px;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .flag-feedback.visible {
+            opacity: 1;
+        }
+
+        .flag-feedback.success {
+            color: #28a745;
+        }
+
+        .flag-feedback.error {
+            color: #dc3545;
+        }
+    </style>
 </head>
 <body>
     <%view navbar %>
@@ -36,6 +227,68 @@
         </div>
     </div>
 
+    <div class="flags-section">
+        <h2>Special Flags</h2>
+        <p class="section-description">
+            Control special provisioning behaviour for this device. 
+            <strong>One-time</strong> flags are automatically cleared after the next provisioning cycle.
+            <strong>Persistent</strong> flags remain active until manually removed.
+        </p>
+
+        <%c++ 
+            auto flagsData = @@.get<std::vector<std::map<std::string, std::string>>>("flags");
+            for (size_t i = 0; i < flagsData.size(); ++i) {
+                const auto &flag = flagsData[i];
+                std::string fId = flag.at("id");
+                std::string fLabel = flag.at("label");
+                std::string fDesc = flag.at("description");
+                std::string fConstraint = flag.at("constraint");
+                std::string fActive = flag.at("active");
+                std::string fMode = flag.at("mode");
+
+                std::string cardClass = "flag-card";
+                if (fMode == "persistent") cardClass += " flag-active";
+                else if (fMode == "once") cardClass += " flag-active-once";
+
+                std::string statusClass = "flag-status-indicator flag-status-" + fMode;
+                std::string statusLabel = (fMode == "off") ? "Not set" : (fMode == "once") ? "One-time" : "Persistent";
+        %>
+        <div class="<%c++ $$<<cardClass; %>" id="flag-card-<%c++ $$<<fId; %>" data-flag-id="<%c++ $$<<fId; %>">
+            <div class="flag-header">
+                <span class="flag-title"><%c++ $$<<fLabel; %></span>
+                <%c++ if (!fConstraint.empty()) { %>
+                <span class="flag-constraint"><%c++ $$<<fConstraint; %></span>
+                <%c++ } %>
+                <span class="<%c++ $$<<statusClass; %>" id="flag-status-<%c++ $$<<fId; %>"><%c++ $$<<statusLabel; %></span>
+            </div>
+            <div class="flag-description"><%c++ $$<<fDesc; %></div>
+            <div class="flag-controls">
+                <div class="flag-mode-group" role="radiogroup" aria-label="Flag mode for <%c++ $$<<fLabel; %>">
+                    <label class="<%c++ if (fMode == "off") $$<<"mode-active-off"; %>" id="label-<%c++ $$<<fId; %>-off">
+                        <input type="radio" name="flag-<%c++ $$<<fId; %>" value="off"
+                               <%c++ if (fMode == "off") $$<<"checked"; %>
+                               onchange="setFlag('<%c++ $$<<fId; %>', 'off')">
+                        <span>Off</span>
+                    </label>
+                    <label class="<%c++ if (fMode == "once") $$<<"mode-active-once"; %>" id="label-<%c++ $$<<fId; %>-once">
+                        <input type="radio" name="flag-<%c++ $$<<fId; %>" value="once"
+                               <%c++ if (fMode == "once") $$<<"checked"; %>
+                               onchange="setFlag('<%c++ $$<<fId; %>', 'once')">
+                        <span>One-time</span>
+                    </label>
+                    <label class="<%c++ if (fMode == "persistent") $$<<"mode-active-persistent"; %>" id="label-<%c++ $$<<fId; %>-persistent">
+                        <input type="radio" name="flag-<%c++ $$<<fId; %>" value="persistent"
+                               <%c++ if (fMode == "persistent") $$<<"checked"; %>
+                               onchange="setFlag('<%c++ $$<<fId; %>', 'persistent')">
+                        <span>Persistent</span>
+                    </label>
+                </div>
+                <span class="flag-feedback" id="flag-feedback-<%c++ $$<<fId; %>"></span>
+            </div>
+        </div>
+        <%c++ } %>
+    </div>
+
     <div class="log-section">
         <h2>Provisioner Log</h2>
         <div class="log-content">[[provisioner_log]]</div>
@@ -51,5 +304,75 @@
         <div class="log-content">[[triage_log]]</div>
     </div>
     </main>
+
+    <script>
+    var deviceSerial = '[[device.serial]]';
+
+    function setFlag(flagId, mode) {
+        var card = document.getElementById('flag-card-' + flagId);
+        var feedback = document.getElementById('flag-feedback-' + flagId);
+        var statusEl = document.getElementById('flag-status-' + flagId);
+
+        // Add saving state
+        card.classList.add('flag-saving');
+        feedback.textContent = 'Saving...';
+        feedback.className = 'flag-feedback visible';
+
+        fetch('/devices/' + encodeURIComponent(deviceSerial) + '/flags', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ flag: flagId, mode: mode })
+        })
+        .then(function(response) {
+            if (!response.ok) {
+                return response.json().then(function(err) {
+                    throw new Error(err.error || 'Failed to update flag');
+                });
+            }
+            return response.json();
+        })
+        .then(function(data) {
+            card.classList.remove('flag-saving');
+
+            // Update card styling
+            card.className = 'flag-card';
+            if (mode === 'persistent') card.classList.add('flag-active');
+            else if (mode === 'once') card.classList.add('flag-active-once');
+
+            // Update status indicator
+            statusEl.className = 'flag-status-indicator flag-status-' + mode;
+            if (mode === 'off') statusEl.textContent = 'Not set';
+            else if (mode === 'once') statusEl.textContent = 'One-time';
+            else statusEl.textContent = 'Persistent';
+
+            // Update radio button label styles
+            var labels = card.querySelectorAll('.flag-mode-group label');
+            labels.forEach(function(label) {
+                label.className = '';
+            });
+            var activeLabel = document.getElementById('label-' + flagId + '-' + mode);
+            if (activeLabel) {
+                if (mode === 'off') activeLabel.classList.add('mode-active-off');
+                else if (mode === 'once') activeLabel.classList.add('mode-active-once');
+                else if (mode === 'persistent') activeLabel.classList.add('mode-active-persistent');
+            }
+
+            // Show success feedback
+            feedback.textContent = 'Saved';
+            feedback.className = 'flag-feedback visible success';
+            setTimeout(function() {
+                feedback.classList.remove('visible');
+            }, 2000);
+        })
+        .catch(function(err) {
+            card.classList.remove('flag-saving');
+            feedback.textContent = err.message || 'Error';
+            feedback.className = 'flag-feedback visible error';
+            setTimeout(function() {
+                feedback.classList.remove('visible');
+            }, 4000);
+        });
+    }
+    </script>
 </body>
-</html> 
+</html>
