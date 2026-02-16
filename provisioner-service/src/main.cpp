@@ -499,6 +499,7 @@ int main(int argc, char* argv[])
     .setLogLevel(logLevel)
     .addListener(listenerAddress, listenerPort) // HTTP listener
     .setClientMaxBodySize(std::numeric_limits<size_t>::max())
+    .enableRequestStream()
     .setThreadNum(nthreads)
     .setUploadPath(uploadPath)
     .setDocumentRoot(staticPath);  // Set static files path
