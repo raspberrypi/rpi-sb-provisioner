@@ -1850,6 +1850,14 @@ namespace provisioner {
                 return filename;
             };
 
+            // Helper: strip compression extension from .img.{gz,xz,zst} -> .img
+            auto stripImgCompressionExtension = [&endsWith](const std::string& filename, const std::string& lowerFilename) -> std::string {
+                if (endsWith(lowerFilename, ".img.gz"))  return filename.substr(0, filename.size() - 3);
+                if (endsWith(lowerFilename, ".img.xz"))  return filename.substr(0, filename.size() - 3);
+                if (endsWith(lowerFilename, ".img.zst")) return filename.substr(0, filename.size() - 4);
+                return filename;
+            };
+
             // ---- Non-stream fallback (if streaming is disabled) ----
             if (!stream) {
                 LOG_WARN << "Request stream not available, falling back to buffered upload";
@@ -1906,13 +1914,22 @@ namespace provisioner {
 
             // ---- Streaming upload path ----
 
-            // Early disk space check using Content-Length header
+            // Early disk space check using Content-Length header.
+            // This is a baseline check -- for compressed images, the worker thread
+            // performs exact pre-allocation via posix_fallocate after reading the
+            // container metadata (xz/zstd), or relies on this heuristic (gzip).
             size_t contentLength = req->realContentLength();
             if (contentLength > 0) {
                 auto availableSpace = getAvailableDiskSpace(IMAGES_PATH);
-                if (availableSpace < contentLength) {
-                    LOG_ERROR << "Insufficient disk space for upload: need " << contentLength
-                              << " bytes, have " << availableSpace;
+                // Use 5x multiplier to account for possible compression.
+                // At this point we don't know if the upload is compressed or not
+                // (the filename arrives later in the multipart headers), so we
+                // apply the multiplier conservatively. For uncompressed .img
+                // uploads this means we require 5x headroom, which is acceptable.
+                size_t spaceNeeded = contentLength * 5;
+                if (availableSpace < spaceNeeded) {
+                    LOG_ERROR << "Insufficient disk space for upload: need ~" << spaceNeeded
+                              << " bytes (5x Content-Length), have " << availableSpace;
                     stream->setStreamReader(drogon::RequestStreamReader::newNullReader());
                     auto resp = provisioner::utils::createErrorResponse(
                         req, "Insufficient disk space for upload",
@@ -1928,6 +1945,7 @@ namespace provisioner {
                 std::string originalFilename;
                 std::string finalFilename;
                 bool isArchive = false;
+                bool isCompressedImg = false;
                 bool hadError = false;
                 std::string errorMessage;
                 drogon::HttpStatusCode errorCode = drogon::k500InternalServerError;
@@ -1937,7 +1955,7 @@ namespace provisioner {
                 size_t totalBytesWritten = 0;
                 std::string targetPath;
 
-                // Archive extraction state (libarchive producer-consumer)
+                // Archive / compressed-img shared state (libarchive producer-consumer)
                 std::string artefactName;
                 std::filesystem::path tempDir;
                 std::filesystem::path finalDir;
@@ -1950,9 +1968,15 @@ namespace provisioner {
                 bool extractionOk = false;
                 std::string extractionError;
 
-                // SHA256 computed inline on the raw upload data
+                // SHA256 computed inline on the raw upload data (archives)
+                // For .img and compressed .img, SHA256 is on the decompressed data
                 SHA256_CTX sha256Ctx;
                 bool sha256Initialized = false;
+
+                // SHA256 computed in worker thread on decompressed data (compressed .img only)
+                SHA256_CTX workerSha256Ctx;
+                bool workerSha256Initialized = false;
+                std::string workerSha256Result;
 
                 // Response plumbing
                 std::function<void(const drogon::HttpResponsePtr &)> callback;
@@ -1985,7 +2009,7 @@ namespace provisioner {
             auto reader = drogon::RequestStreamReader::newMultipartReader(
                 req,
                 // ---- headerCb: called when a new multipart part header is parsed ----
-                [ctx, endsWith, generateUniqueFilename, stripArchiveExtension, archiveReadCb](drogon::MultipartHeader &&header) {
+                [ctx, endsWith, generateUniqueFilename, stripArchiveExtension, stripImgCompressionExtension, archiveReadCb](drogon::MultipartHeader &&header) {
                     if (ctx->hadError) return;
 
                     ctx->originalFilename = header.filename;
@@ -1999,9 +2023,16 @@ namespace provisioner {
                                      endsWith(lowerFilename, ".tar.xz") ||
                                      endsWith(lowerFilename, ".tar.zst");
 
-                    // Initialize inline SHA256
-                    SHA256_Init(&ctx->sha256Ctx);
-                    ctx->sha256Initialized = true;
+                    ctx->isCompressedImg = endsWith(lowerFilename, ".img.gz") ||
+                                           endsWith(lowerFilename, ".img.xz") ||
+                                           endsWith(lowerFilename, ".img.zst");
+
+                    // Initialize inline SHA256 for archives (hashes the compressed stream)
+                    // For plain .img and compressed .img, SHA256 is on decompressed data
+                    if (ctx->isArchive) {
+                        SHA256_Init(&ctx->sha256Ctx);
+                        ctx->sha256Initialized = true;
+                    }
 
                     if (ctx->isArchive) {
                         // --- Archive streaming path ---
@@ -2084,12 +2115,118 @@ namespace provisioner {
                             archive_write_free(ext);
                             archive_read_free(a);
                         });
+                    } else if (ctx->isCompressedImg) {
+                        // --- Compressed .img streaming path ---
+                        // Decompress on-the-fly via libarchive format_raw, write plain .img
+                        std::string imgFilename = stripImgCompressionExtension(ctx->originalFilename, lowerFilename);
+                        ctx->finalFilename = generateUniqueFilename(imgFilename, IMAGES_PATH);
+                        ctx->targetPath = (std::filesystem::path(IMAGES_PATH) / ctx->finalFilename).string();
+
+                        LOG_INFO << "Streaming compressed .img upload: " << ctx->originalFilename
+                                 << " -> " << ctx->finalFilename;
+
+                        ctx->fd = ::open(ctx->targetPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                        if (ctx->fd < 0) {
+                            ctx->hadError = true;
+                            ctx->errorMessage = "Failed to open target file: " + std::string(strerror(errno));
+                            return;
+                        }
+
+                        // Spawn decompression worker thread
+                        ctx->extractionThread = std::thread([ctx, archiveReadCb]() {
+                            struct archive *a = archive_read_new();
+                            archive_read_support_filter_gzip(a);
+                            archive_read_support_filter_xz(a);
+                            archive_read_support_filter_zstd(a);
+                            archive_read_support_format_raw(a);
+
+                            if (archive_read_open(a, ctx.get(), nullptr, archiveReadCb, nullptr) != ARCHIVE_OK) {
+                                ctx->extractionError = "Failed to open compressed stream: " + std::string(archive_error_string(a));
+                                archive_read_free(a);
+                                return;
+                            }
+
+                            struct archive_entry *entry;
+                            if (archive_read_next_header(a, &entry) != ARCHIVE_OK) {
+                                ctx->extractionError = "Failed to read compressed stream header: " + std::string(archive_error_string(a));
+                                archive_read_free(a);
+                                return;
+                            }
+
+                            // Try to pre-allocate using the decompressed size from container metadata.
+                            // xz and zstd embed the uncompressed size; gzip's ISIZE is uint32_t
+                            // and wraps at 4 GiB, so we never trust it for pre-allocation.
+                            la_int64_t entrySize = archive_entry_size(entry);
+                            int filterCode = archive_filter_code(a, 0);
+                            if (entrySize > 0 && filterCode != ARCHIVE_FILTER_GZIP) {
+                                int fa_ret = posix_fallocate(ctx->fd, 0, static_cast<off_t>(entrySize));
+                                if (fa_ret != 0) {
+                                    ctx->extractionError = "Failed to pre-allocate disk space for decompressed image: " + std::string(strerror(fa_ret));
+                                    ctx->errorCode = drogon::k507InsufficientStorage;
+                                    ctx->hadError = true;
+                                    archive_read_free(a);
+                                    return;
+                                }
+                                LOG_INFO << "Pre-allocated " << entrySize << " bytes for decompressed image";
+                            }
+
+                            // Initialize SHA256 for the decompressed data
+                            SHA256_Init(&ctx->workerSha256Ctx);
+                            ctx->workerSha256Initialized = true;
+
+                            // Read decompressed data blocks and write to disk
+                            const void *buff;
+                            size_t size;
+                            la_int64_t offset;
+                            int r;
+                            while ((r = archive_read_data_block(a, &buff, &size, &offset)) == ARCHIVE_OK) {
+                                SHA256_Update(&ctx->workerSha256Ctx, buff, size);
+
+                                const char *ptr = static_cast<const char*>(buff);
+                                size_t remaining = size;
+                                while (remaining > 0) {
+                                    ssize_t written = ::write(ctx->fd, ptr, remaining);
+                                    if (written < 0) {
+                                        if (errno == EINTR) continue;
+                                        ctx->extractionError = "Write failed: " + std::string(strerror(errno));
+                                        if (errno == ENOSPC) ctx->errorCode = drogon::k507InsufficientStorage;
+                                        ctx->hadError = true;
+                                        archive_read_free(a);
+                                        return;
+                                    }
+                                    ptr += written;
+                                    remaining -= static_cast<size_t>(written);
+                                }
+                                ctx->totalBytesWritten += size;
+                            }
+
+                            if (r != ARCHIVE_EOF) {
+                                ctx->extractionError = "Decompression error: " + std::string(archive_error_string(a));
+                                archive_read_free(a);
+                                return;
+                            }
+
+                            // Finalize SHA256 in the worker
+                            unsigned char hash[SHA256_DIGEST_LENGTH];
+                            SHA256_Final(hash, &ctx->workerSha256Ctx);
+                            std::ostringstream oss;
+                            for (int i = 0; i < SHA256_DIGEST_LENGTH; ++i)
+                                oss << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(hash[i]);
+                            ctx->workerSha256Result = oss.str();
+
+                            ctx->extractionOk = true;
+                            archive_read_free(a);
+                        });
                     } else {
                         // --- .img direct-write path ---
                         ctx->finalFilename = generateUniqueFilename(ctx->originalFilename, IMAGES_PATH);
                         ctx->targetPath = (std::filesystem::path(IMAGES_PATH) / ctx->finalFilename).string();
 
                         LOG_INFO << "Streaming .img upload: " << ctx->originalFilename << " -> " << ctx->finalFilename;
+
+                        // Initialize inline SHA256 for plain .img
+                        SHA256_Init(&ctx->sha256Ctx);
+                        ctx->sha256Initialized = true;
 
                         ctx->fd = ::open(ctx->targetPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
                         if (ctx->fd < 0) {
@@ -2119,8 +2256,8 @@ namespace provisioner {
 
                     if (length == 0) {
                         // Part complete
-                        if (ctx->isArchive) {
-                            // Signal EOF to the extraction thread
+                        if (ctx->isArchive || ctx->isCompressedImg) {
+                            // Signal EOF to the extraction/decompression thread
                             {
                                 std::lock_guard<std::mutex> lock(ctx->bufferMutex);
                                 ctx->streamFinished = true;
@@ -2137,12 +2274,14 @@ namespace provisioner {
                         return;
                     }
 
-                    // Update inline SHA256
+                    // Update inline SHA256 for archives (hashes compressed stream)
+                    // and plain .img (hashes raw data). Compressed .img computes
+                    // SHA256 on decompressed data inside the worker thread instead.
                     if (ctx->sha256Initialized) {
                         SHA256_Update(&ctx->sha256Ctx, data, length);
                     }
 
-                    if (ctx->isArchive) {
+                    if (ctx->isArchive || ctx->isCompressedImg) {
                         // Push chunk to the producer-consumer buffer for libarchive
                         {
                             std::lock_guard<std::mutex> lock(ctx->bufferMutex);
@@ -2181,21 +2320,25 @@ namespace provisioner {
                         sha256Hex = oss.str();
                     }
 
+                    // Helper: signal the worker thread and clean up on error
+                    auto signalWorkerAndCleanup = [&ctx]() {
+                        if (ctx->isArchive || ctx->isCompressedImg) {
+                            { std::lock_guard<std::mutex> lock(ctx->bufferMutex); ctx->streamFinished = true; }
+                            ctx->bufferCv.notify_one();
+                            if (ctx->extractionThread.joinable()) ctx->extractionThread.join();
+                            if (ctx->isArchive && std::filesystem::exists(ctx->tempDir))
+                                std::filesystem::remove_all(ctx->tempDir);
+                        }
+                        if (!ctx->targetPath.empty()) ::unlink(ctx->targetPath.c_str());
+                    };
+
                     // Handle stream-level errors
                     if (ex) {
                         try { std::rethrow_exception(ex); }
                         catch (const drogon::StreamError& e) { LOG_ERROR << "Stream error: " << e.what(); }
                         catch (const std::exception& e) { LOG_ERROR << "Upload stream error: " << e.what(); }
 
-                        // Clean up partial files
-                        if (!ctx->isArchive && !ctx->targetPath.empty()) ::unlink(ctx->targetPath.c_str());
-                        if (ctx->isArchive && std::filesystem::exists(ctx->tempDir)) {
-                            // Signal extraction thread to stop, then clean up
-                            { std::lock_guard<std::mutex> lock(ctx->bufferMutex); ctx->streamFinished = true; }
-                            ctx->bufferCv.notify_one();
-                            if (ctx->extractionThread.joinable()) ctx->extractionThread.join();
-                            std::filesystem::remove_all(ctx->tempDir);
-                        }
+                        signalWorkerAndCleanup();
 
                         auto resp = provisioner::utils::createErrorResponse(
                             ctx->req, "Upload stream failed", drogon::k400BadRequest,
@@ -2206,13 +2349,7 @@ namespace provisioner {
 
                     // Handle write errors detected during streaming
                     if (ctx->hadError) {
-                        if (!ctx->isArchive && !ctx->targetPath.empty()) ::unlink(ctx->targetPath.c_str());
-                        if (ctx->isArchive) {
-                            { std::lock_guard<std::mutex> lock(ctx->bufferMutex); ctx->streamFinished = true; }
-                            ctx->bufferCv.notify_one();
-                            if (ctx->extractionThread.joinable()) ctx->extractionThread.join();
-                            if (std::filesystem::exists(ctx->tempDir)) std::filesystem::remove_all(ctx->tempDir);
-                        }
+                        signalWorkerAndCleanup();
                         auto resp = provisioner::utils::createErrorResponse(
                             ctx->req, ctx->errorMessage, ctx->errorCode,
                             "Upload Error", "UPLOAD_WRITE_ERROR");
@@ -2313,6 +2450,58 @@ namespace provisioner {
                             result["analysis"] = analyzeIdpArtefact(ctx->finalDir);
                         }
 
+                        resp->setBody(result.toStyledString());
+                        ctx->callback(resp);
+                    } else if (ctx->isCompressedImg) {
+                        // ---- Compressed .img post-processing ----
+                        if (ctx->extractionThread.joinable()) ctx->extractionThread.join();
+
+                        if (!ctx->extractionOk) {
+                            LOG_ERROR << "Decompression failed: " << ctx->extractionError;
+                            if (!ctx->targetPath.empty()) ::unlink(ctx->targetPath.c_str());
+                            auto resp = provisioner::utils::createErrorResponse(
+                                ctx->req, "Failed to decompress image: " + ctx->extractionError,
+                                ctx->errorCode, "Decompression Error", "DECOMPRESS_ERROR");
+                            ctx->callback(resp);
+                            return;
+                        }
+
+                        // Trim the file to actual decompressed size
+                        if (ctx->fd >= 0) {
+                            if (::ftruncate(ctx->fd, static_cast<off_t>(ctx->totalBytesWritten)) != 0) {
+                                LOG_WARN << "ftruncate failed: " << strerror(errno);
+                            }
+                            ::close(ctx->fd);
+                            ctx->fd = -1;
+                        }
+
+                        AuditLog::logFileSystemAccess("UPLOAD", ctx->targetPath, true, "",
+                            "Compressed image decompressed: " + ctx->originalFilename + " -> " + ctx->finalFilename);
+
+                        {
+                            std::lock_guard<std::mutex> lock(sha256Cache_mutex);
+                            sha256Cache.erase(ctx->finalFilename);
+                        }
+
+                        // Store the worker-computed SHA256 in the cache directly
+                        if (!ctx->workerSha256Result.empty()) {
+                            std::lock_guard<std::mutex> lock(sha256Cache_mutex);
+                            sha256Cache[ctx->finalFilename] = {ctx->workerSha256Result, SHA256Status::COMPLETE};
+                        }
+
+                        triggerBootImgGeneration(ctx->finalFilename);
+
+                        auto resp = drogon::HttpResponse::newHttpResponse();
+                        resp->setStatusCode(drogon::k200OK);
+                        resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+                        Json::Value result;
+                        result["success"] = true;
+                        result["is_idp"] = false;
+                        result["filename"] = ctx->finalFilename;
+                        result["renamed"] = (ctx->originalFilename != (ctx->finalFilename));
+                        if (ctx->originalFilename != ctx->finalFilename) result["original_filename"] = ctx->originalFilename;
+                        result["message"] = "Compressed image uploaded and decompressed successfully";
+                        result["sha256"] = ctx->workerSha256Result.empty() ? "Calculating..." : ctx->workerSha256Result;
                         resp->setBody(result.toStyledString());
                         ctx->callback(resp);
                     } else {

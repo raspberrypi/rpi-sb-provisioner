@@ -867,7 +867,7 @@
         <h2>Upload New Image</h2>
         <form class="upload-form" id="uploadForm" enctype="multipart/form-data">
             <div class="upload-row">
-                <input type="file" name="image" accept=".img,.tar.gz,.tgz,.tar.xz,.tar.zst" required>
+                <input type="file" name="image" accept=".img,.img.gz,.img.xz,.img.zst,.tar.gz,.tgz,.tar.xz,.tar.zst" required>
                 <div class="progress-container" style="display: none;">
                     <div class="progress-bar">
                         <div class="progress-fill"></div>

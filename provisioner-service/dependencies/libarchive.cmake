@@ -26,7 +26,7 @@ set(ARCHIVE_BUILD_EXAMPLES OFF CACHE BOOL "")
 set(ENABLE_ZSTD ON CACHE BOOL "")
 set(ENABLE_LZMA ON CACHE BOOL "")
 set(POSIX_REGEX_LIB "libc" CACHE STRING "" FORCE)
-set(LIBARCHIVE_VERSION "3.8.4")
+set(LIBARCHIVE_VERSION "3.8.5")
 
 # Patch to improve ZSTD static detection (from rpi-imager)
 set(LIBARCHIVE_PATCH_FILE "${CMAKE_CURRENT_BINARY_DIR}/libarchive_zstd_patch.cmake")
