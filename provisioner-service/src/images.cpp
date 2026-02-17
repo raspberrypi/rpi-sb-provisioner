@@ -27,7 +27,6 @@
 #include <sstream>
 #include <iomanip>
 #include <openssl/evp.h>
-#include <openssl/sha.h>
 #include <mutex>
 #include <unordered_map>
 #include <queue>
@@ -546,20 +545,14 @@ namespace provisioner {
 
     // Calculate SHA256 of a file
     std::string calculateSHA256(const std::filesystem::path& imagePath, const std::string& imageName, std::shared_ptr<SHA256CancellationToken> cancellationToken) {
-        // Use smaller chunks (1MB) for more responsive cancellation
-        constexpr size_t CHUNK_SIZE = 1 * 1024 * 1024; 
-        // For very large files, process in even smaller sub-chunks within each chunk
-        constexpr size_t SUB_CHUNK_SIZE = 256 * 1024; // 256KB sub-chunks
+        constexpr size_t CHUNK_SIZE = 1 * 1024 * 1024;
+        constexpr size_t SUB_CHUNK_SIZE = 256 * 1024;
         std::vector<unsigned char> buffer(CHUNK_SIZE);
-        unsigned char hash[EVP_MAX_MD_SIZE];
-        unsigned int hash_len;
-        
-        EVP_MD_CTX* mdctx = EVP_MD_CTX_new();
-        EVP_DigestInit_ex(mdctx, EVP_sha256(), nullptr);
+
+        provisioner::utils::SHA256Hasher hasher;
         
         std::ifstream file(imagePath, std::ios::binary);
         if (!file) {
-            EVP_MD_CTX_free(mdctx);
             return "file-read-error";
         }
         
@@ -568,7 +561,6 @@ namespace provisioner {
         std::streamsize fileSize = file.tellg();
         file.seekg(0, std::ios::beg);
         
-        // Log start of calculation
         LOG_INFO << "Starting SHA256 calculation for " << imagePath.filename().string() 
                  << " (" << (fileSize / (1024 * 1024)) << " MB)";
         
@@ -576,12 +568,9 @@ namespace provisioner {
         int lastProgressPercent = 0;
         
         while (file) {
-            // Check for cancellation before each chunk
             if (cancellationToken) {
                 if (cancellationToken->is_cancelled()) {
                     LOG_INFO << "SHA256 calculation cancelled for " << imageName;
-                    EVP_MD_CTX_free(mdctx);
-                    file.close();
                     return "calculation-cancelled";
                 }
             } else {
@@ -591,53 +580,43 @@ namespace provisioner {
             file.read(reinterpret_cast<char*>(buffer.data()), CHUNK_SIZE);
             std::streamsize bytes_read = file.gcount();
             if (bytes_read > 0) {
-                // Process in smaller sub-chunks for more frequent cancellation checks
                 std::streamsize processed = 0;
                 while (processed < bytes_read) {
-                    // Check for cancellation every sub-chunk
                     if (cancellationToken && cancellationToken->is_cancelled()) {
                         LOG_INFO << "SHA256 calculation cancelled during sub-chunk processing for " << imageName;
-                        EVP_MD_CTX_free(mdctx);
-                        file.close();
                         return "calculation-cancelled";
                     }
                     
                     std::streamsize sub_chunk_size = std::min(static_cast<std::streamsize>(SUB_CHUNK_SIZE), bytes_read - processed);
-                    EVP_DigestUpdate(mdctx, buffer.data() + processed, sub_chunk_size);
+                    hasher.update(buffer.data() + processed, sub_chunk_size);
                     processed += sub_chunk_size;
                 }
                 
                 totalBytesRead += bytes_read;
                 
-                // Log progress every 10%
                 if (fileSize > 0) {
                     int progressPercent = static_cast<int>((totalBytesRead * 100) / fileSize);
                     double progressFraction = static_cast<double>(totalBytesRead) / fileSize;
                     
                     if (progressPercent >= lastProgressPercent + 5) {
-                        lastProgressPercent = (progressPercent / 5) * 5; // Round to nearest 5%
+                        lastProgressPercent = (progressPercent / 5) * 5;
                         LOG_INFO << "SHA256 calculation: " << lastProgressPercent << "% complete for "
                                  << imagePath.filename().string();
                         
-                        // Update the progress in the cache
                         if (!imageName.empty()) {
                             std::lock_guard<std::mutex> lock(sha256Cache_mutex);
                             auto it = sha256Cache.find(imageName);
                             if (it != sha256Cache.end() && it->second.status == SHA256Status::PENDING) {
-                                // Update progress while keeping other fields the same
                                 SHA256Result updatedResult("", SHA256Status::PENDING, progressFraction);
                                 
-                                // Preserve the timestamp if it exists
                                 if (it->second.timestamp.has_value()) {
                                     updatedResult.timestamp = it->second.timestamp;
                                 }
                                 
-                                // CRITICAL: Preserve the cancellation token!
                                 updatedResult.cancellation_token = it->second.cancellation_token;
                                 
                                 sha256Cache.insert_or_assign(imageName, updatedResult);
                                 
-                                // Broadcast progress update to connected WebSocket clients
                                 SHA256WebSocketController::broadcastUpdate(imageName, updatedResult);
                             }
                         }
@@ -646,24 +625,12 @@ namespace provisioner {
             }
         }
         
-        // Final check for cancellation before completing
         if (cancellationToken && cancellationToken->is_cancelled()) {
             LOG_INFO << "SHA256 calculation cancelled at completion for " << imageName;
-            EVP_MD_CTX_free(mdctx);
-            file.close();
             return "calculation-cancelled";
         }
         
-        EVP_DigestFinal_ex(mdctx, hash, &hash_len);
-        EVP_MD_CTX_free(mdctx);
-        file.close();
-        
-        std::stringstream ss;
-        for(unsigned int i = 0; i < hash_len; i++) {
-            ss << std::hex << std::setw(2) << std::setfill('0') << (int)hash[i];
-        }
-        std::string sha256 = ss.str();
-        std::memset(hash, 0, EVP_MAX_MD_SIZE);
+        std::string sha256 = hasher.finalize();
         
         LOG_INFO << "Completed SHA256 calculation for " << imagePath.filename().string();
         
@@ -1970,12 +1937,10 @@ namespace provisioner {
 
                 // SHA256 computed inline on the raw upload data (archives)
                 // For .img and compressed .img, SHA256 is on the decompressed data
-                SHA256_CTX sha256Ctx;
-                bool sha256Initialized = false;
+                std::unique_ptr<provisioner::utils::SHA256Hasher> sha256Hasher;
 
                 // SHA256 computed in worker thread on decompressed data (compressed .img only)
-                SHA256_CTX workerSha256Ctx;
-                bool workerSha256Initialized = false;
+                std::unique_ptr<provisioner::utils::SHA256Hasher> workerSha256Hasher;
                 std::string workerSha256Result;
 
                 // Response plumbing
@@ -2030,8 +1995,7 @@ namespace provisioner {
                     // Initialize inline SHA256 for archives (hashes the compressed stream)
                     // For plain .img and compressed .img, SHA256 is on decompressed data
                     if (ctx->isArchive) {
-                        SHA256_Init(&ctx->sha256Ctx);
-                        ctx->sha256Initialized = true;
+                        ctx->sha256Hasher = std::make_unique<provisioner::utils::SHA256Hasher>();
                     }
 
                     if (ctx->isArchive) {
@@ -2171,8 +2135,7 @@ namespace provisioner {
                             }
 
                             // Initialize SHA256 for the decompressed data
-                            SHA256_Init(&ctx->workerSha256Ctx);
-                            ctx->workerSha256Initialized = true;
+                            ctx->workerSha256Hasher = std::make_unique<provisioner::utils::SHA256Hasher>();
 
                             // Read decompressed data blocks and write to disk
                             const void *buff;
@@ -2180,7 +2143,7 @@ namespace provisioner {
                             la_int64_t offset;
                             int r;
                             while ((r = archive_read_data_block(a, &buff, &size, &offset)) == ARCHIVE_OK) {
-                                SHA256_Update(&ctx->workerSha256Ctx, buff, size);
+                                ctx->workerSha256Hasher->update(buff, size);
 
                                 const char *ptr = static_cast<const char*>(buff);
                                 size_t remaining = size;
@@ -2207,12 +2170,7 @@ namespace provisioner {
                             }
 
                             // Finalize SHA256 in the worker
-                            unsigned char hash[SHA256_DIGEST_LENGTH];
-                            SHA256_Final(hash, &ctx->workerSha256Ctx);
-                            std::ostringstream oss;
-                            for (int i = 0; i < SHA256_DIGEST_LENGTH; ++i)
-                                oss << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(hash[i]);
-                            ctx->workerSha256Result = oss.str();
+                            ctx->workerSha256Result = ctx->workerSha256Hasher->finalize();
 
                             ctx->extractionOk = true;
                             archive_read_free(a);
@@ -2225,8 +2183,7 @@ namespace provisioner {
                         LOG_INFO << "Streaming .img upload: " << ctx->originalFilename << " -> " << ctx->finalFilename;
 
                         // Initialize inline SHA256 for plain .img
-                        SHA256_Init(&ctx->sha256Ctx);
-                        ctx->sha256Initialized = true;
+                        ctx->sha256Hasher = std::make_unique<provisioner::utils::SHA256Hasher>();
 
                         ctx->fd = ::open(ctx->targetPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
                         if (ctx->fd < 0) {
@@ -2277,8 +2234,8 @@ namespace provisioner {
                     // Update inline SHA256 for archives (hashes compressed stream)
                     // and plain .img (hashes raw data). Compressed .img computes
                     // SHA256 on decompressed data inside the worker thread instead.
-                    if (ctx->sha256Initialized) {
-                        SHA256_Update(&ctx->sha256Ctx, data, length);
+                    if (ctx->sha256Hasher) {
+                        ctx->sha256Hasher->update(data, length);
                     }
 
                     if (ctx->isArchive || ctx->isCompressedImg) {
@@ -2311,13 +2268,8 @@ namespace provisioner {
                 [ctx, endsWith](std::exception_ptr ex) {
                     // Finalize inline SHA256
                     std::string sha256Hex;
-                    if (ctx->sha256Initialized) {
-                        unsigned char hash[SHA256_DIGEST_LENGTH];
-                        SHA256_Final(hash, &ctx->sha256Ctx);
-                        std::ostringstream oss;
-                        for (int i = 0; i < SHA256_DIGEST_LENGTH; ++i)
-                            oss << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(hash[i]);
-                        sha256Hex = oss.str();
+                    if (ctx->sha256Hasher) {
+                        sha256Hex = ctx->sha256Hasher->finalize();
                     }
 
                     // Helper: signal the worker thread and clean up on error
@@ -2486,7 +2438,8 @@ namespace provisioner {
                         // Store the worker-computed SHA256 in the cache directly
                         if (!ctx->workerSha256Result.empty()) {
                             std::lock_guard<std::mutex> lock(sha256Cache_mutex);
-                            sha256Cache[ctx->finalFilename] = {ctx->workerSha256Result, SHA256Status::COMPLETE};
+                            sha256Cache.insert_or_assign(ctx->finalFilename,
+                                SHA256Result(ctx->workerSha256Result, SHA256Status::COMPLETE));
                         }
 
                         triggerBootImgGeneration(ctx->finalFilename);

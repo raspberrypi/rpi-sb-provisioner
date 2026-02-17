@@ -867,7 +867,7 @@
         <h2>Upload New Image</h2>
         <form class="upload-form" id="uploadForm" enctype="multipart/form-data">
             <div class="upload-row">
-                <input type="file" name="image" accept=".img,.img.gz,.img.xz,.img.zst,.tar.gz,.tgz,.tar.xz,.tar.zst" required>
+                <input type="file" name="image" required>
                 <div class="progress-container" style="display: none;">
                     <div class="progress-bar">
                         <div class="progress-fill"></div>
@@ -1116,6 +1116,22 @@
                 }
                 
                 const file = fileInput.files[0];
+                const fileName = file.name.toLowerCase();
+
+                const allowedExtensions = [
+                    '.img',
+                    '.img.gz', '.img.xz', '.img.zst',
+                    '.tar.gz', '.tgz', '.tar.xz', '.tar.zst'
+                ];
+                const isAllowed = allowedExtensions.some(ext => fileName.endsWith(ext));
+                if (!isAllowed) {
+                    showMessage(
+                        'Unsupported file type. Allowed: ' + allowedExtensions.join(', '),
+                        true
+                    );
+                    return;
+                }
+
                 const formData = new FormData();
                 formData.append('image', file);
                 

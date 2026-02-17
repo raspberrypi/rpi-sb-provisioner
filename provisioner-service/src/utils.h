@@ -2,7 +2,10 @@
 
 #include <drogon/HttpResponse.h>
 #include <drogon/HttpTypes.h>
+#include <openssl/evp.h>
 #include <string>
+#include <sstream>
+#include <iomanip>
 #include <regex>
 #include <optional>
 #include <map>
@@ -14,6 +17,47 @@
 
 namespace provisioner {
     namespace utils {
+
+        /**
+         * RAII wrapper for incremental SHA256 hashing using the OpenSSL 3.0 EVP API.
+         *
+         * Usage:
+         *   SHA256Hasher hasher;
+         *   hasher.update(data1, len1);
+         *   hasher.update(data2, len2);
+         *   std::string hex = hasher.finalize();
+         */
+        class SHA256Hasher {
+            EVP_MD_CTX *ctx_;
+        public:
+            SHA256Hasher() : ctx_(EVP_MD_CTX_new()) {
+                EVP_DigestInit_ex(ctx_, EVP_sha256(), nullptr);
+            }
+            ~SHA256Hasher() { if (ctx_) EVP_MD_CTX_free(ctx_); }
+
+            SHA256Hasher(const SHA256Hasher&) = delete;
+            SHA256Hasher& operator=(const SHA256Hasher&) = delete;
+            SHA256Hasher(SHA256Hasher&& o) noexcept : ctx_(o.ctx_) { o.ctx_ = nullptr; }
+            SHA256Hasher& operator=(SHA256Hasher&& o) noexcept {
+                if (ctx_) EVP_MD_CTX_free(ctx_);
+                ctx_ = o.ctx_; o.ctx_ = nullptr;
+                return *this;
+            }
+
+            void update(const void *data, size_t len) {
+                EVP_DigestUpdate(ctx_, data, len);
+            }
+
+            std::string finalize() {
+                unsigned char hash[EVP_MAX_MD_SIZE];
+                unsigned int len = 0;
+                EVP_DigestFinal_ex(ctx_, hash, &len);
+                std::ostringstream oss;
+                for (unsigned int i = 0; i < len; ++i)
+                    oss << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(hash[i]);
+                return oss.str();
+            }
+        };
         
         // ===== Configuration Paths =====
         // Package defaults are read first, then user config overrides

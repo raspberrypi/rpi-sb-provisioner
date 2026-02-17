@@ -4,8 +4,6 @@
 #include <fstream>
 #include <sstream>
 #include <iomanip>
-#include <openssl/evp.h>
-#include <openssl/sha.h>
 #include <drogon/drogon.h>
 
 namespace provisioner {
@@ -87,30 +85,20 @@ namespace provisioner {
             }
 
             // Calculate SHA256
-            EVP_MD_CTX *mdctx = EVP_MD_CTX_new();
-            const EVP_MD *md = EVP_sha256();
-            unsigned char hash[EVP_MAX_MD_SIZE];
-            unsigned int hash_len;
             char buffer[4096];
-            
+
             std::ifstream file(fullPath, std::ios::binary);
             if (file) {
-                EVP_DigestInit_ex(mdctx, md, nullptr);
-                
+                provisioner::utils::SHA256Hasher hasher;
+
                 while (file.read(buffer, sizeof(buffer))) {
-                    EVP_DigestUpdate(mdctx, buffer, file.gcount());
+                    hasher.update(buffer, file.gcount());
                 }
                 if (file.gcount() > 0) {
-                    EVP_DigestUpdate(mdctx, buffer, file.gcount());
+                    hasher.update(buffer, file.gcount());
                 }
-                
-                EVP_DigestFinal_ex(mdctx, hash, &hash_len);
 
-                std::stringstream ss;
-                for (unsigned int i = 0; i < hash_len; i++) {
-                    ss << std::hex << std::setw(2) << std::setfill('0') << (int)hash[i];
-                }
-                script["sha256"] = ss.str();
+                script["sha256"] = hasher.finalize();
                 
                 // Reset file position to beginning
                 file.clear();
@@ -123,8 +111,7 @@ namespace provisioner {
                     script["content"] = contentSs.str();
                 }
             }
-            EVP_MD_CTX_free(mdctx);
-            
+
             // Extract provisioner and stage from filename
             for (const auto& [provisioner, stages] : PROVISIONER_STAGES) {
                 if (filename.find(provisioner) == 0) {
