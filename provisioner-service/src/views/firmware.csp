@@ -1,415 +1,522 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <title>Firmware Selection</title>
-    <%view stylesheet %>
-    <style>
-        .firmware-container {
-            display: flex;
-            gap: 20px;
-            margin-top: 20px;
-        }
-        
-        .firmware-list {
-            flex: 1;
-            max-width: 50%;
-        }
-        
-        .firmware-item {
-            border: 1px solid #ddd;
-            border-radius: 8px;
-            padding: 15px;
-            margin-bottom: 10px;
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
-        
-        .firmware-item:hover {
-            border-color: #007bff;
-            background-color: #f8f9fa;
-        }
-        
-        .firmware-item.selected {
-            border-color: #007bff;
-            background-color: #e7f3ff;
-        }
-        
-        .firmware-item.viewing {
-            border: 2px solid #6c757d;
-            background-color: #f1f3f4;
-        }
-        
-        .firmware-version {
-            font-size: 18px;
-            font-weight: bold;
-            color: #333;
-            margin-bottom: 8px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .selected-indicator {
-            background-color: #28a745;
-            color: white;
-            padding: 2px 8px;
-            border-radius: 4px;
-            font-size: 12px;
-            font-weight: bold;
-            text-transform: uppercase;
-        }
-        
-        .firmware-details {
-            font-size: 14px;
-            color: #666;
-            margin-bottom: 5px;
-        }
-        
-        .release-channel {
-            display: inline-block;
-            padding: 2px 8px;
-            border-radius: 4px;
-            font-size: 12px;
-            font-weight: bold;
-            text-transform: uppercase;
-        }
-        
-        .release-channel.default {
-            background-color: #28a745;
-            color: white;
-        }
-        
-        .release-channel.latest {
-            background-color: #007bff;
-            color: white;
-        }
-        
-        .release-channel.beta {
-            background-color: #ffc107;
-            color: black;
-        }
-        
-        .release-channel.stable {
-            background-color: #6c757d;
-            color: white;
-        }
-        
-        .release-channel.critical {
-            background-color: #dc3545;
-            color: white;
-        }
-        
-        .firmware-notes {
-            flex: 1;
-            max-width: 50%;
-        }
-        
-        .notes-container {
-            border: 1px solid #ddd;
-            border-radius: 8px;
-            padding: 20px;
-            max-height: 600px;
-            overflow-y: auto;
-            background-color: #f8f9fa;
-        }
-        
-        .notes-container h3 {
-            margin-top: 0;
-            color: #333;
-        }
-        
-        .notes-container pre {
-            white-space: pre-wrap;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            font-size: 14px;
-            line-height: 1.5;
-        }
-        
-        .no-selection {
-            text-align: center;
-            color: #666;
-            font-style: italic;
-            padding: 50px 20px;
-        }
-        
-        .device-info {
-            background-color: #e9ecef;
-            border-radius: 8px;
-            padding: 15px;
-            margin-bottom: 20px;
-        }
-        
-        .device-info h3 {
-            margin-top: 0;
-            color: #495057;
-        }
-        
-        .select-button {
-            background-color: #007bff;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            padding: 8px 16px;
-            cursor: pointer;
-            font-size: 14px;
-            margin-top: 10px;
-        }
-        
-        .select-button:hover {
-            background-color: #0056b3;
-        }
-        
-        .select-button:disabled {
-            background-color: #6c757d;
-            cursor: not-allowed;
-        }
-        
-        .success-message {
-            background-color: #d4edda;
-            border: 1px solid #c3e6cb;
-            color: #155724;
-            padding: 10px;
-            border-radius: 4px;
-            margin-bottom: 20px;
-            display: none;
-        }
-        
-        .error-message {
-            background-color: #f8d7da;
-            border: 1px solid #f5c6cb;
-            color: #721c24;
-            padding: 10px;
-            border-radius: 4px;
-            margin-bottom: 20px;
-            display: none;
-        }
-    </style>
-</head>
-<body>
-    <%view navbar %>
-
-    <main id="main-content">
-    <h1>Firmware Selection</h1>
+<!-- Firmware Browser Sub-View (included by options.csp) -->
+<style>
+    /* ===== Inline Firmware Browser ===== */
+    .firmware-expand-btn {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        padding: 10px 16px;
+        background: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 0.9rem;
+        color: #495057;
+        transition: all 0.2s;
+        margin-top: 10px;
+    }
     
-    <div id="success-message" class="success-message" role="status" aria-live="polite">
-        Firmware selection saved successfully!
-    </div>
+    .firmware-expand-btn:hover {
+        background: #e9ecef;
+        border-color: #adb5bd;
+    }
     
-    <div id="error-message" class="error-message" role="alert" aria-live="assertive"></div>
+    .firmware-expand-btn.expanded {
+        border-bottom-left-radius: 0;
+        border-bottom-right-radius: 0;
+        border-bottom-color: transparent;
+        background: #fff;
+    }
+    
+    .expand-icon {
+        font-size: 0.7rem;
+        transition: transform 0.2s;
+    }
+    
+    .firmware-expand-btn.expanded .expand-icon {
+        transform: rotate(180deg);
+    }
+    
+    .firmware-browser {
+        border: 1px solid #dee2e6;
+        border-top: none;
+        border-radius: 0 0 8px 8px;
+        background: #fff;
+        overflow: hidden;
+    }
+    
+    /* Two-column browser layout (shared by image and firmware browsers) */
+    .firmware-browser-content {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0;
+        max-height: 600px;
+        overflow: hidden;
+    }
+    
+    @media (max-width: 900px) {
+        .firmware-browser-content {
+            grid-template-columns: 1fr;
+            max-height: none;
+        }
+    }
+    
+    .firmware-list-container {
+        border-right: 1px solid #e9ecef;
+        display: flex;
+        flex-direction: column;
+    }
+    
+    @media (max-width: 900px) {
+        .firmware-list-container {
+            border-right: none;
+            border-bottom: 1px solid #e9ecef;
+        }
+    }
+    
+    .firmware-list-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 12px 16px;
+        background: #f8f9fa;
+        border-bottom: 1px solid #e9ecef;
+    }
+    
+    .firmware-list-header h4 {
+        margin: 0;
+        font-size: 0.9rem;
+        color: #495057;
+    }
+    
+    .firmware-loading {
+        font-size: 0.8rem;
+        color: #6c757d;
+    }
+    
+    .firmware-list {
+        overflow-y: auto;
+        max-height: calc(600px - 45px);
+        padding: 8px;
+    }
+    
+    .firmware-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 12px;
+        border: 1px solid transparent;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.15s;
+        margin-bottom: 4px;
+    }
+    
+    .firmware-item:hover {
+        background: #f8f9fa;
+        border-color: #dee2e6;
+    }
+    
+    .firmware-item.viewing {
+        background: #e3f2fd;
+        border-color: #90caf9;
+    }
+    
+    .firmware-item.selected {
+        background: #e8f5e9;
+        border-color: #a5d6a7;
+    }
+    
+    .firmware-item-info {
+        flex: 1;
+        min-width: 0;
+    }
+    
+    .firmware-item-version {
+        font-weight: 600;
+        color: #333;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    
+    .firmware-item-channel {
+        font-size: 0.7rem;
+        padding: 2px 6px;
+        border-radius: 3px;
+        font-weight: 500;
+        text-transform: uppercase;
+    }
+    
+    .firmware-item-channel.default { background: #c8e6c9; color: #2e7d32; }
+    .firmware-item-channel.latest { background: #bbdefb; color: #1565c0; }
+    .firmware-item-channel.beta { background: #fff9c4; color: #f9a825; }
+    .firmware-item-channel.stable { background: #e0e0e0; color: #616161; }
+    .firmware-item-channel.critical { background: #ffcdd2; color: #c62828; }
+    
+    .firmware-item-meta {
+        font-size: 0.75rem;
+        color: #888;
+        margin-top: 2px;
+    }
+    
+    .firmware-selected-badge {
+        font-size: 0.7rem;
+        background: #28a745;
+        color: white;
+        padding: 2px 6px;
+        border-radius: 3px;
+        margin-left: auto;
+    }
+    
+    .firmware-notes-container {
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        border-radius: 0 0 8px 0;
+    }
+    
+    .firmware-notes-container h4 {
+        margin: 0;
+        padding: 12px 16px;
+        font-size: 0.9rem;
+        color: #495057;
+        background: #f8f9fa;
+        border-bottom: 1px solid #e9ecef;
+    }
+    
+    .firmware-notes {
+        flex: 1;
+        overflow-y: auto;
+        padding: 16px;
+        padding-bottom: 24px;
+        font-size: 0.85rem;
+        line-height: 1.5;
+        max-height: calc(600px - 45px);
+        min-height: 200px;
+    }
+    
+    .firmware-notes-placeholder {
+        color: #999;
+        font-style: italic;
+        text-align: center;
+        padding: 40px 20px;
+    }
+    
+    .firmware-notes pre {
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        font-family: inherit;
+        margin: 0;
+        background: none;
+        border: none;
+        padding: 0;
+    }
+    
+    .firmware-notes h3 {
+        font-size: 1rem;
+        margin: 0 0 10px 0;
+        color: #333;
+    }
+    
+    .firmware-empty {
+        text-align: center;
+        padding: 30px;
+        color: #888;
+    }
+    
+    .firmware-empty-icon {
+        font-size: 2rem;
+        margin-bottom: 10px;
+        opacity: 0.5;
+    }
+</style>
 
-    <%c++ 
-    auto deviceFamily = @@.get<std::string>("deviceFamily");
-    auto chipNumber = @@.get<std::string>("chipNumber");
-    auto firmwareList = @@.get<std::vector<std::map<std::string, std::string>>>("firmwareList");
-    auto selectedFirmwareFile = @@.get<std::string>("selectedFirmwareFile");
-    %>
-
-    <div class="device-info">
-        <h3>Device Configuration</h3>
-        <%c++ if (!deviceFamily.empty()) { %>
-            <p><strong>Device Family:</strong> Raspberry Pi <%c++ $$ << deviceFamily; %></p>
-            <p><strong>Chip:</strong> BCM<%c++ $$ << chipNumber; %></p>
-        <%c++ } else { %>
-            <p class="warning">⚠️ No device family configured. Please set RPI_DEVICE_FAMILY in the options before selecting firmware.</p>
-        <%c++ } %>
-    </div>
-
-    <%c++ if (!deviceFamily.empty() && !firmwareList.empty()) { %>
-        <div class="firmware-container">
-            <div class="firmware-list">
-                <h3>Available Firmware Versions</h3>
-                <%c++ for (const auto& firmware : firmwareList) { %>
-                    <%c++ bool isSelected = (!selectedFirmwareFile.empty() && firmware.at("filepath") == selectedFirmwareFile); %>
-                    <div class="firmware-item<%c++ if(isSelected) $$ << " selected"; %>" 
-                         data-firmware-path="<%c++ $$ << firmware.at("filepath"); %>" 
-                         data-version="<%c++ $$ << firmware.at("version"); %>"
-                         data-release-channel="<%c++ $$ << firmware.at("releaseChannel"); %>"
-                         role="button" 
-                         tabindex="0"
-                         aria-label="Select firmware version <%c++ $$ << firmware.at("version"); %><%c++ if(isSelected) $$ << " (currently selected)"; %>"
-                         <%c++ if(isSelected) { %>aria-pressed="true"<%c++ } else { %>aria-pressed="false"<%c++ } %>>
-                        <div class="firmware-version">
-                            <span><%c++ $$ << firmware.at("version"); %></span>
-                            <%c++ if(isSelected) { %>
-                                <span class="selected-indicator">Selected</span>
-                            <%c++ } %>
-                        </div>
-                        <div class="firmware-details">
-                            <span class="release-channel <%c++ $$ << firmware.at("releaseChannel"); %>"><%c++ $$ << firmware.at("releaseChannel"); %></span>
-                            <span style="margin-left: 10px;">Size: <%c++ $$ << std::to_string(std::stoi(firmware.at("size")) / 1024); %> KB</span>
-                        </div>
-                        <div class="firmware-details">
-                            <small><%c++ $$ << firmware.at("filename"); %></small>
-                        </div>
-                        <button class="select-button" onclick="selectFirmware('<%c++ $$ << firmware.at("filepath"); %>')" aria-label="Select firmware version <%c++ $$ << firmware.at("version"); %>">Select This Version</button>
-                    </div>
-                <%c++ } %>
+<!-- Firmware Selection - Inline Browser -->
+<%c++ auto firmwareFile = @@.get<std::map<std::string, std::string>>("options").count("RPI_DEVICE_FIRMWARE_FILE") ? @@.get<std::map<std::string, std::string>>("options").at("RPI_DEVICE_FIRMWARE_FILE") : std::string(); %>
+<div class="field-group">
+    <label class="field-label">Device Firmware <span class="optional-badge">Optional</span></label>
+    <input type="hidden" id="RPI_DEVICE_FIRMWARE_FILE" name="RPI_DEVICE_FIRMWARE_FILE" value="<%c++ $$ << firmwareFile; %>">
+    
+    <!-- Expand/Collapse Button -->
+    <button type="button" class="firmware-expand-btn" id="firmware-expand-btn" onclick="toggleFirmwareBrowser()">
+        <span class="expand-icon" id="expand-icon">&#9660;</span>
+        Browse Available Firmware
+    </button>
+    
+    <!-- Expandable Firmware Browser -->
+    <div class="firmware-browser" id="firmware-browser" style="display: none;">
+        <div class="firmware-browser-content">
+            <div class="firmware-list-container">
+                <div class="firmware-list-header">
+                    <h4>Available Versions</h4>
+                    <div class="firmware-loading" id="firmware-loading">Loading...</div>
+                </div>
+                <div class="firmware-list" id="firmware-list">
+                    <!-- Populated by JavaScript -->
+                </div>
             </div>
-            
-            <div class="firmware-notes">
-                <h3 id="release-notes-heading">Release Notes</h3>
-                <div class="notes-container" role="region" aria-labelledby="release-notes-heading" aria-live="polite">
-                    <div class="no-selection">
-                        Click on a firmware version to view release notes
+            <div class="firmware-notes-container">
+                <h4>Release Notes</h4>
+                <div class="firmware-notes" id="firmware-notes">
+                    <div class="firmware-notes-placeholder">
+                        Select a firmware version to view release notes
                     </div>
                 </div>
             </div>
         </div>
-    <%c++ } else if (!deviceFamily.empty()) { %>
-        <div class="error-message" style="display: block;">
-            No firmware versions found for device family <%c++ $$ << deviceFamily; %>. Please check your system configuration.
-        </div>
-    <%c++ } %>
+    </div>
+</div>
 
-    <script>
-        let selectedFirmwarePath = '';
+<script>
+    // ===== Inline Firmware Browser =====
+    let firmwareListData = [];
+    let currentViewingFirmware = null;
+    
+    function toggleFirmwareBrowser() {
+        const browser = document.getElementById('firmware-browser');
+        const btn = document.getElementById('firmware-expand-btn');
+        const isExpanded = browser.style.display !== 'none';
         
-        // Function to show release notes (doesn't change selection)
-        function showFirmwareNotes(item) {
-            // Remove visual focus from all items
-            document.querySelectorAll('.firmware-item').forEach(i => {
-                i.classList.remove('viewing');
-            });
-            
-            // Add visual focus to clicked item (different from selected)
-            item.classList.add('viewing');
-            
-            // Get version and load release notes
-            const version = item.dataset.version;
-            loadReleaseNotes(version);
+        if (isExpanded) {
+            browser.style.display = 'none';
+            btn.classList.remove('expanded');
+        } else {
+            browser.style.display = 'block';
+            btn.classList.add('expanded');
+            loadFirmwareList();
         }
+    }
+    
+    async function loadFirmwareList() {
+        const listEl = document.getElementById('firmware-list');
+        const loadingEl = document.getElementById('firmware-loading');
         
-        // Function to actually select firmware (updates config)
-        function markFirmwareAsSelected(firmwarePath) {
-            // Remove selected indicators from all items
-            document.querySelectorAll('.firmware-item').forEach(i => {
-                i.setAttribute('aria-pressed', 'false');
-                const existingIndicator = i.querySelector('.selected-indicator');
-                if (existingIndicator) {
-                    existingIndicator.remove();
-                }
-            });
-            
-            // Find the item with this firmware path and mark it as selected
-            const selectedItem = document.querySelector(`[data-firmware-path="${firmwarePath}"]`);
-            if (selectedItem) {
-                selectedItem.setAttribute('aria-pressed', 'true');
-                
-                // Add selected indicator to the version header
-                const versionHeader = selectedItem.querySelector('.firmware-version');
-                if (versionHeader && !versionHeader.querySelector('.selected-indicator')) {
-                    const indicator = document.createElement('span');
-                    indicator.className = 'selected-indicator';
-                    indicator.textContent = 'Selected';
-                    versionHeader.appendChild(indicator);
-                }
+        loadingEl.textContent = 'Loading...';
+        loadingEl.style.display = 'block';
+        
+        try {
+            const response = await fetch('/options/firmware/list');
+            if (response.ok) {
+                const data = await response.json();
+                firmwareListData = data.firmwareList || [];
+                renderFirmwareList(data.selectedFirmwareFile);
+                loadingEl.style.display = 'none';
+            } else {
+                listEl.innerHTML = '<div class="firmware-empty"><div class="firmware-empty-icon">&#9888;</div>Failed to load firmware list</div>';
+                loadingEl.style.display = 'none';
             }
+        } catch (error) {
+            console.error('Error loading firmware:', error);
+            listEl.innerHTML = '<div class="firmware-empty"><div class="firmware-empty-icon">&#9888;</div>Failed to load firmware list</div>';
+            loadingEl.style.display = 'none';
         }
-
-        // Add click and keyboard handlers to firmware items
-        document.querySelectorAll('.firmware-item').forEach(item => {
-            item.addEventListener('click', function() {
-                showFirmwareNotes(this);
-            });
+    }
+    
+    function renderFirmwareList(selectedPath) {
+        const listEl = document.getElementById('firmware-list');
+        
+        if (firmwareListData.length === 0) {
+            listEl.innerHTML = `
+                <div class="firmware-empty">
+                    <div class="firmware-empty-icon">&#128190;</div>
+                    <div>No firmware versions found</div>
+                    <div style="font-size: 0.8rem; margin-top: 5px;">Check device family configuration</div>
+                </div>
+            `;
+            return;
+        }
+        
+        listEl.innerHTML = '';
+        
+        firmwareListData.forEach((fw, index) => {
+            const isSelected = selectedPath && fw.filepath === selectedPath;
+            const sizeKB = Math.round(parseInt(fw.size) / 1024);
             
-            item.addEventListener('keydown', function(e) {
-                if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    showFirmwareNotes(this);
-                }
-            });
+            const item = document.createElement('div');
+            item.className = 'firmware-item' + (isSelected ? ' selected' : '');
+            item.dataset.path = fw.filepath;
+            item.dataset.version = fw.version;
+            item.dataset.index = index;
+            item.onclick = () => viewFirmware(fw.version, fw.filepath);
+            
+            const info = document.createElement('div');
+            info.className = 'firmware-item-info';
+            
+            const versionDiv = document.createElement('div');
+            versionDiv.className = 'firmware-item-version';
+            versionDiv.textContent = fw.version + ' ';
+            
+            const channelBadge = document.createElement('span');
+            channelBadge.className = 'firmware-item-channel ' + fw.releaseChannel;
+            channelBadge.textContent = fw.releaseChannel;
+            versionDiv.appendChild(channelBadge);
+            
+            if (isSelected) {
+                const selectedBadge = document.createElement('span');
+                selectedBadge.className = 'firmware-selected-badge';
+                selectedBadge.textContent = 'Selected';
+                versionDiv.appendChild(selectedBadge);
+            }
+            
+            const metaDiv = document.createElement('div');
+            metaDiv.className = 'firmware-item-meta';
+            metaDiv.textContent = fw.filename + ' • ' + sizeKB + ' KB';
+            
+            info.appendChild(versionDiv);
+            info.appendChild(metaDiv);
+            
+            item.appendChild(info);
+            listEl.appendChild(item);
+        });
+    }
+    
+    async function viewFirmware(version, path) {
+        // Update viewing state
+        document.querySelectorAll('.firmware-item').forEach(el => {
+            el.classList.remove('viewing');
+            if (el.dataset.path === path) {
+                el.classList.add('viewing');
+            }
         });
         
-        async function loadReleaseNotes(version) {
-            const notesContainer = document.querySelector('.notes-container');
-            notesContainer.innerHTML = '<p>Loading release notes...</p>';
-            
-            try {
-                const response = await fetch(`/options/firmware/notes/${version}`);
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.notes && data.notes.trim()) {
-                        notesContainer.innerHTML = `
-                            <h3>Release Notes for ${version}</h3>
-                            <pre>${data.notes}</pre>
-                        `;
-                    } else {
-                        notesContainer.innerHTML = `
-                            <h3>Release Notes for ${version}</h3>
-                            <p>No specific release notes available for this version.</p>
-                        `;
-                    }
-                } else {
-                    notesContainer.innerHTML = '<p>Error loading release notes.</p>';
-                }
-            } catch (error) {
-                console.error('Error loading release notes:', error);
-                notesContainer.innerHTML = '<p>Error loading release notes.</p>';
+        currentViewingFirmware = { version, path };
+        
+        const notesEl = document.getElementById('firmware-notes');
+        const currentFirmware = document.getElementById('RPI_DEVICE_FIRMWARE_FILE')?.value || '';
+        const isSelected = currentFirmware === path;
+        
+        let content = '';
+        
+        content += `<h3>Version ${escapeHtml(version)}</h3>`;
+        
+        content += `<dl style="margin: 0 0 16px 0; font-size: 0.9rem;">`;
+        content += `<dt style="font-weight: 600; color: #555;">Path</dt>`;
+        content += `<dd style="margin: 4px 0 12px 0; font-family: monospace; word-break: break-all;">${escapeHtml(path)}</dd>`;
+        content += `</dl>`;
+        
+        content += `<div style="display: flex; flex-direction: column; gap: 8px; margin-top: 16px; padding-top: 16px; border-top: 1px solid #e0e0e0;">`;
+        
+        if (isSelected) {
+            content += `<div style="padding: 8px 12px; background: #d4edda; color: #155724; border-radius: 4px; text-align: center;">&#10003; Currently selected</div>`;
+            content += `<button type="button" onclick="clearFirmwareSelection()" style="padding: 8px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">Use Default Firmware</button>`;
+        } else {
+            content += `<button type="button" onclick="selectFirmware('${escapeHtml(path)}', '${escapeHtml(version)}')" class="image-upload-btn">Use This Firmware</button>`;
+            if (currentFirmware) {
+                content += `<button type="button" onclick="clearFirmwareSelection()" style="padding: 8px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">Use Default Firmware</button>`;
             }
         }
         
-        async function selectFirmware(firmwarePath) {
-            if (!firmwarePath) {
-                showError('No firmware path specified');
-                return;
+        content += `</div>`;
+        
+        content += `<div style="margin-top: 20px; padding-top: 16px; border-top: 1px solid #e0e0e0;">`;
+        content += `<dt style="font-weight: 600; color: #555; margin-bottom: 8px;">Release Notes</dt>`;
+        
+        notesEl.innerHTML = content + `<dd style="margin: 0;"><span style="color: #888;">Loading...</span></dd></div>`;
+        
+        try {
+            const response = await fetch(`/options/firmware/notes/${version}`);
+            if (response.ok) {
+                const data = await response.json();
+                if (data.notes && data.notes.trim()) {
+                    notesEl.innerHTML = content + `<dd style="margin: 0;"><pre style="white-space: pre-wrap; word-wrap: break-word; font-family: inherit; margin: 0; background: none; border: none; padding: 0;">${escapeHtml(data.notes)}</pre></dd></div>`;
+                } else {
+                    notesEl.innerHTML = content + `<dd style="margin: 0; color: #888;">No release notes available for this version.</dd></div>`;
+                }
+            } else {
+                notesEl.innerHTML = content + `<dd style="margin: 0; color: #888;">No release notes available.</dd></div>`;
+            }
+        } catch (error) {
+            console.error('Error loading release notes:', error);
+            notesEl.innerHTML = content + `<dd style="margin: 0; color: #dc3545;">Failed to load release notes.</dd></div>`;
+        }
+    }
+    
+    async function selectFirmware(path, version) {
+        try {
+            const headers = {
+                'Content-Type': 'application/json'
+            };
+            if (csrfToken) {
+                headers['X-CSRF-Token'] = csrfToken;
             }
             
-            try {
-                const response = await fetch('/options/firmware/set', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        firmware_path: firmwarePath
-                    })
-                });
+            const response = await fetch('/options/firmware/set', {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify({ firmware_path: path })
+            });
+            
+            if (response.ok) {
+                document.getElementById('RPI_DEVICE_FIRMWARE_FILE').value = path;
+                renderFirmwareList(path);
                 
-                if (response.ok) {
-                    // Mark this firmware as selected
-                    markFirmwareAsSelected(firmwarePath);
-                    
-                    // Get version info for success message
-                    const selectedItem = document.querySelector(`[data-firmware-path="${firmwarePath}"]`);
-                    if (selectedItem) {
-                        const version = selectedItem.dataset.version;
-                        const channel = selectedItem.dataset.releaseChannel;
-                        showSuccess(`Firmware ${version} (${channel}) selected successfully!`);
-                    } else {
-                        showSuccess('Firmware selected successfully!');
-                    }
-                } else {
-                    const errorData = await response.json();
-                    showError(errorData.message || 'Failed to save firmware selection');
+                if (currentViewingFirmware && currentViewingFirmware.path === path) {
+                    viewFirmware(version, path);
                 }
-            } catch (error) {
-                console.error('Error selecting firmware:', error);
-                showError('Failed to save firmware selection');
+                
+                showSuccess(`Firmware ${version} selected`);
+            } else {
+                let errorMsg = 'Failed to select firmware';
+                try {
+                    const errorData = await response.json();
+                    errorMsg = errorData.error || errorData.message || errorMsg;
+                } catch (e) {
+                    // Ignore parse error
+                }
+                showError(errorMsg);
             }
+        } catch (error) {
+            console.error('Error selecting firmware:', error);
+            showError('Failed to select firmware: ' + error.message);
         }
-        
-        function showSuccess(message) {
-            const successDiv = document.getElementById('success-message');
-            successDiv.textContent = message;
-            successDiv.style.display = 'block';
+    }
+    
+    async function clearFirmwareSelection() {
+        try {
+            const response = await fetch('/options/firmware/set', addCsrfHeader({
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ firmware_path: '' })
+            }));
             
-            // Hide after 3 seconds
-            setTimeout(() => {
-                successDiv.style.display = 'none';
-            }, 3000);
+            if (response.ok) {
+                document.getElementById('RPI_DEVICE_FIRMWARE_FILE').value = '';
+                renderFirmwareList('');
+                
+                if (currentViewingFirmware) {
+                    viewFirmware(currentViewingFirmware.version, currentViewingFirmware.path);
+                }
+                
+                showSuccess('Reverted to default firmware');
+            } else {
+                showError('Failed to clear firmware selection');
+            }
+        } catch (error) {
+            console.error('Error clearing firmware:', error);
+            showError('Failed to clear firmware selection');
         }
-        
-        function showError(message) {
-            const errorDiv = document.getElementById('error-message');
-            errorDiv.textContent = message;
-            errorDiv.style.display = 'block';
-            
-            // Hide after 5 seconds
-            setTimeout(() => {
-                errorDiv.style.display = 'none';
-            }, 5000);
+    }
+    
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    
+    // Reload firmware list when device family changes
+    const deviceFamilyTiles = document.querySelectorAll('.tile-option');
+    deviceFamilyTiles.forEach(tile => {
+        const radio = tile.querySelector('input[name="RPI_DEVICE_FAMILY"]');
+        if (radio) {
+            tile.addEventListener('click', function() {
+                const browser = document.getElementById('firmware-browser');
+                if (browser && browser.style.display !== 'none') {
+                    setTimeout(loadFirmwareList, 500);
+                }
+            });
         }
-    </script>
-    </main>
-</body>
-</html> 
+    });
+</script>
+<%view-end%>

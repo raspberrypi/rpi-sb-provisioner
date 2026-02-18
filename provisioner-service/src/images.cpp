@@ -354,6 +354,45 @@ public:
 std::unordered_map<std::string, std::vector<drogon::WebSocketConnectionPtr>> BootPackageWebSocketController::activeConnections;
 std::mutex BootPackageWebSocketController::connectionsMutex;
 
+#include "include/topic_hub.h"
+
+// Generic progress WebSocket controller — delegates everything to TopicHub.
+// Clients send {"subscribe":"upload:<id>"} / {"unsubscribe":"upload:<id>"}.
+class ProgressWebSocketController : public drogon::WebSocketController<ProgressWebSocketController> {
+public:
+    void handleNewMessage(const drogon::WebSocketConnectionPtr& wsConnPtr,
+                          std::string&& message,
+                          const drogon::WebSocketMessageType& type) override
+    {
+        if (type != drogon::WebSocketMessageType::Text) return;
+
+        Json::CharReaderBuilder rbuilder;
+        Json::Value root;
+        std::string errs;
+        std::istringstream s(message);
+        if (!Json::parseFromStream(rbuilder, s, &root, &errs)) return;
+
+        auto& hub = provisioner::TopicHub::instance();
+
+        if (root.isMember("subscribe") && root["subscribe"].isString()) {
+            hub.subscribe(root["subscribe"].asString(), wsConnPtr);
+        } else if (root.isMember("unsubscribe") && root["unsubscribe"].isString()) {
+            hub.unsubscribe(root["unsubscribe"].asString(), wsConnPtr);
+        }
+    }
+
+    void handleNewConnection(const drogon::HttpRequestPtr&,
+                             const drogon::WebSocketConnectionPtr&) override {}
+
+    void handleConnectionClosed(const drogon::WebSocketConnectionPtr& wsConnPtr) override {
+        provisioner::TopicHub::instance().removeConnection(wsConnPtr);
+    }
+
+    WS_PATH_LIST_BEGIN
+    WS_PATH_ADD("/ws/progress");
+    WS_PATH_LIST_END
+};
+
 namespace provisioner {
 
     namespace {
@@ -1345,159 +1384,7 @@ namespace provisioner {
             callback(resp);
         });
         
-        app.registerHandler("/get-images", [](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
-            LOG_INFO << "Images::get-images";
-
-            // Add audit log entry for handler access
-            AuditLog::logHandlerAccess(req, "/get-images");
-
-            std::vector<ImageInfo> imageInfos;
-            
-            LOG_INFO << "Scanning directory: " << IMAGES_PATH;
-            for (const auto &entry : std::filesystem::directory_iterator(IMAGES_PATH)) {
-                LOG_INFO << "Found entry: " << entry.path().string();
-
-                // Include IDP artefact directories (directories containing a .json file)
-                if (entry.is_directory()) {
-                    // Skip hidden directories (used for in-progress extraction)
-                    if (entry.path().filename().string()[0] == '.') continue;
-                    if (isIdpArtefactDirectory(entry.path())) {
-                        ImageInfo info;
-                        info.name = entry.path().filename().string();
-                        info.is_idp = true;
-                        // Read SHA256 from sidecar file (hash of the original archive)
-                        info.sha256 = "IDP Artefact";
-                        try {
-                            std::filesystem::path sidecarPath = entry.path();
-                            sidecarPath += ".sha256";
-                            if (std::filesystem::exists(sidecarPath)) {
-                                std::ifstream in(sidecarPath);
-                                std::string line;
-                                if (in && std::getline(in, line)) {
-                                    while (!line.empty() && (line.back()==' ' || line.back()=='\t' || line.back()=='\n' || line.back()=='\r')) {
-                                        line.pop_back();
-                                    }
-                                    if (!line.empty()) info.sha256 = line;
-                                }
-                            }
-                        } catch (...) {}
-                        imageInfos.push_back(info);
-                        LOG_INFO << "Added IDP artefact: " << info.name;
-                    }
-                    continue;
-                }
-
-                if (entry.is_regular_file()) {
-                    std::filesystem::path imagePath = entry.path();
-                    // Skip SHA256 sidecar files from the listing
-                    if (imagePath.extension() == ".sha256") {
-                        continue;
-                    }
-                    ImageInfo info;
-                    info.name = imagePath.filename().string();
-                    
-                    // Prefer sidecar file if present; fall back to cache status
-                    try {
-                        std::filesystem::path sidecarPath = imagePath;
-                        sidecarPath += ".sha256";
-                        if (std::filesystem::exists(sidecarPath)) {
-                            std::ifstream in(sidecarPath);
-                            std::string line;
-                            if (in && std::getline(in, line)) {
-                                // Trim trailing whitespace
-                                while (!line.empty() && (line.back()==' ' || line.back()=='\t' || line.back()=='\n' || line.back()=='\r')) {
-                                    line.pop_back();
-                                }
-                                info.sha256 = line;
-                            }
-                        }
-                    } catch (const std::filesystem::filesystem_error& e) {
-                        // Ignore filesystem errors while reading sidecar, but log at debug level
-                        LOG_DEBUG << "Ignoring sidecar filesystem read error for " << imagePath.filename().string() << ": " << e.what();
-                    } catch (const std::ios_base::failure& e) {
-                        LOG_DEBUG << "Ignoring sidecar IO error for " << imagePath.filename().string() << ": " << e.what();
-                    } catch (const std::exception& e) {
-                        LOG_DEBUG << "Ignoring sidecar generic read error for " << imagePath.filename().string() << ": " << e.what();
-                    }
-                    
-                    if (info.sha256.empty()) {
-                        // Get SHA256 from cache if available
-                        {
-                            std::lock_guard<std::mutex> lock(sha256Cache_mutex);
-                            auto it = sha256Cache.find(info.name);
-                            if (it != sha256Cache.end()) {
-                                if (it->second.status == SHA256Status::COMPLETE) {
-                                    info.sha256 = it->second.value;
-                                } else if (it->second.status == SHA256Status::PENDING) {
-                                    info.sha256 = "Calculating...";
-                                } else {
-                                    info.sha256 = "Error";
-                                }
-                            } else {
-                                // Not in cache yet, calculation may still be pending
-                                info.sha256 = "Calculating...";
-                            }
-                        }
-                    }
-                    
-                    imageInfos.push_back(info);
-                    LOG_INFO << "Added image: " << info.name;
-                }
-            }
-            
-            LOG_INFO << "Total images found: " << imageInfos.size();
-            
-            auto resp = drogon::HttpResponse::newHttpResponse();
-            
-            // Check if the client accepts HTML
-            auto acceptHeader = req->getHeader("Accept");
-            if (!acceptHeader.empty() && (acceptHeader.find("text/html") != std::string::npos)) {
-                LOG_INFO << "HTML response requested";
-
-                // Get current gold master image
-                std::string currentGoldMaster;
-                auto goldMasterPath = provisioner::utils::getConfigValue("GOLD_MASTER_OS_FILE");
-                if (goldMasterPath) {
-                    currentGoldMaster = *goldMasterPath;
-                    // Extract just the filename from the full path
-                    std::filesystem::path path(currentGoldMaster);
-                    currentGoldMaster = path.filename().string();
-                } else {
-                    LOG_ERROR << "Failed to read GOLD_MASTER_OS_FILE from config";
-                }
-
-                drogon::HttpViewData viewData;
-                std::vector<std::map<std::string, std::string>> imageMaps;
-                for (const auto& info : imageInfos) {
-                    std::map<std::string, std::string> imageMap;
-                    imageMap["name"] = info.name;
-                    imageMap["sha256"] = info.sha256;
-                    imageMap["is_gold_master"] = (info.name == currentGoldMaster) ? "true" : "false";
-                    imageMaps.push_back(imageMap);
-                }
-                viewData.insert("images", imageMaps);
-                viewData.insert("currentPage", std::string("images"));
-                viewData.insert("useWebSocket", true); // Tell the template to use WebSocket
-                LOG_INFO << "View data populated with " << imageMaps.size() << " images";
-                resp = drogon::HttpResponse::newHttpViewResponse("images.csp", viewData);
-            } else {
-                LOG_INFO << "JSON response requested";
-                Json::Value imageArray(Json::arrayValue);
-                for (const auto& info : imageInfos) {
-                    Json::Value imageObj;
-                    imageObj["name"] = info.name;
-                    imageObj["sha256"] = info.sha256;
-                    imageArray.append(imageObj);
-                }
-                resp->setStatusCode(drogon::k200OK);
-                resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
-                resp->setBody(imageArray.toStyledString());
-            }
-            
-            callback(resp);
-        });
-
-        // JSON-only endpoint for listing images (used by Options page)
+        // JSON endpoint for listing images (used by Options page image browser)
         app.registerHandler("/images/list", [](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
             LOG_INFO << "Images::list (JSON)";
             AuditLog::logHandlerAccess(req, "/images/list");
@@ -1810,19 +1697,24 @@ namespace provisioner {
 
             // Helper: strip archive extension to get the artefact name
             auto stripArchiveExtension = [&endsWith](const std::string& filename, const std::string& lowerFilename) -> std::string {
-                if (endsWith(lowerFilename, ".tar.gz"))  return filename.substr(0, filename.size() - 7);
                 if (endsWith(lowerFilename, ".tar.xz"))  return filename.substr(0, filename.size() - 7);
                 if (endsWith(lowerFilename, ".tar.zst")) return filename.substr(0, filename.size() - 8);
-                if (endsWith(lowerFilename, ".tgz"))     return filename.substr(0, filename.size() - 4);
                 return filename;
             };
 
-            // Helper: strip compression extension from .img.{gz,xz,zst} -> .img
+            // Helper: strip compression extension from .img.{xz,zst} -> .img
             auto stripImgCompressionExtension = [&endsWith](const std::string& filename, const std::string& lowerFilename) -> std::string {
-                if (endsWith(lowerFilename, ".img.gz"))  return filename.substr(0, filename.size() - 3);
                 if (endsWith(lowerFilename, ".img.xz"))  return filename.substr(0, filename.size() - 3);
                 if (endsWith(lowerFilename, ".img.zst")) return filename.substr(0, filename.size() - 4);
                 return filename;
+            };
+
+            auto isSupportedUpload = [&endsWith](const std::string& lowerFilename) -> bool {
+                return endsWith(lowerFilename, ".img") ||
+                       endsWith(lowerFilename, ".img.xz") ||
+                       endsWith(lowerFilename, ".img.zst") ||
+                       endsWith(lowerFilename, ".tar.xz") ||
+                       endsWith(lowerFilename, ".tar.zst");
             };
 
             // ---- Non-stream fallback (if streaming is disabled) ----
@@ -1884,7 +1776,7 @@ namespace provisioner {
             // Early disk space check using Content-Length header.
             // This is a baseline check -- for compressed images, the worker thread
             // performs exact pre-allocation via posix_fallocate after reading the
-            // container metadata (xz/zstd), or relies on this heuristic (gzip).
+            // container metadata (xz/zstd embed the uncompressed size).
             size_t contentLength = req->realContentLength();
             if (contentLength > 0) {
                 auto availableSpace = getAvailableDiskSpace(IMAGES_PATH);
@@ -1943,6 +1835,11 @@ namespace provisioner {
                 std::unique_ptr<provisioner::utils::SHA256Hasher> workerSha256Hasher;
                 std::string workerSha256Result;
 
+                // WebSocket progress push (set from X-Upload-Id header; empty = no push)
+                std::string uploadId;
+                std::atomic<int64_t> progressBytesWritten{0};
+                int64_t progressTotalBytes = 0;
+
                 // Response plumbing
                 std::function<void(const drogon::HttpResponsePtr &)> callback;
                 drogon::HttpRequestPtr req;
@@ -1958,6 +1855,7 @@ namespace provisioner {
             ctx->callback = std::move(callback);
             ctx->req = req;
             ctx->contentLength = contentLength;
+            ctx->uploadId = req->getHeader("X-Upload-Id");
 
             // libarchive custom read callback: blocks on the producer-consumer buffer
             auto archiveReadCb = [](struct archive*, void* clientData, const void** buffer) -> la_ssize_t {
@@ -1974,7 +1872,7 @@ namespace provisioner {
             auto reader = drogon::RequestStreamReader::newMultipartReader(
                 req,
                 // ---- headerCb: called when a new multipart part header is parsed ----
-                [ctx, endsWith, generateUniqueFilename, stripArchiveExtension, stripImgCompressionExtension, archiveReadCb](drogon::MultipartHeader &&header) {
+                [ctx, endsWith, generateUniqueFilename, stripArchiveExtension, stripImgCompressionExtension, isSupportedUpload, archiveReadCb](drogon::MultipartHeader &&header) {
                     if (ctx->hadError) return;
 
                     ctx->originalFilename = header.filename;
@@ -1983,13 +1881,16 @@ namespace provisioner {
                     std::string lowerFilename = ctx->originalFilename;
                     std::transform(lowerFilename.begin(), lowerFilename.end(), lowerFilename.begin(), ::tolower);
 
-                    ctx->isArchive = endsWith(lowerFilename, ".tar.gz") ||
-                                     endsWith(lowerFilename, ".tgz") ||
-                                     endsWith(lowerFilename, ".tar.xz") ||
+                    if (!isSupportedUpload(lowerFilename)) {
+                        ctx->hadError = true;
+                        ctx->errorMessage = "Unsupported file type. Accepted formats: .img, .img.xz, .img.zst, .tar.xz, .tar.zst";
+                        return;
+                    }
+
+                    ctx->isArchive = endsWith(lowerFilename, ".tar.xz") ||
                                      endsWith(lowerFilename, ".tar.zst");
 
-                    ctx->isCompressedImg = endsWith(lowerFilename, ".img.gz") ||
-                                           endsWith(lowerFilename, ".img.xz") ||
+                    ctx->isCompressedImg = endsWith(lowerFilename, ".img.xz") ||
                                            endsWith(lowerFilename, ".img.zst");
 
                     // Initialize inline SHA256 for archives (hashes the compressed stream)
@@ -2018,7 +1919,6 @@ namespace provisioner {
                         std::string tempDirStr = ctx->tempDir.string();
                         ctx->extractionThread = std::thread([ctx, archiveReadCb, tempDirStr]() {
                             struct archive *a = archive_read_new();
-                            archive_read_support_filter_gzip(a);
                             archive_read_support_filter_xz(a);
                             archive_read_support_filter_zstd(a);
                             archive_read_support_format_tar(a);
@@ -2036,6 +1936,8 @@ namespace provisioner {
 
                             struct archive_entry *entry;
                             int r;
+                            size_t archiveBytesWritten = 0;
+                            auto lastPublish = std::chrono::steady_clock::now() - std::chrono::seconds(1);
                             while ((r = archive_read_next_header(a, &entry)) == ARCHIVE_OK) {
                                 std::string entryPath = archive_entry_pathname(entry);
                                 if (!isArchivePathSafe(entryPath)) {
@@ -2060,6 +1962,18 @@ namespace provisioner {
                                         if (archive_write_data_block(ext, buff, size, offset) != ARCHIVE_OK) {
                                             ctx->extractionError = "Failed to write data: " + std::string(archive_error_string(ext));
                                             break;
+                                        }
+                                        archiveBytesWritten += size;
+                                        if (!ctx->uploadId.empty()) {
+                                            auto now = std::chrono::steady_clock::now();
+                                            if (now - lastPublish >= std::chrono::milliseconds(250)) {
+                                                lastPublish = now;
+                                                Json::Value p;
+                                                p["phase"] = "extracting";
+                                                p["bytes_written"] = static_cast<Json::Int64>(archiveBytesWritten);
+                                                p["current_entry"] = entryPath;
+                                                provisioner::TopicHub::instance().publish("upload:" + ctx->uploadId, p);
+                                            }
                                         }
                                     }
                                     if (!ctx->extractionError.empty()) break;
@@ -2099,7 +2013,6 @@ namespace provisioner {
                         // Spawn decompression worker thread
                         ctx->extractionThread = std::thread([ctx, archiveReadCb]() {
                             struct archive *a = archive_read_new();
-                            archive_read_support_filter_gzip(a);
                             archive_read_support_filter_xz(a);
                             archive_read_support_filter_zstd(a);
                             archive_read_support_format_raw(a);
@@ -2117,12 +2030,10 @@ namespace provisioner {
                                 return;
                             }
 
-                            // Try to pre-allocate using the decompressed size from container metadata.
-                            // xz and zstd embed the uncompressed size; gzip's ISIZE is uint32_t
-                            // and wraps at 4 GiB, so we never trust it for pre-allocation.
+                            // Pre-allocate using the decompressed size from container metadata.
+                            // xz and zstd both embed the uncompressed size reliably.
                             la_int64_t entrySize = archive_entry_size(entry);
-                            int filterCode = archive_filter_code(a, 0);
-                            if (entrySize > 0 && filterCode != ARCHIVE_FILTER_GZIP) {
+                            if (entrySize > 0) {
                                 int fa_ret = posix_fallocate(ctx->fd, 0, static_cast<off_t>(entrySize));
                                 if (fa_ret != 0) {
                                     ctx->extractionError = "Failed to pre-allocate disk space for decompressed image: " + std::string(strerror(fa_ret));
@@ -2132,6 +2043,7 @@ namespace provisioner {
                                     return;
                                 }
                                 LOG_INFO << "Pre-allocated " << entrySize << " bytes for decompressed image";
+                                ctx->progressTotalBytes = static_cast<int64_t>(entrySize);
                             }
 
                             // Initialize SHA256 for the decompressed data
@@ -2142,6 +2054,7 @@ namespace provisioner {
                             size_t size;
                             la_int64_t offset;
                             int r;
+                            auto lastPublish = std::chrono::steady_clock::now() - std::chrono::seconds(1);
                             while ((r = archive_read_data_block(a, &buff, &size, &offset)) == ARCHIVE_OK) {
                                 ctx->workerSha256Hasher->update(buff, size);
 
@@ -2161,6 +2074,19 @@ namespace provisioner {
                                     remaining -= static_cast<size_t>(written);
                                 }
                                 ctx->totalBytesWritten += size;
+
+                                if (!ctx->uploadId.empty()) {
+                                    auto now = std::chrono::steady_clock::now();
+                                    if (now - lastPublish >= std::chrono::milliseconds(250)) {
+                                        lastPublish = now;
+                                        Json::Value p;
+                                        p["phase"] = "decompressing";
+                                        p["bytes_written"] = static_cast<Json::Int64>(ctx->totalBytesWritten);
+                                        if (ctx->progressTotalBytes > 0)
+                                            p["total_bytes"] = static_cast<Json::Int64>(ctx->progressTotalBytes);
+                                        provisioner::TopicHub::instance().publish("upload:" + ctx->uploadId, p);
+                                    }
+                                }
                             }
 
                             if (r != ARCHIVE_EOF) {
@@ -2284,6 +2210,17 @@ namespace provisioner {
                         if (!ctx->targetPath.empty()) ::unlink(ctx->targetPath.c_str());
                     };
 
+                    // Helper: publish an error/completion message and tear down the topic
+                    auto publishProgress = [&ctx](const std::string& phase, const std::string& errMsg = "") {
+                        if (ctx->uploadId.empty()) return;
+                        Json::Value p;
+                        p["phase"] = phase;
+                        if (!errMsg.empty()) p["message"] = errMsg;
+                        auto& hub = provisioner::TopicHub::instance();
+                        hub.publish("upload:" + ctx->uploadId, p);
+                        hub.removeTopic("upload:" + ctx->uploadId);
+                    };
+
                     // Handle stream-level errors
                     if (ex) {
                         try { std::rethrow_exception(ex); }
@@ -2291,6 +2228,7 @@ namespace provisioner {
                         catch (const std::exception& e) { LOG_ERROR << "Upload stream error: " << e.what(); }
 
                         signalWorkerAndCleanup();
+                        publishProgress("error", "Upload stream failed");
 
                         auto resp = provisioner::utils::createErrorResponse(
                             ctx->req, "Upload stream failed", drogon::k400BadRequest,
@@ -2302,6 +2240,7 @@ namespace provisioner {
                     // Handle write errors detected during streaming
                     if (ctx->hadError) {
                         signalWorkerAndCleanup();
+                        publishProgress("error", ctx->errorMessage);
                         auto resp = provisioner::utils::createErrorResponse(
                             ctx->req, ctx->errorMessage, ctx->errorCode,
                             "Upload Error", "UPLOAD_WRITE_ERROR");
@@ -2319,6 +2258,7 @@ namespace provisioner {
                             if (std::filesystem::exists(ctx->tempDir)) std::filesystem::remove_all(ctx->tempDir);
                             AuditLog::logFileSystemAccess("UPLOAD_ARCHIVE", ctx->finalDir.string(), false, "",
                                 "Archive extraction failed: " + ctx->extractionError);
+                            publishProgress("error", "Archive extraction failed: " + ctx->extractionError);
                             auto resp = provisioner::utils::createErrorResponse(
                                 ctx->req, "Failed to extract archive: " + ctx->extractionError,
                                 drogon::k500InternalServerError, "Extraction Error", "ARCHIVE_EXTRACT_ERROR");
@@ -2402,6 +2342,7 @@ namespace provisioner {
                             result["analysis"] = analyzeIdpArtefact(ctx->finalDir);
                         }
 
+                        publishProgress("complete");
                         resp->setBody(result.toStyledString());
                         ctx->callback(resp);
                     } else if (ctx->isCompressedImg) {
@@ -2411,6 +2352,7 @@ namespace provisioner {
                         if (!ctx->extractionOk) {
                             LOG_ERROR << "Decompression failed: " << ctx->extractionError;
                             if (!ctx->targetPath.empty()) ::unlink(ctx->targetPath.c_str());
+                            publishProgress("error", "Decompression failed: " + ctx->extractionError);
                             auto resp = provisioner::utils::createErrorResponse(
                                 ctx->req, "Failed to decompress image: " + ctx->extractionError,
                                 ctx->errorCode, "Decompression Error", "DECOMPRESS_ERROR");
@@ -2455,6 +2397,7 @@ namespace provisioner {
                         if (ctx->originalFilename != ctx->finalFilename) result["original_filename"] = ctx->originalFilename;
                         result["message"] = "Compressed image uploaded and decompressed successfully";
                         result["sha256"] = ctx->workerSha256Result.empty() ? "Calculating..." : ctx->workerSha256Result;
+                        publishProgress("complete");
                         resp->setBody(result.toStyledString());
                         ctx->callback(resp);
                     } else {
