@@ -139,9 +139,12 @@ cleanup() {
 
     return_value=$?
 
+    # Disable errexit so cleanup runs to completion even if umount/sync fail
+    set +e
+
     # Unmount any mounted partitions from image customisation
-    [ -d "${TMP_DIR}/rpi-boot-img-mount" ] && umount "${TMP_DIR}"/rpi-boot-img-mount 2>/dev/null && sync
-    [ -d "${TMP_DIR}/rpi-rootfs-img-mount" ] && umount "${TMP_DIR}"/rpi-rootfs-img-mount 2>/dev/null && sync
+    [ -d "${TMP_DIR}/rpi-boot-img-mount" ] && { umount "${TMP_DIR}"/rpi-boot-img-mount 2>/dev/null; sync; }
+    [ -d "${TMP_DIR}/rpi-rootfs-img-mount" ] && { umount "${TMP_DIR}"/rpi-rootfs-img-mount 2>/dev/null; sync; }
 
     # Detach any loop devices associated with the modified image copy
     if [ -n "${TMP_DIR}" ] && [ -f "${TMP_DIR}/gold-master-modified.img" ]; then
@@ -159,6 +162,8 @@ cleanup() {
         DELETE_PRIVATE_TMPDIR=
         announce_stop "Deleting customised intermediates"
     fi
+
+    cleanup_orphans
 
     exit ${return_value}
 }
