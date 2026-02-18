@@ -229,15 +229,18 @@ cleanup() {
 
     returnvalue=$?
 
+    # Disable errexit so cleanup runs to completion even if umount/sync fail
+    set +e
+
     # Unmount partitions first, then detach loop device, then delete files.
     # Wrong order (delete before unmount) leaves dangling loop devices.
-    [ -d "${TMP_DIR}/rpi-boot-img-mount" ] && umount "${TMP_DIR}"/rpi-boot-img-mount 2>/dev/null && sync
-    [ -d "${TMP_DIR}/rpi-rootfs-img-mount" ] && umount "${TMP_DIR}"/rpi-rootfs-img-mount 2>/dev/null && sync
-    [ -d "${TMP_DIR}/rpi-cryptroot-bootfs-img-mount" ] && umount "${TMP_DIR}"/rpi-cryptroot-bootfs-img-mount 2>/dev/null && sync
+    [ -d "${TMP_DIR}/rpi-boot-img-mount" ] && { umount "${TMP_DIR}"/rpi-boot-img-mount 2>/dev/null; sync; }
+    [ -d "${TMP_DIR}/rpi-rootfs-img-mount" ] && { umount "${TMP_DIR}"/rpi-rootfs-img-mount 2>/dev/null; sync; }
+    [ -d "${TMP_DIR}/rpi-cryptroot-bootfs-img-mount" ] && { umount "${TMP_DIR}"/rpi-cryptroot-bootfs-img-mount 2>/dev/null; sync; }
     unmount_image "${GOLD_MASTER_OS_FILE}" 2>/dev/null
 
     rm -f "${CUSTOMER_PUBLIC_KEY_FILE}"
-    [ -d "${TMP_DIR}" ] && rm -rf "${TMP_DIR}" && sync
+    [ -d "${TMP_DIR}" ] && { rm -rf "${TMP_DIR}"; sync; }
 
     if [ -n "${DELETE_PRIVATE_TMPDIR}" ]; then
         announce_start "Deleting customised intermediates"
@@ -247,6 +250,8 @@ cleanup() {
         DELETE_PRIVATE_TMPDIR=
         announce_stop "Deleting customised intermediates"
     fi
+
+    cleanup_orphans
 
     exit ${returnvalue}
 }

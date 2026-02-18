@@ -78,7 +78,7 @@ with_lock() {
 cleanup_orphans() {
     # Clean up temp directories inside TEMP_BASE that are older than the threshold
     # Using -mindepth 1 to avoid removing TEMP_BASE itself
-    find "$TEMP_BASE" -mindepth 1 -maxdepth 1 -type d -mtime +"$MAX_TEMP_DIR_AGE_HOURS" -exec rm -rf {} + 2>/dev/null || true
+    find "$TEMP_BASE" -mindepth 1 -maxdepth 1 -type d -mmin +"$((MAX_TEMP_DIR_AGE_HOURS * 60))" -exec rm -rf {} + 2>/dev/null || true
     find "$LOG_BASE" -type d -empty -delete 2>/dev/null || true
     find "$LOCK_BASE" -type f -mtime +1 -delete 2>/dev/null || true
 }
