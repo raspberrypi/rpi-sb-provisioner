@@ -290,15 +290,15 @@ unmount() {
 unmount_image() {
     sync
     sleep 1
-    LOOP_DEVICE=$(losetup --list | grep "$1" | cut -f1 -d' ')
-    if [ -n "$LOOP_DEVICE" ]; then
-        for part in "$LOOP_DEVICE"p*; do
+    losetup --list | grep "$1" | cut -f1 -d' ' | while read -r LOOP_DEVICE; do
+        [ -z "$LOOP_DEVICE" ] && continue
+        for part in "${LOOP_DEVICE}"p*; do
             if DIR=$(findmnt -n -o target -S "$part"); then
                 unmount "$DIR"
             fi
         done
         losetup -d "$LOOP_DEVICE"
-    fi
+    done
 }
 
 # =============================================================================
