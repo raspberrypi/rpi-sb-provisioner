@@ -211,6 +211,8 @@
 
         // Map of bus number -> speed (populated from backend data)
         const busSpeedMap = new Map();
+        // Backend-provided companion bus pairs (from sysfs controller ancestry)
+        let backendCompanionPairs = null;
         
         function busTierForId(id) {
             const m = String(id).match(/^(\d+)-/);
@@ -243,59 +245,72 @@
             }
         }
 
-        function buildCanonicalRootHubMap(nodes) {
-            // Coalesce by root port. Prefer an SS roothub when present; if not, pick one HS roothub.
-            const canonicalByPort = new Map(); // portIdx -> canonicalRootId like '4-1'
-            const hsFallbackByPort = new Map(); // portIdx -> chosen HS root id
+        function buildCompanionBusMap(nodes) {
+            // Prefer backend-provided companion pairs (resolved from sysfs
+            // controller ancestry — authoritative, not heuristic).
+            if (backendCompanionPairs && backendCompanionPairs.length > 0) {
+                const companionMap = new Map();
+                for (const p of backendCompanionPairs) {
+                    const ssPorts = new Set();
+                    for (let i = 1; i <= (p.ssPortCount || 0); i++) ssPorts.add(i);
+                    companionMap.set(p.hsBus, { ssBus: p.ssBus, ssPorts });
+                }
+                return companionMap;
+            }
+
+            // Fallback: infer companion pairs from bus speeds and node IDs.
+            // xHCI registers the HS root hub first (lower bus number) then SS
+            // (bus number + 1). Only HS ports with a matching SS port share a
+            // physical connector; the rest are standalone USB 2.0 ports.
+            const ssBuses = new Set();
+            const hsBuses = new Set();
+            const ssPortsByBus = new Map(); // SS bus -> Set of root-port numbers
             for (const n of nodes) {
-                if (!n || !n.isHub) continue;
-                const pid = n.parentId ? String(n.parentId) : 'server';
-                const rootPort = parseRootPort(String(n.id));
-                if (pid !== 'server' || !rootPort) continue;
+                if (!n) continue;
+                const m = String(n.id).match(/^(\d+)-/);
+                if (!m) continue;
+                const bus = parseInt(m[1], 10);
                 const tier = busTierForId(String(n.id));
-                const { bus } = parseBusAndChain(String(n.id)) || {};
                 if (tier === 'ss') {
-                    const current = canonicalByPort.get(rootPort);
-                    if (!current) {
-                        canonicalByPort.set(rootPort, String(n.id));
-                    } else {
-                        // Prefer higher SS bus number (e.g., 4 over 3)
-                        const existingBus = parseInt(current.split('-')[0], 10);
-                        const newBus = parseInt(bus, 10);
-                        if (newBus > existingBus) canonicalByPort.set(rootPort, String(n.id));
-                    }
-                } else if (tier === 'hs') {
-                    const currentHs = hsFallbackByPort.get(rootPort);
-                    if (!currentHs) {
-                        hsFallbackByPort.set(rootPort, String(n.id));
-                    } else {
-                        // Prefer lower HS bus number for stability
-                        const existingBus = parseInt(currentHs.split('-')[0], 10);
-                        const newBus = parseInt(bus, 10);
-                        if (newBus < existingBus) hsFallbackByPort.set(rootPort, String(n.id));
+                    ssBuses.add(bus);
+                    const pm = String(n.id).match(/^(\d+)-(\d+)/);
+                    if (pm) {
+                        const port = parseInt(pm[2], 10);
+                        if (port > 0) {
+                            if (!ssPortsByBus.has(bus)) ssPortsByBus.set(bus, new Set());
+                            ssPortsByBus.get(bus).add(port);
+                        }
                     }
                 }
+                else if (tier === 'hs') hsBuses.add(bus);
             }
-            // Fill gaps with HS fallback when no SS canonical exists
-            for (const [port, hsId] of hsFallbackByPort.entries()) {
-                if (!canonicalByPort.has(port)) canonicalByPort.set(port, hsId);
+            const companionMap = new Map(); // HS bus -> { ssBus, ssPorts }
+            for (const ssBus of ssBuses) {
+                const potentialHs = ssBus - 1;
+                if (hsBuses.has(potentialHs)) {
+                    companionMap.set(potentialHs, {
+                        ssBus,
+                        ssPorts: ssPortsByBus.get(ssBus) || new Set()
+                    });
+                }
             }
-            return canonicalByPort;
+            return companionMap;
         }
 
-        function canonicalizeIdByRoot(id, canonicalByPort) {
-            // Coalesce by root port: map any id starting with '<bus>-<port>'
-            // to the canonical SuperSpeed root for that port when available.
-            // This hides HS root placeholders and re-parents HS-only children
-            // under the SS "Root Port n" group without losing visibility.
-            const m = String(id).match(/^(\d+)-([0-9]+)(\..*)?$/);
+        function canonicalizeId(id, companionBusMap) {
+            // Remap nodes on companion HS buses to their SS counterpart, but
+            // only when the root-port number exists on the SS bus. HS ports
+            // without an SS counterpart are standalone USB 2.0 ports.
+            const m = String(id).match(/^(\d+)-(\d+)(\..*)?$/);
             if (!m) return String(id);
-            const port = m[2];
+            const bus = parseInt(m[1], 10);
+            const rootPort = parseInt(m[2], 10);
             const rest = m[3] || '';
-            const canonicalRoot = canonicalByPort.get(port);
-            if (!canonicalRoot) return String(id);
-            const canonicalPrefix = canonicalRoot; // like '2-1'
-            return canonicalPrefix + rest;
+            const companion = companionBusMap.get(bus);
+            if (companion && companion.ssPorts.has(rootPort)) {
+                return String(companion.ssBus) + '-' + m[2] + rest;
+            }
+            return String(id);
         }
 
         function applyStateClass(el, state) {
@@ -415,8 +430,8 @@
                 // This ensures USB 3 devices win over their USB 2 companions during canonicalization
                 const sortedNodes = [...rawNodes].sort((a, b) => (b.speed || 0) - (a.speed || 0));
                 
-                // Build canonical map and deduplicate nodes
-                const canonicalByPort = buildCanonicalRootHubMap(sortedNodes);
+                // Build companion bus map for deduplication
+                const companionBusMap = buildCompanionBusMap(sortedNodes);
                 const nodeMap = new Map();
                 const links = [];
                 
@@ -438,11 +453,16 @@
                             portsUsed.ss.add(rootPort);
                         } else if (tier === 'hs') {
                             const busNum = parseBus(id);
-                            if (!isNaN(busNum)) hsBusSet.add(busNum);
+                            if (!isNaN(busNum)) {
+                                const companion = companionBusMap.get(busNum);
+                                const rp = parseRootPort(id);
+                                const rpNum = rp ? parseInt(rp, 10) : -1;
+                                if (!companion || !companion.ssPorts.has(rpNum)) hsBusSet.add(busNum);
+                            }
                         }
                     }
                 });
-                // Map HS buses to ordinal root port numbers (bus 1 → port 1, bus 2 → port 2, etc.)
+                // Map standalone HS buses to ordinal root port numbers (bus 3 → port 1, etc.)
                 const hsBusOrder = Array.from(hsBusSet).sort((a, b) => a - b);
                 const hsBusToPort = new Map();
                 hsBusOrder.forEach((bus, idx) => {
@@ -504,7 +524,7 @@
                 
                 // Add actual device nodes (using sorted list so USB 3 nodes are processed first)
                 sortedNodes.forEach(n => {
-                    const canonicalId = canonicalizeIdByRoot(String(n.id), canonicalByPort);
+                    const canonicalId = canonicalizeId(String(n.id), companionBusMap);
                     if (!nodeMap.has(canonicalId)) {
                         const node = { ...n, id: canonicalId };
                         // Set server at center
@@ -540,7 +560,7 @@
                             }
                         }
                         
-                        const canonicalParentId = canonicalizeIdByRoot(parentId, canonicalByPort);
+                        const canonicalParentId = canonicalizeId(parentId, companionBusMap);
                         const parent = nodeMap.get(canonicalParentId) || nodeMap.get(parentId) || nodeMap.get('server');
                         if (parent) {
                             links.push({ source: parent.id, target: n.id });
@@ -971,10 +991,8 @@
             // This ensures USB 3 devices win over their USB 2 companions during canonicalization
             const sortedNodes = [...nodes].sort((a, b) => (b.speed || 0) - (a.speed || 0));
             const seen = new Set();
-            const emittedIds = new Set(); // ids after canonicalization to avoid duplicates
-            // Build per-root canonical mapping so companion hubs (e.g., buses 3/4) are coalesced
-            const canonicalByPort = buildCanonicalRootHubMap(sortedNodes);
-            const nodeIdSet = new Set(sortedNodes.map(n => String(n.id)));
+            // Build companion bus map to deduplicate HS/SS pairs from xHCI controllers
+            const companionBusMap = buildCompanionBusMap(sortedNodes);
             // Pre-create tier containers and at least 2 root-port groups per tier
             const portsByTier = { hs: new Set(), ss: new Set() };
             const hsBusSet = new Set();
@@ -987,10 +1005,12 @@
                     if (tier === 'ss') {
                         portsByTier.ss.add(port);
                     } else if (tier === 'hs') {
-                        // Hide HS root groups that are fully aliased to SS companions
-                        if (!canonicalByPort.has(port)) {
+                        const busNum = parseBus(id);
+                        const companion = companionBusMap.get(busNum);
+                        const portNum = port ? parseInt(port, 10) : -1;
+                        if (!companion || !companion.ssPorts.has(portNum)) {
                             portsByTier.hs.add(port);
-                            hsBusSet.add(parseBus(id));
+                            hsBusSet.add(busNum);
                         }
                     }
                 }
@@ -1020,17 +1040,16 @@
             for (const n of sortedNodes) {
                 const rawId = String(n.id);
                 if (rawId === 'server') { seen.add('server'); continue; }
-                // Canonicalize id by root-port; drop if it maps to an already-present id
-                const canonicalId = canonicalizeIdByRoot(rawId, canonicalByPort);
-                if (canonicalId !== rawId && (nodeIdSet.has(canonicalId) || emittedIds.has(canonicalId))) {
+                // Remap companion HS bus IDs to their SS counterpart; drop duplicates
+                const canonicalId = canonicalizeId(rawId, companionBusMap);
+                if (seen.has(canonicalId)) {
                     try { console.log('applyTopology: drop companion duplicate', rawId, '→', canonicalId); } catch(e) {}
                     continue;
                 }
-                const id = canonicalId; // use canonical id for rendering and grouping
+                const id = canonicalId;
                 seen.add(id);
                 let parentId = n.parentId ? String(n.parentId) : 'server';
-                // Re-map parent to canonical so children of hidden companion hubs attach correctly
-                parentId = canonicalizeIdByRoot(parentId, canonicalByPort);
+                parentId = canonicalizeId(parentId, companionBusMap);
                 try { console.debug('applyTopology: node', { id, parentId, isHub: !!n.isHub, placeholder: !!n.placeholder, modelGen: n.modelGen }); } catch(e) {}
                 // For direct root-port items, group under USB tier then "Root Port <n>"
                 let parentEl;
@@ -1095,9 +1114,9 @@
                     const msg = JSON.parse(event.data);
                     if (msg && msg.type === 'topology' && Array.isArray(msg.nodes)) {
                         try { console.log('ws: topology message nodes', msg.nodes.length, 'removed', Array.isArray(msg.removed) ? msg.removed.length : 0); } catch(e) {}
-                        // Update bus speed map first (before processing topology)
+                        // Update bus speed map and companion pairs before processing
                         updateBusSpeedMap(msg.nodes);
-                        // Apply updates first
+                        if (Array.isArray(msg.companionPairs)) backendCompanionPairs = msg.companionPairs;
                         applyTopology(msg.nodes);
                         // Also update D3 interactive graph if active
                         if (window.__d3Apply) { try { window.__d3Apply(msg.nodes); } catch(e) { console.error('D3 update error:', e); } }
