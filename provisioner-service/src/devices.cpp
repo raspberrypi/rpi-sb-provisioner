@@ -580,6 +580,69 @@ namespace provisioner {
             return "server";
         }
 
+        struct CompanionBusPair {
+            int hsBus;
+            int ssBus;
+            int ssPortCount;
+        };
+
+        // Resolve companion HS/SS bus pairs by checking which root hubs
+        // share a physical USB controller in sysfs.  This is authoritative
+        // (no heuristic) — two root hubs are companions iff they share
+        // the same parent device (the xHCI controller instance).
+        std::vector<CompanionBusPair> detectCompanionBuses() {
+            std::vector<CompanionBusPair> pairs;
+            const std::filesystem::path usbPath("/sys/bus/usb/devices");
+            if (!std::filesystem::exists(usbPath)) return pairs;
+
+            struct BusInfo { int bus; int speed; int portCount; };
+            std::unordered_map<std::string, std::vector<BusInfo>> controllerBuses;
+
+            for (const auto &entry : std::filesystem::directory_iterator(usbPath)) {
+                const std::string name = entry.path().filename().string();
+                if (name.size() < 4 || name.substr(0, 3) != "usb") continue;
+                int bus;
+                try { bus = std::stoi(name.substr(3)); } catch (...) { continue; }
+
+                std::error_code ec;
+                auto realPath = std::filesystem::canonical(entry.path(), ec);
+                if (ec) continue;
+                std::string controllerPath = realPath.parent_path().string();
+
+                int speed = 0;
+                const std::string speedStr = readFileTrimmed(entry.path() / "speed");
+                if (!speedStr.empty()) {
+                    try { speed = std::stoi(speedStr); } catch (...) {}
+                }
+
+                int portCount = 0;
+                const std::string mcStr = readFileTrimmed(entry.path() / "maxchild");
+                if (!mcStr.empty()) {
+                    try { portCount = std::stoi(mcStr); } catch (...) {}
+                }
+
+                controllerBuses[controllerPath].push_back({bus, speed, portCount});
+            }
+
+            for (const auto &[ctrl, buses] : controllerBuses) {
+                std::vector<BusInfo> hsList, ssList;
+                for (const auto &b : buses) {
+                    if (b.speed >= 5000) ssList.push_back(b);
+                    else hsList.push_back(b);
+                }
+                if (ssList.empty() || hsList.empty()) continue;
+                // Sort by bus number for deterministic sequential pairing
+                std::sort(hsList.begin(), hsList.end(), [](const BusInfo &a, const BusInfo &b) { return a.bus < b.bus; });
+                std::sort(ssList.begin(), ssList.end(), [](const BusInfo &a, const BusInfo &b) { return a.bus < b.bus; });
+                size_t count = std::min(hsList.size(), ssList.size());
+                for (size_t i = 0; i < count; ++i) {
+                    pairs.push_back({hsList[i].bus, ssList[i].bus, ssList[i].portCount});
+                }
+            }
+
+            return pairs;
+        }
+
         std::unordered_map<std::string, UsbNode> scanUsbSysfs() {
             std::unordered_map<std::string, UsbNode> nodes;
             // Always include the server root node
@@ -928,6 +991,18 @@ namespace provisioner {
                 Json::Value r(Json::arrayValue);
                 for (const auto &id : removed) r.append(id);
                 root["removed"] = r;
+            }
+            auto companionPairs = detectCompanionBuses();
+            if (!companionPairs.empty()) {
+                Json::Value pairsArr(Json::arrayValue);
+                for (const auto &cp : companionPairs) {
+                    Json::Value p;
+                    p["hsBus"] = cp.hsBus;
+                    p["ssBus"] = cp.ssBus;
+                    p["ssPortCount"] = cp.ssPortCount;
+                    pairsArr.append(p);
+                }
+                root["companionPairs"] = pairsArr;
             }
             root["timestamp"] = static_cast<Json::UInt64>(std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now().time_since_epoch()).count());
