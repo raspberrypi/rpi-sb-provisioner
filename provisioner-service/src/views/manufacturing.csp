@@ -154,6 +154,57 @@
             color: #6c757d;
             font-size: 14px;
         }
+        
+        .pagination-controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 12px;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        
+        .pagination-controls .page-buttons {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        
+        .pagination-controls button {
+            background-color: #f2f2f2;
+            border: 1px solid #ddd;
+            padding: 4px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        
+        .pagination-controls button:hover:not(:disabled) {
+            background-color: #e0e0e0;
+        }
+        
+        .pagination-controls button:disabled {
+            opacity: 0.4;
+            cursor: default;
+        }
+        
+        .pagination-controls button.active-page {
+            background-color: #0066cc;
+            color: white;
+            border-color: #0066cc;
+        }
+        
+        .pagination-controls .page-info {
+            font-size: 13px;
+            color: #666;
+        }
+        
+        .pagination-controls select {
+            padding: 4px 6px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 13px;
+        }
     </style>
 </head>
 <body>
@@ -197,6 +248,7 @@
         <div class="scroll-indicator">Scroll to see more</div>
         <!-- Initial table will be created by JavaScript -->
     </div>
+    <div id="pagination-controls" class="pagination-controls" style="display:none;"></div>
 
     <script>
         // Prevent stored XSS by escaping untrusted data before HTML insertion
@@ -266,7 +318,174 @@
             });
         }
         
-        // Function to fetch and update the manufacturing table
+        // Pagination state
+        let allData = [];
+        let currentPage = 1;
+        let pageSize = 50;
+        const COLUMN_COUNT = 22;
+        
+        function totalPages() {
+            return Math.max(1, Math.ceil(allData.length / pageSize));
+        }
+        
+        function renderCurrentPage() {
+            const start = (currentPage - 1) * pageSize;
+            const pageData = allData.slice(start, start + pageSize);
+            
+            let tableHtml = `
+                <table id="manufacturingTable">
+                    <caption class="sr-only">Manufacturing database showing provisioned device information</caption>
+                    <thead>
+                        <tr>
+                            <th scope="col">Provision Time</th>
+                            <th scope="col">ID</th>
+                            <th scope="col">Board</th>
+                            <th scope="col">Serial</th>
+                            <th scope="col">Ethernet MAC</th>
+                            <th scope="col">WiFi MAC</th>
+                            <th scope="col">Bluetooth MAC</th>
+                            <th scope="col">eMMC Size</th>
+                            <th scope="col">eMMC CID</th>
+                            <th scope="col">RPi DUID</th>
+                            <th scope="col">Revision</th>
+                            <th scope="col">Processor</th>
+                            <th scope="col">Memory</th>
+                            <th scope="col">Manufacturer</th>
+                            <th scope="col">Secure</th>
+                            <th scope="col">JTAG Locked</th>
+                            <th scope="col">EEPROM WP</th>
+                            <th scope="col">Pubkey Prog.</th>
+                            <th scope="col">Devkey Revoked</th>
+                            <th scope="col">Signed Boot</th>
+                            <th scope="col">OS Image Filename</th>
+                            <th scope="col">OS Image SHA256</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+            
+            if (pageData.length > 0) {
+                pageData.forEach(device => {
+                    tableHtml += `
+                        <tr>
+                            <td>${escapeHtml(device.provision_ts)}</td>
+                            <td>${escapeHtml(device.id)}</td>
+                            <td>${escapeHtml(device.boardname)}</td>
+                            <td>${escapeHtml(device.serial)}</td>
+                            <td>${escapeHtml(device.eth_mac)}</td>
+                            <td>${escapeHtml(device.wifi_mac)}</td>
+                            <td>${escapeHtml(device.bt_mac)}</td>
+                            <td class="emmc-size" data-size="${escapeHtml(device.mmc_size)}">${escapeHtml(device.mmc_size)}</td>
+                            <td>${escapeHtml(device.mmc_cid)}</td>
+                            <td>${escapeHtml(device.rpi_duid)}</td>
+                            <td>${escapeHtml(device.board_revision)}</td>
+                            <td>${escapeHtml(device.processor)}</td>
+                            <td>${escapeHtml(device.memory)}</td>
+                            <td>${escapeHtml(device.manufacturer)}</td>
+                            <td>${escapeHtml(device.secure)}</td>
+                            <td class="security-field">${formatSecurityField(device.jtag_locked)}</td>
+                            <td class="security-field">${formatSecurityField(device.eeprom_write_protected)}</td>
+                            <td class="security-field">${formatSecurityField(device.pubkey_programmed)}</td>
+                            <td class="security-field">${formatSecurityField(device.devkey_revoked)}</td>
+                            <td class="security-field">${formatSecurityField(device.signed_boot_enabled)}</td>
+                            <td>${escapeHtml(device.os_image_filename)}</td>
+                            <td style="font-family: monospace;">${escapeHtml(device.os_image_sha256)}</td>
+                        </tr>
+                    `;
+                });
+            } else {
+                tableHtml += `
+                    <tr>
+                        <td colspan="${COLUMN_COUNT}" class="no-devices">No manufacturing data available</td>
+                    </tr>
+                `;
+            }
+            
+            tableHtml += `
+                    </tbody>
+                </table>
+            `;
+            
+            // Preserve scroll position across the table rebuild
+            const container = document.getElementById('manu-table-container');
+            const prevScrollTop = container.scrollTop;
+            const prevScrollLeft = container.scrollLeft;
+            
+            container.innerHTML = tableHtml;
+            
+            container.scrollTop = prevScrollTop;
+            container.scrollLeft = prevScrollLeft;
+            
+            applyEmmcSizeTooltips();
+            updateScrollIndicator();
+            renderPaginationControls();
+        }
+        
+        function renderPaginationControls() {
+            const total = allData.length;
+            const pages = totalPages();
+            const controlsEl = document.getElementById('pagination-controls');
+            
+            if (total === 0) {
+                controlsEl.style.display = 'none';
+                return;
+            }
+            controlsEl.style.display = 'flex';
+            
+            const start = (currentPage - 1) * pageSize + 1;
+            const end = Math.min(currentPage * pageSize, total);
+            
+            let html = '<span class="page-info">Showing ' + start + '–' + end + ' of ' + total + ' devices</span>';
+            html += '<div class="page-buttons">';
+            html += '<button id="pg-prev" ' + (currentPage <= 1 ? 'disabled' : '') + '>&laquo; Prev</button>';
+            
+            // Show a window of page buttons around the current page
+            const maxButtons = 7;
+            let rangeStart = Math.max(1, currentPage - Math.floor(maxButtons / 2));
+            let rangeEnd = Math.min(pages, rangeStart + maxButtons - 1);
+            if (rangeEnd - rangeStart < maxButtons - 1) {
+                rangeStart = Math.max(1, rangeEnd - maxButtons + 1);
+            }
+            
+            if (rangeStart > 1) {
+                html += '<button class="pg-goto" data-page="1">1</button>';
+                if (rangeStart > 2) html += '<span class="page-info">&hellip;</span>';
+            }
+            for (let p = rangeStart; p <= rangeEnd; p++) {
+                html += '<button class="pg-goto' + (p === currentPage ? ' active-page' : '') + '" data-page="' + p + '">' + p + '</button>';
+            }
+            if (rangeEnd < pages) {
+                if (rangeEnd < pages - 1) html += '<span class="page-info">&hellip;</span>';
+                html += '<button class="pg-goto" data-page="' + pages + '">' + pages + '</button>';
+            }
+            
+            html += '<button id="pg-next" ' + (currentPage >= pages ? 'disabled' : '') + '>Next &raquo;</button>';
+            html += '</div>';
+            html += '<label class="page-info">Per page: <select id="pg-size">';
+            [25, 50, 100, 250].forEach(s => {
+                html += '<option value="' + s + '"' + (s === pageSize ? ' selected' : '') + '>' + s + '</option>';
+            });
+            html += '</select></label>';
+            
+            controlsEl.innerHTML = html;
+            
+            // Bind events
+            const prevBtn = document.getElementById('pg-prev');
+            const nextBtn = document.getElementById('pg-next');
+            if (prevBtn) prevBtn.addEventListener('click', () => { currentPage--; renderCurrentPage(); });
+            if (nextBtn) nextBtn.addEventListener('click', () => { currentPage++; renderCurrentPage(); });
+            controlsEl.querySelectorAll('.pg-goto').forEach(btn => {
+                btn.addEventListener('click', () => { currentPage = parseInt(btn.dataset.page); renderCurrentPage(); });
+            });
+            const sizeSelect = document.getElementById('pg-size');
+            if (sizeSelect) sizeSelect.addEventListener('change', () => {
+                pageSize = parseInt(sizeSelect.value);
+                currentPage = 1;
+                renderCurrentPage();
+            });
+        }
+        
+        // Fetch data from API and re-render
         async function refreshManufacturingTable() {
             try {
                 const response = await fetch('/api/v2/manufacturing');
@@ -276,101 +495,20 @@
                 }
                 
                 const data = await response.json();
+                allData = Array.isArray(data) ? data : [];
                 
-                // Create a new table with the updated data
-                let tableHtml = `
-                    <table id="manufacturingTable">
-                        <caption class="sr-only">Manufacturing database showing provisioned device information</caption>
-                        <thead>
-                            <tr>
-                                <th scope="col">Provision Time</th>
-                                <th scope="col">ID</th>
-                                <th scope="col">Board</th>
-                                <th scope="col">Serial</th>
-                                <th scope="col">Ethernet MAC</th>
-                                <th scope="col">WiFi MAC</th>
-                                <th scope="col">Bluetooth MAC</th>
-                                <th scope="col">eMMC Size</th>
-                                <th scope="col">eMMC CID</th>
-                                <th scope="col">RPi DUID</th>
-                                <th scope="col">Revision</th>
-                                <th scope="col">Processor</th>
-                                <th scope="col">Memory</th>
-                                <th scope="col">Manufacturer</th>
-                                <th scope="col">Secure</th>
-                                <th scope="col">JTAG Locked</th>
-                                <th scope="col">EEPROM WP</th>
-                                <th scope="col">Pubkey Prog.</th>
-                                <th scope="col">Devkey Revoked</th>
-                                <th scope="col">Signed Boot</th>
-                                <th scope="col">OS Image Filename</th>
-                                <th scope="col">OS Image SHA256</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                `;
+                // Clamp current page if the dataset shrank
+                if (currentPage > totalPages()) currentPage = totalPages();
                 
-                if (data && data.length > 0) {
-                    data.forEach(device => {
-                        tableHtml += `
-                            <tr>
-                                <td>${escapeHtml(device.provision_ts)}</td>
-                                <td>${escapeHtml(device.id)}</td>
-                                <td>${escapeHtml(device.boardname)}</td>
-                                <td>${escapeHtml(device.serial)}</td>
-                                <td>${escapeHtml(device.eth_mac)}</td>
-                                <td>${escapeHtml(device.wifi_mac)}</td>
-                                <td>${escapeHtml(device.bt_mac)}</td>
-                                <td class="emmc-size" data-size="${escapeHtml(device.mmc_size)}">${escapeHtml(device.mmc_size)}</td>
-                                <td>${escapeHtml(device.mmc_cid)}</td>
-                                <td>${escapeHtml(device.rpi_duid)}</td>
-                                <td>${escapeHtml(device.board_revision)}</td>
-                                <td>${escapeHtml(device.processor)}</td>
-                                <td>${escapeHtml(device.memory)}</td>
-                                <td>${escapeHtml(device.manufacturer)}</td>
-                                <td>${escapeHtml(device.secure)}</td>
-                                <td class="security-field">${formatSecurityField(device.jtag_locked)}</td>
-                                <td class="security-field">${formatSecurityField(device.eeprom_write_protected)}</td>
-                                <td class="security-field">${formatSecurityField(device.pubkey_programmed)}</td>
-                                <td class="security-field">${formatSecurityField(device.devkey_revoked)}</td>
-                                <td class="security-field">${formatSecurityField(device.signed_boot_enabled)}</td>
-                                <td>${escapeHtml(device.os_image_filename)}</td>
-                                <td style="font-family: monospace;">${escapeHtml(device.os_image_sha256)}</td>
-                            </tr>
-                        `;
-                    });
-                } else {
-                    tableHtml += `
-                        <tr>
-                            <td colspan="21" class="no-devices">No manufacturing data available</td>
-                        </tr>
-                    `;
-                }
+                renderCurrentPage();
                 
-                tableHtml += `
-                        </tbody>
-                    </table>
-                `;
-                
-                // Preserve scroll position across the table rebuild
-                const container = document.getElementById('manu-table-container');
-                const prevScrollTop = container.scrollTop;
-                const prevScrollLeft = container.scrollLeft;
-                
-                container.innerHTML = tableHtml;
-                
-                container.scrollTop = prevScrollTop;
-                container.scrollLeft = prevScrollLeft;
-                
-                // Apply tooltips and update UI after the table is updated
-                applyEmmcSizeTooltips();
-                updateScrollIndicator();
+                // Clear any previous error
+                document.getElementById('error-container').innerHTML = '';
                 
                 return true;
             } catch (error) {
                 console.error('Error fetching manufacturing data:', error);
                 
-                // Show error message
                 document.getElementById('error-container').innerHTML = `
                     <div class="error-message">
                         <strong>Error loading data:</strong> ${escapeHtml(error.message) || 'Failed to fetch manufacturing data'}
@@ -381,53 +519,55 @@
             }
         }
         
-        // Export table to CSV
+        // Export ALL data to CSV (not just the current page)
         document.getElementById('exportCsv').addEventListener('click', function() {
-            // Get the table
-            const table = document.getElementById('manufacturingTable');
-            let csvContent = "data:text/csv;charset=utf-8,";
+            if (!allData || allData.length === 0) return;
             
-            // Get header row
-            const headerRow = table.querySelector('thead tr');
-            const headers = [];
-            headerRow.querySelectorAll('th').forEach(th => {
-                headers.push('"' + th.innerText + '"');
+            function csvEscape(val) {
+                const s = (val === null || val === undefined) ? '' : String(val);
+                return '"' + s.replace(/"/g, '""') + '"';
+            }
+            
+            function securityLabel(val) {
+                if (val === '1') return 'Yes';
+                if (val === '0') return 'No';
+                return 'Unknown';
+            }
+            
+            const headers = [
+                'Provision Time','ID','Board','Serial','Ethernet MAC','WiFi MAC',
+                'Bluetooth MAC','eMMC Size','eMMC CID','RPi DUID','Revision',
+                'Processor','Memory','Manufacturer','Secure','JTAG Locked',
+                'EEPROM WP','Pubkey Prog.','Devkey Revoked','Signed Boot',
+                'OS Image Filename','OS Image SHA256'
+            ];
+            
+            const rows = [headers.map(csvEscape).join(',')];
+            allData.forEach(d => {
+                rows.push([
+                    csvEscape(d.provision_ts), csvEscape(d.id), csvEscape(d.boardname),
+                    csvEscape(d.serial), csvEscape(d.eth_mac), csvEscape(d.wifi_mac),
+                    csvEscape(d.bt_mac), csvEscape(d.mmc_size), csvEscape(d.mmc_cid),
+                    csvEscape(d.rpi_duid), csvEscape(d.board_revision), csvEscape(d.processor),
+                    csvEscape(d.memory), csvEscape(d.manufacturer), csvEscape(d.secure),
+                    csvEscape(securityLabel(d.jtag_locked)),
+                    csvEscape(securityLabel(d.eeprom_write_protected)),
+                    csvEscape(securityLabel(d.pubkey_programmed)),
+                    csvEscape(securityLabel(d.devkey_revoked)),
+                    csvEscape(securityLabel(d.signed_boot_enabled)),
+                    csvEscape(d.os_image_filename), csvEscape(d.os_image_sha256)
+                ].join(','));
             });
-            csvContent += headers.join(',') + '\r\n';
             
-            // Get data rows
-            const rows = table.querySelectorAll('tbody tr');
-            rows.forEach(row => {
-                const rowData = [];
-                row.querySelectorAll('td').forEach(cell => {
-                    // For security fields, extract the symbol and convert to readable text
-                    let cellText = cell.innerText || '';
-                    if (cell.classList.contains('security-field')) {
-                        const span = cell.querySelector('span');
-                        if (span) {
-                            const symbol = span.innerText;
-                            if (symbol === '✓') cellText = 'Yes';
-                            else if (symbol === '✗') cellText = 'No';
-                            else if (symbol === '?') cellText = 'Unknown';
-                        }
-                    }
-                    rowData.push('"' + cellText + '"');
-                });
-                if (rowData.length > 1) { // Skip empty rows
-                    csvContent += rowData.join(',') + '\r\n';
-                }
-            });
-            
-            // Create download link
-            const encodedUri = encodeURI(csvContent);
+            const blob = new Blob([rows.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
-            link.setAttribute('href', encodedUri);
-            link.setAttribute('download', 'manufacturing_data_' + new Date().toISOString().split('T')[0] + '.csv');
+            link.href = url;
+            link.download = 'manufacturing_data_' + new Date().toISOString().split('T')[0] + '.csv';
             document.body.appendChild(link);
-            
-            // Download the CSV file
             link.click();
             document.body.removeChild(link);
+            URL.revokeObjectURL(url);
         });
 
         // Auto-refresh functionality
