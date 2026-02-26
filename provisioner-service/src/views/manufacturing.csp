@@ -199,6 +199,17 @@
     </div>
 
     <script>
+        // Prevent stored XSS by escaping untrusted data before HTML insertion
+        function escapeHtml(str) {
+            if (str === null || str === undefined) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
         // Function to format security field values with accessibility
         function formatSecurityField(value) {
             if (value === null || value === undefined || value === '') {
@@ -303,28 +314,28 @@
                     data.forEach(device => {
                         tableHtml += `
                             <tr>
-                                <td>${device.provision_ts || ''}</td>
-                                <td>${device.id || ''}</td>
-                                <td>${device.boardname || ''}</td>
-                                <td>${device.serial || ''}</td>
-                                <td>${device.eth_mac || ''}</td>
-                                <td>${device.wifi_mac || ''}</td>
-                                <td>${device.bt_mac || ''}</td>
-                                <td class="emmc-size" data-size="${device.mmc_size || ''}">${device.mmc_size || ''}</td>
-                                <td>${device.mmc_cid || ''}</td>
-                                <td>${device.rpi_duid || ''}</td>
-                                <td>${device.board_revision || ''}</td>
-                                <td>${device.processor || ''}</td>
-                                <td>${device.memory || ''}</td>
-                                <td>${device.manufacturer || ''}</td>
-                                <td>${device.secure || ''}</td>
+                                <td>${escapeHtml(device.provision_ts)}</td>
+                                <td>${escapeHtml(device.id)}</td>
+                                <td>${escapeHtml(device.boardname)}</td>
+                                <td>${escapeHtml(device.serial)}</td>
+                                <td>${escapeHtml(device.eth_mac)}</td>
+                                <td>${escapeHtml(device.wifi_mac)}</td>
+                                <td>${escapeHtml(device.bt_mac)}</td>
+                                <td class="emmc-size" data-size="${escapeHtml(device.mmc_size)}">${escapeHtml(device.mmc_size)}</td>
+                                <td>${escapeHtml(device.mmc_cid)}</td>
+                                <td>${escapeHtml(device.rpi_duid)}</td>
+                                <td>${escapeHtml(device.board_revision)}</td>
+                                <td>${escapeHtml(device.processor)}</td>
+                                <td>${escapeHtml(device.memory)}</td>
+                                <td>${escapeHtml(device.manufacturer)}</td>
+                                <td>${escapeHtml(device.secure)}</td>
                                 <td class="security-field">${formatSecurityField(device.jtag_locked)}</td>
                                 <td class="security-field">${formatSecurityField(device.eeprom_write_protected)}</td>
                                 <td class="security-field">${formatSecurityField(device.pubkey_programmed)}</td>
                                 <td class="security-field">${formatSecurityField(device.devkey_revoked)}</td>
                                 <td class="security-field">${formatSecurityField(device.signed_boot_enabled)}</td>
-                                <td>${device.os_image_filename || ''}</td>
-                                <td style="font-family: monospace;">${device.os_image_sha256 || ''}</td>
+                                <td>${escapeHtml(device.os_image_filename)}</td>
+                                <td style="font-family: monospace;">${escapeHtml(device.os_image_sha256)}</td>
                             </tr>
                         `;
                     });
@@ -355,7 +366,7 @@
                 // Show error message
                 document.getElementById('error-container').innerHTML = `
                     <div class="error-message">
-                        <strong>Error loading data:</strong> ${error.message || 'Failed to fetch manufacturing data'}
+                        <strong>Error loading data:</strong> ${escapeHtml(error.message) || 'Failed to fetch manufacturing data'}
                     </div>
                 `;
                 
