@@ -245,7 +245,10 @@
     <div id="error-container"></div>
     
     <div class="table-container" id="manu-table-container">
-        <!-- Table and scroll indicator managed by JavaScript -->
+        <div class="loading-container">
+            <div class="loading-spinner"></div>
+            <p>Loading manufacturing data&hellip;</p>
+        </div>
     </div>
     <div id="pagination-controls" class="pagination-controls" style="display:none;"></div>
 
@@ -526,6 +529,10 @@
                 return true;
             } catch (error) {
                 console.error('Error fetching manufacturing data:', error);
+                
+                // Remove loading spinner if this is the first load
+                const loader = document.querySelector('#manu-table-container .loading-container');
+                if (loader) loader.remove();
                 
                 document.getElementById('error-container').innerHTML = `
                     <div class="error-message">
