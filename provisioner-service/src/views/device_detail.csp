@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Device Details - [[device.serial]]</title>
     <%view stylesheet %>
     <style>
@@ -148,28 +149,6 @@
             font-weight: 600;
         }
 
-        .flag-status-indicator {
-            font-size: 0.8rem;
-            padding: 3px 10px;
-            border-radius: 12px;
-            font-weight: 500;
-        }
-
-        .flag-status-off {
-            background: #f0f0f0;
-            color: #666;
-        }
-
-        .flag-status-once {
-            background: #fff3cd;
-            color: #856404;
-        }
-
-        .flag-status-persistent {
-            background: #cce5ff;
-            color: #004085;
-        }
-
         .flag-saving {
             opacity: 0.6;
             pointer-events: none;
@@ -193,13 +172,181 @@
         .flag-feedback.error {
             color: #dc3545;
         }
+
+        /* Provisioning Progress Stepper */
+        .detail-progress {
+            display: flex;
+            align-items: flex-start;
+            margin: 16px 0 20px;
+            gap: 0;
+            background: #fff;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 20px 24px 16px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+        .detail-step {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            flex: 1;
+            position: relative;
+        }
+        .detail-step-circle {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border: 3px solid #ccc;
+            background: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 15px;
+            font-weight: 700;
+            color: #ccc;
+            transition: all 0.3s;
+            z-index: 1;
+        }
+        .detail-step.step-complete .detail-step-circle {
+            background: #28a745;
+            border-color: #28a745;
+            color: #fff;
+        }
+        .detail-step.step-active .detail-step-circle {
+            background: #ffc107;
+            border-color: #e0a800;
+            color: #333;
+            animation: detailStepPulse 2s ease-in-out infinite;
+        }
+        .detail-step.step-error .detail-step-circle {
+            background: #dc3545;
+            border-color: #dc3545;
+            color: #fff;
+        }
+        @keyframes detailStepPulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(255,193,7,0.4); }
+            50% { box-shadow: 0 0 0 6px rgba(255,193,7,0); }
+        }
+        .detail-step-label {
+            font-size: 0.85rem;
+            color: #555;
+            font-weight: 600;
+            margin-top: 6px;
+            white-space: nowrap;
+        }
+        .detail-step.step-complete .detail-step-label { color: #28a745; }
+        .detail-step.step-active .detail-step-label { color: #e0a800; font-weight: 700; }
+        .detail-step.step-error .detail-step-label { color: #dc3545; }
+        .detail-step-line {
+            position: absolute;
+            top: 18px;
+            left: calc(50% + 18px);
+            right: 0;
+            height: 3px;
+            background: #ccc;
+            z-index: 0;
+        }
+        .detail-step-line-left {
+            position: absolute;
+            top: 18px;
+            left: 0;
+            width: calc(50% - 18px);
+            height: 3px;
+            background: #ccc;
+            z-index: 0;
+        }
+        .detail-step.step-complete .detail-step-line { background: #28a745; }
+
+        @media (max-width: 600px) {
+            .detail-progress { padding: 14px 12px 10px; }
+            .detail-step-circle { width: 28px; height: 28px; font-size: 12px; }
+            .detail-step-line { top: 14px; left: calc(50% + 14px); }
+            .detail-step-line-left { top: 14px; width: calc(50% - 14px); }
+            .detail-step-label { font-size: 0.75rem; }
+        }
+
+        .detail-back {
+            display: inline-block;
+            margin-bottom: 8px;
+            font-size: 0.9rem;
+            color: #0b69ff;
+            text-decoration: none;
+        }
+        .detail-back:hover { text-decoration: underline; }
+
+        .ws-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.8rem;
+            color: #888;
+            float: right;
+            margin-top: 4px;
+        }
+        .ws-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: #ccc;
+        }
+        .ws-dot.connected { background: #28a745; }
+        .ws-dot.reconnecting { background: #ffc107; animation: wsPulse 1s ease-in-out infinite; }
+        @keyframes wsPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+        .detail-banner {
+            padding: 10px 16px;
+            border-radius: 6px;
+            margin-bottom: 16px;
+            font-weight: 500;
+            font-size: 0.9rem;
+            display: none;
+        }
+        .detail-banner.banner-rebooting {
+            display: block;
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            color: #856404;
+        }
+        .detail-banner.banner-disconnected {
+            display: block;
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        .detail-banner.banner-complete {
+            display: block;
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+
+        @media (max-width: 600px) {
+            .info-row {
+                flex-direction: column;
+                gap: 2px;
+            }
+            .info-label {
+                width: auto;
+                font-size: 0.75rem;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                color: #888;
+            }
+        }
     </style>
 </head>
 <body>
     <%view navbar %>
 
     <main id="main-content">
-    <h1>Device Details</h1>
+    <a class="detail-back" id="back-link" href="/devices#tiles">&#8592; Back to Devices</a>
+    <h1>Device Details
+        <span class="ws-indicator" id="ws-indicator">
+            <span class="ws-dot" id="ws-dot"></span>
+            <span id="ws-label">Connecting</span>
+        </span>
+    </h1>
+
+    <div class="detail-banner" id="detail-banner" role="status" aria-live="polite"></div>
     
     <div id="success-message" class="success-message" role="status" aria-live="polite"></div>
     <div id="error-message" class="error-message" role="alert" aria-live="assertive"></div>
@@ -207,24 +354,27 @@
     <div class="device-info">
         <div class="info-row">
             <span class="info-label">Serial Number:</span>
-            <span>[[device.serial]]</span>
+            <span id="info-serial" data-field="serial">[[device.serial]]</span>
         </div>
         <div class="info-row">
             <span class="info-label">Port:</span>
-            <span>[[device.port]]</span>
+            <span id="info-port" data-field="port">[[device.port]]</span>
         </div>
         <div class="info-row">
             <span class="info-label">IP Address:</span>
-            <span>[[device.ip_address]]</span>
+            <span id="info-ip" data-field="ip_address">[[device.ip_address]]</span>
         </div>
         <div class="info-row">
             <span class="info-label">State:</span>
-            <span>[[device.state]]</span>
+            <span id="info-state" data-field="state">[[device.state]]</span>
         </div>
         <div class="info-row">
             <span class="info-label">Image:</span>
-            <span>[[device.image]]</span>
+            <span id="info-image" data-field="image">[[device.image]]</span>
         </div>
+    </div>
+
+    <div class="detail-progress" id="progress-stepper" role="group" aria-label="Provisioning progress">
     </div>
 
     <div class="state-history-section" style="background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 24px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.08);">
@@ -292,9 +442,6 @@
                 std::string cardClass = "flag-card";
                 if (fMode == "persistent") cardClass += " flag-active";
                 else if (fMode == "once") cardClass += " flag-active-once";
-
-                std::string statusClass = "flag-status-indicator flag-status-" + fMode;
-                std::string statusLabel = (fMode == "off") ? "Not set" : (fMode == "once") ? "One-time" : "Persistent";
         %>
         <div class="<%c++ $$<<cardClass; %>" id="flag-card-<%c++ $$<<fId; %>" data-flag-id="<%c++ $$<<fId; %>">
             <div class="flag-header">
@@ -302,7 +449,6 @@
                 <%c++ if (!fConstraint.empty()) { %>
                 <span class="flag-constraint"><%c++ $$<<fConstraint; %></span>
                 <%c++ } %>
-                <span class="<%c++ $$<<statusClass; %>" id="flag-status-<%c++ $$<<fId; %>"><%c++ $$<<statusLabel; %></span>
             </div>
             <div class="flag-description"><%c++ $$<<fDesc; %></div>
             <div class="flag-controls">
@@ -351,10 +497,232 @@
     <script>
     var deviceSerial = '[[device.serial]]';
 
+    // Provisioning progress stepper
+    var ProgressStepper = (function() {
+        var STEPS = ['Bootstrap', 'Triage', 'Provisioning', 'Complete'];
+        var container = document.getElementById('progress-stepper');
+
+        function parseState(stateStr) {
+            if (!stateStr) return { step: -1, status: 'none' };
+            var s = stateStr.toUpperCase();
+            if (s.indexOf('ABORTED') !== -1) {
+                if (s.indexOf('PROVISIONER') !== -1) return { step: 2, status: 'error' };
+                if (s.indexOf('TRIAGE') !== -1) return { step: 1, status: 'error' };
+                return { step: 0, status: 'error' };
+            }
+            if (s.indexOf('PROVISIONER-FINISHED') !== -1) return { step: 3, status: 'complete' };
+            if (s.indexOf('PROVISIONER-STARTED') !== -1 || s.indexOf('PROVISIONER') !== -1) return { step: 2, status: 'active' };
+            if (s === 'TRIAGE-FINISHED') return { step: 1, status: 'complete' };
+            if (s.indexOf('TRIAGE') !== -1) return { step: 1, status: 'active' };
+            if (s === 'BOOTSTRAP-FINISHED') return { step: 0, status: 'complete' };
+            if (s.indexOf('BOOTSTRAP') !== -1 || s.indexOf('FASTBOOT') !== -1) return { step: 0, status: 'active' };
+            return { step: -1, status: 'none' };
+        }
+
+        function render(stateStr) {
+            var parsed = parseState(stateStr);
+            var html = '';
+            for (var i = 0; i < STEPS.length; i++) {
+                var cls = 'detail-step';
+                var circleText = String(i + 1);
+                if (i < parsed.step) {
+                    cls += ' step-complete';
+                    circleText = '\u2713';
+                } else if (i === parsed.step) {
+                    cls += ' step-' + parsed.status;
+                    if (parsed.status === 'complete') circleText = '\u2713';
+                    else if (parsed.status === 'error') circleText = '!';
+                }
+                html += '<div class="' + cls + '">';
+                if (i > 0) {
+                    var leftColor = (i - 1 < parsed.step) || (i - 1 === parsed.step && parsed.status === 'complete') ? '#28a745' : '#ccc';
+                    html += '<div class="detail-step-line-left" style="background:' + leftColor + '"></div>';
+                }
+                if (i < STEPS.length - 1) {
+                    html += '<div class="detail-step-line"></div>';
+                }
+                html += '<div class="detail-step-circle">' + circleText + '</div>';
+                html += '<div class="detail-step-label">' + STEPS[i] + '</div>';
+                html += '</div>';
+            }
+            container.innerHTML = html;
+        }
+
+        // Initial render from server-side state
+        render(document.getElementById('info-state').textContent.trim());
+
+        return { render: render };
+    })();
+
+    // Live update via WebSocket
+    (function() {
+        var initialSerial = deviceSerial;
+        var initialPort = document.getElementById('info-port').textContent.trim();
+        var lastKnownState = document.getElementById('info-state').textContent.trim();
+        var wsDot = document.getElementById('ws-dot');
+        var wsLabel = document.getElementById('ws-label');
+        var banner = document.getElementById('detail-banner');
+        var ws = null;
+        var isUnloading = false;
+        var disappearTimer = null;
+        var logFetchPending = false;
+
+        function setWsStatus(status) {
+            wsDot.classList.remove('connected', 'reconnecting');
+            if (status === 'connected') { wsDot.classList.add('connected'); wsLabel.textContent = 'Live'; }
+            else if (status === 'reconnecting') { wsDot.classList.add('reconnecting'); wsLabel.textContent = 'Reconnecting'; }
+            else { wsLabel.textContent = 'Disconnected'; }
+        }
+
+        function isTransitional(s) {
+            if (!s) return false;
+            var u = s.toUpperCase();
+            return u === 'BOOTSTRAP-FINISHED' || u.includes('FASTBOOT-INITIALISATION');
+        }
+
+        function showBanner(type, text) {
+            banner.className = 'detail-banner';
+            if (type) { banner.classList.add('banner-' + type); banner.textContent = text; }
+        }
+
+        function hideBanner() { banner.className = 'detail-banner'; banner.textContent = ''; }
+
+        function findDevice(nodes) {
+            if (!Array.isArray(nodes)) return null;
+            for (var i = 0; i < nodes.length; i++) {
+                var n = nodes[i];
+                if (!n) continue;
+                if (initialSerial && n.serial === initialSerial) return n;
+                if (deviceSerial && n.serial === deviceSerial) return n;
+                if (initialPort && String(n.id) === initialPort) return n;
+            }
+            return null;
+        }
+
+        function updateField(id, value) {
+            var el = document.getElementById(id);
+            if (el && value !== undefined && value !== null) {
+                var text = String(value);
+                if (el.textContent.trim() !== text) el.textContent = text;
+            }
+        }
+
+        function fetchLogs() {
+            if (logFetchPending) return;
+            logFetchPending = true;
+            var id = deviceSerial || initialPort;
+            fetch('/devices/' + encodeURIComponent(id))
+                .then(function(r) { return r.text(); })
+                .then(function(html) {
+                    logFetchPending = false;
+                    var parser = new DOMParser();
+                    var doc = parser.parseFromString(html, 'text/html');
+                    var sections = doc.querySelectorAll('.log-section');
+                    var localSections = document.querySelectorAll('.log-section');
+                    for (var i = 0; i < sections.length && i < localSections.length; i++) {
+                        var newContent = sections[i].querySelector('.log-content');
+                        var oldContent = localSections[i].querySelector('.log-content');
+                        if (newContent && oldContent && newContent.textContent !== oldContent.textContent) {
+                            oldContent.textContent = newContent.textContent;
+                        }
+                    }
+                    try { console.log('detail: logs refreshed'); } catch(e) {}
+                })
+                .catch(function(err) {
+                    logFetchPending = false;
+                    try { console.warn('detail: log fetch failed', err); } catch(e) {}
+                });
+        }
+
+        function handleTopology(msg) {
+            var device = findDevice(msg.nodes);
+            var removed = Array.isArray(msg.removed) ? msg.removed : [];
+
+            if (device) {
+                if (disappearTimer) { clearTimeout(disappearTimer); disappearTimer = null; }
+                hideBanner();
+
+                updateField('info-state', device.state || '');
+                updateField('info-ip', device.ip || '');
+                updateField('info-image', device.image || '');
+                updateField('info-port', String(device.id || ''));
+
+                if (device.serial && device.serial !== deviceSerial) {
+                    try { console.log('detail: serial expanded "' + deviceSerial + '" -> "' + device.serial + '"'); } catch(e) {}
+                    deviceSerial = device.serial;
+                    updateField('info-serial', deviceSerial);
+                    document.title = 'Device Details - ' + deviceSerial;
+                    history.replaceState(null, '', '/devices/' + encodeURIComponent(deviceSerial));
+                }
+
+                if (device.state && device.state !== lastKnownState) {
+                    try { console.log('detail: state changed "' + lastKnownState + '" -> "' + device.state + '"'); } catch(e) {}
+                    lastKnownState = device.state;
+                    ProgressStepper.render(device.state);
+                    fetchLogs();
+                }
+            } else {
+                var isGone = removed.some(function(id) {
+                    return String(id) === initialPort || String(id) === deviceSerial;
+                });
+                if (isGone && !disappearTimer) {
+                    var transitional = isTransitional(lastKnownState);
+                    if (transitional) {
+                        showBanner('rebooting', 'Device is rebooting between provisioning phases\u2026');
+                    }
+                    disappearTimer = setTimeout(function() {
+                        disappearTimer = null;
+                        if (!transitional) {
+                            var upper = (lastKnownState || '').toUpperCase();
+                            if (upper.includes('FINISHED') && !upper.includes('ABORTED')) {
+                                showBanner('complete', 'Provisioning complete. Device has been disconnected.');
+                            } else {
+                                showBanner('disconnected', 'Device has been disconnected.');
+                            }
+                        } else {
+                            showBanner('disconnected', 'Device did not reappear after reboot.');
+                        }
+                    }, transitional ? 30000 : 5000);
+                }
+            }
+        }
+
+        function connect() {
+            if (ws) try { ws.close(); } catch(e) {}
+            var protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(protocol + '//' + location.host + '/ws/devices');
+            ws.onopen = function() { setWsStatus('connected'); };
+            ws.onmessage = function(ev) {
+                try {
+                    var msg = JSON.parse(ev.data);
+                    if (msg && msg.type === 'topology' && Array.isArray(msg.nodes)) {
+                        handleTopology(msg);
+                    }
+                } catch(e) { try { console.error('detail: ws parse error', e); } catch(e2) {} }
+            };
+            ws.onclose = function() {
+                setWsStatus('reconnecting');
+                if (!isUnloading) setTimeout(connect, 2000);
+            };
+            ws.onerror = function() { try { ws.close(); } catch(e) {} };
+        }
+
+        window.addEventListener('beforeunload', function() { isUnloading = true; if (ws) try { ws.close(); } catch(e) {} });
+        window.addEventListener('pagehide', function() { isUnloading = true; if (ws) try { ws.close(); } catch(e) {} });
+
+        // Set back link to restore the active tab
+        var backLink = document.getElementById('back-link');
+        try {
+            var savedTab = localStorage.getItem('devices-active-tab');
+            if (savedTab) backLink.href = '/devices#' + savedTab;
+        } catch(e) {}
+
+        connect();
+    })();
+
     function setFlag(flagId, mode) {
         var card = document.getElementById('flag-card-' + flagId);
         var feedback = document.getElementById('flag-feedback-' + flagId);
-        var statusEl = document.getElementById('flag-status-' + flagId);
 
         // Add saving state
         card.classList.add('flag-saving');
@@ -381,12 +749,6 @@
             card.className = 'flag-card';
             if (mode === 'persistent') card.classList.add('flag-active');
             else if (mode === 'once') card.classList.add('flag-active-once');
-
-            // Update status indicator
-            statusEl.className = 'flag-status-indicator flag-status-' + mode;
-            if (mode === 'off') statusEl.textContent = 'Not set';
-            else if (mode === 'once') statusEl.textContent = 'One-time';
-            else statusEl.textContent = 'Persistent';
 
             // Update radio button label styles
             var labels = card.querySelectorAll('.flag-mode-group label');
