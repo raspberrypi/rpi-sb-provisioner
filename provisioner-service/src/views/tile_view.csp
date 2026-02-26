@@ -1,0 +1,547 @@
+<!-- Device-Centric Tile View Sub-View (included by devices.csp) -->
+<style>
+    .tiles-container {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+        gap: 12px;
+        padding: 10px 0;
+        min-height: 120px;
+    }
+
+    .tiles-empty {
+        grid-column: 1 / -1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 48px 20px;
+        color: #888;
+        text-align: center;
+    }
+    .tiles-empty-icon {
+        font-size: 40px;
+        margin-bottom: 12px;
+        opacity: 0.5;
+    }
+    .tiles-empty-text {
+        font-size: 1rem;
+        line-height: 1.5;
+    }
+
+    .device-tile {
+        background: #fff;
+        border: 2px solid #e0e0e0;
+        border-radius: 8px;
+        padding: 20px;
+        cursor: pointer;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+        transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s, opacity 0.3s;
+        animation: tileIn 0.3s ease-out;
+        min-height: 90px;
+        position: relative;
+    }
+    .device-tile:hover, .device-tile:focus-visible {
+        box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+        transform: translateY(-1px);
+        border-color: #b0b0b0;
+    }
+    .device-tile:focus-visible {
+        outline: 3px solid #0066cc;
+        outline-offset: 2px;
+    }
+
+    .device-tile.tile-active { border-color: #ffc107; }
+    .device-tile.tile-complete { border-color: #28a745; background: #f0faf2; }
+    .device-tile.tile-error { border-color: #dc3545; background: #fdf0f1; }
+    .device-tile.tile-rebooting {
+        opacity: 0.6;
+        animation: tileReboot 2s ease-in-out infinite;
+    }
+    .device-tile.tile-removing {
+        animation: tileOut 0.4s ease-in forwards;
+    }
+    .device-tile.tile-updated {
+        animation: tileFlash 0.8s ease-out;
+    }
+
+    .tile-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 10px;
+        font-weight: 600;
+        font-size: 1.05rem;
+        color: #333;
+        overflow: hidden;
+    }
+    .tile-serial {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-family: monospace;
+        font-size: 1rem;
+    }
+    .tile-badge {
+        display: inline-block;
+        font-weight: 700;
+        font-size: 11px;
+        line-height: 1;
+        padding: 2px 7px;
+        border-radius: 10px;
+        color: #fff;
+        flex-shrink: 0;
+    }
+    .tile-badge-gen { background: #d32f2f; }
+    .tile-badge-model { background: #5c6bc0; }
+
+    /* Progress stepper */
+    .tile-progress {
+        display: flex;
+        align-items: flex-start;
+        margin: 10px 0;
+        gap: 0;
+    }
+    .tile-step {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        flex: 1;
+        position: relative;
+        transition: flex 0.3s;
+    }
+    .tile-step.step-compressed {
+        flex: 0.25;
+        min-width: 44px;
+    }
+    .tile-step-circle {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        border: 2px solid #ccc;
+        background: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        font-weight: 700;
+        color: #ccc;
+        transition: all 0.3s;
+        z-index: 1;
+    }
+    .tile-step.step-complete .tile-step-circle {
+        background: #28a745;
+        border-color: #28a745;
+        color: #fff;
+    }
+    .tile-step.step-active .tile-step-circle {
+        background: #ffc107;
+        border-color: #e0a800;
+        color: #333;
+    }
+    .tile-step.step-error .tile-step-circle {
+        background: #dc3545;
+        border-color: #dc3545;
+        color: #fff;
+    }
+    .tile-step-label-full, .tile-step-label-short {
+        font-size: 11px;
+        color: #333;
+        font-weight: 700;
+        margin-top: 3px;
+        white-space: nowrap;
+    }
+    .tile-step-label-short { display: none; }
+    .tile-step.step-label-hidden .tile-step-label-full,
+    .tile-step.step-label-hidden .tile-step-label-short { display: none !important; }
+    .tile-step-line {
+        position: absolute;
+        top: 14px;
+        left: calc(50% + 14px);
+        right: 0;
+        height: 2px;
+        background: #ccc;
+        z-index: 0;
+    }
+    .tile-step-line-left {
+        position: absolute;
+        top: 14px;
+        left: 0;
+        width: calc(50% - 14px);
+        height: 2px;
+        background: #ccc;
+        z-index: 0;
+    }
+    .tile-step.step-complete .tile-step-line { background: #28a745; }
+
+    .tile-meta {
+        font-size: 0.85rem;
+        color: #666;
+        margin-top: 8px;
+    }
+    .tile-meta-row {
+        display: flex;
+        gap: 6px;
+        margin-top: 2px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .tile-meta-label {
+        font-weight: 600;
+        color: #888;
+        flex-shrink: 0;
+    }
+    .tile-meta-value {
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .tile-reboot-label {
+        text-align: center;
+        font-size: 0.75rem;
+        color: #999;
+        font-style: italic;
+        margin-top: 6px;
+    }
+
+    @keyframes tileIn {
+        from { opacity: 0; transform: scale(0.92); }
+        to { opacity: 1; transform: scale(1); }
+    }
+    @keyframes tileOut {
+        from { opacity: 1; transform: scale(1); }
+        to { opacity: 0; transform: scale(0.92); }
+    }
+    @keyframes tileReboot {
+        0%, 100% { opacity: 0.6; }
+        50% { opacity: 0.35; }
+    }
+    @keyframes tileFlash {
+        0% { box-shadow: 0 0 0 3px rgba(11, 105, 255, 0.5); }
+        100% { box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
+    }
+
+    /* Responsive: Tablet */
+    @media (max-width: 768px) {
+        .tiles-container {
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 10px;
+        }
+        .device-tile { padding: 14px; }
+        .tile-step-label-full { display: none; }
+        .tile-step-label-short { display: block; }
+        .tile-step.step-label-hidden .tile-step-label-short { display: none; }
+    }
+
+    /* Responsive: Phone */
+    @media (max-width: 480px) {
+        .tiles-container {
+            grid-template-columns: 1fr;
+            gap: 8px;
+        }
+        .device-tile { padding: 10px; }
+        .tile-step-label-full, .tile-step-label-short { display: none; }
+        .tile-step-circle { width: 20px; height: 20px; font-size: 9px; }
+        .tile-step-line { top: 10px; left: calc(50% + 10px); }
+        .tile-step-line-left { top: 10px; width: calc(50% - 10px); }
+    }
+</style>
+
+<div class="tiles-container" id="tiles-root">
+    <div class="tiles-empty" id="tiles-empty">
+        <div class="tiles-empty-icon" aria-hidden="true">&#9881;</div>
+        <div class="tiles-empty-text">No devices connected.<br>Plug in a Raspberry Pi to begin provisioning.</div>
+    </div>
+</div>
+
+<script>
+    const TileView = (() => {
+        const tileMap = new Map();
+        const container = document.getElementById('tiles-root');
+        const emptyEl = document.getElementById('tiles-empty');
+        const STEP_NAMES = ['Bootstrap', 'Triage', 'Provisioning', 'Complete'];
+        const STEP_SHORT = ['Boot', 'Tri', 'Prov', 'Done'];
+        const GRACE_SHORT = 5000;
+        const GRACE_REBOOT = 30000;
+
+        function parseProvisioningStep(stateStr) {
+            if (!stateStr) return { step: -1, status: 'none' };
+            const s = stateStr.toUpperCase();
+            if (s.includes('ABORTED')) {
+                if (s.includes('PROVISIONER')) return { step: 2, status: 'error' };
+                if (s.includes('TRIAGE')) return { step: 1, status: 'error' };
+                return { step: 0, status: 'error' };
+            }
+            if (s.includes('PROVISIONER-FINISHED')) return { step: 3, status: 'complete' };
+            if (s.includes('PROVISIONER-STARTED') || s.includes('PROVISIONER')) return { step: 2, status: 'active' };
+            if (s === 'TRIAGE-FINISHED') return { step: 1, status: 'complete' };
+            if (s.includes('TRIAGE')) return { step: 1, status: 'active' };
+            if (s === 'BOOTSTRAP-FINISHED') return { step: 0, status: 'complete' };
+            if (s.includes('BOOTSTRAP') || s.includes('FASTBOOT')) return { step: 0, status: 'active' };
+            try { console.debug('tiles: parse-state "' + stateStr + '" -> step=-1 status=none'); } catch(e) {}
+            return { step: -1, status: 'none' };
+        }
+
+        function isTransitionalState(stateStr) {
+            if (!stateStr) return false;
+            const s = stateStr.toUpperCase();
+            return s === 'BOOTSTRAP-FINISHED' || s.includes('FASTBOOT-INITIALISATION');
+        }
+
+        function isDeviceNode(n) {
+            if (!n || !n.id) return false;
+            if (n.id === 'server') return false;
+            if (n.isHub) return false;
+            if (n.placeholder) return false;
+            if (String(n.id).startsWith('usb2-root') || String(n.id).startsWith('usb3-root')) return false;
+            if (String(n.id).startsWith('rootport-')) return false;
+            return true;
+        }
+
+        function deviceLink(entry) {
+            if (entry.serial) return '/devices/' + encodeURIComponent(entry.serial);
+            return '/devices/' + encodeURIComponent(entry.usbPath);
+        }
+
+        function createStepperHTML() {
+            let html = '<div class="tile-progress" role="group" aria-label="Provisioning progress">';
+            for (let i = 0; i < STEP_NAMES.length; i++) {
+                html += '<div class="tile-step" data-step-idx="' + i + '">';
+                if (i > 0) html += '<div class="tile-step-line-left"></div>';
+                if (i < STEP_NAMES.length - 1) html += '<div class="tile-step-line"></div>';
+                html += '<div class="tile-step-circle" aria-label="' + STEP_NAMES[i] + ': pending">' + (i + 1) + '</div>';
+                html += '<div class="tile-step-label-full">' + STEP_NAMES[i] + '</div>';
+                html += '<div class="tile-step-label-short">' + STEP_SHORT[i] + '</div>';
+                html += '</div>';
+            }
+            html += '</div>';
+            return html;
+        }
+
+        function updateStepper(tileEl, parsed) {
+            const steps = tileEl.querySelectorAll('.tile-step');
+            for (let i = 0; i < steps.length; i++) {
+                const step = steps[i];
+                const circle = step.querySelector('.tile-step-circle');
+                step.classList.remove('step-complete', 'step-active', 'step-error', 'step-label-hidden', 'step-compressed');
+                if (i < parsed.step) {
+                    step.classList.add('step-complete', 'step-label-hidden', 'step-compressed');
+                    circle.setAttribute('aria-label', STEP_NAMES[i] + ': complete');
+                    circle.textContent = '\u2713';
+                } else if (i === parsed.step) {
+                    step.classList.add('step-' + parsed.status);
+                    circle.setAttribute('aria-label', STEP_NAMES[i] + ': ' + parsed.status);
+                    circle.textContent = parsed.status === 'complete' ? '\u2713' : (parsed.status === 'error' ? '!' : (i + 1));
+                } else {
+                    step.classList.add('step-label-hidden');
+                    circle.setAttribute('aria-label', STEP_NAMES[i] + ': pending');
+                    circle.textContent = i + 1;
+                }
+                const leftLine = step.querySelector('.tile-step-line-left');
+                if (leftLine) {
+                    const prevGreen = (i - 1 < parsed.step) || (i - 1 === parsed.step && parsed.status === 'complete');
+                    leftLine.style.background = prevGreen ? '#28a745' : '#ccc';
+                }
+            }
+        }
+
+        function createTile(n) {
+            const el = document.createElement('div');
+            el.className = 'device-tile';
+            el.setAttribute('tabindex', '0');
+            el.setAttribute('role', 'article');
+
+            const serial = n.serial || '';
+            const usbPath = String(n.id);
+            const displayName = serial || ('Port ' + usbPath);
+            el.setAttribute('aria-label', 'Device ' + displayName);
+
+            el.setAttribute('data-usb-path', usbPath);
+            el.setAttribute('data-serial', serial);
+            el.setAttribute('data-state', n.state || '');
+
+            let headerHTML = '<div class="tile-header">';
+            headerHTML += '<span class="tile-serial">' + escapeHtml(displayName) + '</span>';
+            if (n.model) headerHTML += '<span class="tile-badge tile-badge-model">' + escapeHtml(n.model) + '</span>';
+            if (n.modelGen) headerHTML += '<span class="tile-badge tile-badge-gen">' + n.modelGen + '</span>';
+            headerHTML += '</div>';
+
+            el.innerHTML = headerHTML + createStepperHTML() + '<div class="tile-meta"></div>';
+
+            const parsed = parseProvisioningStep(n.state);
+            updateStepper(el, parsed);
+            updateTileState(el, parsed);
+            updateMeta(el, n);
+
+            el.setAttribute('data-step', String(parsed.step));
+            el.setAttribute('data-step-status', parsed.status);
+
+            const entry = { element: el, state: n.state || '', serial: serial, usbPath: usbPath, graceTimer: null };
+            el.addEventListener('click', () => { window.location.href = deviceLink(entry); });
+            el.addEventListener('keydown', (e) => { if (e.key === 'Enter') window.location.href = deviceLink(entry); });
+
+            return entry;
+        }
+
+        function updateTileState(el, parsed) {
+            el.classList.remove('tile-active', 'tile-complete', 'tile-error');
+            if (parsed.status === 'error') el.classList.add('tile-error');
+            else if (parsed.step >= 3) el.classList.add('tile-complete');
+            else if (parsed.step >= 0) el.classList.add('tile-active');
+        }
+
+        function updateMeta(el, n) {
+            const meta = el.querySelector('.tile-meta');
+            let html = '';
+            if (n.image) html += '<div class="tile-meta-row"><span class="tile-meta-label">Image:</span><span class="tile-meta-value">' + escapeHtml(n.image) + '</span></div>';
+            if (n.ip) html += '<div class="tile-meta-row"><span class="tile-meta-label">IP:</span><span class="tile-meta-value">' + escapeHtml(n.ip) + '</span></div>';
+            html += '<div class="tile-meta-row"><span class="tile-meta-label">Port:</span><span class="tile-meta-value">' + escapeHtml(String(n.id)) + '</span></div>';
+            meta.innerHTML = html;
+        }
+
+        function escapeHtml(str) {
+            const d = document.createElement('div');
+            d.textContent = str;
+            return d.innerHTML;
+        }
+
+        function flashTile(el) {
+            el.classList.remove('tile-updated');
+            void el.offsetWidth;
+            el.classList.add('tile-updated');
+            setTimeout(() => el.classList.remove('tile-updated'), 1000);
+        }
+
+        function removeTile(usbPath) {
+            const entry = tileMap.get(usbPath);
+            if (!entry) return;
+            entry.element.classList.add('tile-removing');
+            setTimeout(() => {
+                if (entry.element.parentNode) entry.element.parentNode.removeChild(entry.element);
+                tileMap.delete(usbPath);
+                updateEmptyState();
+                try { console.log('tiles: remove ' + usbPath); } catch(e) {}
+            }, 400);
+        }
+
+        function updateEmptyState() {
+            const hasTiles = tileMap.size > 0 && Array.from(tileMap.values()).some(e => !e.element.classList.contains('tile-removing'));
+            emptyEl.style.display = hasTiles ? 'none' : '';
+        }
+
+        function update(nodes, removed) {
+            if (!Array.isArray(nodes)) return;
+            const deviceNodes = nodes.filter(n => isDeviceNode(n));
+            try { console.debug('tiles: update received devices=' + deviceNodes.length + ' removed=' + (removed ? removed.length : 0)); } catch(e) {}
+
+            for (const n of deviceNodes) {
+                const usbPath = String(n.id);
+                const existing = tileMap.get(usbPath);
+
+                if (existing) {
+                    if (existing.graceTimer) {
+                        clearTimeout(existing.graceTimer);
+                        existing.graceTimer = null;
+                        existing.element.classList.remove('tile-rebooting');
+                        existing.element.removeAttribute('data-grace');
+                        const rebootLabel = existing.element.querySelector('.tile-reboot-label');
+                        if (rebootLabel) rebootLabel.remove();
+                        try { console.log('tiles: grace-cancel ' + usbPath); } catch(e) {}
+                    }
+
+                    const oldState = existing.state;
+                    const newState = n.state || '';
+                    let changed = false;
+
+                    if (oldState !== newState) {
+                        existing.state = newState;
+                        const parsed = parseProvisioningStep(newState);
+                        updateStepper(existing.element, parsed);
+                        updateTileState(existing.element, parsed);
+                        existing.element.setAttribute('data-state', newState);
+                        existing.element.setAttribute('data-step', String(parsed.step));
+                        existing.element.setAttribute('data-step-status', parsed.status);
+                        flashTile(existing.element);
+                        changed = true;
+                    }
+
+                    const newSerial = n.serial || '';
+                    if (newSerial && newSerial !== existing.serial) {
+                        existing.serial = newSerial;
+                        existing.element.setAttribute('data-serial', newSerial);
+                        const serialSpan = existing.element.querySelector('.tile-serial');
+                        if (serialSpan) serialSpan.textContent = newSerial;
+                        existing.element.setAttribute('aria-label', 'Device ' + newSerial);
+                        changed = true;
+                    }
+
+                    updateMeta(existing.element, n);
+
+                    if (n.model) {
+                        let modelBadge = existing.element.querySelector('.tile-badge-model');
+                        if (modelBadge) { modelBadge.textContent = n.model; }
+                        else {
+                            const header = existing.element.querySelector('.tile-header');
+                            if (header) { modelBadge = document.createElement('span'); modelBadge.className = 'tile-badge tile-badge-model'; modelBadge.textContent = n.model; header.appendChild(modelBadge); }
+                        }
+                    }
+
+                    if (changed) {
+                        try { console.log('tiles: update ' + usbPath + ' state="' + oldState + '"->"' + (n.state||'') + '" serial="' + existing.serial + '"'); } catch(e) {}
+                    }
+                } else {
+                    const entry = createTile(n);
+                    tileMap.set(usbPath, entry);
+                    container.appendChild(entry.element);
+                    try { console.log('tiles: create ' + usbPath + ' serial="' + (n.serial||'') + '" state="' + (n.state||'') + '" model="' + (n.model||'') + '"'); } catch(e) {}
+                }
+            }
+
+            if (Array.isArray(removed)) {
+                for (const id of removed) {
+                    const usbPath = String(id);
+                    const entry = tileMap.get(usbPath);
+                    if (!entry) continue;
+                    if (entry.graceTimer) continue;
+
+                    const transitional = isTransitionalState(entry.state);
+                    const graceDuration = transitional ? GRACE_REBOOT : GRACE_SHORT;
+
+                    if (transitional) {
+                        entry.element.classList.add('tile-rebooting');
+                        entry.element.setAttribute('data-grace', 'rebooting');
+                        let rebootLabel = entry.element.querySelector('.tile-reboot-label');
+                        if (!rebootLabel) {
+                            rebootLabel = document.createElement('div');
+                            rebootLabel.className = 'tile-reboot-label';
+                            rebootLabel.textContent = 'Device rebooting\u2026';
+                            entry.element.appendChild(rebootLabel);
+                        }
+                    } else {
+                        entry.element.setAttribute('data-grace', 'glitch');
+                    }
+
+                    try { console.log('tiles: grace-start ' + usbPath + ' ' + (graceDuration/1000) + 's reason=' + (transitional ? 'reboot' : 'glitch')); } catch(e) {}
+
+                    entry.graceTimer = setTimeout(() => {
+                        entry.graceTimer = null;
+                        removeTile(usbPath);
+                    }, graceDuration);
+                }
+            }
+
+            updateEmptyState();
+        }
+
+        function init() {
+            window.__tilesApply = update;
+            window.__tileDebug = { tileMap, parseProvisioningStep };
+            try { console.log('tiles: initialized'); } catch(e) {}
+            return update;
+        }
+
+        return { init };
+    })();
+
+    TileView.init();
+</script>

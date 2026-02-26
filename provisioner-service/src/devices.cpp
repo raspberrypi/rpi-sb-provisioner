@@ -780,8 +780,7 @@ namespace provisioner {
             // Build latest record per endpoint (descending ts ensures first seen is newest)
             struct DbRecord { std::string serial, state, image, ip; };
             std::unordered_map<std::string, DbRecord> latestByEndpoint;
-            // Also capture latest manufacturing info by serial (boardname/processor)
-            struct MfgRecord { std::string boardname, processor; };
+            struct MfgRecord { std::string boardname, processor, osImageFilename; };
             std::unordered_map<std::string, MfgRecord> latestMfgBySerial;
 
             sqlite3* db;
@@ -823,7 +822,7 @@ namespace provisioner {
                 sqlite3* mdb = nullptr;
                 int rc2 = sqlite3_open("/srv/rpi-sb-provisioner/manufacturing.db", &mdb);
                 if (rc2 == SQLITE_OK) {
-                    const char* msql = "SELECT serial, boardname, processor FROM devices ORDER BY provision_ts DESC";
+                    const char* msql = "SELECT serial, boardname, processor, os_image_filename FROM devices ORDER BY provision_ts DESC";
                     sqlite3_stmt* mstmt = nullptr;
                     rc2 = sqlite3_prepare_v2(mdb, msql, -1, &mstmt, nullptr);
                     if (rc2 == SQLITE_OK) {
@@ -831,12 +830,14 @@ namespace provisioner {
                             const unsigned char* serial = sqlite3_column_text(mstmt, 0);
                             const unsigned char* boardname = sqlite3_column_text(mstmt, 1);
                             const unsigned char* processor = sqlite3_column_text(mstmt, 2);
+                            const unsigned char* osImage = sqlite3_column_text(mstmt, 3);
                             if (!serial) continue;
                             std::string s = reinterpret_cast<const char*>(serial);
                             if (latestMfgBySerial.find(s) == latestMfgBySerial.end()) {
                                 latestMfgBySerial.emplace(s, MfgRecord{
                                     boardname ? reinterpret_cast<const char*>(boardname) : std::string{},
-                                    processor ? reinterpret_cast<const char*>(processor) : std::string{}
+                                    processor ? reinterpret_cast<const char*>(processor) : std::string{},
+                                    osImage ? reinterpret_cast<const char*>(osImage) : std::string{}
                                 });
                             }
                         }
@@ -866,11 +867,9 @@ namespace provisioner {
                     auto mit = latestMfgBySerial.find(n.serial);
                     if (mit != latestMfgBySerial.end()) {
                         const auto &mr = mit->second;
-                        // Prefer model from manufacturing boardname (e.g., CM5, 4B)
                         if (!mr.boardname.empty()) n.model = mr.boardname;
                         else if (!mr.processor.empty() && n.model.empty()) n.model = mr.processor;
-                        // Keep image for OS image name only; if image was being used as model before, do not overwrite unless set
-                        if (n.image.empty() && !mr.boardname.empty()) n.image = n.image; // no-op placeholder to emphasize separation
+                        if (n.image.empty() && !mr.osImageFilename.empty()) n.image = mr.osImageFilename;
                     }
                 }
             }
@@ -900,12 +899,12 @@ namespace provisioner {
                         n.image = rec.image;
                     }
                     n.ip = rec.ip;
-                    // Apply manufacturing data if available
                     auto mit = latestMfgBySerial.find(n.serial);
                     if (mit != latestMfgBySerial.end()) {
                         const auto &mr = mit->second;
                         if (!mr.boardname.empty()) n.model = mr.boardname;
                         else if (!mr.processor.empty() && n.model.empty()) n.model = mr.processor;
+                        if (n.image.empty() && !mr.osImageFilename.empty()) n.image = mr.osImageFilename;
                     }
                 }
             }
@@ -1310,6 +1309,11 @@ namespace provisioner {
                 return;
             }
 
+            // Try matching by serial first, then fall back to matching by
+            // USB endpoint path.  This allows the detail page to be reached
+            // via /devices/<usbPath> for devices that don't yet have a serial
+            // (e.g. Zero 2 W in RPIBOOT, or early bootstrap phase).
+            bool matchedByEndpoint = false;
             sqlite3_stmt* stmt;
             const char* sql = "SELECT serial, endpoint, state, image, ip_address FROM devices WHERE serial = ? ORDER BY ts DESC LIMIT 1";
             rc = sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr);
@@ -1332,17 +1336,42 @@ namespace provisioner {
 
             if (sqlite3_step(stmt) != SQLITE_ROW) {
                 sqlite3_finalize(stmt);
-                sqlite3_close(db);
-                auto resp = provisioner::utils::createErrorResponse(
-                    req,
-                    "Device not found in database",
-                    drogon::k400BadRequest,
-                    "Device Not Found",
-                    "DEVICE_NOT_FOUND",
-                    "Requested serial: " + serialno
-                );
-                callback(resp);
-                return;
+                LOG_INFO << "Device lookup: no serial match for '" << serialno << "', trying endpoint fallback";
+                const char* endpointSql = "SELECT serial, endpoint, state, image, ip_address FROM devices WHERE endpoint = ? ORDER BY ts DESC LIMIT 1";
+                rc = sqlite3_prepare_v2(db, endpointSql, -1, &stmt, nullptr);
+                if (rc != SQLITE_OK) {
+                    sqlite3_close(db);
+                    auto resp = provisioner::utils::createErrorResponse(
+                        req,
+                        "Failed to prepare SQL statement",
+                        drogon::k500InternalServerError,
+                        "Database Error",
+                        "SQL_PREPARE_ERROR",
+                        std::string(sqlite3_errmsg(db))
+                    );
+                    callback(resp);
+                    return;
+                }
+                sqlite3_bind_text(stmt, 1, serialno.c_str(), -1, SQLITE_STATIC);
+                if (sqlite3_step(stmt) != SQLITE_ROW) {
+                    sqlite3_finalize(stmt);
+                    sqlite3_close(db);
+                    LOG_WARN << "Device lookup: no match for '" << serialno << "' by serial or endpoint";
+                    auto resp = provisioner::utils::createErrorResponse(
+                        req,
+                        "Device not found in database",
+                        drogon::k400BadRequest,
+                        "Device Not Found",
+                        "DEVICE_NOT_FOUND",
+                        "Requested identifier: " + serialno
+                    );
+                    callback(resp);
+                    return;
+                }
+                matchedByEndpoint = true;
+                LOG_INFO << "Device lookup: endpoint match for '" << serialno << "'";
+            } else {
+                LOG_INFO << "Device lookup: serial match for '" << serialno << "'";
             }
 
             const unsigned char* serial = sqlite3_column_text(stmt, 0);
@@ -1352,14 +1381,36 @@ namespace provisioner {
             const unsigned char* ip_address = sqlite3_column_text(stmt, 4);
 
             Device device;
-            device.serial = (const char*)serial;
-            device.port = (const char*)endpoint;
-            device.ip_address = (const char*)ip_address;
-            device.state = (const char*)state;
-            device.image = (const char*)image;
+            device.serial = serial ? (const char*)serial : "";
+            device.port = endpoint ? (const char*)endpoint : "";
+            device.ip_address = ip_address ? (const char*)ip_address : "";
+            device.state = state ? (const char*)state : "";
+            device.image = image ? (const char*)image : "";
 
             sqlite3_finalize(stmt);
             sqlite3_close(db);
+
+            // Enrich with manufacturing data if available (e.g. os_image_filename for completed devices)
+            if (!device.serial.empty()) {
+                sqlite3* mdb = nullptr;
+                int mrc = sqlite3_open("/srv/rpi-sb-provisioner/manufacturing.db", &mdb);
+                if (mrc == SQLITE_OK) {
+                    sqlite3_stmt* mstmt = nullptr;
+                    const char* msql = "SELECT os_image_filename FROM devices WHERE serial = ? ORDER BY provision_ts DESC LIMIT 1";
+                    mrc = sqlite3_prepare_v2(mdb, msql, -1, &mstmt, nullptr);
+                    if (mrc == SQLITE_OK) {
+                        sqlite3_bind_text(mstmt, 1, device.serial.c_str(), -1, SQLITE_STATIC);
+                        if (sqlite3_step(mstmt) == SQLITE_ROW) {
+                            const unsigned char* osImage = sqlite3_column_text(mstmt, 0);
+                            if (osImage && device.image.empty()) {
+                                device.image = reinterpret_cast<const char*>(osImage);
+                            }
+                        }
+                        sqlite3_finalize(mstmt);
+                    }
+                    sqlite3_close(mdb);
+                }
+            }
 
             // Check if the client accepts HTML
             auto acceptHeader = req->getHeader("Accept");
@@ -1393,17 +1444,23 @@ namespace provisioner {
                 bootstrap_log = tryReadLog(serialDir, endpointDir, "bootstrap.log");
                 triage_log = tryReadLog(serialDir, endpointDir, "triage.log");
 
-                // Query last 10 state changes for this device
+                // Query last 10 state changes for this device.
+                // When the device was looked up by endpoint (USB path), query
+                // history by endpoint too so we get results for devices whose
+                // serial may have changed across phases.
                 std::vector<std::map<std::string, std::string>> stateHistory;
                 {
                     sqlite3* histDb;
                     int histRc = sqlite3_open("/srv/rpi-sb-provisioner/state.db", &histDb);
                     if (histRc == SQLITE_OK) {
                         sqlite3_stmt* histStmt;
-                        const char* histSql = "SELECT state, ts FROM devices WHERE serial = ? ORDER BY ts DESC LIMIT 10";
+                        const char* histSql = matchedByEndpoint
+                            ? "SELECT state, ts FROM devices WHERE endpoint = ? ORDER BY ts DESC LIMIT 10"
+                            : "SELECT state, ts FROM devices WHERE serial = ? ORDER BY ts DESC LIMIT 10";
                         histRc = sqlite3_prepare_v2(histDb, histSql, -1, &histStmt, nullptr);
                         if (histRc == SQLITE_OK) {
-                            sqlite3_bind_text(histStmt, 1, device.serial.c_str(), -1, SQLITE_STATIC);
+                            const std::string &histKey = matchedByEndpoint ? device.port : device.serial;
+                            sqlite3_bind_text(histStmt, 1, histKey.c_str(), -1, SQLITE_STATIC);
                             while (sqlite3_step(histStmt) == SQLITE_ROW) {
                                 const unsigned char* hState = sqlite3_column_text(histStmt, 0);
                                 const unsigned char* hTs = sqlite3_column_text(histStmt, 1);
