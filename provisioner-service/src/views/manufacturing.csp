@@ -352,8 +352,15 @@
                     </table>
                 `;
                 
-                // Update the table container without showing/hiding elements
-                document.getElementById('manu-table-container').innerHTML = tableHtml;
+                // Preserve scroll position across the table rebuild
+                const container = document.getElementById('manu-table-container');
+                const prevScrollTop = container.scrollTop;
+                const prevScrollLeft = container.scrollLeft;
+                
+                container.innerHTML = tableHtml;
+                
+                container.scrollTop = prevScrollTop;
+                container.scrollLeft = prevScrollLeft;
                 
                 // Apply tooltips and update UI after the table is updated
                 applyEmmcSizeTooltips();
