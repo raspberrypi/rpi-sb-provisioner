@@ -245,8 +245,7 @@
     <div id="error-container"></div>
     
     <div class="table-container" id="manu-table-container">
-        <div class="scroll-indicator">Scroll to see more</div>
-        <!-- Initial table will be created by JavaScript -->
+        <!-- Table and scroll indicator managed by JavaScript -->
     </div>
     <div id="pagination-controls" class="pagination-controls" style="display:none;"></div>
 
@@ -275,25 +274,44 @@
             }
         }
 
-        // Handle scroll indicator visibility
+        // Scroll indicator state -- kept outside the function to avoid
+        // accumulating listeners and timeouts on every refresh cycle.
+        let scrollIndicatorTimeout = null;
+        let scrollIndicatorShown = false;
+        
+        function handleScrollHide() {
+            const ind = document.querySelector('.scroll-indicator');
+            if (ind) ind.style.display = 'none';
+            scrollIndicatorShown = false;
+            if (scrollIndicatorTimeout) { clearTimeout(scrollIndicatorTimeout); scrollIndicatorTimeout = null; }
+        }
+        
         function updateScrollIndicator() {
-            const container = document.querySelector('.table-container');
-            const indicator = document.querySelector('.scroll-indicator');
+            const container = document.getElementById('manu-table-container');
+            if (!container) return;
             
-            // Show indicator only if horizontal scrolling is possible
+            // Ensure the indicator element exists (innerHTML destroys it each cycle)
+            let indicator = container.querySelector('.scroll-indicator');
+            if (!indicator) {
+                indicator = document.createElement('div');
+                indicator.className = 'scroll-indicator';
+                indicator.textContent = 'Scroll to see more';
+                container.appendChild(indicator);
+            }
+            
             if (container.scrollWidth > container.clientWidth) {
-                indicator.style.display = 'block';
-                
-                // Hide after scrolling or after 5 seconds
-                container.addEventListener('scroll', function() {
-                    indicator.style.display = 'none';
-                }, {once: true});
-                
-                setTimeout(function() {
-                    indicator.style.display = 'none';
-                }, 5000);
+                if (!scrollIndicatorShown) {
+                    indicator.style.display = 'block';
+                    scrollIndicatorShown = true;
+                    
+                    container.addEventListener('scroll', handleScrollHide, { once: true });
+                    
+                    if (scrollIndicatorTimeout) clearTimeout(scrollIndicatorTimeout);
+                    scrollIndicatorTimeout = setTimeout(handleScrollHide, 5000);
+                }
             } else {
                 indicator.style.display = 'none';
+                scrollIndicatorShown = false;
             }
         }
         
