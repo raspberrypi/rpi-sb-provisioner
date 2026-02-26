@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>USB Topology</title>
     <%view stylesheet %>
     <script src="/static/js/d3.min.js"></script>
@@ -68,6 +69,16 @@
         .d3-legend-color { width: 14px; height: 14px; border-radius: 50%; border: 2px solid; flex-shrink: 0; }
         .d3-legend-label { color: #555; }
         
+        /* Responsive: tabs and graph */
+        @media (max-width: 600px) {
+            .view-tabs { flex-wrap: wrap; gap: 6px; }
+            .view-tab { padding: 8px 14px; font-size: 0.85rem; min-height: 44px; }
+            .mindmap-container svg { min-height: 300px; height: 50vh; }
+            .d3-legend { font-size: 9px; padding: 6px 8px; }
+            .zoom-controls { top: 6px; right: 6px; }
+            .zoom-btn { width: 40px; height: 40px; font-size: 18px; }
+        }
+
         /* Secret test panel styles */
         .test-panel { display: none; position: fixed; top: 60px; right: 20px; background: rgba(40, 40, 40, 0.95); 
                       border: 2px solid #ff6b35; border-radius: 8px; padding: 12px 16px; z-index: 9999; 
@@ -1093,7 +1104,6 @@
                         childrenEl.appendChild(el);
                     }
                 }
-                emittedIds.add(id);
             }
             // Do not remove unseen elements blindly. Only the backend should decide removals.
             // This avoids pruning placeholders or briefly missing nodes during enumeration.
@@ -1120,6 +1130,8 @@
                         applyTopology(msg.nodes);
                         // Also update D3 interactive graph if active
                         if (window.__d3Apply) { try { window.__d3Apply(msg.nodes); } catch(e) { console.error('D3 update error:', e); } }
+                        // Update tile view
+                        if (window.__tilesApply) { try { window.__tilesApply(msg.nodes, msg.removed); } catch(e) { console.error('Tiles update error:', e); } }
                         // Then process removals explicitly from backend
                         if (Array.isArray(msg.removed)) {
                             for (const id of msg.removed) {
@@ -1207,6 +1219,7 @@
     <div class="view-tabs" role="tablist" aria-label="Device view options">
         <button id="tab-rel" class="view-tab active" role="tab" aria-selected="true" aria-controls="rel-view">Relational</button>
         <button id="tab-topo" class="view-tab" role="tab" aria-selected="false" aria-controls="topo-view">Detail</button>
+        <button id="tab-tiles" class="view-tab" role="tab" aria-selected="false" aria-controls="tiles-view">Tiles</button>
     </div>
     <div id="rel-view" class="view-container active" role="tabpanel" aria-labelledby="tab-rel">
         <div class="mindmap-container" role="img" aria-label="Interactive USB device topology graph showing connected devices and their relationships">
@@ -1219,6 +1232,9 @@
             <div id="topology-root"></div>
         </div>
     </div>
+    <div id="tiles-view" class="view-container" role="tabpanel" aria-labelledby="tab-tiles" hidden>
+        <%view tile_view %>
+    </div>
     
     <script>
         const topologyRoot = document.getElementById('topology-root');
@@ -1227,33 +1243,35 @@
         // Initialize D3 interactive graph
         window.__d3Apply = D3Graph.init();
         // Tabs
-        const tabRel = document.getElementById('tab-rel');
-        const tabTopo = document.getElementById('tab-topo');
-        const relView = document.getElementById('rel-view');
-        const topoView = document.getElementById('topo-view');
-        function setActive(which){
-            if (which==='rel'){ 
-                tabRel.classList.add('active'); 
-                tabTopo.classList.remove('active'); 
-                relView.classList.add('active'); 
-                topoView.classList.remove('active');
-                tabRel.setAttribute('aria-selected', 'true');
-                tabTopo.setAttribute('aria-selected', 'false');
-                relView.removeAttribute('hidden');
-                topoView.setAttribute('hidden', '');
-            } else { 
-                tabTopo.classList.add('active'); 
-                tabRel.classList.remove('active'); 
-                topoView.classList.add('active'); 
-                relView.classList.remove('active');
-                tabTopo.setAttribute('aria-selected', 'true');
-                tabRel.setAttribute('aria-selected', 'false');
-                topoView.removeAttribute('hidden');
-                relView.setAttribute('hidden', '');
+        const tabs = {
+            rel:   { btn: document.getElementById('tab-rel'),   view: document.getElementById('rel-view') },
+            topo:  { btn: document.getElementById('tab-topo'),  view: document.getElementById('topo-view') },
+            tiles: { btn: document.getElementById('tab-tiles'), view: document.getElementById('tiles-view') }
+        };
+        const TAB_STORAGE_KEY = 'devices-active-tab';
+        const VALID_TABS = Object.keys(tabs);
+        function setActive(which) {
+            if (!VALID_TABS.includes(which)) which = 'rel';
+            for (const [key, t] of Object.entries(tabs)) {
+                const active = key === which;
+                t.btn.classList.toggle('active', active);
+                t.btn.setAttribute('aria-selected', String(active));
+                t.view.classList.toggle('active', active);
+                if (active) t.view.removeAttribute('hidden');
+                else t.view.setAttribute('hidden', '');
             }
+            try { localStorage.setItem(TAB_STORAGE_KEY, which); } catch(e) {}
+            history.replaceState(null, '', '#' + which);
         }
-        tabRel.addEventListener('click', ()=>setActive('rel'));
-        tabTopo.addEventListener('click', ()=>setActive('topo'));
+        for (const key of VALID_TABS) {
+            tabs[key].btn.addEventListener('click', () => setActive(key));
+        }
+        // Restore persisted tab from URL hash or localStorage
+        const hashTab = location.hash.replace('#', '');
+        const savedTab = hashTab && VALID_TABS.includes(hashTab) ? hashTab : null;
+        const storedTab = (() => { try { return localStorage.getItem(TAB_STORAGE_KEY); } catch(e) { return null; } })();
+        const defaultTab = window.innerWidth <= 768 ? 'tiles' : 'rel';
+        setActive(savedTab || storedTab || defaultTab);
         initWebSocket();
         
         // Secret Test Mode Controls
