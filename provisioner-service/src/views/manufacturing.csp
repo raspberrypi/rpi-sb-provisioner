@@ -235,14 +235,14 @@
     
     <div class="toggle-container">
         <label class="toggle-switch">
-            <input type="checkbox" id="auto-refresh" checked>
+            <input type="checkbox" id="auto-refresh" checked aria-label="Auto Refresh">
             <span class="toggle-slider"></span>
         </label>
-        <span>Auto Refresh</span>
-        <span id="refresh-status">(Enabled - refreshing every 5s)</span>
+        <label for="auto-refresh">Auto Refresh</label>
+        <span id="refresh-status" aria-live="polite">(Enabled - refreshing every 5s)</span>
     </div>
     
-    <div id="error-container"></div>
+    <div id="error-container" aria-live="polite"></div>
     
     <div class="table-container" id="manu-table-container">
         <div class="loading-container">
@@ -250,7 +250,7 @@
             <p>Loading manufacturing data&hellip;</p>
         </div>
     </div>
-    <div id="pagination-controls" class="pagination-controls" style="display:none;"></div>
+    <div id="pagination-controls" class="pagination-controls" style="display:none;" aria-live="polite"></div>
 
     <script>
         // Prevent stored XSS by escaping untrusted data before HTML insertion
