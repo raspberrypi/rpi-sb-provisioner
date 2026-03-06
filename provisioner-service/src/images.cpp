@@ -2303,9 +2303,20 @@ namespace provisioner {
                             ctx->tempDir = promotedTemp;
                         }
 
-                        // Atomically replace any existing artefact directory
-                        if (std::filesystem::exists(ctx->finalDir)) std::filesystem::remove_all(ctx->finalDir);
-                        std::filesystem::rename(ctx->tempDir, ctx->finalDir);
+                        // Replace any existing artefact directory with minimal downtime.
+                        // Move the old directory aside first (atomic rename), then rename
+                        // the new one into place (atomic rename), then delete the old one.
+                        // This avoids a window where finalDir doesn't exist at all, which
+                        // would cause /analyze-image to return 404 during a concurrent request.
+                        if (std::filesystem::exists(ctx->finalDir)) {
+                            auto oldDir = std::filesystem::path(IMAGES_PATH) / ("." + ctx->artefactName + ".old");
+                            if (std::filesystem::exists(oldDir)) std::filesystem::remove_all(oldDir);
+                            std::filesystem::rename(ctx->finalDir, oldDir);
+                            std::filesystem::rename(ctx->tempDir, ctx->finalDir);
+                            std::filesystem::remove_all(oldDir);
+                        } else {
+                            std::filesystem::rename(ctx->tempDir, ctx->finalDir);
+                        }
 
                         AuditLog::logFileSystemAccess("UPLOAD_ARCHIVE", ctx->finalDir.string(), true, "",
                             "IDP artefact archive streamed and extracted: " + ctx->originalFilename + " -> " + ctx->artefactName);
