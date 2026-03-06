@@ -1010,6 +1010,13 @@
                         try {
                             const msg = JSON.parse(event.data);
                             if (msg.phase === 'complete') {
+                                // Show 100% briefly while we wait for the HTTP response to arrive
+                                if (processingTimerId) { clearInterval(processingTimerId); processingTimerId = null; }
+                                progressFill.classList.remove('indeterminate');
+                                progressFill.style.width = '100%';
+                                progressText.classList.remove('processing');
+                                progressText.textContent = 'Finishing...';
+                                elapsedText.textContent = '';
                                 try { ws.close(); } catch(e) {}
                                 activeProgressWs = null;
                                 return;
