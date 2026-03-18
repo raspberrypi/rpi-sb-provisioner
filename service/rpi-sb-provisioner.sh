@@ -486,7 +486,7 @@ prepare_pre_boot_auth_images() {
         # Get the size of the original boot image in MiB (rounded up)
         BOOTFS_SIZE_MB=$(( ($(stat -c%s "${TMP_DIR}"/bootfs-original.img) + 1048575) / 1048576 ))
         truncate -s "${BOOTFS_SIZE_MB}M" "${TMP_DIR}"/bootfs-temporary.img
-        mkfs.fat -n "BOOT" "${TMP_DIR}"/bootfs-temporary.img
+        mkfs.fat -s 1 -n "BOOT" "${TMP_DIR}"/bootfs-temporary.img
 
         META_BOOTIMG_MOUNT_PATH=$(mktemp -d)
         mount -o loop "${TMP_DIR}"/bootfs-temporary.img "${META_BOOTIMG_MOUNT_PATH}"
