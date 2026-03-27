@@ -26,7 +26,7 @@ set(ARCHIVE_BUILD_EXAMPLES OFF CACHE BOOL "")
 set(ENABLE_ZSTD ON CACHE BOOL "")
 set(ENABLE_LZMA ON CACHE BOOL "")
 set(POSIX_REGEX_LIB "libc" CACHE STRING "" FORCE)
-set(LIBARCHIVE_VERSION "3.8.5")
+set(LIBARCHIVE_VERSION "3.8.6")
 
 # Patch to improve ZSTD static detection (from rpi-imager)
 set(LIBARCHIVE_PATCH_FILE "${CMAKE_CURRENT_BINARY_DIR}/libarchive_zstd_patch.cmake")
@@ -71,6 +71,11 @@ else()
     message(WARNING \"Could not find ZSTD section in libarchive CMakeLists.txt\")
 endif()
 ")
+
+# Skip macOS libSystem crypto probes (CommonCrypto/CommonDigest.h doesn't exist on Linux)
+foreach(_algo MD5 SHA1 SHA256 SHA384 SHA512)
+    set(ARCHIVE_CRYPTO_${_algo}_LIBSYSTEM FALSE)
+endforeach()
 
 FetchContent_Declare(libarchive
     GIT_REPOSITORY https://github.com/libarchive/libarchive.git
