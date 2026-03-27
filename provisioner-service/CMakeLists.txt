@@ -21,7 +21,7 @@ set(JSONCPP_WITH_CMAKE_PACKAGE OFF CACHE BOOL "Generate and install cmake packag
 
 FetchContent_Declare(jsoncpp
  GIT_REPOSITORY https://github.com/open-source-parsers/jsoncpp.git
- GIT_TAG        1.9.6
+ GIT_TAG        1.9.7
  EXCLUDE_FROM_ALL  # Prevents installation in packages
 )
 
@@ -130,7 +130,7 @@ set(CURL_DISABLE_NTLM ON CACHE BOOL "Set to ON to disable NTLM support." FORCE)
 
 FetchContent_Declare(curl
  GIT_REPOSITORY https://github.com/curl/curl.git
- GIT_TAG        curl-8_16_0
+ GIT_TAG        curl-8_19_0
  PATCH_COMMAND patch -p1 < ${CMAKE_SOURCE_DIR}/cmake/curl/http-no-auth.patch
  UPDATE_DISCONNECTED 1
  EXCLUDE_FROM_ALL  # Prevents installation in packages
