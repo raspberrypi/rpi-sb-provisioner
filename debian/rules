@@ -35,6 +35,11 @@ debian/rpi-sb-provisioner.1:
 	$(MAKE) -f debian/rules debian/rpi-sb-provisioner.1
 	dh $@
 
+# Clean stale FetchContent checkouts from previous builds
+override_dh_auto_clean:
+	dh_auto_clean --sourcedirectory=provisioner-service
+	rm -rf obj-aarch64-linux-gnu
+
 # Configure the CMake project with network fetch enabled
 override_dh_auto_configure:
 	dh_auto_configure --sourcedirectory=provisioner-service -- \
