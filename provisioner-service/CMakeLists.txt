@@ -45,6 +45,20 @@ unset(JSONCPP_WITH_POST_BUILD_UNITTEST)
 unset(JSONCPP_WITH_PKGCONFIG_SUPPORT)
 unset(JSONCPP_WITH_CMAKE_PACKAGE)
 
+# Valijson: header-only JSON Schema validation library (Draft-07)
+set(valijson_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(valijson_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(valijson_INSTALL_HEADERS OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(valijson
+  GIT_REPOSITORY https://github.com/tristanpenman/valijson.git
+  GIT_TAG        v1.0.3
+  EXCLUDE_FROM_ALL
+)
+FetchContent_MakeAvailable(valijson)
+unset(valijson_BUILD_EXAMPLES)
+unset(valijson_BUILD_TESTS)
+unset(valijson_INSTALL_HEADERS)
+
 # Prevent installation of Drogon dependencies by setting BUILD_* options before declaring the dependency
 set(BUILD_EXAMPLES OFF CACHE BOOL "Build Drogon examples" FORCE)
 set(BUILD_CTL ON CACHE BOOL "Build drogon_ctl utility" FORCE)  # Needed for compiling CSP templates
@@ -282,6 +296,7 @@ target_sources(rpi-provisioner-ui
     src/scantool.cpp
     src/audit.cpp
     src/utils.cpp
+    src/schema_validator.cpp
     ${VIEW_SOURCES}
 )
 
@@ -292,6 +307,7 @@ target_include_directories(rpi-provisioner-ui
     ${CSP_OUTPUT_DIR}  # Include the compiled templates
     ${curl_SOURCE_DIR}/include  # Add curl headers
     ${LibArchive_INCLUDE_DIR}  # libarchive headers
+    ${valijson_SOURCE_DIR}/include  # valijson JSON Schema headers
 )
 
 target_link_libraries(rpi-provisioner-ui

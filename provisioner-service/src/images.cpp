@@ -16,6 +16,7 @@
 #include <errno.h>
 #include <systemd/sd-bus.h>
 #include "utils.h"
+#include "include/schema_validator.h"
 
 #include <archive.h>
 #include <archive_entry.h>
@@ -470,6 +471,13 @@ namespace provisioner {
             if (!Json::parseFromStream(builder, jsonFile, &json, &errors)) {
                 result["error"] = "JSON parse error: " + errors;
                 return result;
+            }
+
+            // Schema-validate the image description
+            auto schemaResult = provisioner::schema::validateImageJsonFull(json);
+            result["schema_valid"] = schemaResult.valid;
+            if (!schemaResult.valid) {
+                result["schema_errors"] = schemaResult.errorsToJson();
             }
 
             // Extract IGmeta fields

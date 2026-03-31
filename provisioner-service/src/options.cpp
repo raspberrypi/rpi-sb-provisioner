@@ -10,6 +10,7 @@
 #include <drogon/HttpAppFramework.h>
 #include "utils.h"
 #include "include/audit.h"
+#include "include/schema_validator.h"
 
 namespace provisioner {
     namespace {
@@ -249,6 +250,18 @@ namespace provisioner {
                                         jsonResponse["valid"] = false;
                                         jsonResponse["error"] = "JSON description file is not valid JSON: " + errors;
                                     } else {
+                                        // Validate against the image.json and provisionmap schemas
+                                        auto schemaResult = provisioner::schema::validateImageJsonFull(json);
+                                        if (!schemaResult.valid) {
+                                            jsonResponse["valid"] = false;
+                                            std::string msg = "Image description fails schema validation";
+                                            if (!schemaResult.errors.empty()) {
+                                                msg += ": " + schemaResult.errors[0].description;
+                                            }
+                                            jsonResponse["error"] = msg;
+                                            jsonResponse["validation_errors"] = schemaResult.errorsToJson();
+                                        }
+
                                         // Check all referenced .simg files exist
                                         std::vector<std::string> missingFiles;
                                         if (json.isMember("layout") && json["layout"].isMember("partitionimages")) {
