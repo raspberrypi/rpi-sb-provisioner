@@ -18,7 +18,7 @@ namespace schema {
             Json::Value root;
             Json::CharReaderBuilder builder;
             std::string errors;
-            std::istringstream stream(std::string(src));
+            std::istringstream stream{std::string(src)};
             if (!Json::parseFromStream(builder, stream, &root, &errors)) {
                 throw std::runtime_error("Failed to parse embedded schema: " + errors);
             }
