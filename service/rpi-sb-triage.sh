@@ -136,6 +136,25 @@ fi
 read_config
 setup_fastboot_and_id_vars "${TARGET_DEVICE_SERIAL}"
 
+# Ensure the device has a firmware crypto ECDSA key.  Every provisioned
+# device gets one regardless of style -- it is needed for HMAC-based LUKS
+# key derivation and is useful for device identity.
+log "Checking device firmware crypto key status"
+FWCRYPTO_STATUS=$(fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem fwcrypto status 2>&1) || true
+if echo "${FWCRYPTO_STATUS}" | grep -qi "not provisioned"; then
+    log "Provisioning device firmware crypto key"
+    timeout_fatal fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem fwcrypto init
+    # Confirm the key was actually written to OTP
+    FWCRYPTO_STATUS=$(fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem fwcrypto status 2>&1) || true
+    if echo "${FWCRYPTO_STATUS}" | grep -qi "not provisioned"; then
+        record_state "${TARGET_DEVICE_SERIAL}" "${TRIAGE_ABORTED}" "${TARGET_USB_PATH}"
+        die "Failed to provision device firmware crypto key"
+    fi
+    log "Device firmware crypto key provisioned and verified"
+else
+    log "Device firmware crypto key already provisioned"
+fi
+
 KEYPAIR_DIR="${LOG_DIRECTORY}/${TARGET_DEVICE_SERIAL}"/keypair
 if [ -d "${RPI_DEVICE_RETRIEVE_KEYPAIR}" ]; then
     KEYPAIR_DIR="${RPI_DEVICE_RETRIEVE_KEYPAIR}"
