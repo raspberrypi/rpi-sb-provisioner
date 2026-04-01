@@ -59,7 +59,23 @@ rpi-sb-provisioner (2.3.0) unstable; urgency=medium
       rpi-idp-provisioner@.service to /usr/lib/systemd/system in
       debian/install
 
- -- Tom Dewey <tom.dewey@raspberrypi.com>  Fri, 13 Feb 2026 12:00:00 +0000
+  * Raspberry Pi Connect Device Identity Registration:
+    - Automatically register provisioned devices with the Raspberry Pi
+      Connect management API when RPI_CONNECT_API_KEY is configured
+    - Request signing uses the device's firmware crypto ECDSA key via
+      fastbootd's 'oem fwcrypto sign-hash' command; the private key
+      never leaves hardware
+    - Add RPI_CONNECT_API_KEY and RPI_CONNECT_DESCRIPTION config
+      options with validation in options.cpp
+    - Add Cloud Services section to options UI with password-masked
+      API key input and description prefix field
+    - Add connect_registered and connect_device_id columns to
+      manufacturing database schema, with migration in postinst
+    - Add Connect columns to manufacturing UI table and CSV export
+    - Non-fatal: registration failures log warnings but never abort
+      provisioning (set +e guard, curl timeouts, robust PEM capture)
+
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Wed, 01 Apr 2026 12:00:00 +0100
 
 rpi-sb-provisioner (2.2.0) unstable; urgency=medium
 
