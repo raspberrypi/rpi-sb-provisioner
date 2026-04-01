@@ -140,7 +140,7 @@
         let allData = [];
         let currentPage = 1;
         let pageSize = 50;
-        const COLUMN_COUNT = 22;
+        const COLUMN_COUNT = 24;
         
         function totalPages() {
             return Math.max(1, Math.ceil(allData.length / pageSize));
@@ -177,11 +177,13 @@
                             <th scope="col">Signed Boot</th>
                             <th scope="col">OS Image Filename</th>
                             <th scope="col">OS Image SHA256</th>
+                            <th scope="col">Connect Reg.</th>
+                            <th scope="col">Connect Device ID</th>
                         </tr>
                     </thead>
                     <tbody>
             `;
-            
+
             if (pageData.length > 0) {
                 pageData.forEach(device => {
                     tableHtml += `
@@ -208,6 +210,8 @@
                             <td class="security-field">${formatSecurityField(device.signed_boot_enabled)}</td>
                             <td>${escapeHtml(device.os_image_filename)}</td>
                             <td style="font-family: monospace;">${escapeHtml(device.os_image_sha256)}</td>
+                            <td class="security-field">${formatSecurityField(device.connect_registered)}</td>
+                            <td>${escapeHtml(device.connect_device_id)}</td>
                         </tr>
                     `;
                 });
@@ -361,9 +365,10 @@
                 'Bluetooth MAC','eMMC Size','eMMC CID','RPi DUID','Revision',
                 'Processor','Memory','Manufacturer','Secure','JTAG Locked',
                 'EEPROM WP','Pubkey Prog.','Devkey Revoked','Signed Boot',
-                'OS Image Filename','OS Image SHA256'
+                'OS Image Filename','OS Image SHA256',
+                'Connect Reg.','Connect Device ID'
             ];
-            
+
             const rows = [headers.map(csvEscape).join(',')];
             allData.forEach(d => {
                 rows.push([
@@ -377,7 +382,9 @@
                     csvEscape(securityLabel(d.pubkey_programmed)),
                     csvEscape(securityLabel(d.devkey_revoked)),
                     csvEscape(securityLabel(d.signed_boot_enabled)),
-                    csvEscape(d.os_image_filename), csvEscape(d.os_image_sha256)
+                    csvEscape(d.os_image_filename), csvEscape(d.os_image_sha256),
+                    csvEscape(securityLabel(d.connect_registered)),
+                    csvEscape(d.connect_device_id)
                 ].join(','));
             });
             

@@ -449,6 +449,16 @@ namespace provisioner {
                         jsonResponse["error"] = "GPIO pin must be one of: 2, 4, 5, 6, 7, or 8. GPIO 8 is recommended.";
                     }
                 }
+            } else if (fieldName == "RPI_CONNECT_API_KEY") {
+                if (!fieldValue.empty()) {
+                    // Reject values containing whitespace
+                    if (fieldValue.find_first_of(" \t\r\n") != std::string::npos) {
+                        jsonResponse["valid"] = false;
+                        jsonResponse["error"] = "API key must not contain whitespace";
+                    }
+                }
+            } else if (fieldName == "RPI_CONNECT_DESCRIPTION") {
+                // Any non-empty string is valid; empty is fine (auto-generated description used)
             }
 
             auto resp = HttpResponse::newHttpResponse();

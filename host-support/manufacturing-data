@@ -4,6 +4,136 @@ metadata_get() {
     fastboot -s "${TARGET_DEVICE_SERIAL}" getvar "$1" 2>&1 | grep -oP "${1}"': \K[^\r\n]*' || true
 }
 
+# Register device identity with the Raspberry Pi Connect management API.
+# Requires RPI_CONNECT_API_KEY to be set in config.
+#
+# Signing is performed on-device via "oem fwcrypto sign-hash" so the
+# device's ECDSA private key never leaves the firmware crypto hardware.
+# The public key is retrieved via "getvar public-key".
+#
+# Sets CONNECT_REGISTERED_VALUE (NULL/0/1) and CONNECT_DEVICE_ID_VALUE
+# for inclusion in the manufacturing database INSERT.
+#
+# Non-fatal: logs warnings on failure and allows provisioning to continue.
+connect_register_device() {
+    CONNECT_REGISTERED_VALUE="NULL"
+    CONNECT_DEVICE_ID_VALUE=""
+
+    # Skip if no API key configured
+    if [ -z "${RPI_CONNECT_API_KEY}" ]; then
+        return 0
+    fi
+
+    announce_start "Connect device identity registration"
+
+    if ! command -v jq >/dev/null 2>&1 || ! command -v curl >/dev/null 2>&1; then
+        log "WARNING: jq and curl are required for Connect registration, skipping"
+        CONNECT_REGISTERED_VALUE="0"
+        announce_stop "Connect device identity registration: missing dependencies"
+        return 0
+    fi
+
+    _connect_tmpdir=$(mktemp -d)
+
+    # Retrieve public key PEM from device.  Cannot use get_variable() here
+    # because it truncates at the first newline and PEM is multiline.
+    # Instead capture the full fastboot output and extract the PEM block.
+    _connect_fb_output=$(fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar public-key 2>&1 | tr -d '\r') || true
+    _connect_public_key_pem=$(printf '%s\n' "${_connect_fb_output}" | \
+        sed -n '/-----BEGIN PUBLIC KEY-----/,/-----END PUBLIC KEY-----/{
+            s/^[^-]*\(-----BEGIN\)/\1/
+            p
+        }')
+    if [ -z "${_connect_public_key_pem}" ]; then
+        log "WARNING: Could not retrieve device public key, skipping Connect registration"
+        log "fastboot output: ${_connect_fb_output}"
+        CONNECT_REGISTERED_VALUE="0"
+        rm -rf "${_connect_tmpdir}"
+        announce_stop "Connect device identity registration: no public key"
+        return 0
+    fi
+
+    # Build description: optional user prefix + board type + serial
+    _connect_desc=""
+    if [ -n "${RPI_CONNECT_DESCRIPTION}" ]; then
+        _connect_desc="${RPI_CONNECT_DESCRIPTION} "
+    fi
+    _connect_desc="${_connect_desc}${BOARD_STR} ${TARGET_DEVICE_SERIAL}"
+
+    _connect_base_url="${CONNECT_BASE_URL:-https://api.connect.raspberrypi.com}"
+    _connect_url="${_connect_base_url}/organisation/device-identities"
+
+    # Build JSON body (jq handles PEM newline escaping)
+    _connect_body=$(jq -nc \
+        --arg pk "${_connect_public_key_pem}" \
+        --arg desc "${_connect_desc}" \
+        '{public_key: $pk, description: $desc}')
+
+    # SHA256 hex digest of the request body
+    _connect_body_hash=$(printf '%s' "${_connect_body}" | openssl dgst -sha256 -hex)
+    _connect_body_hash="${_connect_body_hash##* }"
+
+    # Signature payload matching the Connect SignatureVerification.build_payload
+    # protocol.  Only includes headers we actually send.
+    _connect_sig_payload="POST
+${_connect_url}
+Authorization: Bearer ${RPI_CONNECT_API_KEY}
+Content-Type: application/json
+${_connect_body_hash}"
+
+    # Hash the signature payload on the host, then have the device perform
+    # the ECDSA sign via firmware crypto (private key never leaves hardware).
+    _connect_payload_hash=$(printf '%s' "${_connect_sig_payload}" | openssl dgst -sha256 -hex)
+    _connect_payload_hash="${_connect_payload_hash##* }"
+
+    _connect_sign_result=$(fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" \
+        oem fwcrypto sign-hash "${_connect_payload_hash}" 2>&1) || true
+    _connect_signature=$(printf '%s' "${_connect_sign_result}" | \
+        grep -oP '\(bootloader\) connect-signature:\K.*' || true)
+
+    if [ -z "${_connect_signature}" ]; then
+        log "WARNING: Device-side signing failed, skipping Connect registration"
+        log "fastboot output: ${_connect_sign_result}"
+        CONNECT_REGISTERED_VALUE="0"
+        rm -rf "${_connect_tmpdir}"
+        announce_stop "Connect device identity registration: signing failed"
+        return 0
+    fi
+
+    # POST to Connect management API
+    # -k: allow self-signed certs for local development environments
+    # -H "Accept:": suppress curl's default Accept header to avoid signature mismatch
+    # --connect-timeout/--max-time: bound the request so a network issue
+    #   cannot block provisioning indefinitely
+    _connect_http_code=$(curl -sk \
+        --connect-timeout 10 --max-time 30 \
+        -o "${_connect_tmpdir}/response.json" \
+        -w '%{http_code}' \
+        -X POST "${_connect_url}" \
+        -H "Authorization: Bearer ${RPI_CONNECT_API_KEY}" \
+        -H "Content-Type: application/json" \
+        -H "Accept:" \
+        -H "X-Connect-Identity-Signature: ${_connect_signature}" \
+        -d "${_connect_body}")
+
+    if [ "${_connect_http_code}" = "201" ]; then
+        CONNECT_REGISTERED_VALUE="1"
+        if [ -s "${_connect_tmpdir}/response.json" ]; then
+            CONNECT_DEVICE_ID_VALUE=$(jq -r '.id // empty' "${_connect_tmpdir}/response.json" 2>/dev/null || true)
+        fi
+        log "Connect device identity registered (ID: ${CONNECT_DEVICE_ID_VALUE})"
+    else
+        CONNECT_REGISTERED_VALUE="0"
+        log "WARNING: Connect device identity registration failed (HTTP ${_connect_http_code})"
+        if [ -s "${_connect_tmpdir}/response.json" ]; then
+            log "Response: $(cat "${_connect_tmpdir}/response.json")"
+        fi
+    fi
+
+    rm -rf "${_connect_tmpdir}"
+    announce_stop "Connect device identity registration"
+}
+
 metadata_gather() {
     announce_start "Metadata extraction"
     
@@ -23,6 +153,7 @@ metadata_gather() {
     
     TYPE=$(metadata_get "revision-type")
     PROCESSOR=$(metadata_get "revision-processor")
+    SDRAM_SIZE_BYTES=$(metadata_get "sdram-size-bytes")
     MEMORY=$(metadata_get "revision-memory")
     MANUFACTURER=$(metadata_get "revision-manufacturer")
     REVISION=$(metadata_get "revision-revision")
@@ -60,17 +191,28 @@ metadata_gather() {
             PROCESSOR_STR="Unknown: ${PROCESSOR}"
     esac
     
-    case ${MEMORY} in
-        "0x0") MEMORY_STR="256MB" ;;
-        "0x1") MEMORY_STR="512MB" ;;
-        "0x2") MEMORY_STR="1GB" ;;
-        "0x3") MEMORY_STR="2GB" ;;
-        "0x4") MEMORY_STR="4GB" ;;
-        "0x5") MEMORY_STR="8GB" ;;
-        "0x6") MEMORY_STR="16GB" ;;
-        *)
-            MEMORY_STR="Unknown: ${MEMORY}"
-    esac
+    if [ -n "${SDRAM_SIZE_BYTES}" ] && [ "${SDRAM_SIZE_BYTES}" -gt 0 ] 2>/dev/null; then
+        # Use DT-derived SDRAM size (more durable than OTP code lookup)
+        SDRAM_MB=$(( SDRAM_SIZE_BYTES / 1000 / 1000 ))
+        if [ "${SDRAM_MB}" -ge 1000 ]; then
+            MEMORY_STR="$(( SDRAM_MB / 1000 ))GB"
+        else
+            MEMORY_STR="${SDRAM_MB}MB"
+        fi
+    else
+        # Fallback to OTP revision code
+        case ${MEMORY} in
+            "0x0") MEMORY_STR="256MB" ;;
+            "0x1") MEMORY_STR="512MB" ;;
+            "0x2") MEMORY_STR="1GB" ;;
+            "0x3") MEMORY_STR="2GB" ;;
+            "0x4") MEMORY_STR="4GB" ;;
+            "0x5") MEMORY_STR="8GB" ;;
+            "0x6") MEMORY_STR="16GB" ;;
+            *)
+                MEMORY_STR="Unknown: ${MEMORY}"
+        esac
+    fi
     
     case ${MANUFACTURER} in
         "0x0") MANUFACTURER_STR="Sony UK" ;;
@@ -115,11 +257,13 @@ metadata_gather() {
                     signed_boot_enabled integer         DEFAULT NULL,
                     os_image_filename varchar(255)      DEFAULT NULL,
                     os_image_sha256  char(64)           DEFAULT NULL,
+                    connect_registered integer          DEFAULT NULL,
+                    connect_device_id varchar(255)      DEFAULT NULL,
                     provision_ts    timestamp           default current_timestamp"
-        
+
         # Check if the table exists
         TABLE_EXISTS=$(sqlite3 "${RPI_SB_PROVISIONER_MANUFACTURING_DB}" "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='devices';")
-        
+
         if [ "$TABLE_EXISTS" -eq 0 ]; then
             # Table doesn't exist, create it
             sqlite3 "${RPI_SB_PROVISIONER_MANUFACTURING_DB}" "CREATE TABLE devices($EXPECTED_SCHEMA);" > /dev/null 2>&1
@@ -206,6 +350,13 @@ metadata_gather() {
 	            fi
 	        fi
 
+        # Register with Raspberry Pi Connect (if API key is configured).
+        # Disable errexit: registration is non-fatal and must never abort
+        # provisioning regardless of network, fastboot, or crypto failures.
+        set +e
+        connect_register_device
+        set -e
+
         # Insert new device data
         sqlite3 "${RPI_SB_PROVISIONER_MANUFACTURING_DB}" \
         "INSERT INTO devices(           \
@@ -228,7 +379,9 @@ metadata_gather() {
                     devkey_revoked,             \
                     signed_boot_enabled,        \
                     os_image_filename,          \
-                    os_image_sha256             \
+                    os_image_sha256,            \
+                    connect_registered,         \
+                    connect_device_id           \
                 ) VALUES (                      \
                     '${BOARD_STR}',               \
                     '${TARGET_DEVICE_SERIAL}',    \
@@ -249,7 +402,9 @@ metadata_gather() {
                     ${DEVKEY_REVOKED_VALUE},      \
                     ${SIGNED_BOOT_VALUE},         \
                     '${OS_IMAGE_FILENAME}',       \
-                    '${OS_IMAGE_SHA256}'          \
+                    '${OS_IMAGE_SHA256}',         \
+                    ${CONNECT_REGISTERED_VALUE},  \
+                    '${CONNECT_DEVICE_ID_VALUE}'  \
         );" > /dev/null 2>&1
         announce_stop "Manufacturing Database Insertion"
     fi

@@ -866,6 +866,8 @@
     bool lockJtag = options.count("RPI_DEVICE_LOCK_JTAG") && !options["RPI_DEVICE_LOCK_JTAG"].empty();
     bool eepromWp = options.count("RPI_DEVICE_EEPROM_WP_SET") && !options["RPI_DEVICE_EEPROM_WP_SET"].empty();
     std::string rpibootGpio = options.count("RPI_DEVICE_RPIBOOT_GPIO") ? options["RPI_DEVICE_RPIBOOT_GPIO"] : "";
+    std::string connectApiKey = options.count("RPI_CONNECT_API_KEY") ? options["RPI_CONNECT_API_KEY"] : "";
+    std::string connectDescription = options.count("RPI_CONNECT_DESCRIPTION") ? options["RPI_CONNECT_DESCRIPTION"] : "";
     %>
 
     <form id="optionsForm" onsubmit="event.preventDefault();">
@@ -1249,8 +1251,52 @@
                 </div>
             </div>
         </div>
-        
-        <!-- ===== SECTION 5: Hardware Security ===== -->
+
+        <!-- ===== SECTION 5: Cloud Services ===== -->
+        <div class="config-section" id="section-cloud-services">
+            <div class="section-header">
+                <h2 class="section-title">
+                    <span class="section-title-icon">&#9729;</span>
+                    Cloud Services
+                </h2>
+                <p class="section-description">Register provisioned devices with Raspberry Pi Connect. Requires an organisation API key from the Connect management portal.</p>
+            </div>
+
+            <!-- Connect API Key -->
+            <div class="field-group">
+                <label class="field-label" for="RPI_CONNECT_API_KEY">Connect API Key <span class="optional-badge">Optional</span></label>
+                <div class="pin-input-wrapper">
+                    <input type="password" class="field-input" id="RPI_CONNECT_API_KEY" name="RPI_CONNECT_API_KEY"
+                           value="<%c++ $$ << connectApiKey; %>"
+                           placeholder="Organisation API key from Raspberry Pi Connect"
+                           onblur="validateAndSaveField('RPI_CONNECT_API_KEY')">
+                    <button type="button" class="pin-toggle-visibility" onclick="toggleConnectKeyVisibility()" aria-label="Toggle API key visibility">&#128065;</button>
+                </div>
+                <div id="feedback-RPI_CONNECT_API_KEY" class="field-feedback"></div>
+
+                <div class="inline-help">
+                    <span class="inline-help-icon">&#9432;</span>
+                    <span>When set, each provisioned device will be registered with Raspberry Pi Connect using its firmware ECDSA identity key.</span>
+                </div>
+            </div>
+
+            <!-- Connect Description Prefix -->
+            <div class="field-group">
+                <label class="field-label" for="RPI_CONNECT_DESCRIPTION">Description Prefix <span class="optional-badge">Optional</span></label>
+                <input type="text" class="field-input" id="RPI_CONNECT_DESCRIPTION" name="RPI_CONNECT_DESCRIPTION"
+                       value="<%c++ $$ << connectDescription; %>"
+                       placeholder="e.g. Factory-A (appended with board type and serial)"
+                       onblur="validateAndSaveField('RPI_CONNECT_DESCRIPTION')">
+                <div id="feedback-RPI_CONNECT_DESCRIPTION" class="field-feedback"></div>
+
+                <div class="inline-help">
+                    <span class="inline-help-icon">&#9432;</span>
+                    <span>Optional prefix for the device description sent to Connect. The board type and serial number are always appended.</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== SECTION 6: Hardware Security ===== -->
         <div class="config-section" id="section-hardware-security">
             <div class="section-header">
                 <h2 class="section-title">
@@ -1741,13 +1787,26 @@
         function togglePinVisibility() {
             const pinInput = document.getElementById('pkcs11-pin');
             const icon = document.getElementById('pin-visibility-icon');
-            
+
             if (pinInput.type === 'password') {
                 pinInput.type = 'text';
                 icon.innerHTML = '&#128064;';  // Eye with line
             } else {
                 pinInput.type = 'password';
                 icon.innerHTML = '&#128065;';  // Eye
+            }
+        }
+
+        // Toggle Connect API key visibility
+        function toggleConnectKeyVisibility() {
+            const keyInput = document.getElementById('RPI_CONNECT_API_KEY');
+            const btn = keyInput.nextElementSibling;
+            if (keyInput.type === 'password') {
+                keyInput.type = 'text';
+                btn.innerHTML = '&#128064;';
+            } else {
+                keyInput.type = 'password';
+                btn.innerHTML = '&#128065;';
             }
         }
         
