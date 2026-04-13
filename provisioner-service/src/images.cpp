@@ -22,6 +22,7 @@
 #include <archive_entry.h>
 
 #include <filesystem>
+#include <set>
 #include <string>
 #include <vector>
 #include <fstream>
@@ -533,11 +534,21 @@ namespace provisioner {
                 result["cipher"] = cipher;
             }
 
-            // Count .simg files in the directory
+            // Count sparse image files referenced by the IDP descriptor
             int simgCount = 0;
-            for (const auto& entry : std::filesystem::directory_iterator(dirPath)) {
-                if (entry.is_regular_file() && entry.path().extension() == ".simg") {
-                    simgCount++;
+            if (json.isMember("layout") && json["layout"].isMember("partitionimages")) {
+                std::set<std::string> seen;
+                const auto& pimages = json["layout"]["partitionimages"];
+                for (const auto& key : pimages.getMemberNames()) {
+                    if (pimages[key].isMember("simage")) {
+                        std::string name = pimages[key]["simage"].asString();
+                        if (!name.empty() && seen.insert(name).second) {
+                            std::filesystem::path p = dirPath / name;
+                            if (std::filesystem::exists(p) && std::filesystem::is_regular_file(p)) {
+                                simgCount++;
+                            }
+                        }
+                    }
                 }
             }
             result["simg_file_count"] = simgCount;
