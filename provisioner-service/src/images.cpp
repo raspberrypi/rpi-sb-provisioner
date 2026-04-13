@@ -515,11 +515,12 @@ namespace provisioner {
                 if (layout.isMember("provisionmap")) {
                     const auto& pmap = layout["provisionmap"];
                     for (const auto& entry : pmap) {
-                        if (entry.isMember("encrypted") && entry["encrypted"].asBool()) {
+                        if (entry.isMember("encrypted") && entry["encrypted"].isObject()) {
                             hasEncryption = true;
-                        }
-                        if (entry.isMember("cipher") && !entry["cipher"].asString().empty()) {
-                            cipher = entry["cipher"].asString();
+                            const auto& enc = entry["encrypted"];
+                            if (enc.isMember("luks2") && enc["luks2"].isMember("cipher")) {
+                                cipher = enc["luks2"]["cipher"].asString();
+                            }
                         }
                     }
                 }
