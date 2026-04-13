@@ -872,16 +872,29 @@
 
     <form id="optionsForm" onsubmit="event.preventDefault();">
         
-        <!-- ===== SECTION 1: Target Device ===== -->
-        <div class="config-section" id="section-target-device">
+        <!-- ===== SECTION 1: OS Image ===== -->
+        <div class="config-section" id="section-os-image">
+            <div class="section-header">
+                <h2 class="section-title">
+                    <span class="section-title-icon">&#128190;</span>
+                    OS Image
+                </h2>
+                <p class="section-description">Select or upload the operating system image to provision. IDP artefacts will automatically configure device and encryption settings.</p>
+            </div>
+
+            <%view images %>
+        </div>
+
+        <!-- ===== SECTION 2: Device & Firmware ===== -->
+        <div class="config-section" id="section-device-firmware">
             <div class="section-header">
                 <h2 class="section-title">
                     <span class="section-title-icon">&#128421;</span>
-                    Target Device
+                    Device &amp; Firmware
                 </h2>
-                <p class="section-description">Select the Raspberry Pi model you'll be provisioning.</p>
+                <p class="section-description">Configure the target device hardware and firmware.</p>
             </div>
-            
+
             <!-- Device Family Tiles -->
             <div class="field-group">
                 <label class="field-label">Device Family</label>
@@ -894,7 +907,7 @@
                         </div>
                         <p class="tile-description">Pi 5, Compute Module 5. Supports secure boot.</p>
                     </label>
-                    
+
                     <label class="tile-option <%c++ if(deviceFamily == "4") $$ << "selected"; %>">
                         <input type="radio" name="RPI_DEVICE_FAMILY" value="4" <%c++ if(deviceFamily == "4") $$ << "checked"; %>>
                         <span class="tile-check">&#10003;</span>
@@ -903,7 +916,7 @@
                         </div>
                         <p class="tile-description">Pi 4, Compute Module 4. Supports secure boot.</p>
                     </label>
-                    
+
                     <label class="tile-option <%c++ if(deviceFamily == "2W") $$ << "selected"; %>">
                         <input type="radio" name="RPI_DEVICE_FAMILY" value="2W" <%c++ if(deviceFamily == "2W") $$ << "checked"; %>>
                         <span class="tile-check">&#10003;</span>
@@ -916,7 +929,7 @@
                 </div>
                 <div id="feedback-RPI_DEVICE_FAMILY" class="field-feedback"></div>
             </div>
-            
+
             <!-- Storage Type Tiles -->
             <div class="field-group">
                 <label class="field-label">Storage Type</label>
@@ -929,7 +942,7 @@
                         </div>
                         <p class="tile-description">Standard microSD card storage.</p>
                     </label>
-                    
+
                     <label class="tile-option <%c++ if(storageType == "emmc") $$ << "selected"; %>" id="emmc-tile">
                         <input type="radio" name="RPI_DEVICE_STORAGE_TYPE" value="emmc" <%c++ if(storageType == "emmc") $$ << "checked"; %>>
                         <span class="tile-check">&#10003;</span>
@@ -938,7 +951,7 @@
                         </div>
                         <p class="tile-description">Embedded flash storage on Compute Modules.</p>
                     </label>
-                    
+
                     <label class="tile-option <%c++ if(storageType == "nvme") $$ << "selected"; %>" id="nvme-tile" <%c++ if(deviceFamily == "2W") $$ << "style=\"display: none;\""; %>>
                         <input type="radio" name="RPI_DEVICE_STORAGE_TYPE" value="nvme" <%c++ if(storageType == "nvme") $$ << "checked"; %>>
                         <span class="tile-check">&#10003;</span>
@@ -950,13 +963,13 @@
                 </div>
                 <div id="feedback-RPI_DEVICE_STORAGE_TYPE" class="field-feedback"></div>
             </div>
-            
+
             <!-- RPIBOOT GPIO (Raspberry Pi 4 family only) -->
             <div class="field-group" id="rpibootGpioGroup" style="display: none;">
                 <label class="field-label">RPIBOOT GPIO Pin</label>
-                <select id="RPI_DEVICE_RPIBOOT_GPIO" 
-                        name="RPI_DEVICE_RPIBOOT_GPIO" 
-                        class="form-control" 
+                <select id="RPI_DEVICE_RPIBOOT_GPIO"
+                        name="RPI_DEVICE_RPIBOOT_GPIO"
+                        class="form-control"
                         style="font-size: 1.1em; padding: 12px; width: 100%; max-width: 400px;"
                         onchange="validateAndSaveField('RPI_DEVICE_RPIBOOT_GPIO')">
                     <option value="8" <%c++ if(rpibootGpio.empty() || rpibootGpio == "8") $$ << "selected"; %>>GPIO 8 (Recommended)</option>
@@ -976,9 +989,26 @@
                     <span>This value is permanently written to OTP and cannot be changed. Ensure you use the same GPIO pin you will physically wire to ground during provisioning.</span>
                 </div>
             </div>
+
+            <%view firmware %>
+
+            <!-- Bootloader Config -->
+            <div class="field-group">
+                <label class="field-label" for="RPI_DEVICE_BOOTLOADER_CONFIG_FILE">Bootloader Configuration <span class="optional-badge">Optional</span></label>
+                <input type="text" class="field-input" id="RPI_DEVICE_BOOTLOADER_CONFIG_FILE" name="RPI_DEVICE_BOOTLOADER_CONFIG_FILE"
+                       value="<%c++ $$ << bootloaderConfig; %>"
+                       placeholder="Leave blank to use default"
+                       onblur="validateAndSaveField('RPI_DEVICE_BOOTLOADER_CONFIG_FILE')">
+                <div id="feedback-RPI_DEVICE_BOOTLOADER_CONFIG_FILE" class="field-feedback"></div>
+
+                <div class="inline-help">
+                    <span class="inline-help-icon">&#9432;</span>
+                    <span>Custom bootloader configuration file. A sensible default is provided if not specified.</span>
+                </div>
+            </div>
         </div>
-        
-        <!-- ===== SECTION 2: Security Configuration ===== -->
+
+        <!-- ===== SECTION 3: Security Configuration ===== -->
         <div class="config-section" id="section-security">
             <div class="section-header">
                 <h2 class="section-title">
@@ -987,7 +1017,7 @@
                 </h2>
                 <p class="section-description">Choose your provisioning security model.</p>
             </div>
-            
+
             <!-- Provisioning Style Tiles -->
             <div class="field-group">
                 <label class="field-label">Provisioning Style</label>
@@ -1001,7 +1031,7 @@
                         <p class="tile-description">Signed bootloader chain with encrypted storage. Devices only boot verified, signed code.</p>
                         <span class="tile-badge recommended">Recommended</span>
                     </label>
-                    
+
                     <label class="tile-option <%c++ if(provisioningStyle == "fde-only") $$ << "selected"; %>" id="fde-only-tile">
                         <input type="radio" name="PROVISIONING_STYLE" value="fde-only" <%c++ if(provisioningStyle == "fde-only") $$ << "checked"; %>>
                         <span class="tile-check">&#10003;</span>
@@ -1013,7 +1043,7 @@
                             <strong>No secure boot chain.</strong> Does not protect against SD card swapping or man-in-the-middle attacks.
                         </div>
                     </label>
-                    
+
                     <label class="tile-option <%c++ if(provisioningStyle == "naked") $$ << "selected"; %>" id="naked-tile">
                         <input type="radio" name="PROVISIONING_STYLE" value="naked" <%c++ if(provisioningStyle == "naked") $$ << "checked"; %>>
                         <span class="tile-check">&#10003;</span>
@@ -1028,14 +1058,14 @@
                     </label>
                 </div>
                 <div id="feedback-PROVISIONING_STYLE" class="field-feedback"></div>
-                
+
                 <!-- Notice when secure boot is unavailable -->
                 <div class="inline-help" id="no-secure-boot-notice" <%c++ if(deviceFamily != "2W") $$ << "style=\"display: none;\""; %>>
                     <span class="inline-help-icon">&#9432;</span>
                     <span>Secure Boot is not available for Zero 2 W. Select FDE Only or Naked provisioning.</span>
                 </div>
             </div>
-            
+
             <!-- Encryption Cipher Tiles -->
             <div class="field-group" id="cipher-group">
                 <label class="field-label">Encryption Cipher</label>
@@ -1049,7 +1079,7 @@
                         <p class="tile-description">Hardware-accelerated on Pi 5. Software fallback on other devices.</p>
                         <span class="tile-badge recommended" id="aes-badge">Best for Pi 5</span>
                     </label>
-                    
+
                     <label class="tile-option <%c++ if(storageCipher == "xchacha12,aes-adiantum-plain64") $$ << "selected"; %>">
                         <input type="radio" name="RPI_DEVICE_STORAGE_CIPHER" value="xchacha12,aes-adiantum-plain64" <%c++ if(storageCipher == "xchacha12,aes-adiantum-plain64") $$ << "checked"; %>>
                         <span class="tile-check">&#10003;</span>
@@ -1062,7 +1092,7 @@
                 </div>
                 <div id="feedback-RPI_DEVICE_STORAGE_CIPHER" class="field-feedback"></div>
             </div>
-            
+
             <!-- Key Configuration (Secure Boot only) -->
             <div class="field-group" id="key-config-group">
                 <label class="field-label">Bootloader Signing Key (RSA 2048-bit)</label>
@@ -1077,7 +1107,7 @@
                             PKCS#11 / HSM
                         </button>
                     </div>
-                    
+
                     <div class="key-panel <%c++ if(keyPkcs11.empty()) $$ << "active"; %>" data-panel="pem">
                         <div class="file-upload-zone <%c++ if(!keyFilePem.empty()) $$ << "has-file"; %>" id="key-upload-zone">
                             <div class="upload-icon">&#128196;</div>
@@ -1099,13 +1129,13 @@
                         </div>
                         <%c++ } %>
                         <input type="hidden" name="CUSTOMER_KEY_FILE_PEM" id="CUSTOMER_KEY_FILE_PEM" value="<%c++ $$ << keyFilePem; %>">
-                        
+
                         <div class="inline-warning">
                             <span class="inline-warning-icon">&#9888;</span>
                             <span>This is sensitive key material. Protect according to your threat model.</span>
                         </div>
                     </div>
-                    
+
                     <div class="key-panel <%c++ if(!keyPkcs11.empty()) $$ << "active"; %>" data-panel="pkcs11">
                         <div class="pkcs11-builder">
                             <div class="pkcs11-input-group">
@@ -1113,21 +1143,21 @@
                                 <input type="text" id="pkcs11-alias" placeholder="e.g., my-signing-key" oninput="updatePkcs11Preview()" onblur="savePkcs11Value()">
                                 <div id="feedback-CUSTOMER_KEY_PKCS11_NAME" class="field-feedback"></div>
                             </div>
-                            
+
                             <div class="pkcs11-preview" id="pkcs11-preview">
                                 <div class="pkcs11-preview-label">Generated PKCS#11 URI:</div>
                                 <code id="pkcs11-uri">pkcs11:object=<em>&lt;alias&gt;</em>;type=private</code>
                             </div>
-                            
+
                             <div class="key-metrics-container" id="pkcs11-key-metrics-container" style="display: none;">
                                 <div class="key-metrics" id="pkcs11-key-metrics">
                                     <span class="key-metrics-loading">Validating key...</span>
                                 </div>
                             </div>
-                            
+
                             <input type="hidden" name="CUSTOMER_KEY_PKCS11_NAME" id="CUSTOMER_KEY_PKCS11_NAME" value="<%c++ $$ << keyPkcs11; %>">
                         </div>
-                        
+
                         <!-- PKCS#11 PIN Input -->
                         <div class="pkcs11-pin-section">
                             <div class="pkcs11-input-group">
@@ -1146,52 +1176,22 @@
                             <button type="button" class="pin-save-btn" id="pin-save-btn" onclick="savePkcs11Pin()">Save PIN &amp; Validate</button>
                             <button type="button" class="pin-remove-btn" id="pin-remove-btn" onclick="removePkcs11Pin()" style="display: none;">Remove PIN</button>
                         </div>
-                        
+
                         <div class="inline-warning">
                             <span class="inline-warning-icon">&#9888;</span>
                             <span>The HSM PIN is stored securely on this server. Never share it or enter it on untrusted systems.</span>
                         </div>
-                        
+
                         <div class="inline-help">
                             <span class="inline-help-icon">&#9432;</span>
                             <span>PKCS#11 keys are typically stored on a Hardware Security Module (HSM). Enter the keypair alias and PIN - the full URI will be generated automatically and the key will be validated.</span>
                         </div>
                     </div>
                 </div>
-                
+
                 <div class="inline-help">
                     <span class="inline-help-icon">&#9432;</span>
                     <span>This RSA private key is used to sign the bootloader. The corresponding public key will be fused into the device's OTP during provisioning.</span>
-                </div>
-            </div>
-        </div>
-        
-        <!-- ===== SECTION 3: OS Image & Firmware ===== -->
-        <div class="config-section" id="section-os-image">
-            <div class="section-header">
-                <h2 class="section-title">
-                    <span class="section-title-icon">&#128190;</span>
-                    OS Image &amp; Firmware
-                </h2>
-                <p class="section-description">Configure the operating system image and device firmware.</p>
-            </div>
-            
-            <%view images %>
-            
-            <%view firmware %>
-            
-            <!-- Bootloader Config -->
-            <div class="field-group">
-                <label class="field-label" for="RPI_DEVICE_BOOTLOADER_CONFIG_FILE">Bootloader Configuration <span class="optional-badge">Optional</span></label>
-                <input type="text" class="field-input" id="RPI_DEVICE_BOOTLOADER_CONFIG_FILE" name="RPI_DEVICE_BOOTLOADER_CONFIG_FILE" 
-                       value="<%c++ $$ << bootloaderConfig; %>" 
-                       placeholder="Leave blank to use default"
-                       onblur="validateAndSaveField('RPI_DEVICE_BOOTLOADER_CONFIG_FILE')">
-                <div id="feedback-RPI_DEVICE_BOOTLOADER_CONFIG_FILE" class="field-feedback"></div>
-                
-                <div class="inline-help">
-                    <span class="inline-help-icon">&#9432;</span>
-                    <span>Custom bootloader configuration file. A sensible default is provided if not specified.</span>
                 </div>
             </div>
         </div>
