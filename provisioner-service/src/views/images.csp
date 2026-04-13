@@ -643,7 +643,7 @@
         // --- IDP image selected ---
         
         // 1. Auto-fill and lock Device Family
-        const deviceSection = document.getElementById('section-target-device');
+        const deviceSection = document.getElementById('section-device-firmware');
         if (deviceSection && analysis.device_class) {
             // Add IDP info banner at the top of the section
             const banner = document.createElement('div');
