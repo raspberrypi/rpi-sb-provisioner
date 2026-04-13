@@ -379,13 +379,14 @@ namespace provisioner {
             std::string serviceName = name;
 
             // Validate that the service name starts with one of the allowed prefixes
-            if (serviceName.find("rpi-sb-") != 0 && 
-                serviceName.find("rpi-naked-") != 0 && 
-                serviceName.find("rpi-fde-") != 0) {
+            if (serviceName.find("rpi-sb-") != 0 &&
+                serviceName.find("rpi-naked-") != 0 &&
+                serviceName.find("rpi-fde-") != 0 &&
+                serviceName.find("rpi-idp-") != 0) {
                 LOG_INFO << "Rejected access to logs for unauthorized service: " << serviceName;
                 auto resp = provisioner::utils::createErrorResponse(
                     req,
-                    "Access denied: Only logs for rpi-sb, rpi-naked, and rpi-fde services are available",
+                    "Access denied: Only logs for rpi-sb, rpi-naked, rpi-fde, and rpi-idp services are available",
                     drogon::k403Forbidden,
                     "Unauthorized Service",
                     "SERVICE_UNAUTHORIZED"
@@ -605,13 +606,14 @@ namespace provisioner {
             std::string serviceName = name;
 
             // Validate that the service name starts with one of the allowed prefixes
-            if (serviceName.find("rpi-sb-") != 0 && 
-                serviceName.find("rpi-naked-") != 0 && 
-                serviceName.find("rpi-fde-") != 0) {
+            if (serviceName.find("rpi-sb-") != 0 &&
+                serviceName.find("rpi-naked-") != 0 &&
+                serviceName.find("rpi-fde-") != 0 &&
+                serviceName.find("rpi-idp-") != 0) {
                 LOG_INFO << "Rejected access to logs for unauthorized service: " << serviceName;
                 auto resp = provisioner::utils::createErrorResponse(
                     req,
-                    "Access denied: Only logs for rpi-sb, rpi-naked, and rpi-fde services are available",
+                    "Access denied: Only logs for rpi-sb, rpi-naked, rpi-fde, and rpi-idp services are available",
                     drogon::k403Forbidden,
                     "Unauthorized Service",
                     "SERVICE_UNAUTHORIZED",
