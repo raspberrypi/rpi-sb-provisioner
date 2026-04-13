@@ -69,6 +69,11 @@ check_pidevice_storage_type() {
     esac
 }
 
+# timeout_fatal: 30-second default used by rpi-sb-common.sh helpers.
+timeout_fatal() {
+    timeout_fatal_secs 30 "$@"
+}
+
 # timeout_fatal with configurable timeout.
 # Arguments: $1 = timeout in seconds, remaining = command to run
 timeout_fatal_secs() {
