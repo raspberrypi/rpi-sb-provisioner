@@ -121,6 +121,15 @@
         text-align: center;
         margin-top: 4px;
     }
+
+    /* Ensure the image details panel scrolls when content exceeds the
+       grid track height.  The shared firmware-notes-container uses
+       overflow:hidden which clips the panel when IDP metadata pushes
+       the content beyond the 600px grid max-height. */
+    .image-browser-container .firmware-notes-container {
+        overflow-y: auto;
+        min-height: 0;
+    }
 </style>
 
 <!-- Gold Master Image -->
@@ -632,10 +641,31 @@
         
         // Remove IDP locked class from all field groups
         document.querySelectorAll('.idp-locked').forEach(el => el.classList.remove('idp-locked'));
-        
+
         // Remove IDP disabled class from all sections
         document.querySelectorAll('.idp-disabled').forEach(el => el.classList.remove('idp-disabled'));
-        
+
+        // Restore FDE-only tile visibility (hidden when IDP is selected)
+        const fdeTileRestore = document.getElementById('fde-only-tile');
+        if (fdeTileRestore) fdeTileRestore.style.display = '';
+
+        // Restore original naked tile content if previously modified for IDP
+        const nakedTile = document.getElementById('naked-tile');
+        if (nakedTile && nakedTile._origContent) {
+            nakedTile.querySelector('.tile-description').textContent = nakedTile._origContent.description;
+            const badge = nakedTile.querySelector('.tile-badge');
+            if (badge) {
+                badge.textContent = nakedTile._origContent.badgeText;
+                badge.className = nakedTile._origContent.badgeClass;
+            }
+            const warning = nakedTile.querySelector('.tile-warning');
+            if (warning) {
+                warning.innerHTML = nakedTile._origContent.warningHtml;
+                warning.className = nakedTile._origContent.warningClass;
+            }
+            delete nakedTile._origContent;
+        }
+
         if (!isIdp) {
             // Traditional image: ensure all sections are visible and enabled
             return;
@@ -704,7 +734,7 @@
             // Hide the FDE-only tile (meaningless for IDP)
             const fdeTile = document.getElementById('fde-only-tile');
             if (fdeTile) fdeTile.style.display = 'none';
-            
+
             // If FDE-only was selected, switch to naked (the IDP artefact
             // handles encryption itself, so "naked" is the correct non-secure
             // counterpart).
@@ -718,6 +748,33 @@
                     nakedTile.classList.add('selected');
                     validateAndSaveField('PROVISIONING_STYLE');
                     updateSecurityVisibility('naked');
+                }
+            }
+
+            // Reword the naked tile for IDP context — "naked" here means
+            // "no secure boot", not "no security", since the IDP provides
+            // encryption.
+            const nakedTileEl = document.getElementById('naked-tile');
+            if (nakedTileEl) {
+                const desc = nakedTileEl.querySelector('.tile-description');
+                const badge = nakedTileEl.querySelector('.tile-badge');
+                const warning = nakedTileEl.querySelector('.tile-warning');
+                // Save originals so we can restore when switching to a non-IDP image
+                nakedTileEl._origContent = {
+                    description: desc ? desc.textContent : '',
+                    badgeText: badge ? badge.textContent : '',
+                    badgeClass: badge ? badge.className : '',
+                    warningHtml: warning ? warning.innerHTML : '',
+                    warningClass: warning ? warning.className : ''
+                };
+                if (desc) desc.textContent = 'Provisioning without boot verification. Encryption is provided by the IDP artefact.';
+                if (badge) {
+                    badge.textContent = 'No secure boot';
+                    badge.className = 'tile-badge warning';
+                }
+                if (warning) {
+                    warning.innerHTML = '<strong>No boot verification.</strong> The device will not verify the boot chain, but storage encryption from the IDP artefact is still applied.';
+                    warning.className = 'tile-warning caution';
                 }
             }
             
