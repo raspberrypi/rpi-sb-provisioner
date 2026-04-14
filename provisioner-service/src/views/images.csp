@@ -626,8 +626,9 @@
         // Remove any existing IDP info banners
         document.querySelectorAll('.idp-info-banner').forEach(el => el.remove());
         
-        // Remove any existing IDP locked badges
+        // Remove any existing IDP locked/default badges
         document.querySelectorAll('.idp-locked-badge').forEach(el => el.remove());
+        document.querySelectorAll('.idp-default-badge').forEach(el => el.remove());
         
         // Remove IDP locked class from all field groups
         document.querySelectorAll('.idp-locked').forEach(el => el.classList.remove('idp-locked'));
@@ -648,7 +649,7 @@
             // Add IDP info banner at the top of the section
             const banner = document.createElement('div');
             banner.className = 'idp-info-banner';
-            banner.innerHTML = '<strong>IDP Artefact Selected.</strong> Device family, storage type, and encryption settings are defined by the image and cannot be changed here.';
+            banner.innerHTML = '<strong>IDP Artefact Selected.</strong> Device family and encryption settings are defined by the image. Storage type has been defaulted to match the image but can be overridden.';
             deviceSection.querySelector('.section-header').after(banner);
             
             // Select the correct device family radio
@@ -671,7 +672,7 @@
                 }
             }
             
-            // Select and lock storage type
+            // Select storage type from IDP (as default, but allow override)
             if (analysis.storage_type) {
                 const storageRadio = deviceSection.querySelector('input[name="RPI_DEVICE_STORAGE_TYPE"][value="' + analysis.storage_type + '"]');
                 if (storageRadio) {
@@ -680,12 +681,11 @@
                 }
                 const storageGroup = storageRadio ? storageRadio.closest('.field-group') : null;
                 if (storageGroup) {
-                    storageGroup.classList.add('idp-locked');
                     const label = storageGroup.querySelector('.field-label');
                     if (label) {
                         const badge = document.createElement('span');
-                        badge.className = 'idp-locked-badge';
-                        badge.textContent = 'Set by image';
+                        badge.className = 'idp-default-badge';
+                        badge.textContent = 'IDP default: ' + analysis.storage_type;
                         label.appendChild(badge);
                     }
                 }
