@@ -348,6 +348,22 @@ metadata_gather() {
 	                # Best-effort: persist to sidecar for reuse by UI and future runs
 	                printf '%s\n' "${OS_IMAGE_SHA256}" > "${GOLD_MASTER_OS_FILE}.sha256" 2>/dev/null || true
 	            fi
+	        elif [ -n "${GOLD_MASTER_OS_FILE}" ] && [ -d "${GOLD_MASTER_OS_FILE}" ]; then
+	            # IDP artefact directory — use the image name from the JSON
+	            # metadata (set by rpi-idp-provisioner.sh before calling us),
+	            # falling back to the directory basename.
+	            if [ -n "${IDP_IMAGE_NAME}" ] && [ "${IDP_IMAGE_NAME}" != "unknown" ]; then
+	                OS_IMAGE_FILENAME="${IDP_IMAGE_NAME}"
+	            else
+	                OS_IMAGE_FILENAME="$(basename -- "${GOLD_MASTER_OS_FILE}")"
+	            fi
+	            # Read the archive SHA256 from the sidecar written by the UI
+	            # at upload time (<directory>.sha256).  This is the hash of
+	            # the original .tar.xz/.tar.zst archive, consistent with
+	            # what the web UI displays.
+	            if [ -f "${GOLD_MASTER_OS_FILE}.sha256" ]; then
+	                OS_IMAGE_SHA256="$(head -n1 "${GOLD_MASTER_OS_FILE}.sha256" | awk '{print $1}')"
+	            fi
 	        fi
 
         # Register with Raspberry Pi Connect (if API key is configured).
