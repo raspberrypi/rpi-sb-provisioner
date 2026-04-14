@@ -41,7 +41,7 @@ connect_register_device() {
     _connect_fb_output=$(fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar public-key 2>&1 | tr -d '\r') || true
     _connect_public_key_pem=$(printf '%s\n' "${_connect_fb_output}" | \
         sed -n '/-----BEGIN PUBLIC KEY-----/,/-----END PUBLIC KEY-----/{
-            s/^[^-]*\(-----BEGIN\)/\1/
+            s/^.*\(-----BEGIN PUBLIC KEY-----\)/\1/
             p
         }')
     if [ -z "${_connect_public_key_pem}" ]; then
