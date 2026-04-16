@@ -39,9 +39,17 @@ WARNING: The PKCS11 provider, and it's associated HSM, should be considered key 
 === GOLD_MASTER_OS_FILE
 *Mandatory*
 
-This should be your 'gold master' OS image. No customisation should be present in this image that you would not expect to be deployed to your entire fleet. `rpi-sb-provisioner` assumes this image has been created using `pi-gen`, and using a non-`pi-gen` image may produce undefined behaviour.
+WARNING: Provisioning erases the device's storage before writing the OS image. If this variable is not set or points to a missing file, the device storage will still be erased and provisioning will then fail — leaving the device with wiped storage. Always ensure a valid image is selected before connecting a device.
 
-WARNING: This file *must* be the uncompressed image.
+This should be your 'gold master' OS image. This can be either:
+
+* A *traditional `.img` file* — an uncompressed disk image, typically created using `pi-gen`. No customisation should be present in this image that you would not expect to be deployed to your entire fleet. Using a non-`pi-gen` image may produce undefined behaviour.
+
+* An *IDP artefact directory* — a directory containing a JSON image descriptor and one or more sparse image (`.simg`) files, produced by `rpi-image-gen`. When a directory is specified, the provisioning system automatically uses the IDP protocol regardless of the `PROVISIONING_STYLE` setting. The artefact's JSON descriptor defines the partition layout, encryption, storage type, and device family, so these fields are auto-populated by the WebUI.
+
+WARNING: Traditional `.img` files *must* be uncompressed.
+
+NOTE: When selecting an IDP artefact through the WebUI, the device family, storage type, and cipher fields are locked to the values defined in the artefact's metadata and cannot be overridden.
 
 === RPI_DEVICE_STORAGE_TYPE
 *Mandatory*

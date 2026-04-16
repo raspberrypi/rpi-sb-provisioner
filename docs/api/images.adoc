@@ -2,6 +2,8 @@
 
 The Images API provides complete management of OS images used for device provisioning, including upload, download, metadata retrieval, and SHA256 hash calculation.
 
+The API supports both traditional `.img` files and IDP (Image Description Provisioning) artefact directories. IDP artefacts are directories containing a JSON image descriptor and one or more sparse images (`.simg` files), typically produced by `rpi-image-gen`.
+
 == /get-images
 
 *HTTP Method:* GET
@@ -17,11 +19,19 @@ The Images API provides complete management of OS images used for device provisi
 [
   {
     "name": "raspios-2025-04-01.img",
-    "sha256": "abc123..."
+    "path": "/srv/rpi-sb-provisioner/images/raspios-2025-04-01.img",
+    "sha256": "abc123...",
+    "size_mb": 4096.0,
+    "is_gold_master": false,
+    "is_idp": false
   },
   {
-    "name": "raspios-2025-03-15.img",
-    "sha256": "Calculating..."
+    "name": "deb13-arm64-min-ab-luks2-2026-04-13",
+    "path": "/srv/rpi-sb-provisioner/images/deb13-arm64-min-ab-luks2-2026-04-13",
+    "sha256": "def456...",
+    "size_mb": 822.7,
+    "is_gold_master": true,
+    "is_idp": true
   }
 ]
 ----
@@ -31,15 +41,20 @@ The Images API provides complete management of OS images used for device provisi
 [options="header"]
 |===
 |Field|Description
-|name|Filename of the image
-|sha256|SHA256 hash of the image (or status: "Calculating...", "Error")
+|name|Filename of the image or name of the IDP artefact directory
+|path|Full filesystem path
+|sha256|SHA256 hash (or status: "Calculating...", "Error"). For IDP artefacts, this is the hash of the original uploaded archive read from a `.sha256` sidecar file
+|size_mb|File size in megabytes. For IDP artefacts, this is the sum of all files in the directory
+|is_gold_master|Whether this image is currently selected as the gold master OS image
+|is_idp|Whether this entry is an IDP artefact directory (as opposed to a traditional `.img` file)
 |===
 
 *Notes:*
 
-- SHA256 hashes are calculated asynchronously in the background
+- SHA256 hashes for traditional images are calculated asynchronously in the background
+- IDP artefact SHA256 is read from a sidecar file created at upload time; no background calculation
 - Images with "Calculating..." status will have their hash computed automatically
-- .sha256 sidecar files are not included in the listing
+- `.sha256` sidecar files and hidden directories (prefixed with `.`) are not included in the listing
 
 == /get-image-metadata
 
@@ -169,6 +184,8 @@ If a file with the same name exists, it will be automatically renamed:
 - Files are automatically renamed if a conflict is detected
 - SHA256 calculation begins automatically after upload
 - Supports very large image files (multi-GB)
+- Compressed images (`.img.xz`, `.img.zst`) are decompressed on-the-fly during upload
+- IDP artefact archives (`.tar.xz`, `.tar.zst`, `.tar.gz`, `.tgz`, `.zip`) are extracted into a directory, with the archive's SHA256 stored in a sidecar file. Archives are validated for path traversal before extraction
 
 == /delete-image
 
@@ -205,6 +222,75 @@ HTTP 200 OK with no body on success.
 *Notes:*
 
 - Deleting an image will cancel any ongoing SHA256 calculation
-- Both the image file and its .sha256 sidecar file are removed
+- Both the image file (or IDP artefact directory) and its `.sha256` sidecar file are removed
+
+== /analyze-image
+
+*HTTP Method:* GET
+
+*Description:* Analyses an image and returns detailed metadata. For IDP artefact directories, this parses the JSON image descriptor and returns device class, storage type, encryption settings, and partition information.
+
+*Parameters:*
+
+[options="header"]
+|===
+|Parameter|Type|Required|Description
+|name|String|Yes|Name of the image or IDP artefact directory
+|===
+
+*Response Format (IDP artefact):*
+
+[source,json]
+----
+{
+  "type": "idp",
+  "name": "deb13-arm64-min-ab-luks2-2026-04-13",
+  "path": "/srv/rpi-sb-provisioner/images/deb13-arm64-min-ab-luks2-2026-04-13",
+  "schema_valid": true,
+  "device_class_raw": "pi5",
+  "device_class": "5",
+  "storage_type": "sd",
+  "image_version": "2026-04-13",
+  "image_name": "deb13-arm64-min-ab-luks2",
+  "partition_count": 6,
+  "encryption": true,
+  "cipher": "aes-xts-plain64"
+}
+----
+
+*Response Format (traditional image):*
+
+[source,json]
+----
+{
+  "type": "traditional",
+  "name": "raspios-2025-04-01.img",
+  "path": "/srv/rpi-sb-provisioner/images/raspios-2025-04-01.img",
+  "size_bytes": 4294967296
+}
+----
+
+*IDP Field Descriptions:*
+
+[options="header"]
+|===
+|Field|Description
+|type|`idp` for IDP artefact directories, `traditional` for `.img` files
+|schema_valid|Whether the IDP JSON passes schema validation
+|device_class_raw|Raw device class from the JSON (e.g. `pi5`, `cm4`, `pi2w`)
+|device_class|Mapped device family matching `RPI_DEVICE_FAMILY` convention (`5`, `4`, `2W`)
+|storage_type|Storage type from the JSON (`sd`, `emmc`, `nvme`)
+|image_version|Image version string from JSON metadata
+|image_name|Human-readable image name from JSON attributes
+|partition_count|Number of partitions defined in the image layout
+|encryption|Whether any partition uses encryption
+|cipher|Encryption cipher (e.g. `aes-xts-plain64`), present only when encryption is enabled
+|===
+
+*Notes:*
+
+- This endpoint is used by the WebUI to auto-populate device family, storage type, and cipher fields when an IDP artefact is selected
+- For IDP artefacts, the response is parsed from the JSON image descriptor without modifying the artefact
+- Returns an `error` field if analysis fails (e.g. missing JSON file, parse error)
 
 
