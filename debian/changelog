@@ -48,6 +48,14 @@ rpi-sb-provisioner (2.3.0) unstable; urgency=medium
       documented and registered endpoint)
     - Fix HTTP method for image deletion: changed from DELETE to POST
       to match the backend handler
+    - Fix image browser detail pane overflowing its container by adding
+      box-sizing: border-box to .image-list and .firmware-notes
+    - Fix cleanup_orphans destroying persistent data directories
+      (images, workdir, databases): TEMP_BASE now points to a dedicated
+      /srv/rpi-sb-provisioner/tmp subdirectory, and all temp directory
+      creation uses a new make_temp_dir helper
+    - Fix rpi-sb-common.sh base directory variables overwriting values
+      pre-set by sourcing scripts (e.g. rpi-sb-bootstrap.sh)
 
   * IDP Validation in provisioner-service:
     - Extend GOLD_MASTER_OS_FILE validation in options.cpp to support
@@ -75,7 +83,7 @@ rpi-sb-provisioner (2.3.0) unstable; urgency=medium
     - Non-fatal: registration failures log warnings but never abort
       provisioning (set +e guard, curl timeouts, robust PEM capture)
 
- -- Tom Dewey <tom.dewey@raspberrypi.com>  Wed, 01 Apr 2026 12:00:00 +0100
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Fri, 17 Apr 2026 12:00:00 +0100
 
 rpi-sb-provisioner (2.2.0) unstable; urgency=medium
 
