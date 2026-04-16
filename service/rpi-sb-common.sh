@@ -3,13 +3,31 @@
 # Common helper functions for Raspberry Pi provisioning scripts
 # This file should be sourced by all provisioning scripts
 
-# Base directories for various operations
-LOCK_BASE="/var/lock/rpi-sb-provisioner"
-LOG_BASE="/var/log/rpi-sb-provisioner"
-TEMP_BASE="/srv/rpi-sb-provisioner"
+# Base directories for various operations.
+# Scripts may override these before sourcing this file; the := pattern
+# preserves any pre-set value.
+: "${LOCK_BASE:=/var/lock/rpi-sb-provisioner}"
+: "${LOG_BASE:=/var/log/rpi-sb-provisioner}"
+: "${TEMP_BASE:=/srv/rpi-sb-provisioner/tmp}"
 
 # Resource limits
 MAX_TEMP_DIR_AGE_HOURS=24
+
+# Creates a temporary directory inside TEMP_BASE so that all temp
+# directories are isolated from persistent data (images, workdir, etc.)
+# and can be safely reaped by cleanup_orphans.
+#
+# Usage:
+#   make_temp_dir                       # anonymous temp dir
+#   make_temp_dir "rpi-sb-bootstrap.XXX" # named template
+make_temp_dir() {
+    mkdir -p "$TEMP_BASE"
+    if [ -n "${1:-}" ]; then
+        mktemp -d "$1" --tmpdir="$TEMP_BASE"
+    else
+        mktemp -d -p "$TEMP_BASE"
+    fi
+}
 
 # Creates a directory atomically, ensuring no race conditions
 # Parameters:
@@ -76,9 +94,15 @@ with_lock() {
 
 # Cleans up orphaned resources (temp dirs older than MAX_TEMP_DIR_AGE_HOURS)
 cleanup_orphans() {
-    # Clean up temp directories inside TEMP_BASE that are older than the threshold
-    # Using -mindepth 1 to avoid removing TEMP_BASE itself
-    find "$TEMP_BASE" -mindepth 1 -maxdepth 1 -type d -mmin +"$((MAX_TEMP_DIR_AGE_HOURS * 60))" -exec rm -rf {} + 2>/dev/null || true
+    mkdir -p "$TEMP_BASE" 2>/dev/null || true
+
+    # Reap stale temp directories.  TEMP_BASE points to a dedicated tmp
+    # subdirectory (/srv/rpi-sb-provisioner/tmp) so persistent data
+    # (images, workdir, databases, etc.) is never at risk.
+    find "$TEMP_BASE" -mindepth 1 -maxdepth 1 -type d \
+        -mmin +"$((MAX_TEMP_DIR_AGE_HOURS * 60))" \
+        -exec rm -rf {} + 2>/dev/null || true
+
     find "$LOG_BASE" -type d -empty -delete 2>/dev/null || true
     find "$LOCK_BASE" -type f -mtime +1 -delete 2>/dev/null || true
 }

@@ -195,17 +195,17 @@ record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_STARTED}" "${TARGET_USB_PA
 # Run provision-started hook (e.g. LED control on programming rigs)
 run_customisation_script "naked-provisioner" "provision-started" "${FASTBOOT_DEVICE_SPECIFIER}" "${TARGET_DEVICE_SERIAL}" "${RPI_DEVICE_STORAGE_TYPE}"
 
-TMP_DIR=$(mktemp -d -p /srv/rpi-sb-provisioner)
+TMP_DIR=$(make_temp_dir)
 RPI_DEVICE_STORAGE_TYPE="$(check_pidevice_storage_type "${RPI_DEVICE_STORAGE_TYPE}")"
 DELETE_PRIVATE_TMPDIR=
 announce_start "Finding the cache directory"
 if [ -z "${RPI_SB_WORKDIR}" ]; then
-    RPI_SB_WORKDIR=$(mktemp -d "rpi-sb-provisioner.XXX" --tmpdir="/srv/")
-    announce_stop "Finding the cache directory: Created a new one as unspecified"
+    RPI_SB_WORKDIR=$(make_temp_dir "rpi-sb-provisioner.XXX")
+    announce_stop "Finding the cache directory: Created ${RPI_SB_WORKDIR} (none configured)"
     DELETE_PRIVATE_TMPDIR="true"
 elif [ ! -d "${RPI_SB_WORKDIR}" ]; then
-    RPI_SB_WORKDIR=$(mktemp -d "rpi-sb-provisioner.XXX" --tmpdir="/srv/")
-    announce_stop "Finding the cache directory: Created a new one in /srv, as supplied path isn't a directory"
+    RPI_SB_WORKDIR=$(make_temp_dir "rpi-sb-provisioner.XXX")
+    announce_stop "Finding the cache directory: Created ${RPI_SB_WORKDIR} (configured path isn't a directory)"
     DELETE_PRIVATE_TMPDIR="true"
 else
     # Deliberately do nothing
