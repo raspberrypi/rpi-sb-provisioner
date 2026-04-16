@@ -16,7 +16,6 @@ export BOOTSTRAP_STARTED="BOOTSTRAP-STARTED"
 LOCK_BASE="/var/lock/rpi-sb-bootstrap"
 STATE_BASE="/var/run/rpi-sb-state"
 LOG_BASE="/var/log/rpi-sb-provisioner"
-TEMP_BASE="/srv/rpi-sb-bootstrap"
 
 # Source common helper functions
 # shellcheck disable=SC1091
@@ -438,12 +437,12 @@ check_command_exists grep
 DELETE_PRIVATE_TMPDIR=
 announce_start "Finding the cache directory"
 if [ -z "${RPI_SB_WORKDIR}" ]; then
-    RPI_SB_WORKDIR=$(mktemp -d "rpi-sb-bootstrap.XXX" --tmpdir="$TEMP_BASE")
-    announce_stop "Finding the cache directory: Created a new one as unspecified"
+    RPI_SB_WORKDIR=$(make_temp_dir "rpi-sb-bootstrap.XXX")
+    announce_stop "Finding the cache directory: Created ${RPI_SB_WORKDIR} (none configured)"
     DELETE_PRIVATE_TMPDIR="true"
 elif [ ! -d "${RPI_SB_WORKDIR}" ]; then
-    RPI_SB_WORKDIR=$(mktemp -d "rpi-sb-bootstrap.XXX" --tmpdir="$TEMP_BASE")
-    announce_stop "Finding the cache directory: Created a new one in $TEMP_BASE, as supplied path isn't a directory"
+    RPI_SB_WORKDIR=$(make_temp_dir "rpi-sb-bootstrap.XXX")
+    announce_stop "Finding the cache directory: Created ${RPI_SB_WORKDIR} (configured path isn't a directory)"
     DELETE_PRIVATE_TMPDIR="true"
 else
     # Deliberately do nothing

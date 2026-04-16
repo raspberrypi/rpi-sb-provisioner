@@ -128,7 +128,7 @@ log "  - Device family: Pi ${RPI_DEVICE_FAMILY}"
 log "  - Key material: $([ -n "${CUSTOMER_KEY_PKCS11_NAME}" ] && echo "PKCS11" || echo "PEM file")"
 
 # Create temporary working directory
-TMP_DIR=$(mktemp -d -p /srv/rpi-sb-provisioner)
+TMP_DIR=$(make_temp_dir)
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
 announce_start "Image analysis"
