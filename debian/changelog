@@ -96,6 +96,19 @@ rpi-sb-provisioner (2.3.0) unstable; urgency=medium
       measurements) and Raspberry Pi Connect device identity
       registration; the private key never leaves the SoC
 
+  * Provisioner Exit Status Fix:
+    - Fix cleanup() trap handler in rpi-sb-provisioner.sh,
+      rpi-fde-provisioner.sh, rpi-naked-provisioner.sh,
+      rpi-idp-provisioner.sh and rpi-sb-bootstrap.sh swallowing the
+      real exit status: the re-entry guard and CLEANUP_DONE=1
+      assignment clobbered $? before it was captured, so any failure
+      caught by the trap (set -e, die, SIGTERM) was reported as
+      success -- the systemd unit showed "Deactivated successfully"
+      and the WebUI saw a clean run despite aborted provisioning
+    - Capture $? as the first statement of cleanup() so the original
+      exit status propagates through to systemd and the manufacturing
+      database
+
  -- Tom Dewey <tom.dewey@raspberrypi.com>  Fri, 17 Apr 2026 12:00:00 +0100
 
 rpi-sb-provisioner (2.2.0) unstable; urgency=medium

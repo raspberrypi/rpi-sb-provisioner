@@ -45,11 +45,14 @@ log() {
 CLEANUP_DONE=0
 
 cleanup() {
+    # Capture the exit status that triggered the trap BEFORE any other
+    # command runs, otherwise $? is clobbered by the guard/assignment below
+    # and a genuine failure is reported as success.
+    returnvalue=$?
+
     # Guard against multiple invocations (signal + EXIT trap)
     [ "$CLEANUP_DONE" -eq 1 ] && return
     CLEANUP_DONE=1
-
-    returnvalue=$?
     if [ ${HOLDING_LOCKFILE} -eq 1 ]; then
         rm -rf "$DEVICE_LOCK"
         
