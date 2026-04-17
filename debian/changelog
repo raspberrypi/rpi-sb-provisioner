@@ -83,6 +83,19 @@ rpi-sb-provisioner (2.3.0) unstable; urgency=medium
     - Non-fatal: registration failures log warnings but never abort
       provisioning (set +e guard, curl timeouts, robust PEM capture)
 
+  * Cryptroot rpifwcrypto Support:
+    - Update cryptroot initramfs to unlock the encrypted root filesystem
+      using the device's firmware crypto ECDSA key (rpifwcrypto), in
+      place of key material delivered out-of-band or stored on disk
+    - Triage now always provisions the device firmware crypto key
+      (oem fwcrypto init) before provisioning proceeds, regardless of
+      provisioning style, and verifies the key is written to OTP before
+      continuing -- aborting the device if provisioning fails
+    - Establishes a hardware-held device unique identity that underpins
+      both LUKS unlock (via a derived secret bound to the key and other
+      measurements) and Raspberry Pi Connect device identity
+      registration; the private key never leaves the SoC
+
  -- Tom Dewey <tom.dewey@raspberrypi.com>  Fri, 17 Apr 2026 12:00:00 +0100
 
 rpi-sb-provisioner (2.2.0) unstable; urgency=medium
