@@ -11,7 +11,7 @@ ACTION=="add", SUBSYSTEM=="usb", \
   ENV{SYSTEMD_WANTS}+="%c"
 
 ACTION=="add", SUBSYSTEM=="usb", \
-  ATTRS{idVendor}=="18d1", ATTR{idProduct}=="4e40", ATTR{manufacturer}=="Raspberry Pi" \
+  ATTRS{idVendor}=="18d1", ATTR{idProduct}=="4e40", ATTR{manufacturer}=="Raspberry Pi", \
   TAG+="systemd", \
   PROGRAM="/usr/bin/systemd-escape -p --template=rpi-sb-triage@.service $attr{serial}", \
   ENV{SYSTEMD_WANTS}+="%c"
