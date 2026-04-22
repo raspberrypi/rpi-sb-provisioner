@@ -103,6 +103,7 @@ namespace provisioner {
         std::string model;       // device model/type (e.g., CM5, 4B, Zero 2 W)
         int portCount{0};        // number of ports if hub (from maxchild)
         bool isPlaceholder{false};
+        int speed{0};            // USB speed in Mbps (e.g., 480 for USB2, 5000 for USB3)
     };
 
     // Tracker state
@@ -114,6 +115,442 @@ namespace provisioner {
         std::unordered_map<std::string, UsbNode> currentTopology;
         // App start time in milliseconds since epoch; used to ignore stale DB rows
         std::atomic<long long> appStartMs{0};
+        
+        // Test mode state for fake device injection
+        std::atomic<bool> testModeEnabled{false};
+        std::unordered_map<std::string, UsbNode> testTopology;
+        
+        // USB spec constants
+        constexpr int USB_MAX_DEVICES = 127;      // Maximum devices per host controller
+        constexpr int USB_MAX_HUB_DEPTH = 5;      // Maximum external hubs in chain (7 tiers total)
+        
+        // Generate a fake serial number
+        std::string generateFakeSerial(int index) {
+            char buf[32];
+            snprintf(buf, sizeof(buf), "TEST%08x", 0x10000000 + index);
+            return buf;
+        }
+        
+        // Generate a fake IP address
+        std::string generateFakeIP(int index) {
+            return "192.168.100." + std::to_string((index % 254) + 1);
+        }
+        
+        // Test scenario generators
+        std::unordered_map<std::string, UsbNode> generateDirectDevices(int count) {
+            // Devices connected directly to root ports (no hubs)
+            std::unordered_map<std::string, UsbNode> nodes;
+            
+            // Server root
+            UsbNode server;
+            server.id = "server";
+            server.parentId = "";
+            server.isHub = true;
+            server.vendor = "Provisioner";
+            server.product = "Server";
+            nodes["server"] = server;
+            
+            // Add root hub placeholder for USB 3 (bus 3)
+            UsbNode rootHub;
+            rootHub.id = "3-0";
+            rootHub.parentId = "server";
+            rootHub.isHub = true;
+            rootHub.portCount = std::min(count, 4);
+            nodes["3-0"] = rootHub;
+            
+            // Direct devices on different root ports
+            const char* states[] = {"bootstrap", "triage", "provisioning", "complete", "error"};
+            const char* models[] = {"CM5", "CM4", "Pi 5", "Pi 4B", "Zero 2 W"};
+            const int modelGens[] = {5, 4, 5, 4, 0};
+            
+            for (int i = 0; i < count && i < 4; ++i) {
+                UsbNode dev;
+                dev.id = "3-" + std::to_string(i + 1);
+                dev.parentId = "server";
+                dev.isHub = false;
+                dev.vendor = "2e8a";
+                dev.product = "000" + std::to_string(i);
+                dev.productName = "BCM2712 Boot";
+                dev.serial = generateFakeSerial(i);
+                dev.state = states[i % 5];
+                dev.ip = generateFakeIP(i);
+                dev.model = models[i % 5];
+                nodes[dev.id] = dev;
+            }
+            
+            return nodes;
+        }
+        
+        std::unordered_map<std::string, UsbNode> generateHubWithDevices(int hubPorts, int deviceCount) {
+            // Single hub with multiple devices
+            std::unordered_map<std::string, UsbNode> nodes;
+            
+            // Server root
+            UsbNode server;
+            server.id = "server";
+            server.parentId = "";
+            server.isHub = true;
+            server.vendor = "Provisioner";
+            server.product = "Server";
+            nodes["server"] = server;
+            
+            // Root hub
+            UsbNode rootHub;
+            rootHub.id = "3-0";
+            rootHub.parentId = "server";
+            rootHub.isHub = true;
+            rootHub.portCount = 2;
+            nodes["3-0"] = rootHub;
+            
+            // USB Hub on port 1
+            UsbNode hub;
+            hub.id = "3-1";
+            hub.parentId = "server";
+            hub.isHub = true;
+            hub.vendor = "0bda";
+            hub.product = "5411";
+            hub.productName = "USB3.0 Hub";
+            hub.portCount = hubPorts;
+            nodes["3-1"] = hub;
+            
+            // Devices under the hub
+            const char* states[] = {"bootstrap", "triage", "provisioning", "complete", "error"};
+            const char* models[] = {"CM5", "CM4", "Pi 5", "Pi 4B", "Zero 2 W"};
+            
+            for (int i = 0; i < deviceCount && i < hubPorts; ++i) {
+                UsbNode dev;
+                dev.id = "3-1." + std::to_string(i + 1);
+                dev.parentId = "3-1";
+                dev.isHub = false;
+                dev.vendor = "2e8a";
+                dev.product = "000" + std::to_string(i);
+                dev.productName = "BCM2712 Boot";
+                dev.serial = generateFakeSerial(100 + i);
+                dev.state = states[i % 5];
+                dev.ip = generateFakeIP(100 + i);
+                dev.model = models[i % 5];
+                nodes[dev.id] = dev;
+            }
+            
+            // Add placeholders for empty ports
+            for (int i = deviceCount; i < hubPorts; ++i) {
+                UsbNode ph;
+                ph.id = "3-1." + std::to_string(i + 1);
+                ph.parentId = "3-1";
+                ph.isHub = false;
+                ph.isPlaceholder = true;
+                nodes[ph.id] = ph;
+            }
+            
+            return nodes;
+        }
+        
+        std::unordered_map<std::string, UsbNode> generateNestedHubs(int depth, int devicesPerHub) {
+            // Nested hubs up to specified depth (max 5)
+            std::unordered_map<std::string, UsbNode> nodes;
+            depth = std::min(depth, USB_MAX_HUB_DEPTH);
+            
+            // Server root
+            UsbNode server;
+            server.id = "server";
+            server.parentId = "";
+            server.isHub = true;
+            server.vendor = "Provisioner";
+            server.product = "Server";
+            nodes["server"] = server;
+            
+            // Root hub
+            UsbNode rootHub;
+            rootHub.id = "3-0";
+            rootHub.parentId = "server";
+            rootHub.isHub = true;
+            rootHub.portCount = 2;
+            nodes["3-0"] = rootHub;
+            
+            // Build chain of hubs
+            std::string parentId = "server";
+            std::string currentId = "3-1";
+            const char* states[] = {"bootstrap", "triage", "provisioning", "complete"};
+            const char* models[] = {"CM5", "CM4", "Pi 5", "Pi 4B"};
+            int deviceIndex = 0;
+            
+            for (int d = 0; d < depth; ++d) {
+                // Add hub at this depth
+                UsbNode hub;
+                hub.id = currentId;
+                hub.parentId = parentId;
+                hub.isHub = true;
+                hub.vendor = "0bda";
+                hub.product = "5411";
+                hub.productName = "USB3.0 Hub (Tier " + std::to_string(d + 1) + ")";
+                hub.portCount = devicesPerHub + 1; // +1 for next hub
+                nodes[hub.id] = hub;
+                
+                // Add devices at this level
+                for (int i = 0; i < devicesPerHub; ++i) {
+                    UsbNode dev;
+                    dev.id = currentId + "." + std::to_string(i + 1);
+                    dev.parentId = currentId;
+                    dev.isHub = false;
+                    dev.vendor = "2e8a";
+                    dev.product = "0003";
+                    dev.productName = "BCM2712 Boot";
+                    dev.serial = generateFakeSerial(200 + deviceIndex);
+                    dev.state = states[deviceIndex % 4];
+                    dev.ip = generateFakeIP(200 + deviceIndex);
+                    dev.model = models[deviceIndex % 4];
+                    nodes[dev.id] = dev;
+                    deviceIndex++;
+                }
+                
+                // Prepare for next level
+                parentId = currentId;
+                currentId = currentId + "." + std::to_string(devicesPerHub + 1);
+            }
+            
+            return nodes;
+        }
+        
+        std::unordered_map<std::string, UsbNode> generateMaxTopology() {
+            // Maximum USB topology: 127 devices with hub hierarchy
+            std::unordered_map<std::string, UsbNode> nodes;
+            
+            // Server root
+            UsbNode server;
+            server.id = "server";
+            server.parentId = "";
+            server.isHub = true;
+            server.vendor = "Provisioner";
+            server.product = "Server";
+            nodes["server"] = server;
+            
+            // Root hubs for USB2 (bus 1) and USB3 (bus 3)
+            for (int bus : {1, 3}) {
+                UsbNode rootHub;
+                rootHub.id = std::to_string(bus) + "-0";
+                rootHub.parentId = "server";
+                rootHub.isHub = true;
+                rootHub.portCount = 4;
+                nodes[rootHub.id] = rootHub;
+            }
+            
+            const char* states[] = {"bootstrap", "triage", "provisioning", "complete", "error"};
+            const char* models[] = {"CM5", "CM4", "Pi 5", "Pi 4B", "Zero 2 W"};
+            int deviceIndex = 0;
+            int totalDevices = 0;
+            
+            // Create hierarchical structure to reach ~127 devices
+            // 4 root ports × 7-port hubs × 4 devices per hub = 112 devices + hubs
+            for (int bus : {1, 3}) {
+                for (int rootPort = 1; rootPort <= 2 && totalDevices < USB_MAX_DEVICES - 10; ++rootPort) {
+                    std::string hubId = std::to_string(bus) + "-" + std::to_string(rootPort);
+                    
+                    // Add 7-port hub
+                    UsbNode hub;
+                    hub.id = hubId;
+                    hub.parentId = "server";
+                    hub.isHub = true;
+                    hub.vendor = "0bda";
+                    hub.product = "5411";
+                    hub.productName = "USB3.0 Hub";
+                    hub.portCount = 7;
+                    nodes[hub.id] = hub;
+                    totalDevices++;
+                    
+                    // Add devices to hub
+                    for (int port = 1; port <= 7 && totalDevices < USB_MAX_DEVICES; ++port) {
+                        // Every 3rd port gets a sub-hub with more devices
+                        if (port % 3 == 0 && totalDevices < USB_MAX_DEVICES - 5) {
+                            std::string subHubId = hubId + "." + std::to_string(port);
+                            UsbNode subHub;
+                            subHub.id = subHubId;
+                            subHub.parentId = hubId;
+                            subHub.isHub = true;
+                            subHub.vendor = "0bda";
+                            subHub.product = "5411";
+                            subHub.productName = "USB3.0 Sub-Hub";
+                            subHub.portCount = 4;
+                            nodes[subHub.id] = subHub;
+                            totalDevices++;
+                            
+                            // Devices on sub-hub
+                            for (int subPort = 1; subPort <= 4 && totalDevices < USB_MAX_DEVICES; ++subPort) {
+                                UsbNode dev;
+                                dev.id = subHubId + "." + std::to_string(subPort);
+                                dev.parentId = subHubId;
+                                dev.isHub = false;
+                                dev.vendor = "2e8a";
+                                dev.product = "0003";
+                                dev.productName = "BCM2712 Boot";
+                                dev.serial = generateFakeSerial(deviceIndex);
+                                dev.state = states[deviceIndex % 5];
+                                dev.ip = generateFakeIP(deviceIndex);
+                                dev.model = models[deviceIndex % 5];
+                                nodes[dev.id] = dev;
+                                deviceIndex++;
+                                totalDevices++;
+                            }
+                        } else {
+                            // Regular device
+                            UsbNode dev;
+                            dev.id = hubId + "." + std::to_string(port);
+                            dev.parentId = hubId;
+                            dev.isHub = false;
+                            dev.vendor = "2e8a";
+                            dev.product = "0003";
+                            dev.productName = "BCM2712 Boot";
+                            dev.serial = generateFakeSerial(deviceIndex);
+                            dev.state = states[deviceIndex % 5];
+                            dev.ip = generateFakeIP(deviceIndex);
+                            dev.model = models[deviceIndex % 5];
+                            nodes[dev.id] = dev;
+                            deviceIndex++;
+                            totalDevices++;
+                        }
+                    }
+                }
+            }
+            
+            LOG_INFO << "Generated max topology with " << totalDevices << " devices";
+            return nodes;
+        }
+        
+        std::unordered_map<std::string, UsbNode> generateMixedTopology() {
+            // Mixed topology: direct devices, hubs, and nested hubs
+            std::unordered_map<std::string, UsbNode> nodes;
+            
+            // Server root
+            UsbNode server;
+            server.id = "server";
+            server.parentId = "";
+            server.isHub = true;
+            server.vendor = "Provisioner";
+            server.product = "Server";
+            nodes["server"] = server;
+            
+            // Root hubs
+            for (int bus : {1, 3}) {
+                UsbNode rootHub;
+                rootHub.id = std::to_string(bus) + "-0";
+                rootHub.parentId = "server";
+                rootHub.isHub = true;
+                rootHub.portCount = 4;
+                nodes[rootHub.id] = rootHub;
+            }
+            
+            const char* states[] = {"bootstrap", "triage", "provisioning", "complete", "error"};
+            const char* models[] = {"CM5", "CM4", "Pi 5", "Pi 4B", "Zero 2 W"};
+            int deviceIndex = 0;
+            
+            // USB3 bus: Direct device on port 1
+            {
+                UsbNode dev;
+                dev.id = "3-1";
+                dev.parentId = "server";
+                dev.isHub = false;
+                dev.vendor = "2e8a";
+                dev.product = "0003";
+                dev.productName = "BCM2712 Boot";
+                dev.serial = generateFakeSerial(deviceIndex++);
+                dev.state = "complete";
+                dev.ip = generateFakeIP(0);
+                dev.model = "CM5";
+                nodes[dev.id] = dev;
+            }
+            
+            // USB3 bus: Hub on port 2 with devices
+            {
+                UsbNode hub;
+                hub.id = "3-2";
+                hub.parentId = "server";
+                hub.isHub = true;
+                hub.vendor = "0bda";
+                hub.product = "5411";
+                hub.productName = "USB3.0 Hub";
+                hub.portCount = 4;
+                nodes[hub.id] = hub;
+                
+                for (int i = 1; i <= 3; ++i) {
+                    UsbNode dev;
+                    dev.id = "3-2." + std::to_string(i);
+                    dev.parentId = "3-2";
+                    dev.isHub = false;
+                    dev.vendor = "2e8a";
+                    dev.product = "0003";
+                    dev.productName = "BCM2712 Boot";
+                    dev.serial = generateFakeSerial(deviceIndex);
+                    dev.state = states[deviceIndex % 5];
+                    dev.ip = generateFakeIP(deviceIndex);
+                    dev.model = models[deviceIndex % 5];
+                    nodes[dev.id] = dev;
+                    deviceIndex++;
+                }
+                
+                // Placeholder for empty port
+                UsbNode ph;
+                ph.id = "3-2.4";
+                ph.parentId = "3-2";
+                ph.isPlaceholder = true;
+                nodes[ph.id] = ph;
+            }
+            
+            // USB2 bus: Nested hubs
+            {
+                UsbNode hub1;
+                hub1.id = "1-1";
+                hub1.parentId = "server";
+                hub1.isHub = true;
+                hub1.vendor = "0bda";
+                hub1.product = "5411";
+                hub1.productName = "USB2.0 Hub";
+                hub1.portCount = 4;
+                nodes[hub1.id] = hub1;
+                
+                // Device on hub1 port 1
+                UsbNode dev1;
+                dev1.id = "1-1.1";
+                dev1.parentId = "1-1";
+                dev1.isHub = false;
+                dev1.vendor = "2e8a";
+                dev1.product = "0003";
+                dev1.productName = "BCM2711 Boot";
+                dev1.serial = generateFakeSerial(deviceIndex++);
+                dev1.state = "provisioning";
+                dev1.ip = generateFakeIP(50);
+                dev1.model = "CM4";
+                nodes[dev1.id] = dev1;
+                
+                // Nested hub on hub1 port 2
+                UsbNode hub2;
+                hub2.id = "1-1.2";
+                hub2.parentId = "1-1";
+                hub2.isHub = true;
+                hub2.vendor = "0bda";
+                hub2.product = "5411";
+                hub2.productName = "USB2.0 Sub-Hub";
+                hub2.portCount = 4;
+                nodes[hub2.id] = hub2;
+                
+                // Devices on nested hub
+                for (int i = 1; i <= 2; ++i) {
+                    UsbNode dev;
+                    dev.id = "1-1.2." + std::to_string(i);
+                    dev.parentId = "1-1.2";
+                    dev.isHub = false;
+                    dev.vendor = "2e8a";
+                    dev.product = "0003";
+                    dev.productName = "BCM2711 Boot";
+                    dev.serial = generateFakeSerial(deviceIndex);
+                    dev.state = states[deviceIndex % 5];
+                    dev.ip = generateFakeIP(60 + i);
+                    dev.model = "Pi 4B";
+                    nodes[dev.id] = dev;
+                    deviceIndex++;
+                }
+            }
+            
+            return nodes;
+        }
 
         std::string readFileTrimmed(const std::filesystem::path &p) {
             try {
@@ -141,6 +578,69 @@ namespace provisioner {
             }
             // If id contains '-' treat as directly connected to server
             return "server";
+        }
+
+        struct CompanionBusPair {
+            int hsBus;
+            int ssBus;
+            int ssPortCount;
+        };
+
+        // Resolve companion HS/SS bus pairs by checking which root hubs
+        // share a physical USB controller in sysfs.  This is authoritative
+        // (no heuristic) — two root hubs are companions iff they share
+        // the same parent device (the xHCI controller instance).
+        std::vector<CompanionBusPair> detectCompanionBuses() {
+            std::vector<CompanionBusPair> pairs;
+            const std::filesystem::path usbPath("/sys/bus/usb/devices");
+            if (!std::filesystem::exists(usbPath)) return pairs;
+
+            struct BusInfo { int bus; int speed; int portCount; };
+            std::unordered_map<std::string, std::vector<BusInfo>> controllerBuses;
+
+            for (const auto &entry : std::filesystem::directory_iterator(usbPath)) {
+                const std::string name = entry.path().filename().string();
+                if (name.size() < 4 || name.substr(0, 3) != "usb") continue;
+                int bus;
+                try { bus = std::stoi(name.substr(3)); } catch (...) { continue; }
+
+                std::error_code ec;
+                auto realPath = std::filesystem::canonical(entry.path(), ec);
+                if (ec) continue;
+                std::string controllerPath = realPath.parent_path().string();
+
+                int speed = 0;
+                const std::string speedStr = readFileTrimmed(entry.path() / "speed");
+                if (!speedStr.empty()) {
+                    try { speed = std::stoi(speedStr); } catch (...) {}
+                }
+
+                int portCount = 0;
+                const std::string mcStr = readFileTrimmed(entry.path() / "maxchild");
+                if (!mcStr.empty()) {
+                    try { portCount = std::stoi(mcStr); } catch (...) {}
+                }
+
+                controllerBuses[controllerPath].push_back({bus, speed, portCount});
+            }
+
+            for (const auto &[ctrl, buses] : controllerBuses) {
+                std::vector<BusInfo> hsList, ssList;
+                for (const auto &b : buses) {
+                    if (b.speed >= 5000) ssList.push_back(b);
+                    else hsList.push_back(b);
+                }
+                if (ssList.empty() || hsList.empty()) continue;
+                // Sort by bus number for deterministic sequential pairing
+                std::sort(hsList.begin(), hsList.end(), [](const BusInfo &a, const BusInfo &b) { return a.bus < b.bus; });
+                std::sort(ssList.begin(), ssList.end(), [](const BusInfo &a, const BusInfo &b) { return a.bus < b.bus; });
+                size_t count = std::min(hsList.size(), ssList.size());
+                for (size_t i = 0; i < count; ++i) {
+                    pairs.push_back({hsList[i].bus, ssList[i].bus, ssList[i].portCount});
+                }
+            }
+
+            return pairs;
         }
 
         std::unordered_map<std::string, UsbNode> scanUsbSysfs() {
@@ -187,6 +687,11 @@ namespace provisioner {
                     if (node.model.empty() && !pn.empty()) node.model = pn;
                     const std::string s = readFileTrimmed(entry.path()/"serial");
                     if (!s.empty()) node.serial = s;
+                    // Read USB speed (in Mbps, e.g., 480, 5000, 10000, 20000)
+                    const std::string speedStr = readFileTrimmed(entry.path()/"speed");
+                    if (!speedStr.empty()) {
+                        try { node.speed = std::stoi(speedStr); } catch (...) {}
+                    }
                 }
 
                 // Detect hubs via either device or interface class files
@@ -275,8 +780,7 @@ namespace provisioner {
             // Build latest record per endpoint (descending ts ensures first seen is newest)
             struct DbRecord { std::string serial, state, image, ip; };
             std::unordered_map<std::string, DbRecord> latestByEndpoint;
-            // Also capture latest manufacturing info by serial (boardname/processor)
-            struct MfgRecord { std::string boardname, processor; };
+            struct MfgRecord { std::string boardname, processor, osImageFilename; };
             std::unordered_map<std::string, MfgRecord> latestMfgBySerial;
 
             sqlite3* db;
@@ -318,7 +822,7 @@ namespace provisioner {
                 sqlite3* mdb = nullptr;
                 int rc2 = sqlite3_open("/srv/rpi-sb-provisioner/manufacturing.db", &mdb);
                 if (rc2 == SQLITE_OK) {
-                    const char* msql = "SELECT serial, boardname, processor FROM devices ORDER BY provision_ts DESC";
+                    const char* msql = "SELECT serial, boardname, processor, os_image_filename FROM devices ORDER BY provision_ts DESC";
                     sqlite3_stmt* mstmt = nullptr;
                     rc2 = sqlite3_prepare_v2(mdb, msql, -1, &mstmt, nullptr);
                     if (rc2 == SQLITE_OK) {
@@ -326,12 +830,14 @@ namespace provisioner {
                             const unsigned char* serial = sqlite3_column_text(mstmt, 0);
                             const unsigned char* boardname = sqlite3_column_text(mstmt, 1);
                             const unsigned char* processor = sqlite3_column_text(mstmt, 2);
+                            const unsigned char* osImage = sqlite3_column_text(mstmt, 3);
                             if (!serial) continue;
                             std::string s = reinterpret_cast<const char*>(serial);
                             if (latestMfgBySerial.find(s) == latestMfgBySerial.end()) {
                                 latestMfgBySerial.emplace(s, MfgRecord{
                                     boardname ? reinterpret_cast<const char*>(boardname) : std::string{},
-                                    processor ? reinterpret_cast<const char*>(processor) : std::string{}
+                                    processor ? reinterpret_cast<const char*>(processor) : std::string{},
+                                    osImage ? reinterpret_cast<const char*>(osImage) : std::string{}
                                 });
                             }
                         }
@@ -361,11 +867,9 @@ namespace provisioner {
                     auto mit = latestMfgBySerial.find(n.serial);
                     if (mit != latestMfgBySerial.end()) {
                         const auto &mr = mit->second;
-                        // Prefer model from manufacturing boardname (e.g., CM5, 4B)
                         if (!mr.boardname.empty()) n.model = mr.boardname;
                         else if (!mr.processor.empty() && n.model.empty()) n.model = mr.processor;
-                        // Keep image for OS image name only; if image was being used as model before, do not overwrite unless set
-                        if (n.image.empty() && !mr.boardname.empty()) n.image = n.image; // no-op placeholder to emphasize separation
+                        if (n.image.empty() && !mr.osImageFilename.empty()) n.image = mr.osImageFilename;
                     }
                 }
             }
@@ -395,12 +899,12 @@ namespace provisioner {
                         n.image = rec.image;
                     }
                     n.ip = rec.ip;
-                    // Apply manufacturing data if available
                     auto mit = latestMfgBySerial.find(n.serial);
                     if (mit != latestMfgBySerial.end()) {
                         const auto &mr = mit->second;
                         if (!mr.boardname.empty()) n.model = mr.boardname;
                         else if (!mr.processor.empty() && n.model.empty()) n.model = mr.processor;
+                        if (n.image.empty() && !mr.osImageFilename.empty()) n.image = mr.osImageFilename;
                     }
                 }
             }
@@ -476,6 +980,7 @@ namespace provisioner {
                 if (!n.model.empty()) j["model"] = n.model;
                 if (!n.ip.empty()) j["ip"] = n.ip;
                 if (n.isPlaceholder) j["placeholder"] = true;
+                if (n.speed > 0) j["speed"] = n.speed;
                 int gen = inferModelGeneration(n);
                 if (gen > 0) j["modelGen"] = gen;
                 arr.append(j);
@@ -486,9 +991,59 @@ namespace provisioner {
                 for (const auto &id : removed) r.append(id);
                 root["removed"] = r;
             }
+            auto companionPairs = detectCompanionBuses();
+            if (!companionPairs.empty()) {
+                Json::Value pairsArr(Json::arrayValue);
+                for (const auto &cp : companionPairs) {
+                    Json::Value p;
+                    p["hsBus"] = cp.hsBus;
+                    p["ssBus"] = cp.ssBus;
+                    p["ssPortCount"] = cp.ssPortCount;
+                    pairsArr.append(p);
+                }
+                root["companionPairs"] = pairsArr;
+            }
             root["timestamp"] = static_cast<Json::UInt64>(std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now().time_since_epoch()).count());
             return root;
+        }
+        
+        void injectTestTopology(const std::string& scenario) {
+            std::unordered_map<std::string, UsbNode> newTopology;
+            
+            if (scenario == "direct") {
+                newTopology = generateDirectDevices(4);
+            } else if (scenario == "hub") {
+                newTopology = generateHubWithDevices(7, 5);
+            } else if (scenario == "nested") {
+                newTopology = generateNestedHubs(3, 2);
+            } else if (scenario == "deep") {
+                newTopology = generateNestedHubs(USB_MAX_HUB_DEPTH, 1);
+            } else if (scenario == "max") {
+                newTopology = generateMaxTopology();
+            } else if (scenario == "mixed") {
+                newTopology = generateMixedTopology();
+            } else if (scenario == "clear" || scenario == "off") {
+                testModeEnabled = false;
+                LOG_INFO << "Test mode disabled";
+                return;
+            } else {
+                LOG_WARN << "Unknown test scenario: " << scenario;
+                return;
+            }
+            
+            {
+                std::lock_guard<std::mutex> lock(topologyMutex);
+                testTopology = newTopology;
+                testModeEnabled = true;
+            }
+            
+            // Broadcast the test topology
+            Json::FastWriter w;
+            std::string msg = w.write(topologyToJson(newTopology));
+            DevicesWebSocketController::broadcast(msg);
+            
+            LOG_INFO << "Test mode enabled with scenario: " << scenario << " (" << newTopology.size() << " nodes)";
         }
 
         std::string topologySnapshotString() {
@@ -501,6 +1056,14 @@ namespace provisioner {
             LOG_INFO << "Topology worker started";
             Json::Value lastJson;
             while (topologyRunning) {
+                // Skip real USB scanning when test mode is enabled
+                if (testModeEnabled) {
+                    for (int i=0; i<10 && topologyRunning; ++i) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+                    }
+                    continue;
+                }
+                
                 auto newMap = scanUsbSysfs();
                 enrichWithProvisioningState(newMap);
 
@@ -746,6 +1309,11 @@ namespace provisioner {
                 return;
             }
 
+            // Try matching by serial first, then fall back to matching by
+            // USB endpoint path.  This allows the detail page to be reached
+            // via /devices/<usbPath> for devices that don't yet have a serial
+            // (e.g. Zero 2 W in RPIBOOT, or early bootstrap phase).
+            bool matchedByEndpoint = false;
             sqlite3_stmt* stmt;
             const char* sql = "SELECT serial, endpoint, state, image, ip_address FROM devices WHERE serial = ? ORDER BY ts DESC LIMIT 1";
             rc = sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr);
@@ -768,17 +1336,42 @@ namespace provisioner {
 
             if (sqlite3_step(stmt) != SQLITE_ROW) {
                 sqlite3_finalize(stmt);
-                sqlite3_close(db);
-                auto resp = provisioner::utils::createErrorResponse(
-                    req,
-                    "Device not found in database",
-                    drogon::k400BadRequest,
-                    "Device Not Found",
-                    "DEVICE_NOT_FOUND",
-                    "Requested serial: " + serialno
-                );
-                callback(resp);
-                return;
+                LOG_INFO << "Device lookup: no serial match for '" << serialno << "', trying endpoint fallback";
+                const char* endpointSql = "SELECT serial, endpoint, state, image, ip_address FROM devices WHERE endpoint = ? ORDER BY ts DESC LIMIT 1";
+                rc = sqlite3_prepare_v2(db, endpointSql, -1, &stmt, nullptr);
+                if (rc != SQLITE_OK) {
+                    sqlite3_close(db);
+                    auto resp = provisioner::utils::createErrorResponse(
+                        req,
+                        "Failed to prepare SQL statement",
+                        drogon::k500InternalServerError,
+                        "Database Error",
+                        "SQL_PREPARE_ERROR",
+                        std::string(sqlite3_errmsg(db))
+                    );
+                    callback(resp);
+                    return;
+                }
+                sqlite3_bind_text(stmt, 1, serialno.c_str(), -1, SQLITE_STATIC);
+                if (sqlite3_step(stmt) != SQLITE_ROW) {
+                    sqlite3_finalize(stmt);
+                    sqlite3_close(db);
+                    LOG_WARN << "Device lookup: no match for '" << serialno << "' by serial or endpoint";
+                    auto resp = provisioner::utils::createErrorResponse(
+                        req,
+                        "Device not found in database",
+                        drogon::k400BadRequest,
+                        "Device Not Found",
+                        "DEVICE_NOT_FOUND",
+                        "Requested identifier: " + serialno
+                    );
+                    callback(resp);
+                    return;
+                }
+                matchedByEndpoint = true;
+                LOG_INFO << "Device lookup: endpoint match for '" << serialno << "'";
+            } else {
+                LOG_INFO << "Device lookup: serial match for '" << serialno << "'";
             }
 
             const unsigned char* serial = sqlite3_column_text(stmt, 0);
@@ -788,68 +1381,150 @@ namespace provisioner {
             const unsigned char* ip_address = sqlite3_column_text(stmt, 4);
 
             Device device;
-            device.serial = (const char*)serial;
-            device.port = (const char*)endpoint;
-            device.ip_address = (const char*)ip_address;
-            device.state = (const char*)state;
-            device.image = (const char*)image;
+            device.serial = serial ? (const char*)serial : "";
+            device.port = endpoint ? (const char*)endpoint : "";
+            device.ip_address = ip_address ? (const char*)ip_address : "";
+            device.state = state ? (const char*)state : "";
+            device.image = image ? (const char*)image : "";
 
             sqlite3_finalize(stmt);
             sqlite3_close(db);
 
+            // Enrich with manufacturing data if available (e.g. os_image_filename for completed devices)
+            if (!device.serial.empty()) {
+                sqlite3* mdb = nullptr;
+                int mrc = sqlite3_open("/srv/rpi-sb-provisioner/manufacturing.db", &mdb);
+                if (mrc == SQLITE_OK) {
+                    sqlite3_stmt* mstmt = nullptr;
+                    const char* msql = "SELECT os_image_filename FROM devices WHERE serial = ? ORDER BY provision_ts DESC LIMIT 1";
+                    mrc = sqlite3_prepare_v2(mdb, msql, -1, &mstmt, nullptr);
+                    if (mrc == SQLITE_OK) {
+                        sqlite3_bind_text(mstmt, 1, device.serial.c_str(), -1, SQLITE_STATIC);
+                        if (sqlite3_step(mstmt) == SQLITE_ROW) {
+                            const unsigned char* osImage = sqlite3_column_text(mstmt, 0);
+                            if (osImage && device.image.empty()) {
+                                device.image = reinterpret_cast<const char*>(osImage);
+                            }
+                        }
+                        sqlite3_finalize(mstmt);
+                    }
+                    sqlite3_close(mdb);
+                }
+            }
+
             // Check if the client accepts HTML
             auto acceptHeader = req->getHeader("Accept");
             if (!acceptHeader.empty() && (acceptHeader.find("text/html") != std::string::npos)) {
-                // Read log files
+                // Read log files, trying serial-keyed directory first, then
+                // falling back to the endpoint/USB-path-keyed directory.
+                // This handles devices where the serial isn't available from the
+                // bootloader and we can only identify by USB path.
                 std::string provisioner_log, bootstrap_log, triage_log;
                 
-                std::string logPath = "/var/log/rpi-sb-provisioner/" + provisioner::utils::sanitize_path_component(device.serial) + "/provisioner.log";
-                std::ifstream provisionerFile(logPath);
-                if (provisionerFile.is_open()) {
-                    // Log file access to audit log
-                    AuditLog::logFileSystemAccess("READ", logPath, true);
-                    
-                    std::stringstream buffer;
-                    buffer << provisionerFile.rdbuf();
-                    provisioner_log = buffer.str();
-                } else {
-                    // Log failed file access to audit log
-                    AuditLog::logFileSystemAccess("READ", logPath, false);
+                std::string serialDir = "/var/log/rpi-sb-provisioner/" + provisioner::utils::sanitize_path_component(device.serial);
+                std::string endpointDir = "/var/log/rpi-sb-provisioner/" + provisioner::utils::sanitize_path_component(device.port);
+                
+                auto tryReadLog = [](const std::string &primaryDir, const std::string &fallbackDir, const std::string &filename) -> std::string {
+                    for (const auto &dir : {primaryDir, fallbackDir}) {
+                        if (dir.empty()) continue;
+                        std::string path = dir + "/" + filename;
+                        std::ifstream f(path);
+                        if (f.is_open()) {
+                            AuditLog::logFileSystemAccess("READ", path, true);
+                            std::stringstream buf;
+                            buf << f.rdbuf();
+                            return buf.str();
+                        }
+                        AuditLog::logFileSystemAccess("READ", path, false);
+                    }
+                    return {};
+                };
+                
+                provisioner_log = tryReadLog(serialDir, endpointDir, "provisioner.log");
+                bootstrap_log = tryReadLog(serialDir, endpointDir, "bootstrap.log");
+                triage_log = tryReadLog(serialDir, endpointDir, "triage.log");
+
+                // Query last 10 state changes for this device.
+                // When the device was looked up by endpoint (USB path), query
+                // history by endpoint too so we get results for devices whose
+                // serial may have changed across phases.
+                std::vector<std::map<std::string, std::string>> stateHistory;
+                {
+                    sqlite3* histDb;
+                    int histRc = sqlite3_open("/srv/rpi-sb-provisioner/state.db", &histDb);
+                    if (histRc == SQLITE_OK) {
+                        sqlite3_stmt* histStmt;
+                        const char* histSql = matchedByEndpoint
+                            ? "SELECT state, ts FROM devices WHERE endpoint = ? ORDER BY ts DESC LIMIT 10"
+                            : "SELECT state, ts FROM devices WHERE serial = ? ORDER BY ts DESC LIMIT 10";
+                        histRc = sqlite3_prepare_v2(histDb, histSql, -1, &histStmt, nullptr);
+                        if (histRc == SQLITE_OK) {
+                            const std::string &histKey = matchedByEndpoint ? device.port : device.serial;
+                            sqlite3_bind_text(histStmt, 1, histKey.c_str(), -1, SQLITE_STATIC);
+                            while (sqlite3_step(histStmt) == SQLITE_ROW) {
+                                const unsigned char* hState = sqlite3_column_text(histStmt, 0);
+                                const unsigned char* hTs = sqlite3_column_text(histStmt, 1);
+                                std::map<std::string, std::string> entry;
+                                entry["state"] = hState ? reinterpret_cast<const char*>(hState) : "";
+                                entry["timestamp"] = hTs ? reinterpret_cast<const char*>(hTs) : "";
+                                stateHistory.push_back(entry);
+                            }
+                            sqlite3_finalize(histStmt);
+                        }
+                        sqlite3_close(histDb);
+                    }
                 }
 
-                logPath = "/var/log/rpi-sb-provisioner/" + provisioner::utils::sanitize_path_component(device.serial) + "/bootstrap.log";
-                std::ifstream bootstrapFile(logPath);
-                if (bootstrapFile.is_open()) {
-                    // Log file access to audit log
-                    AuditLog::logFileSystemAccess("READ", logPath, true);
-                    
-                    std::stringstream buffer;
-                    buffer << bootstrapFile.rdbuf();
-                    bootstrap_log = buffer.str();
-                } else {
-                    // Log failed file access to audit log
-                    AuditLog::logFileSystemAccess("READ", logPath, false);
-                }
-
-                logPath = "/var/log/rpi-sb-provisioner/" + provisioner::utils::sanitize_path_component(device.serial) + "/triage.log";
-                std::ifstream triageFile(logPath);
-                if (triageFile.is_open()) {
-                    // Log file access to audit log
-                    AuditLog::logFileSystemAccess("READ", logPath, true);
-                    
-                    std::stringstream buffer;
-                    buffer << triageFile.rdbuf();
-                    triage_log = buffer.str();
-                } else {
-                    // Log failed file access to audit log
-                    AuditLog::logFileSystemAccess("READ", logPath, false);
+                // Read special flag status for this device
+                std::string sanitizedSerial = provisioner::utils::sanitize_path_component(device.serial);
+                std::vector<std::map<std::string, std::string>> flagsList;
+                struct FlagDef {
+                    std::string id;
+                    std::string label;
+                    std::string description;
+                    std::string constraint;
+                };
+                std::vector<FlagDef> flagDefs = {
+                    {"skip-eeprom", "Skip EEPROM Update",
+                     "Skips writing the EEPROM/bootloader during bootstrap. Use for devices that already have the correct EEPROM or have been signed.", ""},
+                    {"reprovision-device", "Re-provision Device",
+                     "Re-provisions an already-provisioned device by re-signing bootcode from original firmware. Only works on Pi 5 family.", "Pi 5 only (BCM2712)"},
+                };
+                for (const auto &fd : flagDefs) {
+                    std::string filePath = "/etc/rpi-sb-provisioner/special-" + fd.id + "/" + sanitizedSerial;
+                    std::map<std::string, std::string> flagMap;
+                    flagMap["id"] = fd.id;
+                    flagMap["label"] = fd.label;
+                    flagMap["description"] = fd.description;
+                    flagMap["constraint"] = fd.constraint;
+                    if (std::filesystem::exists(filePath)) {
+                        flagMap["active"] = "true";
+                        std::ifstream ff(filePath);
+                        std::string content;
+                        if (ff.is_open()) {
+                            std::getline(ff, content);
+                            while (!content.empty() && (content.back() == '\n' || content.back() == '\r' || content.back() == ' '))
+                                content.pop_back();
+                        }
+                        flagMap["mode"] = (content == "once") ? "once" : "persistent";
+                    } else {
+                        flagMap["active"] = "false";
+                        flagMap["mode"] = "off";
+                    }
+                    flagsList.push_back(flagMap);
                 }
 
                 HttpViewData viewData;
-                viewData.insert("device", device);
+                viewData.insert("device.serial", device.serial);
+                viewData.insert("device.port", device.port);
+                viewData.insert("device.ip_address", device.ip_address);
+                viewData.insert("device.state", device.state);
+                viewData.insert("device.image", device.image);
                 viewData.insert("provisioner_log", provisioner_log);
                 viewData.insert("bootstrap_log", bootstrap_log);
                 viewData.insert("triage_log", triage_log);
+                viewData.insert("flags", flagsList);
+                viewData.insert("stateHistory", stateHistory);
                 viewData.insert("currentPage", std::string("devices"));
                 resp = HttpResponse::newHttpViewResponse("device_detail.csp", viewData);
             } else {
@@ -1139,6 +1814,303 @@ namespace provisioner {
             resp->setBody(buffer.str());
             callback(resp);
         }); // devices/{serialno}/key/private handler
+
+        // Secret test mode endpoint - only accessible with special header or localhost
+        app.registerHandler("/devices/_test/{scenario}", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback, const std::string &scenario) {
+            auto resp = HttpResponse::newHttpResponse();
+            
+            // Security: Only allow from localhost or with secret header
+            std::string clientIP = AuditLog::getClientIP(req);
+            std::string secretHeader = req->getHeader("X-Test-Secret");
+            bool isLocalhost = (clientIP == "127.0.0.1" || clientIP == "::1" || clientIP.find("localhost") != std::string::npos);
+            bool hasSecret = (secretHeader == "rpi-provisioner-test-2024");
+            
+            if (!isLocalhost && !hasSecret) {
+                resp->setStatusCode(k404NotFound);
+                resp->setBody("Not Found");
+                callback(resp);
+                return;
+            }
+            
+            LOG_INFO << "Test mode request: scenario=" << scenario << " from " << clientIP;
+            
+            // Inject the test topology
+            injectTestTopology(scenario);
+            
+            Json::Value result;
+            result["status"] = "ok";
+            result["scenario"] = scenario;
+            result["testMode"] = testModeEnabled.load();
+            result["availableScenarios"] = Json::arrayValue;
+            result["availableScenarios"].append("direct");   // 4 devices directly on root ports
+            result["availableScenarios"].append("hub");      // 7-port hub with 5 devices
+            result["availableScenarios"].append("nested");   // 3-level nested hubs
+            result["availableScenarios"].append("deep");     // Max depth (5 hubs) chain
+            result["availableScenarios"].append("max");      // Near 127 device limit
+            result["availableScenarios"].append("mixed");    // Mixed topology
+            result["availableScenarios"].append("clear");    // Disable test mode
+            result["availableScenarios"].append("off");      // Alias for clear
+            
+            Json::FastWriter writer;
+            resp->setStatusCode(k200OK);
+            resp->setContentTypeCode(CT_APPLICATION_JSON);
+            resp->setBody(writer.write(result));
+            callback(resp);
+        }); // devices/_test/{scenario} handler
+
+        // ===== Special Flags Management =====
+        // Known special flags and their descriptions
+        struct SpecialFlagInfo {
+            std::string id;           // directory name suffix (e.g., "skip-eeprom")
+            std::string label;        // human-readable label
+            std::string description;  // what this flag does
+            std::string constraint;   // any device constraint (empty = all devices)
+        };
+
+        static const std::vector<SpecialFlagInfo> knownFlags = {
+            {"skip-eeprom",
+             "Skip EEPROM Update",
+             "Skips writing the EEPROM/bootloader during the bootstrap phase. "
+             "Use this for devices that already have the correct EEPROM configuration, "
+             "or devices that have already been signed.",
+             ""},
+            {"reprovision-device",
+             "Re-provision Device",
+             "Re-provisions a device that has already been provisioned. "
+             "This re-signs the bootcode using the original firmware recovery.bin "
+             "instead of the cached signed bootcode. Only works on Raspberry Pi 5 family devices.",
+             "Pi 5 only (BCM2712)"},
+        };
+
+        // GET /devices/{serialno}/flags - Read current flag status
+        app.registerHandler("/devices/{serialno}/flags",
+            [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback, const std::string &serialno) {
+            auto resp = HttpResponse::newHttpResponse();
+            LOG_INFO << "Flags request for serial: '" << serialno << "'";
+
+            AuditLog::logHandlerAccess(req, "/devices/" + serialno + "/flags");
+
+            if (serialno.empty()) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req, "Serial number is required",
+                    drogon::k400BadRequest, "Missing Parameter", "MISSING_SERIAL");
+                callback(resp);
+                return;
+            }
+
+            std::string sanitizedSerial = provisioner::utils::sanitize_path_component(serialno);
+
+            Json::Value root;
+            Json::Value flagsArray(Json::arrayValue);
+
+            for (const auto &fi : knownFlags) {
+                std::string dirPath = "/etc/rpi-sb-provisioner/special-" + fi.id;
+                std::string filePath = dirPath + "/" + sanitizedSerial;
+
+                Json::Value flag;
+                flag["id"] = fi.id;
+                flag["label"] = fi.label;
+                flag["description"] = fi.description;
+                if (!fi.constraint.empty()) flag["constraint"] = fi.constraint;
+
+                if (std::filesystem::exists(filePath)) {
+                    flag["active"] = true;
+                    // Read file content to determine mode
+                    std::ifstream f(filePath);
+                    std::string content;
+                    if (f.is_open()) {
+                        std::getline(f, content);
+                        // Trim whitespace
+                        while (!content.empty() && (content.back() == '\n' || content.back() == '\r' || content.back() == ' '))
+                            content.pop_back();
+                    }
+                    flag["mode"] = (content == "once") ? "once" : "persistent";
+                } else {
+                    flag["active"] = false;
+                    flag["mode"] = "off";
+                }
+
+                flagsArray.append(flag);
+            }
+
+            root["serial"] = serialno;
+            root["flags"] = flagsArray;
+
+            Json::FastWriter writer;
+            resp->setStatusCode(k200OK);
+            resp->setContentTypeCode(CT_APPLICATION_JSON);
+            resp->setBody(writer.write(root));
+            callback(resp);
+        }, {Get});
+
+        // POST /devices/{serialno}/flags - Set a flag
+        app.registerHandler("/devices/{serialno}/flags",
+            [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback, const std::string &serialno) {
+            auto resp = HttpResponse::newHttpResponse();
+            LOG_INFO << "Set flag request for serial: '" << serialno << "'";
+
+            AuditLog::logHandlerAccess(req, "/devices/" + serialno + "/flags");
+
+            if (serialno.empty()) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req, "Serial number is required",
+                    drogon::k400BadRequest, "Missing Parameter", "MISSING_SERIAL");
+                callback(resp);
+                return;
+            }
+
+            auto body = req->getJsonObject();
+            if (!body) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req, "Invalid JSON request body",
+                    drogon::k400BadRequest, "Invalid Request", "INVALID_JSON");
+                callback(resp);
+                return;
+            }
+
+            std::string flagId = body->get("flag", "").asString();
+            std::string mode = body->get("mode", "").asString();
+
+            if (flagId.empty()) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req, "Flag name is required",
+                    drogon::k400BadRequest, "Missing Parameter", "MISSING_FLAG");
+                callback(resp);
+                return;
+            }
+
+            if (mode != "once" && mode != "persistent" && mode != "off") {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req, "Mode must be 'once', 'persistent', or 'off'",
+                    drogon::k400BadRequest, "Invalid Parameter", "INVALID_MODE");
+                callback(resp);
+                return;
+            }
+
+            // Validate flag is a known flag
+            bool validFlag = false;
+            for (const auto &fi : knownFlags) {
+                if (fi.id == flagId) { validFlag = true; break; }
+            }
+            if (!validFlag) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req, "Unknown flag: " + flagId,
+                    drogon::k400BadRequest, "Invalid Parameter", "UNKNOWN_FLAG");
+                callback(resp);
+                return;
+            }
+
+            std::string sanitizedSerial = provisioner::utils::sanitize_path_component(serialno);
+            std::string dirPath = "/etc/rpi-sb-provisioner/special-" + flagId;
+            std::string filePath = dirPath + "/" + sanitizedSerial;
+
+            if (mode == "off") {
+                // Remove the flag file
+                if (std::filesystem::exists(filePath)) {
+                    try {
+                        std::filesystem::remove(filePath);
+                        AuditLog::logFileSystemAccess("DELETE_FLAG", filePath, true, "",
+                            "Special flag removed: " + flagId + " for device " + serialno);
+                        LOG_INFO << "Removed special flag: " << flagId << " for device " << serialno;
+                    } catch (const std::exception &e) {
+                        LOG_ERROR << "Failed to remove flag file: " << e.what();
+                        auto resp = provisioner::utils::createErrorResponse(
+                            req, "Failed to remove flag file",
+                            drogon::k500InternalServerError, "File Error", "FLAG_REMOVE_ERROR");
+                        callback(resp);
+                        return;
+                    }
+                }
+            } else {
+                // Create directory if it doesn't exist
+                try {
+                    if (!std::filesystem::exists(dirPath)) {
+                        std::filesystem::create_directories(dirPath);
+                    }
+                } catch (const std::exception &e) {
+                    LOG_ERROR << "Failed to create flag directory: " << e.what();
+                    auto resp = provisioner::utils::createErrorResponse(
+                        req, "Failed to create flag directory",
+                        drogon::k500InternalServerError, "File Error", "FLAG_DIR_ERROR");
+                    callback(resp);
+                    return;
+                }
+
+                // Write the flag file with mode content
+                std::ofstream f(filePath);
+                if (!f.is_open()) {
+                    LOG_ERROR << "Failed to write flag file: " << filePath;
+                    auto resp = provisioner::utils::createErrorResponse(
+                        req, "Failed to write flag file",
+                        drogon::k500InternalServerError, "File Error", "FLAG_WRITE_ERROR");
+                    callback(resp);
+                    return;
+                }
+                f << mode << "\n";
+                f.close();
+
+                AuditLog::logFileSystemAccess("SET_FLAG", filePath, true, "",
+                    "Special flag set: " + flagId + " (" + mode + ") for device " + serialno);
+                LOG_INFO << "Set special flag: " << flagId << " (" << mode << ") for device " << serialno;
+            }
+
+            // Return the updated flag status
+            Json::Value result;
+            result["success"] = true;
+            result["flag"] = flagId;
+            result["mode"] = mode;
+            result["serial"] = serialno;
+
+            Json::FastWriter writer;
+            resp->setStatusCode(k200OK);
+            resp->setContentTypeCode(CT_APPLICATION_JSON);
+            resp->setBody(writer.write(result));
+            callback(resp);
+        }, {Post});
+
+        // Test mode status endpoint
+        app.registerHandler("/devices/_test", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
+            auto resp = HttpResponse::newHttpResponse();
+            
+            // Security: Only allow from localhost or with secret header
+            std::string clientIP = AuditLog::getClientIP(req);
+            std::string secretHeader = req->getHeader("X-Test-Secret");
+            bool isLocalhost = (clientIP == "127.0.0.1" || clientIP == "::1" || clientIP.find("localhost") != std::string::npos);
+            bool hasSecret = (secretHeader == "rpi-provisioner-test-2024");
+            
+            if (!isLocalhost && !hasSecret) {
+                resp->setStatusCode(k404NotFound);
+                resp->setBody("Not Found");
+                callback(resp);
+                return;
+            }
+            
+            Json::Value result;
+            result["testMode"] = testModeEnabled.load();
+            result["availableScenarios"] = Json::arrayValue;
+            result["availableScenarios"].append("direct");
+            result["availableScenarios"].append("hub");
+            result["availableScenarios"].append("nested");
+            result["availableScenarios"].append("deep");
+            result["availableScenarios"].append("max");
+            result["availableScenarios"].append("mixed");
+            result["availableScenarios"].append("clear");
+            result["availableScenarios"].append("off");
+            result["description"] = Json::objectValue;
+            result["description"]["direct"] = "4 devices connected directly to root ports";
+            result["description"]["hub"] = "Single 7-port hub with 5 devices";
+            result["description"]["nested"] = "3-level nested hub hierarchy";
+            result["description"]["deep"] = "Maximum depth (5 external hubs) chain";
+            result["description"]["max"] = "Near USB maximum (127 devices)";
+            result["description"]["mixed"] = "Mixed topology with direct, hub, and nested devices";
+            result["description"]["clear"] = "Disable test mode, return to real USB scanning";
+            
+            Json::FastWriter writer;
+            resp->setStatusCode(k200OK);
+            resp->setContentTypeCode(CT_APPLICATION_JSON);
+            resp->setBody(writer.write(result));
+            callback(resp);
+        }); // devices/_test handler
     }
 
     

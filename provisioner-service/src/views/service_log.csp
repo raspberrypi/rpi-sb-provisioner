@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <title>Service Log</title>
     <%view stylesheet %>
@@ -78,6 +78,7 @@
 <body>
     <%view navbar %>
 
+    <main id="main-content">
     <h1>Service Log: <%c++ $$ << @@.get<std::string>("service_name"); %></h1>
     
     <a href="/services" class="back-link">← Back to Services</a>
@@ -115,7 +116,7 @@
         <button class="pagination-button" id="lastPageBtn">Last</button>
     </div>
     
-    <div class="log-container" id="logContainer">
+    <div class="log-container" id="logContainer" role="log" aria-label="Service log entries" aria-live="polite">
     <%c++ 
     auto logEntries = @@.get<std::vector<std::string>>("log_entries");
     if(logEntries.size() > 0) {
@@ -304,5 +305,6 @@
             });
         });
     </script>
+    </main>
 </body>
 </html> 

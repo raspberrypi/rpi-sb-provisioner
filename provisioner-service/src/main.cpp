@@ -15,6 +15,7 @@
 #include <openssl/err.h>
 #include <fstream>
 #include <sstream>
+#include <sys/stat.h>
 
 #include "images.h"
 #include "devices.h"
@@ -147,6 +148,8 @@ VersionInfo checkForNewerRelease(const std::string& current_version) {
 std::string g_packageVersion;
 bool g_hasNewerVersion = false;
 std::string g_releaseUrl;
+std::string g_listenerAddress;
+bool g_isPublicBinding = false;
 
 // Print help message
 void printHelp(const char* programName) {
@@ -373,6 +376,20 @@ int main(int argc, char* argv[])
     std::string certDir = "/tmp/rpi-sb-provisioner";
     std::filesystem::create_directories(certDir);
     
+    // Create the private directory for temporary PIN files
+    // This is more secure than using /tmp as it's not world-readable
+    constexpr const char* pinTempDir = "/run/rpi-sb-provisioner";
+    try {
+        std::filesystem::create_directories(pinTempDir);
+        // Set directory permissions to 0700 (owner only)
+        chmod(pinTempDir, S_IRWXU);
+        LOG_INFO << "Created secure PIN temp directory: " << pinTempDir;
+    } catch (const std::filesystem::filesystem_error& e) {
+        // Non-fatal - will fall back to /tmp with per-file permissions
+        LOG_WARN << "Could not create secure PIN temp directory " << pinTempDir 
+                 << ": " << e.what() << " (will use fallback)";
+    }
+    
     // Generate self-signed certificate paths
     std::string certPath = certDir + "/cert.pem";
     std::string keyPath = certDir + "/key.pem";
@@ -408,6 +425,13 @@ int main(int argc, char* argv[])
     VersionInfo versionInfo = checkForNewerRelease(g_packageVersion);
     g_hasNewerVersion = versionInfo.has_newer;
     g_releaseUrl = versionInfo.release_url;
+    
+    // Set listener address for security warning in UI
+    g_listenerAddress = listenerAddress;
+    // Check if binding to a non-localhost address (potential security risk)
+    g_isPublicBinding = (listenerAddress != "127.0.0.1" && 
+                         listenerAddress != "localhost" && 
+                         listenerAddress != "::1");
 
     // Add CORS support for all responses
     app.registerPostHandlingAdvice([](const drogon::HttpRequestPtr &req, const drogon::HttpResponsePtr &resp) {
@@ -456,8 +480,8 @@ int main(int argc, char* argv[])
     // Create directory if it doesn't exist
     std::filesystem::create_directories(uploadPath);
 
-    // Configure static files path
-    constexpr const char *staticPath = "/usr/share/rpi-sb-provisioner/static";
+    // Configure static files path (document root, static files served from /static/ subfolder)
+    constexpr const char *staticPath = "/usr/share/rpi-sb-provisioner";
     
     // Configure Drogon app framework
     app
@@ -475,6 +499,7 @@ int main(int argc, char* argv[])
     .setLogLevel(logLevel)
     .addListener(listenerAddress, listenerPort) // HTTP listener
     .setClientMaxBodySize(std::numeric_limits<size_t>::max())
+    .enableRequestStream()
     .setThreadNum(nthreads)
     .setUploadPath(uploadPath)
     .setDocumentRoot(staticPath);  // Set static files path

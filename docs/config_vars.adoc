@@ -39,9 +39,17 @@ WARNING: The PKCS11 provider, and it's associated HSM, should be considered key 
 === GOLD_MASTER_OS_FILE
 *Mandatory*
 
-This should be your 'gold master' OS image. No customisation should be present in this image that you would not expect to be deployed to your entire fleet. `rpi-sb-provisioner` assumes this image has been created using `pi-gen`, and using a non-`pi-gen` image may produce undefined behaviour.
+WARNING: Provisioning erases the device's storage before writing the OS image. If this variable is not set or points to a missing file, the device storage will still be erased and provisioning will then fail — leaving the device with wiped storage. Always ensure a valid image is selected before connecting a device.
 
-WARNING: This file *must* be the uncompressed image.
+This should be your 'gold master' OS image. This can be either:
+
+* A *traditional `.img` file* — an uncompressed disk image, typically created using `pi-gen`. No customisation should be present in this image that you would not expect to be deployed to your entire fleet. Using a non-`pi-gen` image may produce undefined behaviour.
+
+* An *IDP artefact directory* — a directory containing a JSON image descriptor and one or more sparse image (`.simg`) files, produced by `rpi-image-gen`. When a directory is specified, the provisioning system automatically uses the IDP protocol regardless of the `PROVISIONING_STYLE` setting. The artefact's JSON descriptor defines the partition layout, encryption, storage type, and device family, so these fields are auto-populated by the WebUI.
+
+WARNING: Traditional `.img` files *must* be uncompressed.
+
+NOTE: When selecting an IDP artefact through the WebUI, the device family, storage type, and cipher fields are locked to the values defined in the artefact's metadata and cannot be overridden.
 
 === RPI_DEVICE_STORAGE_TYPE
 *Mandatory*
@@ -105,6 +113,36 @@ Set to any value to enable the JTAG restrictions.
 Raspberry Pi devices that use an EEPROM as part of their boot flow can configure that EEPROM to enable write protection - preventing modification.
 
 Set to any value to enable EEPROM write protection.
+
+[#rpi_device_rpiboot_gpio]
+=== RPI_DEVICE_RPIBOOT_GPIO
+*Required for Raspberry Pi 4 family secure-boot provisioning*
+
+Specifies the GPIO pin number to program into OTP for RPIBOOT mode on Raspberry Pi 4 family devices (including Compute Module 4).
+
+When secure-boot provisioning a Raspberry Pi 4 family device, the bootloader must program both the secure boot public key AND the RPIBOOT GPIO configuration into OTP. Without this setting, provisioning will fail with the error:
+
+----
+Failed to set RPIBOOT OTP gpio0 c800 -> 0
+BOOT ERROR: code 34
+----
+
+*Valid values:* `2`, `4`, `5`, `6`, `7`, `8`
+
+*Recommended value:* `8` (GPIO 8 is the standard RPIBOOT pin)
+
+These GPIO pins are valid because they are high by default, allowing them to enable RPIBOOT mode when pulled low.
+
+*Example:*
+----
+RPI_DEVICE_RPIBOOT_GPIO=8
+----
+
+NOTE: This setting is only required for Raspberry Pi 4 family devices. Raspberry Pi 5 family devices do not require this setting as they have a built-in power button for RPIBOOT mode entry.
+
+WARNING: This value is programmed into OTP (one-time programmable memory) and cannot be changed once set. Ensure you use the same GPIO pin that you will physically connect to ground when entering RPIBOOT mode.
+
+See the link:device-guidance/pi4.adoc[Raspberry Pi 4 Connection Guide] for more information about GPIO configuration.
 
 [#rpi_sb_provisioner_manufacturing_db]
 === RPI_SB_PROVISIONER_MANUFACTURING_DB

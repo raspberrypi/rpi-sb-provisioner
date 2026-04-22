@@ -6,7 +6,8 @@ After=network.target
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/rpi-sb-image-bootimg-generator.sh %i
-EnvironmentFile=/etc/rpi-sb-provisioner/config
+EnvironmentFile=/usr/share/rpi-sb-provisioner/defaults/config
+EnvironmentFile=-/etc/rpi-sb-provisioner/config
 StandardOutput=journal
 StandardError=journal
 

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <title>Audit Log</title>
     <%view stylesheet %>
@@ -161,6 +161,7 @@
 <body>
     <%view navbar %>
 
+    <main id="main-content">
     <h1>Audit Log</h1>
     
     <div class="filters">
@@ -205,15 +206,16 @@
     
     <div class="table-container">
         <table id="auditLogTable">
+            <caption class="sr-only">Audit log entries showing system activity</caption>
             <thead>
                 <tr>
-                    <th>Timestamp</th>
-                    <th>Event Type</th>
-                    <th>Client IP</th>
-                    <th>Handler / Operation</th>
-                    <th>Target Path</th>
-                    <th>Success</th>
-                    <th>Additional Info</th>
+                    <th scope="col">Timestamp</th>
+                    <th scope="col">Event Type</th>
+                    <th scope="col">Client IP</th>
+                    <th scope="col">Handler / Operation</th>
+                    <th scope="col">Target Path</th>
+                    <th scope="col">Success</th>
+                    <th scope="col">Additional Info</th>
                 </tr>
             </thead>
             <tbody>
@@ -329,5 +331,6 @@
             }
         });
     </script>
+    </main>
 </body>
 </html> 

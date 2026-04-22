@@ -130,6 +130,7 @@ timeout_fatal() {
     set -e
 }
 TMP_DIR=""
+CLEANUP_DONE=0
 
 get_cryptroot() {
     if [ -f /etc/rpi-sb-provisioner/cryptroot_initramfs ]; then
@@ -220,80 +221,41 @@ check_pidevice_storage_type() {
     esac
 }
 
-# Lifted from pi-gen/scripts/common, unsure under what circumstances this would be necessary
-ensure_next_loopdev() {
-    set +e
-    loopdev="$(losetup -f)"
-    loopmaj="$(echo "$loopdev" | sed -E 's/.*[0-9]*?([0-9]+)$/\1/')"
-    [ -b "$loopdev" ] || mknod "$loopdev" b 7 "$loopmaj"
-    set -e
-}
-
-# Lifted from pi-gen/scripts/common, unsure under what circumstances this would be necessary
-ensure_loopdev_partitions() {
-    set +e
-    lsblk -r -n -o "NAME,MAJ:MIN" "$1" | grep -v "^${1#/dev/}" | while read -r line; do
-        partition="${line%% *}"
-        majmin="${line#* }"
-        if [ ! -b "/dev/$partition" ]; then
-            mknod "/dev/$partition" b "${majmin%:*}" "${majmin#*:}"
-        fi
-    done
-    set -e
-}
-
-# Lifted from pi-gen/scripts/common
-unmount() {
-    if [ -z "$1" ]; then
-        DIR=$PWD
-    else
-        DIR=$1
-    fi
-
-    while mount | grep -q "$DIR"; do
-        locs=$(mount | grep "$DIR" | cut -f 3 -d ' ' | sort -r)
-        for loc in $locs; do
-            umount "$loc"
-        done
-    done
-}
-
-# Lifted from pi-gen/scripts/common
-unmount_image() {
-    sync
-    sleep 1
-    LOOP_DEVICE=$(losetup --list | grep "$1" | cut -f1 -d' ')
-    if [ -n "$LOOP_DEVICE" ]; then
-        for part in "$LOOP_DEVICE"p*; do
-            if DIR=$(findmnt -n -o target -S "$part"); then
-                unmount "$DIR"
-            fi
-        done
-        losetup -d "$LOOP_DEVICE"
-    fi
-}
 
 cleanup() {
-    returnvalue=$?
-    [ -d "${TMP_DIR}/rpi-boot-img-mount" ] && umount "${TMP_DIR}"/rpi-boot-img-mount && sync
-    [ -d "${TMP_DIR}/rpi-rootfs-img-mount" ] && umount "${TMP_DIR}"/rpi-rootfs-img-mount && sync
-    [ -d "${TMP_DIR}" ] && rm -rf "${TMP_DIR}" && sync
-    rm -f "${CUSTOMER_PUBLIC_KEY_FILE}"
+    # Guard against multiple invocations (signal + EXIT trap)
+    [ "$CLEANUP_DONE" -eq 1 ] && return
+    CLEANUP_DONE=1
 
-    unmount_image "${GOLD_MASTER_OS_FILE}"
-    [ -d "${TMP_DIR}" ] && rm -rf "${TMP_DIR}" && sync
+    returnvalue=$?
+
+    # Disable errexit so cleanup runs to completion even if umount/sync fail
+    set +e
+
+    # Unmount partitions first, then detach loop device, then delete files.
+    # Wrong order (delete before unmount) leaves dangling loop devices.
+    [ -d "${TMP_DIR}/rpi-boot-img-mount" ] && { umount "${TMP_DIR}"/rpi-boot-img-mount 2>/dev/null; sync; }
+    [ -d "${TMP_DIR}/rpi-rootfs-img-mount" ] && { umount "${TMP_DIR}"/rpi-rootfs-img-mount 2>/dev/null; sync; }
+    [ -d "${TMP_DIR}/rpi-cryptroot-bootfs-img-mount" ] && { umount "${TMP_DIR}"/rpi-cryptroot-bootfs-img-mount 2>/dev/null; sync; }
+    unmount_image "${GOLD_MASTER_OS_FILE}" 2>/dev/null
+
+    rm -f "${CUSTOMER_PUBLIC_KEY_FILE}"
+    [ -d "${TMP_DIR}" ] && { rm -rf "${TMP_DIR}"; sync; }
 
     if [ -n "${DELETE_PRIVATE_TMPDIR}" ]; then
         announce_start "Deleting customised intermediates"
+        # shellcheck disable=SC2086
         rm -rf "${RPI_SB_WORKDIR}" ${DEBUG}
         sync
         DELETE_PRIVATE_TMPDIR=
         announce_stop "Deleting customised intermediates"
     fi
 
+    cleanup_orphans
+
     exit ${returnvalue}
 }
-trap cleanup INT TERM
+trap cleanup EXIT INT TERM
 
 ### Start the provisioner phase
 
@@ -334,27 +296,26 @@ check_command_exists truncate
 
 check_command_exists systemd-notify
 
-get_variable() {
-    fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar "$1" 2>&1 | grep -oP "${1}"': \K[^\r\n]*'
-}
-
 setup_fastboot_and_id_vars "$1"
 
 record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_STARTED}" "${TARGET_USB_PATH}"
 
 systemd-notify --ready --status="Provisioning started"
 
-TMP_DIR=$(mktemp -d)
+# Run provision-started hook (e.g. LED control on programming rigs)
+run_customisation_script "fde-provisioner" "provision-started" "${FASTBOOT_DEVICE_SPECIFIER}" "${TARGET_DEVICE_SERIAL}" "${RPI_DEVICE_STORAGE_TYPE}"
+
+TMP_DIR=$(make_temp_dir)
 RPI_DEVICE_STORAGE_TYPE="$(check_pidevice_storage_type "${RPI_DEVICE_STORAGE_TYPE}")"
 DELETE_PRIVATE_TMPDIR=
 announce_start "Finding the cache directory"
 if [ -z "${RPI_SB_WORKDIR}" ]; then
-    RPI_SB_WORKDIR=$(mktemp -d "rpi-sb-provisioner.XXX" --tmpdir="/srv/")
-    announce_stop "Finding the cache directory: Created a new one as unspecified"
+    RPI_SB_WORKDIR=$(make_temp_dir "rpi-sb-provisioner.XXX")
+    announce_stop "Finding the cache directory: Created ${RPI_SB_WORKDIR} (none configured)"
     DELETE_PRIVATE_TMPDIR="true"
 elif [ ! -d "${RPI_SB_WORKDIR}" ]; then
-    RPI_SB_WORKDIR=$(mktemp -d "rpi-sb-provisioner.XXX" --tmpdir="/srv/")
-    announce_stop "Finding the cache directory: Created a new one in /srv, as supplied path isn't a directory"
+    RPI_SB_WORKDIR=$(make_temp_dir "rpi-sb-provisioner.XXX")
+    announce_stop "Finding the cache directory: Created ${RPI_SB_WORKDIR} (configured path isn't a directory)"
     DELETE_PRIVATE_TMPDIR="true"
 else
     # Deliberately do nothing
@@ -382,43 +343,14 @@ augment_initramfs() {
     rm -rf "${initramfs_dir}usr/lib/modules"
     mkdir -p "${initramfs_dir}usr/lib/modules"
 
-    # Insert required kernel modules
-    cd "${rootfs_mount}"
-    find usr/lib/modules \
-        \( \
-            -name 'dm-mod.*' \
-            -o \
-            -name 'dm-crypt.*' \
-            -o \
-            -name 'af_alg.*' \
-            -o \
-            -name 'algif_skcipher.*' \
-            -o \
-            -name 'libaes.*' \
-            -o \
-            -name 'aes_generic.*' \
-            -o \
-            -name 'aes-arm64.*' \
-            -o \
-            -name 'libpoly1305.*' \
-            -o \
-            -name 'nhpoly1305.*' \
-            -o \
-            -name 'adiantum.*' \
-            -o \
-            -name 'libchacha.*' \
-            -o \
-            -name 'chacha-neon.*' \
-            -o \
-            -name 'chacha_generic.*' \
-        \) \
-        -exec cp -r --parents "{}" "${initramfs_dir}" \;
-    cd -
-
-    # Generate depmod information
-    find "${initramfs_dir}usr/lib/modules" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | while read -r kernel; do
-        depmod --basedir "${initramfs_dir}" "${kernel}"
-    done
+    # Insert required kernel modules with automatic dependency resolution
+    # Find kernel version from the rootfs modules directory (checks both lib/modules and usr/lib/modules)
+    _kernel_version=$(find_kernel_version "${rootfs_mount}")
+    if [ -n "${_kernel_version}" ]; then
+        copy_kernel_modules_with_deps "${rootfs_mount}" "${initramfs_dir}" "${_kernel_version}"
+    else
+        log "WARNING: Could not determine kernel version from rootfs, skipping module copy"
+    fi
 
     # Configure the cryptroot script to use the correct storage device
     sed -i "s/mmcblk0/${RPI_DEVICE_STORAGE_TYPE}/g" "${initramfs_dir}usr/bin/init_cryptroot.sh"
@@ -444,8 +376,7 @@ prepare_pre_boot_auth_images_as_filesystems() {
                 log "Error in losetup.  Retrying..."
                 sleep 5
             else
-                log "ERROR: losetup failed; exiting"
-                sleep 5
+                die "ERROR: losetup failed after ${cnt} retries; exiting"
             fi
         done
 
@@ -475,7 +406,7 @@ prepare_pre_boot_auth_images_as_filesystems() {
         # Using 1M which is 1 MiB (1048576 bytes) as the block size
         CRYPTROOT_BOOTFS_FILE="${RPI_SB_WORKDIR}/cryptroot-bootfs.img"
         truncate -s "${BOOTFS_SIZE_MB}M" "${CRYPTROOT_BOOTFS_FILE}"
-        mkfs.fat -n "BOOT" "${CRYPTROOT_BOOTFS_FILE}"
+        mkfs.fat -s 1 -n "BOOT" "${CRYPTROOT_BOOTFS_FILE}"
 
         # OS Images are, by convention, packed as a MBR whole-disk file,
         # containing two partitions: A FAT boot partition, which contains the kernel, command line,
@@ -549,8 +480,7 @@ prepare_pre_boot_auth_images_as_bootimg() {
                 log "Error in losetup.  Retrying..."
                 sleep 5
             else
-                log "ERROR: losetup failed; exiting"
-                sleep 5
+                die "ERROR: losetup failed after ${cnt} retries; exiting"
             fi
         done
 
@@ -631,7 +561,7 @@ prepare_pre_boot_auth_images_as_bootimg() {
         BOOTFS_SIZE_MB=$(( ($(stat -c%s "${TMP_DIR}"/bootfs-original.img) + 1048575) / 1048576 ))
         # Using 1M which is 1 MiB (1048576 bytes) as the block size
         truncate -s "${BOOTFS_SIZE_MB}M" "${TMP_DIR}"/bootfs-temporary.img
-        mkfs.fat -n "BOOT" "${TMP_DIR}"/bootfs-temporary.img
+        mkfs.fat -s 1 -n "BOOT" "${TMP_DIR}"/bootfs-temporary.img
 
         META_BOOTIMG_MOUNT_PATH=$(mktemp -d)
         mount -o loop "${TMP_DIR}"/bootfs-temporary.img "${META_BOOTIMG_MOUNT_PATH}"
@@ -733,4 +663,3 @@ systemd-notify --status="Provisioning completed successfully" STOPPING=1
 
 # Exit with success code for systemd
 true
-cleanup

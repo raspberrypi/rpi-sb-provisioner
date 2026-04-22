@@ -10,6 +10,55 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include(FetchContent)
 
+# Add jsoncpp FIRST (before Drogon) so Drogon finds and uses this vendored version
+# instead of finding system libjsoncpp-dev
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libraries" FORCE)
+set(BUILD_STATIC_LIBS ON CACHE BOOL "Build static libraries" FORCE)
+set(JSONCPP_WITH_TESTS OFF CACHE BOOL "Compile and run JsonCpp test executables" FORCE)
+set(JSONCPP_WITH_POST_BUILD_UNITTEST OFF CACHE BOOL "Automatically run unit-tests as a post build step" FORCE)
+set(JSONCPP_WITH_PKGCONFIG_SUPPORT OFF CACHE BOOL "Generate and install .pc files" FORCE)
+set(JSONCPP_WITH_CMAKE_PACKAGE OFF CACHE BOOL "Generate and install cmake package files" FORCE)
+
+FetchContent_Declare(jsoncpp
+ GIT_REPOSITORY https://github.com/open-source-parsers/jsoncpp.git
+ GIT_TAG        1.9.7
+ EXCLUDE_FROM_ALL  # Prevents installation in packages
+)
+
+FetchContent_GetProperties(jsoncpp)
+string(TOLOWER "jsoncpp" jsoncppName)
+if(NOT ${jsoncppName}_POPULATED)
+  FetchContent_Populate(jsoncpp)
+  add_subdirectory(${${jsoncppName}_SOURCE_DIR} ${${jsoncppName}_BINARY_DIR} EXCLUDE_FROM_ALL)
+endif()
+
+# Set JSONCPP_INCLUDE_DIRS and JSONCPP_LIBRARIES so Drogon's find_package(Jsoncpp) succeeds
+# These variables are what FindJsoncpp.cmake looks for, and must be set before Drogon configures
+set(JSONCPP_INCLUDE_DIRS "${${jsoncppName}_SOURCE_DIR}/include" CACHE PATH "jsoncpp include dir" FORCE)
+set(JSONCPP_LIBRARIES jsoncpp_static CACHE STRING "jsoncpp library" FORCE)
+
+# Unset jsoncpp configuration flags
+unset(BUILD_SHARED_LIBS)
+unset(BUILD_STATIC_LIBS)
+unset(JSONCPP_WITH_TESTS)
+unset(JSONCPP_WITH_POST_BUILD_UNITTEST)
+unset(JSONCPP_WITH_PKGCONFIG_SUPPORT)
+unset(JSONCPP_WITH_CMAKE_PACKAGE)
+
+# Valijson: header-only JSON Schema validation library (Draft-07)
+set(valijson_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(valijson_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(valijson_INSTALL_HEADERS OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(valijson
+  GIT_REPOSITORY https://github.com/tristanpenman/valijson.git
+  GIT_TAG        v1.0.3
+  EXCLUDE_FROM_ALL
+)
+FetchContent_MakeAvailable(valijson)
+unset(valijson_BUILD_EXAMPLES)
+unset(valijson_BUILD_TESTS)
+unset(valijson_INSTALL_HEADERS)
+
 # Prevent installation of Drogon dependencies by setting BUILD_* options before declaring the dependency
 set(BUILD_EXAMPLES OFF CACHE BOOL "Build Drogon examples" FORCE)
 set(BUILD_CTL ON CACHE BOOL "Build drogon_ctl utility" FORCE)  # Needed for compiling CSP templates
@@ -95,7 +144,7 @@ set(CURL_DISABLE_NTLM ON CACHE BOOL "Set to ON to disable NTLM support." FORCE)
 
 FetchContent_Declare(curl
  GIT_REPOSITORY https://github.com/curl/curl.git
- GIT_TAG        curl-8_16_0
+ GIT_TAG        curl-8_19_0
  PATCH_COMMAND patch -p1 < ${CMAKE_SOURCE_DIR}/cmake/curl/http-no-auth.patch
  UPDATE_DISCONNECTED 1
  EXCLUDE_FROM_ALL  # Prevents installation in packages
@@ -107,35 +156,6 @@ if(NOT ${curlName}_POPULATED)
   FetchContent_Populate(curl)
   add_subdirectory(${${curlName}_SOURCE_DIR} ${${curlName}_BINARY_DIR} EXCLUDE_FROM_ALL)
 endif()
-
-# Add jsoncpp with static linking
-set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libraries" FORCE)
-set(BUILD_STATIC_LIBS ON CACHE BOOL "Build static libraries" FORCE)
-set(JSONCPP_WITH_TESTS OFF CACHE BOOL "Compile and run JsonCpp test executables" FORCE)
-set(JSONCPP_WITH_POST_BUILD_UNITTEST OFF CACHE BOOL "Automatically run unit-tests as a post build step" FORCE)
-set(JSONCPP_WITH_PKGCONFIG_SUPPORT OFF CACHE BOOL "Generate and install .pc files" FORCE)
-set(JSONCPP_WITH_CMAKE_PACKAGE OFF CACHE BOOL "Generate and install cmake package files" FORCE)
-
-FetchContent_Declare(jsoncpp
- GIT_REPOSITORY https://github.com/open-source-parsers/jsoncpp.git
- GIT_TAG        1.9.6
- EXCLUDE_FROM_ALL  # Prevents installation in packages
-)
-
-FetchContent_GetProperties(jsoncpp)
-string(TOLOWER "jsoncpp" jsoncppName)
-if(NOT ${jsoncppName}_POPULATED)
-  FetchContent_Populate(jsoncpp)
-  add_subdirectory(${${jsoncppName}_SOURCE_DIR} ${${jsoncppName}_BINARY_DIR} EXCLUDE_FROM_ALL)
-endif()
-
-# Unset jsoncpp configuration flags
-unset(BUILD_SHARED_LIBS)
-unset(BUILD_STATIC_LIBS)
-unset(JSONCPP_WITH_TESTS)
-unset(JSONCPP_WITH_POST_BUILD_UNITTEST)
-unset(JSONCPP_WITH_PKGCONFIG_SUPPORT)
-unset(JSONCPP_WITH_CMAKE_PACKAGE)
 
 # Unset curl configuration flags
 unset(BUILD_CURL_EXE)
@@ -178,6 +198,11 @@ unset(CURL_DISABLE_SOCKETPAIR)
 # unset(CURL_DISABLE_AWS)
 # unset(CURL_DISABLE_NTLM)
 
+# Vendored compression libraries + libarchive (for streaming archive extraction)
+include(dependencies/zstd.cmake)
+include(dependencies/xz.cmake)
+include(dependencies/libarchive.cmake)
+
 # Download the ZXing library for barcode scanning
 set(ZXING_JS_URL "https://cdn.jsdelivr.net/npm/@zxing/library/umd/index.min.js")
 set(ZXING_JS_PATH "${CMAKE_SOURCE_DIR}/static/js/zxing.js")
@@ -195,6 +220,24 @@ add_custom_command(
 
 # Create a custom target for downloading ZXing
 add_custom_target(download_zxing DEPENDS ${ZXING_JS_PATH})
+
+# Download D3.js library for graph visualization
+set(D3_JS_URL "https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js")
+set(D3_JS_PATH "${CMAKE_SOURCE_DIR}/static/js/d3.min.js")
+
+# Add a custom command to download D3.js at build time
+add_custom_command(
+    OUTPUT ${D3_JS_PATH}
+    COMMAND ${CMAKE_COMMAND} -E echo "Downloading D3.js library from ${D3_JS_URL}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_SOURCE_DIR}/static/js"
+    COMMAND curl --silent --show-error --output ${D3_JS_PATH} ${D3_JS_URL}
+    COMMAND ${CMAKE_COMMAND} -E echo "D3.js library downloaded to ${D3_JS_PATH}"
+    COMMENT "Downloading D3.js visualization library"
+    VERBATIM
+)
+
+# Create a custom target for downloading D3.js
+add_custom_target(download_d3 DEPENDS ${D3_JS_PATH})
 
 project(rpi-provisioner-ui)
 
@@ -238,6 +281,9 @@ add_dependencies(rpi-provisioner-ui compile_views)
 # Add zxing dependency
 add_dependencies(rpi-provisioner-ui download_zxing)
 
+# Add D3.js dependency
+add_dependencies(rpi-provisioner-ui download_d3)
+
 target_sources(rpi-provisioner-ui
     PRIVATE
     src/main.cpp
@@ -250,6 +296,7 @@ target_sources(rpi-provisioner-ui
     src/scantool.cpp
     src/audit.cpp
     src/utils.cpp
+    src/schema_validator.cpp
     ${VIEW_SOURCES}
 )
 
@@ -259,6 +306,8 @@ target_include_directories(rpi-provisioner-ui
     ${SQLite3_INCLUDE_DIR}
     ${CSP_OUTPUT_DIR}  # Include the compiled templates
     ${curl_SOURCE_DIR}/include  # Add curl headers
+    ${LibArchive_INCLUDE_DIR}  # libarchive headers
+    ${valijson_SOURCE_DIR}/include  # valijson JSON Schema headers
 )
 
 target_link_libraries(rpi-provisioner-ui
@@ -270,6 +319,9 @@ target_link_libraries(rpi-provisioner-ui
     libcurl
     OpenSSL::SSL
     OpenSSL::Crypto
+    ${LibArchive_LIBRARIES}
+    ${ZSTD_LIBRARIES}
+    ${LIBLZMA_LIBRARIES}
 )
 
 # Install directives
@@ -281,5 +333,7 @@ install(TARGETS rpi-provisioner-ui
 # Install static files
 install(DIRECTORY "${CMAKE_SOURCE_DIR}/static/"
         DESTINATION /usr/share/rpi-sb-provisioner/static
-        FILES_MATCHING PATTERN "*.js"
+        FILES_MATCHING 
+        PATTERN "*.js"
+        PATTERN "*.svg"
         PERMISSIONS OWNER_READ GROUP_READ WORLD_READ)

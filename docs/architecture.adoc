@@ -102,6 +102,11 @@ ACTION=="add", SUBSYSTEM=="usb",
 
 Provisioning proceeds through three phases, each implemented as a systemd template service.
 
+WARNING: Provisioning is triggered automatically when a device is connected.
+All provisioners erase the device's storage before writing the OS image.
+If `GOLD_MASTER_OS_FILE` is not configured or points to a missing file, the device storage will still be erased, and provisioning will then fail — leaving the device with wiped storage.
+Always ensure a valid image is selected before connecting a device.
+
 ==== Phase 1: Bootstrap (`rpi-sb-bootstrap@.service`)
 
 *Purpose:* Initialize device, program security keys, update firmware
@@ -127,12 +132,15 @@ Provisioning proceeds through three phases, each implemented as a systemd templa
 *Triggered by:* udev rule detecting fastboot mode
 
 *Key operations:*
-* Read configuration to determine `PROVISIONING_STYLE`
 * Verify device is in fastboot mode
-* Start appropriate provisioning service:
-  - `secure-boot` → `rpi-sb-provisioner@.service`
-  - `fde-only` → `rpi-fde-provisioner@.service`
-  - `naked` → `rpi-naked-provisioner@.service`
+* Provision device firmware crypto ECDSA key (`oem fwcrypto init`) if not already present — every provisioned device receives one regardless of provisioning style, as it is used for HMAC-based LUKS key derivation and device identity
+* Capture device keypair (private and public keys) to the log directory or a configured retrieval path
+* Read configuration to determine provisioning route:
+  - If `GOLD_MASTER_OS_FILE` points to a directory (IDP artefact), start `rpi-idp-provisioner@.service` regardless of `PROVISIONING_STYLE`
+  - Otherwise, start provisioner based on `PROVISIONING_STYLE`:
+    ** `secure-boot` → `rpi-sb-provisioner@.service`
+    ** `fde-only` → `rpi-fde-provisioner@.service`
+    ** `naked` → `rpi-naked-provisioner@.service`
 
 *Script:* `/usr/bin/rpi-sb-triage.sh`
 
@@ -144,10 +152,21 @@ Provisioning proceeds through three phases, each implemented as a systemd templa
 
 *Purpose:* Deploy operating system and configure security
 
-Three variants implement different security models:
+Four variants implement different security and deployment models:
+
+*IDP Provisioner* (`rpi-idp-provisioner@.service`)
+
+* Uses a JSON image descriptor and sparse images produced by `rpi-image-gen`
+* Erase device storage
+* Stage JSON descriptor and initialise device-side partition layout (`idpinit`)
+* Write partition table and encryption metadata (`idpwrite`)
+* Flash sparse images in a device-driven loop: device requests each partition via `idpgetblk`, host flashes the corresponding `.simg` file
+* Finalise provisioning (`idpdone`): device completes encryption setup and verification
+* All partition creation and encryption is handled device-side by fastbootd, not by host scripts
 
 *Secure Boot Provisioner* (`rpi-sb-provisioner@.service`)
 
+* Erase device storage via fastboot
 * Create device-unique encryption key and store in OTP memory
 * Partition and format storage
 * Create LUKS2 encrypted container
@@ -158,6 +177,7 @@ Three variants implement different security models:
 
 *Full Disk Encryption Provisioner* (`rpi-fde-provisioner@.service`)
 
+* Erase device storage via fastboot
 * Create device-unique encryption key and store in OTP memory
 * Partition and format storage
 * Create LUKS2 encrypted container
@@ -166,11 +186,13 @@ Three variants implement different security models:
 
 *Naked Provisioner* (`rpi-naked-provisioner@.service`)
 
+* Erase device storage via fastboot
 * Partition and format storage
 * Deploy OS image directly (no encryption)
 * Install standard boot firmware (uses Raspberry Pi retail key)
 
 *Scripts:*
+* `/usr/bin/rpi-idp-provisioner.sh`
 * `/usr/bin/rpi-sb-provisioner.sh`
 * `/usr/bin/rpi-fde-provisioner.sh`
 * `/usr/bin/rpi-naked-provisioner.sh`
@@ -202,6 +224,7 @@ Shared utilities used by all phases:
 * Device information extraction
 * USB path resolution
 * Error handling
+* Temporary directory management (`make_temp_dir`, `cleanup_orphans`)
 
 *Phase-specific scripts*
 
@@ -247,7 +270,7 @@ A web service provides monitoring, configuration, and API access.
 * `/api/v2/services` - Service monitoring
 * `/api/v2/manufacturing` - Manufacturing database queries
 * `/customisation/*` - Provisioning script management
-* `/get-images` - OS image management
+* `/get-images`, `/analyze-image` - OS image management (traditional and IDP artefacts)
 
 *WebSocket endpoints:*
 
@@ -478,74 +501,99 @@ Device Powers On → Bootloader → Firmware → Kernel → Your OS
 
 === Comparison of Provisioning Modes
 
-[cols="1,2,2,2"]
+[cols="1,2,2,2,2"]
 |===
-|Feature |Secure Boot |FDE Only |Naked
+|Feature |Secure Boot |FDE Only |Naked |IDP
 
 |*EEPROM authentication*
 |✓ Customer key
 |✓ RPi retail key
 |✓ RPi retail key
+|Defined by artefact
 
 |*Pre-boot environment auth*
 |✓ Customer key
 |✗ No
 |N/A
+|Defined by artefact
 
 |*Storage encryption*
 |✓ Yes (LUKS2)
 |✓ Yes (LUKS2)
 |✗ No
+|Defined by artefact
 
 |*Device-unique keys*
 |✓ Yes
 |✓ Yes
 |✗ No
+|Defined by artefact
 
 |*Customer firmware signing*
 |✓ Yes
 |✗ No
 |✗ No
+|Defined by artefact
 
 |*OTP customer key*
 |✓ Yes (permanent)
 |✗ No (RPi retail)
 |✗ No (RPi retail)
+|Defined by artefact
 
 |*OTP encryption key*
 |✓ Yes
 |✓ Yes
 |✗ No
+|Defined by artefact
 
 |*Storage extractable*
 |✗ No (encrypted)
 |✗ No (encrypted)
 |✓ Yes (unencrypted)
+|Defined by artefact
 
 |*Firmware substitution*
 |✗ No (customer-signed only)
 |✓ Yes (any RPi firmware)
 |✓ Yes (any RPi firmware)
+|Defined by artefact
 
 |*Pre-boot environment modifiable*
 |✗ No (signature verification)
 |✓ Yes (no verification)
 |N/A
+|Defined by artefact
 
 |*Provisioning time*
 |Longest
 |Medium
 |Fastest
+|Depends on artefact
 
 |*Security level*
 |Maximum
 |Medium
 |Minimal
+|Defined by artefact
+
+|*Image format*
+|Raw `.img`
+|Raw `.img`
+|Raw `.img`
+|JSON descriptor + sparse images
+
+|*Partition creation*
+|Host-side
+|Host-side
+|Host-side
+|Device-side (fastbootd)
 
 |*Use case*
 |Production devices
 |Encryption without boot restrictions
 |Development, testing
+|Pre-built images from `rpi-image-gen`
 |===
 
 == Data Flow

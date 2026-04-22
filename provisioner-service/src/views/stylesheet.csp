@@ -1,5 +1,115 @@
+<!-- Favicon -->
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+
 <style>
 /* Common Styles for rpi-sb-provisioner */
+
+/* Accessibility: Skip to main content link */
+.skip-link {
+    position: absolute;
+    top: -40px;
+    left: 0;
+    background: #0066cc;
+    color: white;
+    padding: 8px 16px;
+    z-index: 10000;
+    text-decoration: none;
+    font-weight: bold;
+    border-radius: 0 0 4px 0;
+}
+
+.skip-link:focus {
+    top: 0;
+    outline: 3px solid #ffcc00;
+    outline-offset: 2px;
+}
+
+/* Accessibility: Screen reader only class */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+/* Accessibility: Enhanced focus visibility */
+a:focus,
+button:focus,
+input:focus,
+select:focus,
+textarea:focus,
+[tabindex]:focus {
+    outline: 3px solid #0066cc;
+    outline-offset: 2px;
+}
+
+/* Accessibility: Focus visible for keyboard navigation only */
+a:focus:not(:focus-visible),
+button:focus:not(:focus-visible) {
+    outline: none;
+}
+
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+    outline: 3px solid #0066cc;
+    outline-offset: 2px;
+}
+
+/* Security Warning Banner */
+.security-warning-banner {
+    background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+    color: white;
+    padding: 12px 20px;
+    margin-bottom: 15px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3);
+    animation: warningPulse 3s ease-in-out infinite;
+}
+
+@keyframes warningPulse {
+    0%, 100% { box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3); }
+    50% { box-shadow: 0 2px 16px rgba(220, 53, 69, 0.5); }
+}
+
+.security-warning-banner .warning-icon {
+    font-size: 24px;
+    flex-shrink: 0;
+}
+
+.security-warning-banner .warning-content {
+    flex: 1;
+}
+
+.security-warning-banner .warning-title {
+    font-weight: bold;
+    font-size: 14px;
+    margin-bottom: 2px;
+}
+
+.security-warning-banner .warning-text {
+    font-size: 13px;
+    opacity: 0.95;
+}
+
+.security-warning-banner a {
+    color: #ffcccc;
+    text-decoration: underline;
+}
+
+.security-warning-banner a:hover {
+    color: white;
+}
 
 body {
     font-family: Arial, sans-serif;
@@ -500,6 +610,220 @@ pre {
     border-left: 4px solid #0066cc;
     font-style: italic;
     color: #555;
+}
+
+/* Scrollable Table Container */
+.table-container {
+    overflow-x: auto;
+    max-height: 80vh;
+    margin-top: 20px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(0, 0, 0, 0.5) rgba(0, 0, 0, 0.1);
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background-color: #fafafa;
+    padding: 2px;
+    position: relative;
+}
+
+.table-container::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+    display: block;
+    -webkit-appearance: scrollbar;
+}
+
+.table-container::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: 4px;
+}
+
+.table-container::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.5);
+    border-radius: 4px;
+}
+
+.scroll-indicator {
+    position: absolute;
+    right: 10px;
+    bottom: 10px;
+    background-color: rgba(0,0,0,0.6);
+    color: white;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    z-index: 100;
+    opacity: 0.8;
+}
+
+/* Page Header Layout */
+.page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+/* Export Button */
+.export-btn {
+    background-color: #4CAF50;
+    color: white;
+    padding: 8px 15px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.export-btn:hover {
+    background-color: #45a049;
+}
+
+/* Toggle Switch */
+.toggle-container {
+    display: flex;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
+.toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 50px;
+    height: 24px;
+    margin-right: 10px;
+}
+
+.toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #ccc;
+    transition: .4s;
+    border-radius: 24px;
+}
+
+.toggle-slider:before {
+    position: absolute;
+    content: "";
+    height: 18px;
+    width: 18px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    transition: .4s;
+    border-radius: 50%;
+}
+
+input:checked + .toggle-slider {
+    background-color: #0066cc;
+}
+
+input:checked + .toggle-slider:before {
+    transform: translateX(26px);
+}
+
+#refresh-status {
+    margin-left: 10px;
+    font-size: 0.9em;
+    color: #666;
+}
+
+/* Pagination Controls */
+.pagination-controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 12px;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.pagination-controls .page-buttons {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.pagination-controls button {
+    background-color: #f2f2f2;
+    border: 1px solid #ddd;
+    padding: 4px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+.pagination-controls button:hover:not(:disabled) {
+    background-color: #e0e0e0;
+}
+
+.pagination-controls button:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.pagination-controls button.active-page {
+    background-color: #0066cc;
+    color: white;
+    border-color: #0066cc;
+}
+
+.pagination-controls .page-info {
+    font-size: 13px;
+    color: #666;
+}
+
+.pagination-controls select {
+    padding: 4px 6px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 13px;
+}
+
+/* Dynamic Error Messages (injected via JS into containers) */
+#error-container .error-message {
+    display: block;
+    background-color: #ffebee;
+    color: #d32f2f;
+    padding: 15px;
+    border-radius: 4px;
+    margin: 15px 0;
+    border-left: 5px solid #d32f2f;
+}
+
+/* Security Field Indicators */
+.security-field {
+    text-align: center;
+    font-weight: bold;
+}
+
+.security-enabled {
+    color: #28a745;
+    font-size: 14px;
+}
+
+.security-disabled {
+    color: #dc3545;
+    font-size: 14px;
+}
+
+.security-unknown {
+    color: #6c757d;
+    font-size: 14px;
+}
+
+/* eMMC Size Tooltip */
+.emmc-size {
+    cursor: help;
+    text-decoration: underline dotted #666;
 }
 </style>
 <%view-end%> 

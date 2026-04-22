@@ -1,3 +1,225 @@
+rpi-sb-provisioner (2.3.0) unstable; urgency=medium
+
+  * IDP (Image Description Provisioning) Support:
+    - Add support for consuming IDP-style artefacts from rpi-image-gen,
+      enabling pre-built partition layouts, encryption, and sparse image
+      provisioning via the device-side fastboot IDP protocol
+    - Add new rpi-idp-provisioner.sh orchestrator implementing the full
+      IDP protocol: erase, stage JSON, idpinit, idpwrite, idpgetblk/flash
+      loop, and idpdone, with timeout_fatal wrappers on all fastboot
+      commands
+    - Add rpi-idp-provisioner@.service systemd template unit
+    - Extend triage to detect IDP artefact directories
+      (GOLD_MASTER_OS_FILE pointing to a directory) and route to the
+      IDP provisioner automatically
+    - IDP pre-flight validation: JSON syntax, referenced .simg file
+      existence, device class and storage type cross-checks against
+      host configuration
+
+  * IDP WebUI:
+    - Add image-first progressive disclosure UI: selecting an IDP
+      artefact auto-populates device family, storage type, and cipher
+      from the artefact's JSON metadata, locking those fields with
+      "Set by image" badges
+    - Hide the FDE-only provisioning style tile for IDP artefacts, as
+      encryption is defined by the IDP JSON; provisioning style collapses
+      to a binary Secure Boot / Naked choice
+    - Support upload of .tar.gz, .tgz, and .zip archives containing IDP
+      artefacts, with security validation (path traversal checks, disk
+      space checks, atomic extraction)
+    - Add /analyze-image endpoint returning IDP metadata (device class,
+      storage type, encryption, cipher, partition count, image version)
+    - Display IDP badge in the image list for artefact directories
+
+  * Image SHA256 Improvements:
+    - Compute SHA256 of IDP archives before extraction, capturing the
+      fingerprint of the exact artefact uploaded
+    - Store IDP archive hash in a .sha256 sidecar file alongside the
+      extracted artefact directory, reusing the existing sidecar pattern
+    - Update /get-image-sha256 to return sidecar hash directly for IDP
+      artefact directories, avoiding unnecessary background calculation
+    - Add is_idp flag to ImageInfo struct for reliable IDP detection
+      in image listings, replacing fragile sha256 string comparison
+    - Clean up sidecar files when deleting IDP artefact directories
+
+  * Bug Fixes:
+    - Fix image deletion from the Options page: frontend was calling
+      /images/delete (non-existent) instead of /delete-image (the
+      documented and registered endpoint)
+    - Fix HTTP method for image deletion: changed from DELETE to POST
+      to match the backend handler
+    - Fix image browser detail pane overflowing its container by adding
+      box-sizing: border-box to .image-list and .firmware-notes
+    - Fix cleanup_orphans destroying persistent data directories
+      (images, workdir, databases): TEMP_BASE now points to a dedicated
+      /srv/rpi-sb-provisioner/tmp subdirectory, and all temp directory
+      creation uses a new make_temp_dir helper
+    - Fix rpi-sb-common.sh base directory variables overwriting values
+      pre-set by sourcing scripts (e.g. rpi-sb-bootstrap.sh)
+
+  * IDP Validation in provisioner-service:
+    - Extend GOLD_MASTER_OS_FILE validation in options.cpp to support
+      directories: validates exactly one .json file exists, JSON is
+      syntactically valid, and all referenced .simg files are present
+
+  * Packaging:
+    - Add rpi-idp-provisioner.sh to /usr/bin and
+      rpi-idp-provisioner@.service to /usr/lib/systemd/system in
+      debian/install
+
+  * Raspberry Pi Connect Device Identity Registration:
+    - Automatically register provisioned devices with the Raspberry Pi
+      Connect management API when RPI_CONNECT_API_KEY is configured
+    - Request signing uses the device's firmware crypto ECDSA key via
+      fastbootd's 'oem fwcrypto sign-hash' command; the private key
+      never leaves hardware
+    - Add RPI_CONNECT_API_KEY and RPI_CONNECT_DESCRIPTION config
+      options with validation in options.cpp
+    - Add Cloud Services section to options UI with password-masked
+      API key input and description prefix field
+    - Add connect_registered and connect_device_id columns to
+      manufacturing database schema, with migration in postinst
+    - Add Connect columns to manufacturing UI table and CSV export
+    - Non-fatal: registration failures log warnings but never abort
+      provisioning (set +e guard, curl timeouts, robust PEM capture)
+
+  * Cryptroot rpifwcrypto Support:
+    - Update cryptroot initramfs to unlock the encrypted root filesystem
+      using the device's firmware crypto ECDSA key (rpifwcrypto), in
+      place of key material delivered out-of-band or stored on disk
+    - Triage now always provisions the device firmware crypto key
+      (oem fwcrypto init) before provisioning proceeds, regardless of
+      provisioning style, and verifies the key is written to OTP before
+      continuing -- aborting the device if provisioning fails
+    - Establishes a hardware-held device unique identity that underpins
+      both LUKS unlock (via a derived secret bound to the key and other
+      measurements) and Raspberry Pi Connect device identity
+      registration; the private key never leaves the SoC
+
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Fri, 17 Apr 2026 12:00:00 +0100
+
+rpi-sb-provisioner (2.2.0) unstable; urgency=medium
+
+  * Features:
+    - Add PKCS#11 HSM signing support for secure signing operations
+    - Add USB speed attribute detection for better device capability
+      identification
+    - Add CSRF token validation for critical endpoints to improve security
+    - Add kernel_modules.list for configurable kernel module inclusion
+    - Integrate rpi-modcopy for improved kernel module handling and
+      dependency resolution
+    - Add RPI_DEVICE_RPIBOOT_GPIO configuration for Pi 4 family secure-boot
+      provisioning (fixes GitHub issue #242)
+
+  * WebUI Accessibility:
+    - Add lang="en" attribute to all page templates for screen readers
+    - Add semantic HTML structure with <main> landmark and skip navigation
+    - Add ARIA roles and live regions to status/error messages
+    - Add table captions and scope attributes for screen reader navigation
+    - Add aria-label attributes to action buttons with contextual information
+    - Add accessible tab interfaces with proper ARIA roles and keyboard support
+    - Add screen-reader-only descriptions for D3 visualizations
+    - Add role="log" and aria-live to service log container
+    - Improve focus visibility with enhanced CSS outline styles
+    - Add aria-hidden to decorative icons and emojis
+
+  * Provisioning Improvements:
+    - Refactor signing infrastructure into rpi-sb-common.sh for better
+      modularity and reuse
+    - Enhance cleanup process with guard against multiple invocations
+    - Fix temporary directory creation path to /srv/rpi-sb-provisioner,
+      avoiding Trixie tmpfs issue
+    - Improve orphan cleanup logic to preserve base temp directory
+    - Fix Pi 4/CM4 secure-boot provisioning by programming RPIBOOT GPIO
+      into OTP alongside the secure boot public key
+
+  * WebUI:
+    - Add JSON endpoints for firmware listing and management
+    - Improve device visualization with edge avoidance force and better
+      link rendering
+    - Conditionally display firmware select button for cleaner interface
+    - Add RPIBOOT GPIO configuration field for Pi 4 secure-boot provisioning
+      with validation and clear guidance recommending GPIO 8
+
+  * Documentation:
+    - Revise provisioning capacity and throughput metrics
+    - Update Pi 4 device guidance with RPIBOOT GPIO requirements
+    - Add RPI_DEVICE_RPIBOOT_GPIO to configuration variables documentation
+
+  * Naked Provisioner & Image Customisation:
+    - Expand naked-provisioner stages to include bootfs-mounted and
+      rootfs-mounted phases for full image customisation support
+      (fixes GitHub issue #258)
+    - Use cp --reflink=auto for image copying, optimising performance
+      and reducing disk usage on btrfs/xfs hosts
+    - Add checks to ensure customisation scripts are executable before
+      running
+    - Flash modified image when customisation scripts are executed
+
+  * Provisioning Hooks:
+    - Add provision-started stage and hook, allowing actions (e.g. LED
+      control, rig signaling) to execute at the start of provisioning
+
+  * Customisation WebUI:
+    - Add copy-sources functionality allowing users to select and copy
+      scripts from other provisioners during stage editing
+    - Display dropdown for available scripts from other provisioners,
+      improving usability and efficiency
+
+  * Provisioning Improvements:
+    - Consolidate loop device management functions (ensure_next_loopdev,
+      ensure_loopdev_partitions, unmount, unmount_image) into
+      rpi-sb-common.sh for better code reuse and maintainability
+    - Improve cleanup logic in provisioner scripts to properly unmount
+      images before deletion, preventing dangling loop devices
+    - Enhance error handling in losetup operations with clearer exit
+      messages on failure
+    - Remove redundant get_variable function from rpi-fde-provisioner.sh
+
+  * Packaging:
+    - Add rpi-modcopy dependency for kernel module handling
+    - Fix CMake configuration for jsoncpp dependency
+    - Improve upgrade experience by shipping config defaults to
+      /usr/share/rpi-sb-provisioner/defaults/ with user overrides in
+      /etc/rpi-sb-provisioner/. This eliminates dpkg conffile prompts
+      during upgrades when configuration has been modified.
+
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Tue, 11 Feb 2026 12:00:00 +0000
+
+rpi-sb-provisioner (2.1.3) unstable; urgency=medium
+
+  * Features:
+    - Add test mode for USB device topology simulation
+    - Add timestamp handling and formatting for service logs
+    - Integrate D3.js for enhanced graph visualization in device topology UI
+    - Enhance collision resolution for device layout in UI
+    - Add configuration field validation endpoint with real-time UI feedback
+    - Add Nginx reverse proxy example configuration with PAM authentication
+
+  * Bootstrap Improvements:
+    - Run metadata_gather before post-flash for better data collection
+    - Simplify IPv6 address extraction with awk
+
+  * WebUI:
+    - Allow boot package generation for both secure-boot and fde-only
+      provisioning styles
+    - Display last updated timestamps for services in user-friendly format
+    - Improve device visualization with D3.js graph rendering and tooltips
+
+  * Manufacturing Data:
+    - Add support for capturing Zero W and unknown device values
+
+  * Packaging:
+    - Update to debhelper-compat version 13
+    - Use jsoncpp as a vendored dependency in CMake configuration
+    - Update static files path configuration for improved clarity
+    - Update lintian overrides for embedded libjsoncpp
+
+  * Dependencies:
+    - Update rpiboot and rpi-eeprom to catch November 2025 firmware
+
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Thu, 16 Jan 2026 12:00:00 +0000
+
 rpi-sb-provisioner (2.1.2) unstable; urgency=medium
 
   * Bootstrap: Fix USB path extraction for hub-connected devices

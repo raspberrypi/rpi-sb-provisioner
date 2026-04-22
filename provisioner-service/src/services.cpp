@@ -323,6 +323,9 @@ namespace provisioner {
                 serviceObj["instance"] = info.instance;
                 serviceObj["base_name"] = info.base_name;
                 
+                // Add timestamp in microseconds since epoch (will be converted to local time in frontend)
+                serviceObj["timestamp"] = Json::Value::UInt64(info.timestamp);
+                
                 // Reconstruct the full service name for log links
                 std::string fullName;
                 if (!info.instance.empty()) {
@@ -376,13 +379,14 @@ namespace provisioner {
             std::string serviceName = name;
 
             // Validate that the service name starts with one of the allowed prefixes
-            if (serviceName.find("rpi-sb-") != 0 && 
-                serviceName.find("rpi-naked-") != 0 && 
-                serviceName.find("rpi-fde-") != 0) {
+            if (serviceName.find("rpi-sb-") != 0 &&
+                serviceName.find("rpi-naked-") != 0 &&
+                serviceName.find("rpi-fde-") != 0 &&
+                serviceName.find("rpi-idp-") != 0) {
                 LOG_INFO << "Rejected access to logs for unauthorized service: " << serviceName;
                 auto resp = provisioner::utils::createErrorResponse(
                     req,
-                    "Access denied: Only logs for rpi-sb, rpi-naked, and rpi-fde services are available",
+                    "Access denied: Only logs for rpi-sb, rpi-naked, rpi-fde, and rpi-idp services are available",
                     drogon::k403Forbidden,
                     "Unauthorized Service",
                     "SERVICE_UNAUTHORIZED"
@@ -523,15 +527,20 @@ namespace provisioner {
                     continue;
                 }
                 
-                // Convert timestamp to readable format
+                // Convert timestamp to ISO 8601 format (UTC)
                 time_t secs = time / 1000000;
+                uint64_t usecs = time % 1000000;
                 struct tm tm;
-                localtime_r(&secs, &tm);
+                gmtime_r(&secs, &tm);
                 char timestr[64];
-                strftime(timestr, sizeof(timestr), "%Y-%m-%d %H:%M:%S", &tm);
+                strftime(timestr, sizeof(timestr), "%Y-%m-%dT%H:%M:%S", &tm);
+                
+                // Add milliseconds and Z suffix for ISO 8601 UTC format
+                char isotimestr[80];
+                snprintf(isotimestr, sizeof(isotimestr), "%s.%03ldZ", timestr, usecs / 1000);
                 
                 // Add the formatted log entry
-                std::string entry = std::string(timestr) + " " + message;
+                std::string entry = std::string(isotimestr) + " " + message;
                 logEntries.push_back(entry);
                 collected++;
             }
@@ -597,13 +606,14 @@ namespace provisioner {
             std::string serviceName = name;
 
             // Validate that the service name starts with one of the allowed prefixes
-            if (serviceName.find("rpi-sb-") != 0 && 
-                serviceName.find("rpi-naked-") != 0 && 
-                serviceName.find("rpi-fde-") != 0) {
+            if (serviceName.find("rpi-sb-") != 0 &&
+                serviceName.find("rpi-naked-") != 0 &&
+                serviceName.find("rpi-fde-") != 0 &&
+                serviceName.find("rpi-idp-") != 0) {
                 LOG_INFO << "Rejected access to logs for unauthorized service: " << serviceName;
                 auto resp = provisioner::utils::createErrorResponse(
                     req,
-                    "Access denied: Only logs for rpi-sb, rpi-naked, and rpi-fde services are available",
+                    "Access denied: Only logs for rpi-sb, rpi-naked, rpi-fde, and rpi-idp services are available",
                     drogon::k403Forbidden,
                     "Unauthorized Service",
                     "SERVICE_UNAUTHORIZED",
@@ -743,15 +753,20 @@ namespace provisioner {
                     continue;
                 }
                 
-                // Convert timestamp to readable format
+                // Convert timestamp to ISO 8601 format (UTC)
                 time_t secs = time / 1000000;
+                uint64_t usecs = time % 1000000;
                 struct tm tm;
-                localtime_r(&secs, &tm);
+                gmtime_r(&secs, &tm);
                 char timestr[64];
-                strftime(timestr, sizeof(timestr), "%Y-%m-%d %H:%M:%S", &tm);
+                strftime(timestr, sizeof(timestr), "%Y-%m-%dT%H:%M:%S", &tm);
+                
+                // Add milliseconds and Z suffix for ISO 8601 UTC format
+                char isotimestr[80];
+                snprintf(isotimestr, sizeof(isotimestr), "%s.%03ldZ", timestr, usecs / 1000);
                 
                 // Add the formatted log entry
-                std::string entry = std::string(timestr) + " " + message;
+                std::string entry = std::string(isotimestr) + " " + message;
                 logEntries.push_back(entry);
                 collected++;
             }

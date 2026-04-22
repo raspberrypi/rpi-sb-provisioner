@@ -136,6 +136,25 @@ fi
 read_config
 setup_fastboot_and_id_vars "${TARGET_DEVICE_SERIAL}"
 
+# Ensure the device has a firmware crypto ECDSA key.  Every provisioned
+# device gets one regardless of style -- it is needed for HMAC-based LUKS
+# key derivation and is useful for device identity.
+log "Checking device firmware crypto key status"
+FWCRYPTO_STATUS=$(fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem fwcrypto status 2>&1) || true
+if echo "${FWCRYPTO_STATUS}" | grep -qi "not provisioned"; then
+    log "Provisioning device firmware crypto key"
+    timeout_fatal fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem fwcrypto init
+    # Confirm the key was actually written to OTP
+    FWCRYPTO_STATUS=$(fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem fwcrypto status 2>&1) || true
+    if echo "${FWCRYPTO_STATUS}" | grep -qi "not provisioned"; then
+        record_state "${TARGET_DEVICE_SERIAL}" "${TRIAGE_ABORTED}" "${TARGET_USB_PATH}"
+        die "Failed to provision device firmware crypto key"
+    fi
+    log "Device firmware crypto key provisioned and verified"
+else
+    log "Device firmware crypto key already provisioned"
+fi
+
 KEYPAIR_DIR="${LOG_DIRECTORY}/${TARGET_DEVICE_SERIAL}"/keypair
 if [ -d "${RPI_DEVICE_RETRIEVE_KEYPAIR}" ]; then
     KEYPAIR_DIR="${RPI_DEVICE_RETRIEVE_KEYPAIR}"
@@ -152,26 +171,37 @@ else
 fi
 get_variable public-key > "${KEYPAIR_DIR}/${TARGET_DEVICE_SERIAL}.pub"
 
-# Based on the provisioning style, we can determine which systemd unit to trigger.
-# All systemd must be parameterised with the device serial number.
+# Based on the image type and provisioning style, we can determine which
+# systemd unit to trigger.  All units are parameterised with the device serial.
 echo "${TRIAGE_STARTED}" >> "${LOG_DIRECTORY}"/triage.log
-case ${PROVISIONING_STYLE} in
-    "secure-boot")
-        log "Selecting Secure Boot Provisioner"
-        systemctl start rpi-sb-provisioner@"${TARGET_DEVICE_SERIAL}".service
-    ;;
-    "fde-only")
-        log "Selecting Full-Disk Encryption Provisioner"
-        systemctl start rpi-fde-provisioner@"${TARGET_DEVICE_SERIAL}".service
-    ;;
-    "naked")
-        log "Selecting Naked Provisioner"
-        systemctl start rpi-naked-provisioner@"${TARGET_DEVICE_SERIAL}".service
-    ;;
-    *)
-        log "Fatal: Unknown provisioning style: ${PROVISIONING_STYLE}"
-        exit 1
-    ;;
-esac
+
+if [ -d "${GOLD_MASTER_OS_FILE}" ]; then
+    # GOLD_MASTER_OS_FILE is a directory -- this is an IDP artefact.
+    # Route to the IDP provisioner regardless of PROVISIONING_STYLE,
+    # since the IDP provisioner handles the image format natively.
+    # (Secure boot is handled by the bootstrap phase, not the provisioner.)
+    log "GOLD_MASTER_OS_FILE is a directory; selecting IDP Provisioner"
+    systemctl start rpi-idp-provisioner@"${TARGET_DEVICE_SERIAL}".service
+else
+    # Traditional .img file -- use the PROVISIONING_STYLE switch as before
+    case ${PROVISIONING_STYLE} in
+        "secure-boot")
+            log "Selecting Secure Boot Provisioner"
+            systemctl start rpi-sb-provisioner@"${TARGET_DEVICE_SERIAL}".service
+        ;;
+        "fde-only")
+            log "Selecting Full-Disk Encryption Provisioner"
+            systemctl start rpi-fde-provisioner@"${TARGET_DEVICE_SERIAL}".service
+        ;;
+        "naked")
+            log "Selecting Naked Provisioner"
+            systemctl start rpi-naked-provisioner@"${TARGET_DEVICE_SERIAL}".service
+        ;;
+        *)
+            log "Fatal: Unknown provisioning style: ${PROVISIONING_STYLE}"
+            exit 1
+        ;;
+    esac
+fi
 log "${TRIAGE_FINISHED}" >> "${LOG_DIRECTORY}"/triage.log
 record_state "${TARGET_DEVICE_SERIAL}" "${TRIAGE_FINISHED}" "${TARGET_USB_PATH}"

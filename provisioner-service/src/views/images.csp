@@ -1,1269 +1,1189 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>System Images</title>
-    <%view stylesheet %>
-    <script>
-        // WebSocket connection
-        let ws = null;
-        let pendingSha256Requests = new Set();
-        // For polling SHA256 calculations
-        let pollingIntervals = {};
-        const POLLING_INTERVAL = 1000; // Poll every 1 second for better UI responsiveness
+<!-- Image Browser Sub-View (included by options.csp) -->
+<style>
+    /* ===== Image Browser Styling ===== */
+    .image-browser-container {
+        border: 1px solid #e0e0e0;
+        border-radius: 8px;
+        overflow: hidden;
+        margin-top: 12px;
+    }
+    
+    .image-browser-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 12px 16px;
+        background: #f8f9fa;
+        border-bottom: 1px solid #e9ecef;
+    }
+    
+    .image-browser-header h4 {
+        margin: 0;
+        font-size: 0.9rem;
+        color: #495057;
+    }
+    
+    .image-browser-actions {
+        display: flex;
+        gap: 8px;
+    }
+    
+    .image-upload-btn {
+        padding: 6px 12px;
+        font-size: 0.8rem;
+        background: #007bff;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+    }
+    
+    .image-upload-btn:hover {
+        background: #0056b3;
+    }
+    
+    .image-list {
+        max-height: calc(600px - 45px); /* container max-height minus header */
+        overflow-y: auto;
+        padding: 8px;
+        box-sizing: border-box;
+    }
+    
+    .image-empty {
+        text-align: center;
+        padding: 30px;
+        color: #888;
+    }
+    
+    .image-upload-zone {
+        border: 2px dashed #ccc;
+        border-radius: 8px;
+        padding: 20px;
+        text-align: center;
+        background: #fafafa;
+        transition: all 0.2s;
+        cursor: pointer;
+        margin: 8px;
+    }
+    
+    .image-upload-zone:hover,
+    .image-upload-zone.dragover {
+        border-color: #007bff;
+        background: #f0f7ff;
+    }
+    
+    .image-upload-progress {
+        margin: 8px;
+        padding: 12px;
+        background: #f5f5f5;
+        border-radius: 6px;
+    }
+    
+    .image-upload-progress-bar {
+        height: 8px;
+        background: #e0e0e0;
+        border-radius: 4px;
+        overflow: hidden;
+        margin-bottom: 8px;
+    }
+    
+    .image-upload-progress-fill {
+        height: 100%;
+        background: #007bff;
+        transition: width 0.3s;
+    }
+    
+    .image-upload-progress-fill.indeterminate {
+        width: 100% !important;
+        background: linear-gradient(90deg, #007bff 25%, #4dabf7 50%, #007bff 75%);
+        background-size: 200% 100%;
+        animation: indeterminate-slide 1.5s linear infinite;
+    }
+    
+    @keyframes indeterminate-slide {
+        0% { background-position: 200% 0; }
+        100% { background-position: -200% 0; }
+    }
+    
+    .image-upload-progress-text {
+        font-size: 0.8rem;
+        color: #666;
+        text-align: center;
+    }
+    
+    .image-upload-progress-text.processing {
+        color: #495057;
+        font-weight: 500;
+    }
+    
+    .image-upload-elapsed {
+        font-size: 0.75rem;
+        color: #888;
+        text-align: center;
+        margin-top: 4px;
+    }
 
-        function showMessage(message, isError = false) {
-            const messageDiv = document.getElementById(isError ? 'error-message' : 'success-message');
-            messageDiv.textContent = message;
-            messageDiv.style.display = 'block';
-            setTimeout(() => {
-                messageDiv.style.display = 'none';
-            }, 3000);
+    /* Ensure the image details panel scrolls when content exceeds the
+       grid track height.  The shared firmware-notes-container uses
+       overflow:hidden which clips the panel when IDP metadata pushes
+       the content beyond the 600px grid max-height. */
+    .image-browser-container .firmware-notes-container {
+        overflow-y: auto;
+        min-height: 0;
+    }
+
+    .image-browser-container .firmware-notes {
+        box-sizing: border-box;
+    }
+</style>
+
+<!-- Gold Master Image -->
+<%c++ auto goldMasterFile = @@.get<std::map<std::string, std::string>>("options").count("GOLD_MASTER_OS_FILE") ? @@.get<std::map<std::string, std::string>>("options").at("GOLD_MASTER_OS_FILE") : std::string(); %>
+<div class="field-group">
+    <label class="field-label">Gold Master OS Image</label>
+    <input type="hidden" name="GOLD_MASTER_OS_FILE" id="GOLD_MASTER_OS_FILE" value="<%c++ $$ << goldMasterFile; %>">
+    
+    <!-- Image Browser -->
+    <div class="image-browser-container">
+        <div class="image-browser-header">
+            <h4>Available Images</h4>
+            <div class="image-browser-actions">
+                <button type="button" class="image-upload-btn" onclick="toggleImageUpload()">Upload New Image</button>
+            </div>
+        </div>
+        
+        <!-- Upload Zone (hidden by default) -->
+        <div id="image-upload-container" style="display: none;">
+            <div class="image-upload-zone" id="image-upload-zone">
+                <div>Drop an image file here or click to browse</div>
+                <div style="font-size: 0.8rem; color: #888; margin-top: 8px;">Image (.img, .img.xz, .img.zst) or IDP artefact archive (.tar.xz, .tar.zst)</div>
+                <input type="file" id="image-file-input" style="display: none;">
+            </div>
+            <div id="image-upload-progress" class="image-upload-progress" style="display: none;">
+                <div class="image-upload-progress-bar">
+                    <div class="image-upload-progress-fill" id="image-upload-fill" style="width: 0%;"></div>
+                </div>
+                <div class="image-upload-progress-text" id="image-upload-text">Uploading...</div>
+                <div class="image-upload-elapsed" id="image-upload-elapsed"></div>
+            </div>
+        </div>
+        
+        <!-- Two-column browser content -->
+        <div class="firmware-browser-content">
+            <div class="firmware-list-container">
+                <div class="firmware-list-header">
+                    <h4>Images</h4>
+                    <div class="firmware-loading" id="image-loading">Loading...</div>
+                </div>
+                <div class="image-list" id="image-list">
+                    <!-- Populated by JavaScript -->
+                </div>
+            </div>
+            <div class="firmware-notes-container">
+                <h4>Image Details</h4>
+                <div class="firmware-notes" id="image-details">
+                    <div class="firmware-notes-placeholder">
+                        Select an image to view details
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="inline-help">
+        <span class="inline-help-icon">&#9432;</span>
+        <span>Select a base OS image or IDP artefact. Traditional images (.img, .img.xz, .img.zst) require manual configuration. IDP artefacts (.tar.xz, .tar.zst from rpi-image-gen) carry their own configuration and will auto-fill settings below.</span>
+    </div>
+</div>
+
+<script>
+    // ===== Image Browser Functions =====
+    let imageList = [];
+    let currentImageSelection = document.getElementById('GOLD_MASTER_OS_FILE')?.value || '';
+    
+    // Load images on page load
+    document.addEventListener('DOMContentLoaded', loadImageList);
+    
+    async function loadImageList() {
+        const listEl = document.getElementById('image-list');
+        listEl.innerHTML = '<div class="image-empty">Loading images...</div>';
+        
+        try {
+            const response = await fetch('/images/list');
+            if (response.ok) {
+                const data = await response.json();
+                imageList = data.images || [];
+                renderImageList();
+            } else {
+                listEl.innerHTML = '<div class="image-empty">Failed to load images</div>';
+            }
+        } catch (error) {
+            console.error('Error loading images:', error);
+            listEl.innerHTML = '<div class="image-empty">Failed to load images</div>';
         }
-
-        async function useImage(name) {
-            if (!confirm('Are you sure you want to use this image as the gold master?')) {
-                return;
-            }
-
-            try {
-                // Set the new gold master image
-                const response = await fetch('/options/set', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        "GOLD_MASTER_OS_FILE": "/srv/rpi-sb-provisioner/images/" + name
-                    })
-                });
-
-                if (response.ok) {
-                    // Clear the workdir contents by calling the clear-workdir endpoint
-                    // The endpoint will determine the workdir path from the config
-                    const clearResponse = await fetch('/options/clear-workdir', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        }
-                    });
-                    
-                    if (!clearResponse.ok) {
-                        showMessage('Gold master image updated but failed to clear work directory', true);
-                        return;
-                    }
-                    
-                    showMessage('Gold master image updated successfully');
-                    location.reload();
-                } else {
-                    showMessage('Failed to update gold master image', true);
-                }
-            } catch (error) {
-                console.error('Error:', error);
-                showMessage('Failed to update gold master image', true);
-            }
-        }
-
-        async function clearCaches() {
-            if (!confirm('Are you sure you want to clear the cached files for this image?')) {
-                return;
-            }
-
-            try {
-                // Call the clear-workdir endpoint to clear the cache
-                const clearResponse = await fetch('/options/clear-workdir', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    }
-                });
-                
-                if (clearResponse.ok) {
-                    showMessage('Cache files cleared successfully');
-                } else {
-                    showMessage('Failed to clear cache files', true);
-                }
-            } catch (error) {
-                console.error('Error:', error);
-                showMessage('Failed to clear cache files', true);
-            }
-        }
-
-        async function generateBootPackage(name) {
-            if (!confirm('Generate boot package for ' + name + '?\n\nThis will create a Debian package with boot.img and boot.sig files.')) {
-                return;
-            }
-
-            try {
-                const response = await fetch('/generate-boot-package?name=' + encodeURIComponent(name), {
-                    method: 'GET',
-                });
-
-                if (response.ok) {
-                    const result = await response.json();
-                    showMessage(result.message || 'Boot package generation started');
-                    
-                    // Update the boot package cell to show "Generating..."
-                    const cell = document.querySelector(`.boot-package-cell[data-image="${name}"]`);
-                    if (cell) {
-                        cell.textContent = 'Generating...';
-                    }
-                    
-                    let checkCount = 0;
-                    const maxChecks = 60; // 2 minutes (60 checks * 2 seconds)
-                    let generationComplete = false;
-                    
-                    // Poll for status updates
-                    const checkInterval = setInterval(async () => {
-                        checkCount++;
-                        
-                        if (wsBootPackage && wsBootPackage.readyState === WebSocket.OPEN) {
-                            requestBootPackage(name);
-                        }
-                        
-                        // Check if we've exceeded the timeout
-                        if (checkCount >= maxChecks && !generationComplete) {
-                            clearInterval(checkInterval);
-                            const cell = document.querySelector(`.boot-package-cell[data-image="${name}"]`);
-                            if (cell && cell.textContent === 'Generating...') {
-                                cell.innerHTML = `<span style="color: #f44336;">Generation failed or timed out</span> <button class="generate-btn" onclick="generateBootPackage('${name.replace(/'/g, "\\'")}')">Retry</button>`;
-                                showMessage('Boot package generation failed or timed out. Check logs for details.', true);
-                            }
-                        }
-                    }, 2000); // Check every 2 seconds
-                    
-                    // Store interval ID so it can be cleared when generation completes
-                    if (!window.bootPackageIntervals) {
-                        window.bootPackageIntervals = {};
-                    }
-                    window.bootPackageIntervals[name] = checkInterval;
-                } else {
-                    const error = await response.json();
-                    showMessage(error.message || 'Failed to generate boot package', true);
-                }
-            } catch (error) {
-                console.error('Error:', error);
-                showMessage('Failed to generate boot package', true);
-            }
-        }
-
-        async function deleteImage(name) {
-            if (!confirm('Are you sure you want to delete this image?')) {
-                return;
-            }
-
-            try {
-                // Stop any ongoing SHA256 calculation for this image
-                pendingSha256Requests.delete(name);
-                pendingBootPackageRequests.delete(name);
-                stopPolling(name);
-                
-                const response = await fetch(`/delete-image?name=${encodeURIComponent(name)}`, {
-                    method: 'POST'
-                });
-
-                if (response.ok) {
-                    showMessage('Image deleted successfully');
-                    location.reload();
-                } else {
-                    showMessage('Failed to delete image', true);
-                }
-            } catch (error) {
-                console.error('Error:', error);
-                showMessage('Failed to delete image', true);
-            }
+    }
+    
+    let currentViewingImage = null;
+    
+    function renderImageList() {
+        const listEl = document.getElementById('image-list');
+        const loadingEl = document.getElementById('image-loading');
+        const currentValue = document.getElementById('GOLD_MASTER_OS_FILE')?.value || '';
+        
+        if (loadingEl) loadingEl.style.display = 'none';
+        
+        if (imageList.length === 0) {
+            listEl.innerHTML = '<div class="image-empty">No images found. Upload an image to get started.</div>';
+            return;
         }
         
-        // Initialize WebSocket connection
-        function initWebSocket() {
-            // Check if WebSockets are supported
-            if (!window.WebSocket) {
-                console.warn('WebSockets not supported, using polling only');
-                return;
+        listEl.innerHTML = '';
+        
+        imageList.forEach(img => {
+            const isSelected = currentValue && currentValue.includes(img.name);
+            const isViewing = currentViewingImage && currentViewingImage.name === img.name;
+            
+            const item = document.createElement('div');
+            item.className = 'firmware-item' + (isSelected ? ' selected' : '') + (isViewing ? ' viewing' : '');
+            item.dataset.name = img.name;
+            item.onclick = () => viewImage(img);
+            
+            const info = document.createElement('div');
+            info.className = 'firmware-item-info';
+            
+            const nameDiv = document.createElement('div');
+            nameDiv.className = 'firmware-item-version';
+            nameDiv.textContent = img.name;
+            
+            if (img.is_idp) {
+                const idpBadge = document.createElement('span');
+                idpBadge.className = 'idp-badge';
+                idpBadge.textContent = 'IDP';
+                nameDiv.appendChild(idpBadge);
             }
             
-            // Close existing connection if any
-            if (ws) {
-                try {
-                    ws.close();
-                } catch (e) {
-                    console.error('Error closing existing WebSocket:', e);
+            if (isSelected) {
+                const selectedBadge = document.createElement('span');
+                selectedBadge.className = 'firmware-selected-badge';
+                selectedBadge.textContent = 'Selected';
+                selectedBadge.style.marginLeft = '8px';
+                nameDiv.appendChild(selectedBadge);
+            }
+            
+            const metaDiv = document.createElement('div');
+            metaDiv.className = 'firmware-item-meta';
+            const sizeMB = img.size_mb ? img.size_mb.toFixed(1) + ' MB' : 'Unknown size';
+            metaDiv.textContent = img.is_idp ? sizeMB + ' (IDP Artefact)' : sizeMB;
+            
+            info.appendChild(nameDiv);
+            info.appendChild(metaDiv);
+            
+            item.appendChild(info);
+            listEl.appendChild(item);
+        });
+    }
+    
+    function viewImage(img) {
+        currentViewingImage = img;
+        
+        // Update viewing state in list
+        document.querySelectorAll('#image-list .firmware-item').forEach(el => {
+            el.classList.remove('viewing');
+            if (el.dataset.name === img.name) {
+                el.classList.add('viewing');
+            }
+        });
+        
+        // Show image details
+        const detailsEl = document.getElementById('image-details');
+        const currentValue = document.getElementById('GOLD_MASTER_OS_FILE')?.value || '';
+        const isSelected = currentValue && currentValue.includes(img.name);
+        
+        const sizeMB = img.size_mb ? img.size_mb.toFixed(1) + ' MB' : 'Unknown size';
+        const sha256Display = img.sha256 && img.sha256.length > 10 && !img.sha256.includes('Calculating')
+            ? img.sha256 
+            : (img.sha256 || 'Calculating...');
+        
+        detailsEl.innerHTML = '';
+        
+        // Image name header
+        const header = document.createElement('h3');
+        header.textContent = img.name;
+        header.style.marginTop = '0';
+        detailsEl.appendChild(header);
+        
+        // Metadata
+        const metaList = document.createElement('dl');
+        metaList.style.cssText = 'margin: 0; font-size: 0.9rem;';
+        
+        const addMeta = (label, value, id) => {
+            const dt = document.createElement('dt');
+            dt.textContent = label;
+            dt.style.cssText = 'font-weight: 600; margin-top: 12px; color: #555;';
+            const dd = document.createElement('dd');
+            dd.textContent = value;
+            dd.style.cssText = 'margin: 4px 0 0 0; font-family: monospace; word-break: break-all;';
+            if (id) dd.id = id;
+            metaList.appendChild(dt);
+            metaList.appendChild(dd);
+        };
+        
+        if (img.is_idp) {
+            addMeta('Type', 'IDP Artefact');
+        } else {
+            addMeta('Type', 'Traditional Image');
+        }
+        addMeta('Size', sizeMB);
+        if (!img.is_idp) {
+            addMeta('SHA256', sha256Display);
+        }
+        addMeta('Path', img.path || '/srv/rpi-sb-provisioner/images/' + img.name);
+        
+        detailsEl.appendChild(metaList);
+
+        // If IDP, fetch and show analysis
+        if (img.is_idp) {
+            const idpSection = document.createElement('div');
+            idpSection.style.cssText = 'margin-top: 16px; padding-top: 16px; border-top: 1px solid #e0e0e0;';
+            idpSection.innerHTML = '<span style="color: #888;">Analysing IDP artefact...</span>';
+            detailsEl.appendChild(idpSection);
+
+            fetch('/analyze-image?name=' + encodeURIComponent(img.name))
+                .then(r => r.json())
+                .then(data => {
+                    if (data.error) {
+                        idpSection.innerHTML = '<span style="color: #dc3545;">Error: ' + data.error + '</span>';
+                        return;
+                    }
+                    let html = '<h4 style="margin: 0 0 8px 0; color: #0c5460;">IDP Metadata</h4><dl style="margin:0; font-size: 0.9rem;">';
+                    if (data.image_name) html += '<dt style="font-weight:600; margin-top:8px; color:#555;">Image Name</dt><dd style="margin:4px 0 0 0;">' + data.image_name + '</dd>';
+                    if (data.image_version) html += '<dt style="font-weight:600; margin-top:8px; color:#555;">Version</dt><dd style="margin:4px 0 0 0;">' + data.image_version + '</dd>';
+                    if (data.device_class) html += '<dt style="font-weight:600; margin-top:8px; color:#555;">Device Family</dt><dd style="margin:4px 0 0 0;">' + data.device_class + ' <span style="color:#888;">(from ' + (data.device_class_raw || '?') + ')</span></dd>';
+                    if (data.storage_type) html += '<dt style="font-weight:600; margin-top:8px; color:#555;">Storage Type</dt><dd style="margin:4px 0 0 0;">' + data.storage_type + '</dd>';
+                    html += '<dt style="font-weight:600; margin-top:8px; color:#555;">Encryption</dt><dd style="margin:4px 0 0 0;">' + (data.encryption ? 'Yes' : 'No') + '</dd>';
+                    if (data.cipher) html += '<dt style="font-weight:600; margin-top:8px; color:#555;">Cipher</dt><dd style="margin:4px 0 0 0;">' + data.cipher + '</dd>';
+                    if (data.partition_count !== undefined) html += '<dt style="font-weight:600; margin-top:8px; color:#555;">Partitions</dt><dd style="margin:4px 0 0 0;">' + data.partition_count + '</dd>';
+                    html += '</dl>';
+                    idpSection.innerHTML = html;
+                })
+                .catch(e => {
+                    idpSection.innerHTML = '<span style="color: #dc3545;">Failed to analyse artefact</span>';
+                });
+        }
+        
+        // Boot Package section (traditional images only)
+        if (!img.is_idp) {
+            const bootSection = document.createElement('div');
+            bootSection.style.cssText = 'margin-top: 16px; padding-top: 16px; border-top: 1px solid #e0e0e0;';
+            
+            const bootHeader = document.createElement('dt');
+            bootHeader.textContent = 'Boot Package';
+            bootHeader.style.cssText = 'font-weight: 600; color: #555;';
+            bootSection.appendChild(bootHeader);
+            
+            const bootStatus = document.createElement('dd');
+            bootStatus.id = 'boot-package-status-' + img.name.replace(/[^a-zA-Z0-9]/g, '_');
+            bootStatus.style.cssText = 'margin: 4px 0 0 0;';
+            bootStatus.innerHTML = '<span style="color: #888;">Checking...</span>';
+            bootSection.appendChild(bootStatus);
+            
+            detailsEl.appendChild(bootSection);
+            
+            // Check boot package status
+            checkBootPackageStatus(img.name);
+        }
+        
+        // Action buttons
+        const actions = document.createElement('div');
+        actions.style.cssText = 'margin-top: 20px; display: flex; flex-direction: column; gap: 8px;';
+        
+        if (!isSelected) {
+            const selectBtn = document.createElement('button');
+            selectBtn.type = 'button';
+            selectBtn.className = 'image-upload-btn';
+            selectBtn.textContent = 'Use This Image';
+            selectBtn.onclick = () => selectImage(img.name, img.path);
+            actions.appendChild(selectBtn);
+        } else {
+            const selectedNotice = document.createElement('div');
+            selectedNotice.style.cssText = 'padding: 8px 12px; background: #d4edda; color: #155724; border-radius: 4px; text-align: center;';
+            selectedNotice.innerHTML = '&#10003; Currently selected';
+            actions.appendChild(selectedNotice);
+        }
+        
+        if (!img.is_idp) {
+            const generateBootBtn = document.createElement('button');
+            generateBootBtn.type = 'button';
+            generateBootBtn.id = 'generate-boot-btn-' + img.name.replace(/[^a-zA-Z0-9]/g, '_');
+            generateBootBtn.style.cssText = 'padding: 8px 12px; background: #17a2b8; color: white; border: none; border-radius: 4px; cursor: pointer;';
+            generateBootBtn.textContent = 'Generate Boot Package';
+            generateBootBtn.onclick = () => generateBootPackage(img.name);
+            actions.appendChild(generateBootBtn);
+            
+            const clearCacheBtn = document.createElement('button');
+            clearCacheBtn.type = 'button';
+            clearCacheBtn.style.cssText = 'padding: 8px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;';
+            clearCacheBtn.textContent = 'Clear Cached Files';
+            clearCacheBtn.onclick = () => clearImageCache(img.name);
+            actions.appendChild(clearCacheBtn);
+        }
+        
+        const deleteBtn = document.createElement('button');
+        deleteBtn.type = 'button';
+        deleteBtn.style.cssText = 'padding: 8px 12px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;';
+        deleteBtn.textContent = 'Delete Image';
+        deleteBtn.onclick = () => deleteImage(img.name);
+        if (isSelected) {
+            deleteBtn.disabled = true;
+            deleteBtn.style.opacity = '0.5';
+            deleteBtn.style.cursor = 'not-allowed';
+            deleteBtn.title = 'Cannot delete the selected image';
+        }
+        actions.appendChild(deleteBtn);
+        
+        detailsEl.appendChild(actions);
+    }
+    
+    async function checkBootPackageStatus(name) {
+        const statusId = 'boot-package-status-' + name.replace(/[^a-zA-Z0-9]/g, '_');
+        const statusEl = document.getElementById(statusId);
+        if (!statusEl) return;
+        
+        try {
+            const response = await fetch('/get-boot-package-info?name=' + encodeURIComponent(name));
+            if (response.ok) {
+                const data = await response.json();
+                if (data.exists) {
+                    statusEl.innerHTML = '<span style="color: #28a745;">&#10003; Available</span>';
+                    if (data.version) {
+                        statusEl.innerHTML += '<br><span style="font-size: 0.85rem; color: #666;">Version: ' + data.version + '</span>';
+                    }
+                } else if (data.generating) {
+                    statusEl.innerHTML = '<span style="color: #ffc107;">Generating...</span>';
+                    // Poll for updates
+                    setTimeout(() => checkBootPackageStatus(name), 2000);
+                } else {
+                    statusEl.innerHTML = '<span style="color: #888;">Not generated</span>';
                 }
+            } else {
+                statusEl.innerHTML = '<span style="color: #888;">Not generated</span>';
             }
+        } catch (error) {
+            console.error('Error checking boot package status:', error);
+            statusEl.innerHTML = '<span style="color: #888;">Unknown</span>';
+        }
+    }
+    
+    async function generateBootPackage(name) {
+        if (!confirm('Generate boot package for "' + name + '"?\n\nThis will create a Debian package with boot.img and boot.sig files.')) {
+            return;
+        }
+        
+        const statusId = 'boot-package-status-' + name.replace(/[^a-zA-Z0-9]/g, '_');
+        const statusEl = document.getElementById(statusId);
+        const btnId = 'generate-boot-btn-' + name.replace(/[^a-zA-Z0-9]/g, '_');
+        const btn = document.getElementById(btnId);
+        
+        if (statusEl) {
+            statusEl.innerHTML = '<span style="color: #ffc107;">Generating...</span>';
+        }
+        if (btn) {
+            btn.disabled = true;
+            btn.style.opacity = '0.5';
+            btn.textContent = 'Generating...';
+        }
+        
+        try {
+            const response = await fetch('/generate-boot-package?name=' + encodeURIComponent(name), {
+                method: 'GET'
+            });
             
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}/ws/sha256`;
-            
-            try {
-                console.log('Connecting to WebSocket:', wsUrl);
-                ws = new WebSocket(wsUrl);
+            if (response.ok) {
+                const result = await response.json();
+                showSuccess(result.message || 'Boot package generation started');
                 
-                ws.onopen = function() {
-                    console.log('WebSocket connection established');
-                    // Re-send requests for all pending SHA256 calculations
-                    initializeSha256Requests();
-                    // Stop any polling that might have been started
-                    stopAllPolling();
-                };
+                // Poll for completion
+                let checkCount = 0;
+                const maxChecks = 60;
                 
-                ws.onmessage = function(event) {
+                const checkInterval = setInterval(async () => {
+                    checkCount++;
+                    
                     try {
-                        const response = JSON.parse(event.data);
-                        console.log('WebSocket message received:', response);
-                        if (response.image_name) {
-                            // Handle the SHA256 update
-                            updateSha256Cell(response);
-                            
-                            // For completed calculations, we can remove from pending
-                            if (response.status === 'complete' || response.status === 'error') {
-                                pendingSha256Requests.delete(response.image_name);
+                        const statusResponse = await fetch('/get-boot-package-info?name=' + encodeURIComponent(name));
+                        if (statusResponse.ok) {
+                            const data = await statusResponse.json();
+                            if (data.exists) {
+                                clearInterval(checkInterval);
+                                if (statusEl) {
+                                    statusEl.innerHTML = '<span style="color: #28a745;">&#10003; Available</span>';
+                                }
+                                if (btn) {
+                                    btn.disabled = false;
+                                    btn.style.opacity = '1';
+                                    btn.textContent = 'Regenerate Boot Package';
+                                }
+                                showSuccess('Boot package generated successfully');
+                            } else if (checkCount >= maxChecks) {
+                                clearInterval(checkInterval);
+                                if (statusEl) {
+                                    statusEl.innerHTML = '<span style="color: #dc3545;">Generation timed out</span>';
+                                }
+                                if (btn) {
+                                    btn.disabled = false;
+                                    btn.style.opacity = '1';
+                                    btn.textContent = 'Retry Generation';
+                                }
+                                showError('Boot package generation timed out');
                             }
                         }
                     } catch (e) {
-                        console.error('Error parsing WebSocket message:', e);
+                        console.error('Error polling boot package status:', e);
                     }
-                };
-                
-                ws.onerror = function(error) {
-                    console.error('WebSocket error:', error);
-                    // Clear the WebSocket reference on error to prevent stalling
-                    ws = null;
-                    // Fallback to polling
-                    initializePolling();
-                };
-                
-                ws.onclose = function(event) {
-                    console.log(`WebSocket connection closed: code=${event.code}, reason=${event.reason}`);
-                    // Clear the WebSocket reference when closed
-                    ws = null;
-                    
-                    // Fallback to polling while attempting to reconnect
-                    initializePolling();
-                    
-                    // Try to reconnect after a delay (using exponential backoff)
-                    const maxReconnectDelay = 30000; // 30 seconds max
-                    const baseDelay = 1000; // 1 second base
-                    const reconnectAttempts = window.reconnectAttempts || 0;
-                    window.reconnectAttempts = reconnectAttempts + 1;
-                    
-                    const delay = Math.min(
-                        Math.pow(1.5, reconnectAttempts) * baseDelay, 
-                        maxReconnectDelay
-                    );
-                    
-                    console.log(`Will attempt to reconnect in ${delay/1000} seconds (attempt #${reconnectAttempts+1})`);
-                    
-                    setTimeout(() => {
-                        if (document.visibilityState !== 'hidden') {
-                            initWebSocket();
-                        } else {
-                            // If page is hidden, wait for it to become visible
-                            const visibilityHandler = () => {
-                                if (document.visibilityState === 'visible') {
-                                    document.removeEventListener('visibilitychange', visibilityHandler);
-                                    initWebSocket();
-                                }
-                            };
-                            document.addEventListener('visibilitychange', visibilityHandler);
-                        }
-                    }, delay);
-                };
-            } catch (e) {
-                console.error('Error creating WebSocket:', e);
-                // Fallback to polling
-                initializePolling();
+                }, 2000);
+            } else {
+                const error = await response.json().catch(() => ({}));
+                showError(error.message || 'Failed to start boot package generation');
+                if (btn) {
+                    btn.disabled = false;
+                    btn.style.opacity = '1';
+                    btn.textContent = 'Generate Boot Package';
+                }
+                if (statusEl) {
+                    statusEl.innerHTML = '<span style="color: #dc3545;">Generation failed</span>';
+                }
+            }
+        } catch (error) {
+            console.error('Error generating boot package:', error);
+            showError('Failed to generate boot package');
+            if (btn) {
+                btn.disabled = false;
+                btn.style.opacity = '1';
+                btn.textContent = 'Generate Boot Package';
             }
         }
+    }
+    
+    async function selectImage(name, path) {
+        const fullPath = path || '/srv/rpi-sb-provisioner/images/' + name;
         
-        // Update SHA256 cell with response data
-        function updateSha256Cell(response) {
-            const sha256Cell = document.querySelector(`.sha256-cell[data-image="${response.image_name}"]`);
-            if (!sha256Cell) {
-                console.warn(`No SHA256 cell found for image: ${response.image_name}`);
-                return;
+        try {
+            // Analyse the image first to determine type
+            const analyzeResp = await fetch('/analyze-image?name=' + encodeURIComponent(name));
+            let imageAnalysis = null;
+            if (analyzeResp.ok) {
+                imageAnalysis = await analyzeResp.json();
             }
-            
-            if (response.status === 'complete') {
-                console.log(`SHA256 calculation complete for ${response.image_name}: ${response.sha256}`);
-                displayTruncatedHash(sha256Cell, response.sha256);
-                pendingSha256Requests.delete(response.image_name);
-                // Stop polling for this image if it was being polled
-                stopPolling(response.image_name);
-                
-                // Remove progress bar if it exists
-                const progressContainer = sha256Cell.querySelector('.hash-progress-container');
-                if (progressContainer) {
-                    progressContainer.remove();
+
+            // Build the config update payload
+            const configUpdate = { 'GOLD_MASTER_OS_FILE': fullPath };
+
+            // If IDP, also auto-populate device family and storage type from the artefact
+            if (imageAnalysis && imageAnalysis.type === 'idp') {
+                if (imageAnalysis.device_class) {
+                    configUpdate['RPI_DEVICE_FAMILY'] = imageAnalysis.device_class;
                 }
-            } else if (response.status === 'error') {
-                console.log(`SHA256 calculation error for ${response.image_name}: ${response.error || 'Unknown error'}`);
-                
-                // Check if it was cancelled (file deleted)
-                if (response.error && response.error.includes('calculation-cancelled')) {
-                    console.log(`SHA256 calculation was cancelled for ${response.image_name} (file deleted)`);
-                    // Don't display error, just clean up
-                } else {
-                    displayTruncatedHash(sha256Cell, response.error || 'Unknown error');
+                if (imageAnalysis.storage_type) {
+                    configUpdate['RPI_DEVICE_STORAGE_TYPE'] = imageAnalysis.storage_type;
                 }
-                
-                pendingSha256Requests.delete(response.image_name);
-                // Stop polling for this image if it was being polled
-                stopPolling(response.image_name);
-                
-                // Remove progress bar if it exists
-                const progressContainer = sha256Cell.querySelector('.hash-progress-container');
-                if (progressContainer) {
-                    progressContainer.remove();
-                }
-            } else if (response.status === 'pending') {
-                // Show progress if available
-                if (response.progress !== undefined || response.progress_percent !== undefined) {
-                    const progressPercent = response.progress_percent !== undefined ? 
-                        response.progress_percent : 
-                        Math.round(response.progress * 100);
-                    
-                    console.log(`SHA256 progress update for ${response.image_name}: ${progressPercent}%`);
-                    displayTruncatedHash(sha256Cell, `Calculating... ${progressPercent}%`);
-                    
-                    // Create/update progress bar if not exists
-                    let progressContainer = sha256Cell.querySelector('.hash-progress-container');
-                    if (!progressContainer) {
-                        // Create progress bar structure
-                        progressContainer = document.createElement('div');
-                        progressContainer.className = 'hash-progress-container';
-                        
-                        const progressBar = document.createElement('div');
-                        progressBar.className = 'hash-progress-bar';
-                        
-                        const progressFill = document.createElement('div');
-                        progressFill.className = 'hash-progress-fill';
-                        
-                        progressBar.appendChild(progressFill);
-                        progressContainer.appendChild(progressBar);
-                        sha256Cell.appendChild(progressContainer);
-                    }
-                    
-                    // Update progress fill
-                    const progressFill = sha256Cell.querySelector('.hash-progress-fill');
-                    if (progressFill) {
-                        progressFill.style.width = `${progressPercent}%`;
-                    }
-                } else if (sha256Cell.textContent === 'use-websocket' || 
-                           sha256Cell.textContent === 'Connecting...') {
-                    displayTruncatedHash(sha256Cell, 'Calculating...');
+                if (imageAnalysis.cipher) {
+                    configUpdate['RPI_DEVICE_STORAGE_CIPHER'] = imageAnalysis.cipher;
                 }
             }
-        }
-        
-        // Show notification when hash is copied
-        function showCopyNotification(message) {
-            // Create notification element if it doesn't exist
-            let notification = document.getElementById('copy-notification');
-            if (!notification) {
-                notification = document.createElement('div');
-                notification.id = 'copy-notification';
-                document.body.appendChild(notification);
-            }
+
+            const response = await fetch('/options/set', addCsrfHeader({
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(configUpdate)
+            }));
             
-            // Set message and show
-            notification.textContent = message;
-            notification.classList.add('show');
-            
-            // Hide after 2 seconds
-            setTimeout(() => {
-                notification.classList.remove('show');
-            }, 2000);
-        }
-        
-        // Display truncated hash with tooltip and copy functionality
-        function displayTruncatedHash(cell, fullHash) {
-            // Don't process non-hash values
-            if (!fullHash || fullHash.length < 10 || 
-                fullHash === 'Calculating...' || 
-                fullHash.includes('Calculating') || 
-                fullHash.includes('Error')) {
-                cell.textContent = fullHash;
-                return;
-            }
-            
-            // Clear previous content
-            cell.innerHTML = '';
-            
-            // Create truncated hash element
-            const truncatedHash = document.createElement('span');
-            truncatedHash.className = 'truncated-hash';
-            truncatedHash.textContent = fullHash.substring(0, 10) + '...';
-            truncatedHash.title = fullHash;
-            truncatedHash.setAttribute('data-full-hash', fullHash);
-            
-            // Add click handler for copy
-            truncatedHash.addEventListener('click', async () => {
+            if (response.ok) {
+                // Update hidden input
+                document.getElementById('GOLD_MASTER_OS_FILE').value = fullPath;
+                
+                // Apply progressive disclosure based on image type
+                applyIdpDisclosure(imageAnalysis);
+                
+                // Re-render list to show updated selection
+                renderImageList();
+                
+                // Refresh details panel if viewing this image
+                if (currentViewingImage && currentViewingImage.name === name) {
+                    viewImage(currentViewingImage);
+                }
+                
+                // Clear workdir since image changed
                 try {
-                    await navigator.clipboard.writeText(fullHash);
-                    showCopyNotification('SHA256 hash copied to clipboard');
-                } catch (err) {
-                    console.error('Failed to copy hash:', err);
-                    showCopyNotification('Failed to copy hash');
+                    await fetch('/options/clear-workdir', addCsrfHeader({
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' }
+                    }));
+                } catch (e) {
+                    console.warn('Could not clear workdir:', e);
                 }
-            });
-            
-            cell.appendChild(truncatedHash);
+                
+                showSuccess('Image "' + name + '" selected');
+            } else {
+                showError('Failed to select image');
+            }
+        } catch (error) {
+            console.error('Error selecting image:', error);
+            showError('Failed to select image');
+        }
+    }
+    
+    // ===== IDP Progressive Disclosure =====
+    // Applies or removes IDP-specific UI state based on image analysis results
+    function applyIdpDisclosure(analysis) {
+        const isIdp = analysis && analysis.type === 'idp';
+        
+        // Remove any existing IDP info banners
+        document.querySelectorAll('.idp-info-banner').forEach(el => el.remove());
+        
+        // Remove any existing IDP locked/default badges
+        document.querySelectorAll('.idp-locked-badge').forEach(el => el.remove());
+        document.querySelectorAll('.idp-default-badge').forEach(el => el.remove());
+        
+        // Remove IDP locked class from all field groups
+        document.querySelectorAll('.idp-locked').forEach(el => el.classList.remove('idp-locked'));
+
+        // Remove IDP disabled class from all sections
+        document.querySelectorAll('.idp-disabled').forEach(el => el.classList.remove('idp-disabled'));
+
+        // Restore FDE-only tile visibility (hidden when IDP is selected)
+        const fdeTileRestore = document.getElementById('fde-only-tile');
+        if (fdeTileRestore) fdeTileRestore.style.display = '';
+
+        // Restore original naked tile content if previously modified for IDP
+        const nakedTile = document.getElementById('naked-tile');
+        if (nakedTile && nakedTile._origContent) {
+            nakedTile.querySelector('.tile-description').textContent = nakedTile._origContent.description;
+            const badge = nakedTile.querySelector('.tile-badge');
+            if (badge) {
+                badge.textContent = nakedTile._origContent.badgeText;
+                badge.className = nakedTile._origContent.badgeClass;
+            }
+            const warning = nakedTile.querySelector('.tile-warning');
+            if (warning) {
+                warning.innerHTML = nakedTile._origContent.warningHtml;
+                warning.className = nakedTile._origContent.warningClass;
+            }
+            delete nakedTile._origContent;
         }
 
-        // Start polling for SHA256 calculation result
-        function startPolling(imageName) {
-            if (pollingIntervals[imageName]) {
-                // Already polling
-                return;
+        if (!isIdp) {
+            // Traditional image: ensure all sections are visible and enabled
+            return;
+        }
+        
+        // --- IDP image selected ---
+        
+        // 1. Auto-fill and lock Device Family
+        const deviceSection = document.getElementById('section-device-firmware');
+        if (deviceSection && analysis.device_class) {
+            // Add IDP info banner at the top of the section
+            const banner = document.createElement('div');
+            banner.className = 'idp-info-banner';
+            banner.innerHTML = '<strong>IDP Artefact Selected.</strong> Device family and encryption settings are defined by the image. Storage type has been defaulted to match the image but can be overridden.';
+            deviceSection.querySelector('.section-header').after(banner);
+            
+            // Select the correct device family radio
+            const familyRadio = deviceSection.querySelector('input[name="RPI_DEVICE_FAMILY"][value="' + analysis.device_class + '"]');
+            if (familyRadio) {
+                familyRadio.checked = true;
+                familyRadio.dispatchEvent(new Event('change', { bubbles: true }));
             }
             
-            pollingIntervals[imageName] = setInterval(() => {
-                fetchSha256(imageName);
-            }, POLLING_INTERVAL);
+            // Lock the device family field group
+            const familyGroup = familyRadio ? familyRadio.closest('.field-group') : null;
+            if (familyGroup) {
+                familyGroup.classList.add('idp-locked');
+                const label = familyGroup.querySelector('.field-label');
+                if (label) {
+                    const badge = document.createElement('span');
+                    badge.className = 'idp-locked-badge';
+                    badge.textContent = 'Set by image';
+                    label.appendChild(badge);
+                }
+            }
             
-            // Immediately fetch once
-            fetchSha256(imageName);
-        }
-        
-        // Stop polling for a specific image
-        function stopPolling(imageName) {
-            if (pollingIntervals[imageName]) {
-                clearInterval(pollingIntervals[imageName]);
-                delete pollingIntervals[imageName];
+            // Select storage type from IDP (as default, but allow override)
+            if (analysis.storage_type) {
+                const storageRadio = deviceSection.querySelector('input[name="RPI_DEVICE_STORAGE_TYPE"][value="' + analysis.storage_type + '"]');
+                if (storageRadio) {
+                    storageRadio.checked = true;
+                    storageRadio.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                const storageGroup = storageRadio ? storageRadio.closest('.field-group') : null;
+                if (storageGroup) {
+                    const label = storageGroup.querySelector('.field-label');
+                    if (label) {
+                        const badge = document.createElement('span');
+                        badge.className = 'idp-default-badge';
+                        badge.textContent = 'IDP default: ' + analysis.storage_type;
+                        label.appendChild(badge);
+                    }
+                }
             }
         }
         
-        // Stop all polling intervals
-        function stopAllPolling() {
-            Object.keys(pollingIntervals).forEach(imageName => {
-                clearInterval(pollingIntervals[imageName]);
-                delete pollingIntervals[imageName];
-            });
+        // 2. Security section: collapse to just secure-boot toggle for IDP
+        const securitySection = document.getElementById('section-security');
+        if (securitySection) {
+            // Add IDP info banner
+            const banner = document.createElement('div');
+            banner.className = 'idp-info-banner';
+            banner.innerHTML = '<strong>Encryption is defined by the IDP artefact.</strong> Only the secure boot setting applies here. Choose whether to program this device for secure boot (OTP key + signed EEPROM).';
+            securitySection.querySelector('.section-header').after(banner);
+            
+            // Hide the FDE-only tile (meaningless for IDP)
+            const fdeTile = document.getElementById('fde-only-tile');
+            if (fdeTile) fdeTile.style.display = 'none';
+
+            // If FDE-only was selected, switch to naked (the IDP artefact
+            // handles encryption itself, so "naked" is the correct non-secure
+            // counterpart).
+            const selectedStyle = document.querySelector('input[name="PROVISIONING_STYLE"]:checked');
+            if (selectedStyle && selectedStyle.value === 'fde-only') {
+                const nakedTile = document.getElementById('naked-tile');
+                const nakedInput = nakedTile ? nakedTile.querySelector('input[type="radio"]') : null;
+                if (nakedInput) {
+                    nakedInput.checked = true;
+                    fdeTile.classList.remove('selected');
+                    nakedTile.classList.add('selected');
+                    validateAndSaveField('PROVISIONING_STYLE');
+                    updateSecurityVisibility('naked');
+                }
+            }
+
+            // Reword the naked tile for IDP context — "naked" here means
+            // "no secure boot", not "no security", since the IDP provides
+            // encryption.
+            const nakedTileEl = document.getElementById('naked-tile');
+            if (nakedTileEl) {
+                const desc = nakedTileEl.querySelector('.tile-description');
+                const badge = nakedTileEl.querySelector('.tile-badge');
+                const warning = nakedTileEl.querySelector('.tile-warning');
+                // Save originals so we can restore when switching to a non-IDP image
+                nakedTileEl._origContent = {
+                    description: desc ? desc.textContent : '',
+                    badgeText: badge ? badge.textContent : '',
+                    badgeClass: badge ? badge.className : '',
+                    warningHtml: warning ? warning.innerHTML : '',
+                    warningClass: warning ? warning.className : ''
+                };
+                if (desc) desc.textContent = 'Provisioning without boot verification. Encryption is provided by the IDP artefact.';
+                if (badge) {
+                    badge.textContent = 'No secure boot';
+                    badge.className = 'tile-badge warning';
+                }
+                if (warning) {
+                    warning.innerHTML = '<strong>No boot verification.</strong> The device will not verify the boot chain, but storage encryption from the IDP artefact is still applied.';
+                    warning.className = 'tile-warning caution';
+                }
+            }
+            
+            // Lock/hide the cipher selector (IDP defines encryption)
+            const cipherGroup = document.getElementById('cipher-group');
+            if (cipherGroup) {
+                cipherGroup.classList.add('idp-locked');
+                if (analysis.cipher) {
+                    const cipherRadio = cipherGroup.querySelector('input[name="RPI_DEVICE_STORAGE_CIPHER"][value="' + analysis.cipher + '"]');
+                    if (cipherRadio) {
+                        cipherRadio.checked = true;
+                    }
+                }
+                const label = cipherGroup.querySelector('.field-label');
+                if (label) {
+                    const badge = document.createElement('span');
+                    badge.className = 'idp-locked-badge';
+                    badge.textContent = 'Set by image';
+                    label.appendChild(badge);
+                }
+            }
+        }
+    }
+    
+    // On page load, check if current image is IDP and apply disclosure
+    document.addEventListener('DOMContentLoaded', async function() {
+        const goldMaster = document.getElementById('GOLD_MASTER_OS_FILE')?.value || '';
+        if (!goldMaster) return;
+        
+        // Extract the image name from the path
+        const parts = goldMaster.split('/');
+        const imageName = parts[parts.length - 1];
+        if (!imageName) return;
+        
+        try {
+            const resp = await fetch('/analyze-image?name=' + encodeURIComponent(imageName));
+            if (resp.ok) {
+                const analysis = await resp.json();
+                applyIdpDisclosure(analysis);
+            }
+        } catch (e) {
+            console.warn('Could not analyze current image for IDP disclosure:', e);
+        }
+    });
+    
+    async function clearImageSelection() {
+        try {
+            const response = await fetch('/options/set', addCsrfHeader({
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 'GOLD_MASTER_OS_FILE': '' })
+            }));
+            
+            if (response.ok) {
+                document.getElementById('GOLD_MASTER_OS_FILE').value = '';
+                // Clear any IDP progressive disclosure
+                applyIdpDisclosure(null);
+                // Restore hidden FDE tile
+                const fdeTile = document.getElementById('fde-only-tile');
+                if (fdeTile) fdeTile.style.display = '';
+                renderImageList();
+                showSuccess('Image selection cleared');
+            } else {
+                showError('Failed to clear image selection');
+            }
+        } catch (error) {
+            console.error('Error clearing image:', error);
+            showError('Failed to clear image selection');
+        }
+    }
+    
+    async function clearImageCache(name) {
+        if (!confirm('Clear cached files for "' + name + '"?\n\nThis will remove any pre-processed boot files for this image.')) {
+            return;
         }
         
-        // Fetch SHA256 calculation result
-        async function fetchSha256(imageName) {
-            try {
-                // Then fetch the actual SHA256 status
-                const response = await fetch(`/get-image-sha256?name=${encodeURIComponent(imageName)}`);
-                if (response.ok) {
-                    const data = await response.json();
-                    console.log(`SHA256 status for ${imageName}:`, data);
-                    
-                    // If we have a completed hash, update the cell with the final value
-                    if (data.sha256 && data.sha256 !== 'Calculating...') {
-                        console.log(`Got complete SHA256 for ${imageName}: ${data.sha256}`);
-                        updateSha256Cell({
-                            image_name: imageName,
-                            sha256: data.sha256,
-                            status: data.status || 'complete'
-                        });
-                        return;
-                    }
-                    
-                    // Handle progress information
-                    if (data.progress !== undefined) {
-                        const progressPercent = data.progress_percent || Math.round(data.progress * 100);
-                        console.log(`Got progress update for ${imageName}: ${progressPercent}%`);
-                        updateSha256Cell({
-                            image_name: imageName,
-                            status: 'pending',
-                            progress_percent: progressPercent
-                        });
-                        return;
-                    }
-                    
-                    // If it's still calculating but no progress info
-                    if (data.sha256 === 'Calculating...') {
-                        // Get metadata for estimation
+        try {
+            const response = await fetch('/options/clear-workdir', addCsrfHeader({
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            }));
+            
+            if (response.ok) {
+                showSuccess('Cache cleared for "' + name + '"');
+            } else {
+                showError('Failed to clear cache');
+            }
+        } catch (error) {
+            console.error('Error clearing cache:', error);
+            showError('Failed to clear cache');
+        }
+    }
+    
+    async function deleteImage(name) {
+        if (!confirm('Delete image "' + name + '"?\n\nThis cannot be undone.')) {
+            return;
+        }
+        
+        try {
+            const response = await fetch('/delete-image?name=' + encodeURIComponent(name), addCsrfHeader({
+                method: 'POST'
+            }));
+            
+            if (response.ok) {
+                showSuccess('Image "' + name + '" deleted');
+                currentViewingImage = null;
+                
+                // Reset details panel
+                const detailsEl = document.getElementById('image-details');
+                detailsEl.innerHTML = '<div class="firmware-notes-placeholder">Select an image to view details</div>';
+                
+                // Reload image list
+                await loadImageList();
+            } else {
+                const errorData = await response.json().catch(() => ({}));
+                showError(errorData.message || 'Failed to delete image');
+            }
+        } catch (error) {
+            console.error('Error deleting image:', error);
+            showError('Failed to delete image');
+        }
+    }
+    
+    // Image display is now handled inline in the list
+    
+    function toggleImageUpload() {
+        const container = document.getElementById('image-upload-container');
+        container.style.display = container.style.display === 'none' ? 'block' : 'none';
+    }
+    
+    // Image upload handling
+    const imageUploadZone = document.getElementById('image-upload-zone');
+    const imageFileInput = document.getElementById('image-file-input');
+    
+    if (imageUploadZone) {
+        imageUploadZone.addEventListener('click', () => imageFileInput.click());
+        
+        imageUploadZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            imageUploadZone.classList.add('dragover');
+        });
+        
+        imageUploadZone.addEventListener('dragleave', () => {
+            imageUploadZone.classList.remove('dragover');
+        });
+        
+        imageUploadZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            imageUploadZone.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                uploadImage(files[0]);
+            }
+        });
+    }
+    
+    if (imageFileInput) {
+        imageFileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                uploadImage(e.target.files[0]);
+            }
+        });
+    }
+    
+    function describeProcessingPhase(filename) {
+        const lower = filename.toLowerCase();
+        if (lower.endsWith('.tar.xz') || lower.endsWith('.tar.zst')) {
+            return 'Extracting archive';
+        }
+        if (lower.endsWith('.img.xz') || lower.endsWith('.img.zst')) {
+            return 'Decompressing image';
+        }
+        return null;
+    }
+
+    function formatElapsed(seconds) {
+        if (seconds < 60) return seconds + 's';
+        const m = Math.floor(seconds / 60);
+        const s = seconds % 60;
+        return m + 'm ' + s + 's';
+    }
+
+    function formatBytes(bytes, decimals) {
+        if (decimals === undefined) decimals = 1;
+        if (bytes === 0) return '0 B';
+        var k = 1024;
+        var sizes = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+        var i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(decimals)) + ' ' + sizes[i];
+    }
+
+    var activeUploadXhr = null;
+    var activeProgressWs = null;
+
+    function cleanupUpload() {
+        if (activeProgressWs) {
+            try { activeProgressWs.close(); } catch(e) {}
+            activeProgressWs = null;
+        }
+        if (activeUploadXhr) {
+            try { activeUploadXhr.abort(); } catch(e) {}
+            activeUploadXhr = null;
+        }
+    }
+
+    window.addEventListener('beforeunload', cleanupUpload);
+    window.addEventListener('pagehide', cleanupUpload);
+
+    async function uploadImage(file) {
+        const lowerName = file.name.toLowerCase();
+        const validExtensions = [
+            '.img', '.img.xz', '.img.zst',
+            '.tar.xz', '.tar.zst'
+        ];
+        const isValid = validExtensions.some(ext => lowerName.endsWith(ext));
+        if (!isValid) {
+            showError('Unsupported file type. Allowed: ' + validExtensions.join(', '));
+            return;
+        }
+
+        const uploadZone = document.getElementById('image-upload-zone');
+        const progressContainer = document.getElementById('image-upload-progress');
+        const progressFill = document.getElementById('image-upload-fill');
+        const progressText = document.getElementById('image-upload-text');
+        const elapsedText = document.getElementById('image-upload-elapsed');
+
+        const processingLabel = describeProcessingPhase(file.name);
+        let processingTimerId = null;
+        let uploadDone = false;
+        let wsConnected = false;
+
+        const resetUI = () => {
+            uploadZone.style.display = 'block';
+            progressContainer.style.display = 'none';
+            progressFill.classList.remove('indeterminate');
+            progressText.classList.remove('processing');
+            elapsedText.textContent = '';
+            if (processingTimerId) clearInterval(processingTimerId);
+            if (activeProgressWs) {
+                try { activeProgressWs.close(); } catch(e) {}
+                activeProgressWs = null;
+            }
+            activeUploadXhr = null;
+        };
+
+        // Transition to the indeterminate "processing" fallback UI
+        const startFallbackProcessingUI = () => {
+            progressFill.style.width = '100%';
+            progressFill.classList.add('indeterminate');
+            progressText.classList.add('processing');
+            progressText.textContent = processingLabel + '...';
+            let elapsed = 0;
+            elapsedText.textContent = 'This may take a while for large files';
+            processingTimerId = setInterval(() => {
+                elapsed++;
+                elapsedText.textContent = processingLabel + ' \u2014 ' + formatElapsed(elapsed) + ' elapsed';
+            }, 1000);
+        };
+
+        uploadZone.style.display = 'none';
+        progressContainer.style.display = 'block';
+        progressFill.style.width = '0%';
+        progressFill.classList.remove('indeterminate');
+        progressText.classList.remove('processing');
+        progressText.textContent = 'Uploading ' + file.name + '...';
+        elapsedText.textContent = '';
+
+        try {
+            const formData = new FormData();
+            formData.append('image', file);
+
+            const uploadId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+                ? crypto.randomUUID()
+                : 'u-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
+
+            // Open a WebSocket for server-side progress push
+            if (processingLabel) {
+                try {
+                    const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                    const wsUrl = wsProto + '//' + window.location.host + '/ws/progress';
+                    const ws = new WebSocket(wsUrl);
+                    activeProgressWs = ws;
+
+                    ws.onopen = () => {
+                        wsConnected = true;
+                        ws.send(JSON.stringify({ subscribe: 'upload:' + uploadId }));
+                    };
+
+                    ws.onmessage = (event) => {
                         try {
-                            const metadataResponse = await fetch(`/get-image-metadata?name=${encodeURIComponent(imageName)}`);
-                            if (metadataResponse.ok) {
-                                const metadata = await metadataResponse.json();
-                                let estimatedTimeMsg = '';
-                                
-                                if (metadata.size_mb) {
-                                    const fileSizeMB = metadata.size_mb;
-                                    // Estimate based on 40MB/sec processing speed
-                                    const estimatedMinutes = Math.max(1, Math.ceil(fileSizeMB / 40));
-                                    
-                                    if (estimatedMinutes < 2) {
-                                        estimatedTimeMsg = '(should complete shortly)';
-                                    } else if (estimatedMinutes < 5) {
-                                        estimatedTimeMsg = `(est. ${estimatedMinutes} minutes)`;
-                                    } else {
-                                        estimatedTimeMsg = `(est. ${estimatedMinutes} minutes for ${Math.round(fileSizeMB)} MB)`;
-                                    }
-                                }
-                                
-                                // If we're getting 'use-websocket', display informative calculating message
-                                const cell = document.querySelector(`.sha256-cell[data-image="${imageName}"]`);
-                                if (cell) {
-                                    const currentText = cell.textContent;
-                                    // Only update if not already showing a calculation message
-                                    // or if it's the first calculation message
-                                    if (currentText === 'use-websocket' || 
-                                        currentText === 'Connecting...' ||
-                                        !currentText.includes('Calculating')) {
-                                        console.log(`Setting calculation message for ${imageName}`);
-                                        displayTruncatedHash(cell, `Calculating... ${estimatedTimeMsg}`);
-                                    }
+                            const msg = JSON.parse(event.data);
+                            if (msg.phase === 'complete') {
+                                // Show 100% briefly while we wait for the HTTP response to arrive
+                                if (processingTimerId) { clearInterval(processingTimerId); processingTimerId = null; }
+                                progressFill.classList.remove('indeterminate');
+                                progressFill.style.width = '100%';
+                                progressText.classList.remove('processing');
+                                progressText.textContent = 'Finishing...';
+                                elapsedText.textContent = '';
+                                try { ws.close(); } catch(e) {}
+                                activeProgressWs = null;
+                                return;
+                            }
+                            if (msg.phase === 'error') {
+                                resetUI();
+                                showError(msg.message || 'Processing failed on server');
+                                try { ws.close(); } catch(e) {}
+                                activeProgressWs = null;
+                                return;
+                            }
+                            if (msg.phase === 'decompressing' || msg.phase === 'extracting') {
+                                if (processingTimerId) { clearInterval(processingTimerId); processingTimerId = null; }
+                                progressFill.classList.remove('indeterminate');
+                                progressText.classList.add('processing');
+
+                                var label = msg.phase === 'decompressing' ? 'Decompressing image' : 'Extracting archive';
+
+                                if (msg.total_bytes && msg.total_bytes > 0) {
+                                    var pct = Math.min(100, Math.round((msg.bytes_written / msg.total_bytes) * 100));
+                                    progressFill.style.width = pct + '%';
+                                    progressText.textContent = label + '... ' + pct + '%';
+                                    elapsedText.textContent = formatBytes(msg.bytes_written) + ' of ' + formatBytes(msg.total_bytes);
+                                } else if (msg.current_entry) {
+                                    if (!progressFill.classList.contains('indeterminate')) progressFill.classList.add('indeterminate');
+                                    progressFill.style.width = '100%';
+                                    progressText.textContent = label + ': ' + msg.current_entry;
+                                    elapsedText.textContent = formatBytes(msg.bytes_written) + ' written';
+                                } else {
+                                    if (!progressFill.classList.contains('indeterminate')) progressFill.classList.add('indeterminate');
+                                    progressFill.style.width = '100%';
+                                    progressText.textContent = label + '...';
+                                    elapsedText.textContent = formatBytes(msg.bytes_written) + ' written';
                                 }
                             }
-                        } catch (e) {
-                            console.error('Error getting metadata:', e);
-                        }
-                    }
-                }
-            } catch (error) {
-                console.error('Error fetching SHA256:', error);
-            }
-        }
-        
-        // Initialize polling for all SHA256 cells that need it
-        function initializePolling() {
-            const sha256Cells = document.querySelectorAll('.sha256-cell');
-            sha256Cells.forEach(cell => {
-                const imageName = cell.dataset.image;
-                if (cell.textContent === 'Calculating...' || 
-                    cell.textContent === 'Connecting...' ||
-                    cell.textContent.includes('Calculating')) {
-                    console.log(`Starting polling for ${imageName}`);
-                    startPolling(imageName);
-                }
-            });
-        }
-        
-        // Send SHA256 calculation request via WebSocket or start polling
-        function requestSha256(imageName) {
-            if (!ws || ws.readyState !== WebSocket.OPEN) {
-                // If WebSocket not ready, use polling instead
-                console.log(`WebSocket not available, starting polling for ${imageName}`);
-                startPolling(imageName);
-                return;
-            }
-            
-            pendingSha256Requests.add(imageName);
-            ws.send(JSON.stringify({
-                action: 'get_sha256',
-                image_name: imageName
-            }));
-        }
-        
-        // WebSocket for boot package status
-        let wsBootPackage = null;
-        let pendingBootPackageRequests = new Set();
-        
-        // Initialize WebSocket connection for boot packages
-        function initBootPackageWebSocket() {
-            if (!window.WebSocket) {
-                console.warn('WebSocket not supported - boot package status updates disabled');
-                return;
-            }
-            
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}/ws/boot-package`;
-            
-            try {
-                wsBootPackage = new WebSocket(wsUrl);
-                
-                wsBootPackage.onopen = function() {
-                    console.log('Boot package WebSocket connected');
-                    // Request status for all boot packages
-                    initializeBootPackageRequests();
-                };
-                
-                wsBootPackage.onmessage = function(event) {
-                    try {
-                        const response = JSON.parse(event.data);
-                        console.log('Boot package WebSocket message:', response);
-                        updateBootPackageCell(response);
-                    } catch (error) {
-                        console.error('Error parsing boot package WebSocket message:', error);
-                    }
-                };
-                
-                wsBootPackage.onerror = function(error) {
-                    console.error('Boot package WebSocket error:', error);
-                };
-                
-                wsBootPackage.onclose = function() {
-                    console.log('Boot package WebSocket closed');
-                    wsBootPackage = null;
-                };
-            } catch (error) {
-                console.error('Failed to create boot package WebSocket:', error);
-            }
-        }
-        
-        // Update boot package cell with WebSocket response
-        function updateBootPackageCell(response) {
-            const imageName = response.image_name;
-            const cell = document.querySelector(`.boot-package-cell[data-image="${imageName}"]`);
-            if (!cell) return;
-            
-            if (response.status === 'unsupported') {
-                cell.innerHTML = `<span style="color: #666;" title="Boot packages are only available in secure-boot or fde-only provisioning modes">Unsupported</span>`;
-                pendingBootPackageRequests.delete(imageName);
-            } else if (response.exists && response.package_name) {
-                cell.innerHTML = `<a href="/download-boot-package?name=${encodeURIComponent(imageName)}" class="download-link" download title="${response.package_name}">Download</a>`;
-                pendingBootPackageRequests.delete(imageName);
-                
-                // Clear any polling interval for this image
-                if (window.bootPackageIntervals && window.bootPackageIntervals[imageName]) {
-                    clearInterval(window.bootPackageIntervals[imageName]);
-                    delete window.bootPackageIntervals[imageName];
-                }
-            } else if (response.status === 'generating') {
-                cell.textContent = 'Generating...';
-            } else {
-                cell.innerHTML = `<button class="generate-btn" onclick="generateBootPackage('${imageName.replace(/'/g, "\\'")}')">Generate</button>`;
-                pendingBootPackageRequests.delete(imageName);
-                
-                // Clear any polling interval for this image if generation failed
-                if (window.bootPackageIntervals && window.bootPackageIntervals[imageName]) {
-                    clearInterval(window.bootPackageIntervals[imageName]);
-                    delete window.bootPackageIntervals[imageName];
+                        } catch(e) {}
+                    };
+
+                    ws.onerror = () => { wsConnected = false; };
+                    ws.onclose = () => { wsConnected = false; };
+                } catch(e) {
+                    wsConnected = false;
                 }
             }
-        }
-        
-        // Fetch boot package status via HTTP (explicit status fetch)
-        async function fetchBootPackageStatus(imageName) {
-            try {
-                const response = await fetch(`/get-boot-package-info?name=${encodeURIComponent(imageName)}`);
-                if (response.ok) {
-                    const data = await response.json();
-                    updateBootPackageCell(data);
-                    return data;
-                } else {
-                    console.error('Failed to fetch boot package status for:', imageName);
-                    return null;
-                }
-            } catch (error) {
-                console.error('Error fetching boot package status:', error);
-                return null;
-            }
-        }
-        
-        // Request boot package status via WebSocket
-        function requestBootPackage(imageName) {
-            if (!wsBootPackage || wsBootPackage.readyState !== WebSocket.OPEN) {
-                console.warn('Boot package WebSocket not ready for:', imageName);
-                return;
-            }
-            
-            pendingBootPackageRequests.add(imageName);
-            wsBootPackage.send(JSON.stringify({
-                action: 'check_boot_package',
-                image_name: imageName
-            }));
-        }
-        
-        // Initialize boot package requests for all images
-        function initializeBootPackageRequests() {
-            if (!wsBootPackage || wsBootPackage.readyState !== WebSocket.OPEN) {
-                console.warn('Boot package WebSocket not connected');
-                return;
-            }
-            
-            const bootPackageCells = document.querySelectorAll('.boot-package-cell');
-            console.log(`Found ${bootPackageCells.length} boot package cells to initialize`);
-            
-            bootPackageCells.forEach(cell => {
-                const imageName = cell.getAttribute('data-image');
-                if (imageName && !pendingBootPackageRequests.has(imageName)) {
-                    console.log(`Requesting boot package status for: ${imageName}`);
-                    requestBootPackage(imageName);
+
+            const xhr = new XMLHttpRequest();
+            activeUploadXhr = xhr;
+
+            xhr.upload.addEventListener('progress', (e) => {
+                if (uploadDone) return;
+                if (e.lengthComputable) {
+                    const percent = Math.round((e.loaded / e.total) * 100);
+                    progressFill.style.width = percent + '%';
+                    progressText.textContent = 'Uploading ' + file.name + '... ' + percent + '%';
                 }
             });
-        }
-        
-        // Setup long-interval polling for boot packages (fallback mechanism)
-        function setupBootPackagePolling() {
-            // Clear any existing polling interval
-            if (window.bootPackageLongPoll) {
-                clearInterval(window.bootPackageLongPoll);
-            }
-            
-            // Poll every 30 seconds as a fallback
-            window.bootPackageLongPoll = setInterval(() => {
-                const bootPackageCells = document.querySelectorAll('.boot-package-cell');
-                bootPackageCells.forEach(cell => {
-                    const imageName = cell.getAttribute('data-image');
-                    if (imageName) {
-                        fetchBootPackageStatus(imageName);
-                    }
-                });
-            }, 30000); // 30 seconds
-        }
-        
-        // Check all boot packages on page load
-        function checkAllBootPackages() {
-            // Explicitly fetch status for all images on load
-            const bootPackageCells = document.querySelectorAll('.boot-package-cell');
-            bootPackageCells.forEach(cell => {
-                const imageName = cell.getAttribute('data-image');
-                if (imageName) {
-                    fetchBootPackageStatus(imageName);
-                }
-            });
-            
-            // Setup long-interval polling as fallback
-            setupBootPackagePolling();
-            
-            // Also initialize WebSocket for real-time updates
-            initBootPackageWebSocket();
-        }
-        
-        // Cleanup function to be called when navigating away
-        function cleanupBootPackagePolling() {
-            // Clear long-interval polling
-            if (window.bootPackageLongPoll) {
-                clearInterval(window.bootPackageLongPoll);
-                window.bootPackageLongPoll = null;
-            }
-            
-            // Clear all per-image intervals
-            if (window.bootPackageIntervals) {
-                Object.values(window.bootPackageIntervals).forEach(interval => {
-                    clearInterval(interval);
-                });
-                window.bootPackageIntervals = {};
-            }
-            
-            // Close WebSocket
-            if (wsBootPackage && wsBootPackage.readyState === WebSocket.OPEN) {
-                wsBootPackage.close();
-            }
-        }
-        
-        // Initialize SHA256 requests for all images
-        function initializeSha256Requests() {
-            if (!ws || ws.readyState !== WebSocket.OPEN) {
-                console.warn('WebSocket not connected, using polling only');
-                return;
-            }
-            
-            // Reset reconnect attempts on successful connection
-            window.reconnectAttempts = 0;
-            
-            const sha256Cells = document.querySelectorAll('.sha256-cell');
-            console.log(`Found ${sha256Cells.length} SHA256 cells to initialize`);
-            
-            sha256Cells.forEach(cell => {
-                const imageName = cell.dataset.image;
-                const currentText = cell.textContent;
-                
-                // Request SHA256 for cells that need calculation
-                if (currentText === 'Calculating...' || 
-                    currentText === 'Connecting...' || 
-                    currentText.includes('Calculating')) {
-                    
-                    console.log(`Requesting SHA256 via WebSocket for ${imageName}`);
-                    requestSha256(imageName);
-                }
-            });
-        }
 
-        // Initialize truncated hash display for all existing hashes
-        function initializeTruncatedHashes() {
-            const sha256Cells = document.querySelectorAll('.sha256-cell');
-            sha256Cells.forEach(cell => {
-                const hash = cell.textContent;
-                // Only process cells with actual hash values (not calculating or error messages)
-                if (hash && hash.length > 10 && 
-                    !hash.includes('Calculating') && 
-                    !hash.includes('Error')) {
-                    displayTruncatedHash(cell, hash);
-                }
-            });
-        }
-
-        // Initialize when DOM is loaded
-        document.addEventListener('DOMContentLoaded', () => {
-            // Initialize truncated hashes for existing values
-            initializeTruncatedHashes();
-            // Start polling for any images that need SHA256 calculation
-            initializePolling();
-            // Optional: Still try to establish WebSocket for real-time updates
-            initWebSocket();
-            // Check for boot packages
-            checkAllBootPackages();
-        });
-
-        // Force close WebSocket with timeout
-        function forceCloseWebSocket() {
-            if (ws) {
-                console.log('Force closing WebSocket connection');
-                try {
-                    // Set a very short timeout to force immediate termination
-                    const closeTimeout = setTimeout(() => {
-                        console.log('WebSocket close timeout reached, forcing termination');
-                        ws = null; // Clear reference immediately
-                    }, 50); // Very short timeout (50ms)
-                    
-                    // Try to close gracefully
-                    ws.close();
-                    
-                    // Clear timeout if close was successful
-                    if (ws && ws.readyState === WebSocket.CLOSED) {
-                        clearTimeout(closeTimeout);
-                    }
-                    
-                    // Also force close after a very short delay regardless
-                    setTimeout(() => {
-                        if (ws) {
-                            console.log('Force terminating WebSocket reference');
-                            ws = null;
-                        }
-                    }, 100);
-                } catch (e) {
-                    console.error('Error closing WebSocket:', e);
-                    ws = null; // Clear reference even on error
-                }
-            }
-        }
-        
-        // Cleanup when navigating away
-        window.addEventListener('beforeunload', () => {
-            console.log('Page unloading - cleaning up WebSocket and polling');
-            // Clear all pending requests first
-            pendingSha256Requests.clear();
-            pendingBootPackageRequests.clear();
-            // Stop all polling
-            stopAllPolling();
-            cleanupBootPackagePolling();
-            // Force close WebSockets with timeout
-            forceCloseWebSocket();
-            if (wsBootPackage) {
-                wsBootPackage.close();
-            }
-        });
-        
-        // Also cleanup on page hide (covers more navigation scenarios)
-        window.addEventListener('pagehide', () => {
-            console.log('Page hidden - cleaning up WebSocket and polling');
-            // Clear all pending requests first
-            pendingSha256Requests.clear();
-            pendingBootPackageRequests.clear();
-            // Stop all polling
-            stopAllPolling();
-            cleanupBootPackagePolling();
-            // Force close WebSocket with timeout
-            forceCloseWebSocket();
-        });
-    </script>
-</head>
-<body>
-    <%view navbar %>
-
-    <h1>System Images</h1>
-
-    <div id="success-message" class="success-message"></div>
-    <div id="error-message" class="error-message"></div>
-
-    <div class="upload-section">
-        <h2>Upload New Image</h2>
-        <form class="upload-form" id="uploadForm" enctype="multipart/form-data">
-            <div class="upload-row">
-                <input type="file" name="image" required>
-                <div class="progress-container" style="display: none;">
-                    <div class="progress-bar">
-                        <div class="progress-fill"></div>
-                    </div>
-                    <div class="progress-text">0%</div>
-                </div>
-                <button type="submit" id="uploadButton">Upload</button>
-                <button type="button" id="cancelButton" style="display: none;">Cancel</button>
-            </div>
-        </form>
-    </div>
-
-    <table class="image-list">
-        <thead>
-            <tr>
-                <th>Image Name</th>
-                <th>SHA256</th>
-                <th>Status</th>
-                <th>Boot Package</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            <%c++
-            auto images = @@.get<std::vector<std::map<std::string, std::string>>>("images");
-            for(const auto& image : images) {
-            %>
-                <tr class="<%c++ $$ << (image.at("is_gold_master") == "true" ? "gold-master" : ""); %>">
-                    <td><%c++ $$ << image.at("name"); %></td>
-                    <td class="sha256-cell" data-image="<%c++ $$ << image.at("name"); %>"><%c++ $$ << image.at("sha256"); %></td>
-                    <td><%c++ $$ << (image.at("is_gold_master") == "true" ? "Current Gold Master" : ""); %></td>
-                    <td class="boot-package-cell" data-image="<%c++ $$ << image.at("name"); %>">Checking...</td>
-                    <td>
-                        <%c++ if (image.at("is_gold_master") == "true") { %>
-                            <button class="clear-cache-btn" onclick="clearCaches()">Clear Caches</button>
-                        <%c++ } else { %>
-                            <button class="use-btn" onclick="useImage('<%c++ $$ << image.at("name"); %>')">Use</button>
-                        <%c++ } %>
-                        <button class="delete-btn" onclick="deleteImage('<%c++ $$ << image.at("name"); %>')">Delete</button>
-                    </td>
-                </tr>
-            <%c++ } %>
-        </tbody>
-    </table>
-
-    <style>
-        .gold-master {
-            background-color: #e6ffe6;
-        }
-        .use-btn, .delete-btn, .clear-cache-btn, .generate-btn {
-            min-width: 80px;
-            padding: 8px 16px;
-            margin-right: 5px;
-            cursor: pointer;
-            border-radius: 3px;
-            font-size: 14px;
-            font-weight: 500;
-        }
-        .use-btn {
-            background-color: #4CAF50;
-            color: white;
-            border: none;
-        }
-        .use-btn:hover {
-            background-color: #45a049;
-        }
-        .clear-cache-btn {
-            background-color: #2196F3;
-            color: white;
-            border: none;
-        }
-        .clear-cache-btn:hover {
-            background-color: #0b7dda;
-        }
-        .generate-btn {
-            background-color: #FF9800;
-            color: white;
-            border: none;
-        }
-        .generate-btn:hover {
-            background-color: #F57C00;
-        }
-        .delete-btn {
-            background-color: #f44336;
-            color: white;
-            border: none;
-        }
-        .delete-btn:hover {
-            background-color: #da190b;
-        }
-        .upload-form {
-            width: 100%;
-        }
-        .upload-row {
-            display: flex;
-            align-items: center;
-            gap: 15px;
-            flex-wrap: wrap;
-        }
-        .progress-container {
-            flex: 1;
-            min-width: 200px;
-            max-width: 300px;
-        }
-        .progress-bar {
-            width: 100%;
-            height: 20px;
-            background-color: #f0f0f0;
-            border-radius: 10px;
-            overflow: hidden;
-        }
-        .progress-fill {
-            width: 0%;
-            height: 100%;
-            background-color: #4CAF50;
-            transition: width 0.1s ease-out;
-        }
-        .progress-text {
-            text-align: center;
-            margin-top: 5px;
-            font-size: 14px;
-            color: #666;
-            min-height: 1.2em; /* Prevent layout shift when text changes */
-        }
-        #uploadButton, #cancelButton {
-            min-width: 80px;
-            padding: 8px 16px;
-            cursor: pointer;
-            border-radius: 3px;
-            font-size: 14px;
-            font-weight: 500;
-            border: none;
-        }
-        #uploadButton {
-            background-color: #4CAF50;
-            color: white;
-        }
-        #uploadButton:hover {
-            background-color: #45a049;
-        }
-        #cancelButton {
-            background-color: #f44336;
-            color: white;
-        }
-        #cancelButton:hover {
-            background-color: #da190b;
-        }
-        
-        /* SHA256 hash progress bar styles */
-        .hash-progress-container {
-            margin-top: 5px;
-            width: 100%;
-        }
-        .hash-progress-bar {
-            width: 100%;
-            height: 10px;
-            background-color: #f0f0f0;
-            border-radius: 5px;
-            overflow: hidden;
-        }
-        .hash-progress-fill {
-            width: 0%;
-            height: 100%;
-            background-color: #4CAF50;
-            transition: width 0.1s ease-out;
-        }
-        .sha256-cell {
-            position: relative;
-            min-height: 20px;
-        }
-        
-        /* Truncated hash styles */
-        .truncated-hash {
-            cursor: pointer;
-            color: #0066cc;
-            position: relative;
-        }
-        
-        .truncated-hash:hover {
-            text-decoration: underline;
-        }
-        
-        /* Copy notification */
-        #copy-notification {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            background-color: #333;
-            color: white;
-            padding: 10px 20px;
-            border-radius: 4px;
-            opacity: 0;
-            transition: opacity 0.3s ease;
-            pointer-events: none;
-            z-index: 1000;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-        }
-        
-        #copy-notification.show {
-            opacity: 1;
-        }
-        
-        /* Boot package download link styles */
-        .download-link {
-            display: inline-block;
-            padding: 6px 12px;
-            background-color: #2196F3;
-            color: white;
-            text-decoration: none;
-            font-weight: 500;
-            border-radius: 3px;
-            font-size: 14px;
-            cursor: pointer;
-            border: none;
-        }
-        
-        .download-link:hover {
-            background-color: #0b7dda;
-            text-decoration: none;
-        }
-        
-        .boot-package-cell {
-            min-width: 150px;
-        }
-    </style>
-
-    <script>
-        // Handle image upload with progress
-        document.addEventListener('DOMContentLoaded', () => {
-            const form = document.getElementById('uploadForm');
-            const uploadButton = document.getElementById('uploadButton');
-            const cancelButton = document.getElementById('cancelButton');
-            const progressContainer = document.querySelector('.progress-container');
-            const progressFill = document.querySelector('.progress-fill');
-            const progressText = document.querySelector('.progress-text');
-            let controller;
-
-            form.addEventListener('submit', async (e) => {
-                e.preventDefault();
-                
-                const fileInput = form.querySelector('input[type="file"]');
-                if (!fileInput.files.length) {
-                    showMessage('Please select a file to upload', true);
+            xhr.upload.addEventListener('load', () => {
+                uploadDone = true;
+                if (!processingLabel) {
+                    progressFill.style.width = '100%';
+                    progressText.textContent = 'Finalising...';
                     return;
                 }
-                
-                const file = fileInput.files[0];
-                const formData = new FormData();
-                formData.append('image', file);
-                
-                // Show progress UI
-                uploadButton.style.display = 'none';
-                cancelButton.style.display = 'inline-block';
-                progressContainer.style.display = 'block';
-                progressFill.style.width = '0%';
-                progressText.textContent = 'Starting upload...';
-                
-                controller = new AbortController();
-                
-                try {
-                    const response = await new Promise((resolve, reject) => {
-                        const xhr = new XMLHttpRequest();
-                        
-                        // Track upload progress
-                        xhr.upload.addEventListener('progress', (e) => {
-                            if (e.lengthComputable) {
-                                // Scale upload progress to 0-90% range
-                                const uploadPercent = (e.loaded / e.total) * 100;
-                                const scaledPercent = (uploadPercent * 90) / 100;
-                                
-                                progressFill.style.width = scaledPercent + '%';
-                                progressText.textContent = Math.round(scaledPercent) + '%';
-                            }
-                        });
-                        
-                        // Handle upload start
-                        xhr.upload.addEventListener('loadstart', () => {
-                            progressText.textContent = '0%';
-                        });
-                        
-                        // Handle upload completion (data sent to server)
-                        xhr.upload.addEventListener('load', () => {
-                            // Upload transmission complete, but server still processing
-                            progressFill.style.width = '90%';
-                            progressText.textContent = 'Server processing...';
-                        });
-                        
-                        // Handle complete response from server
-                        xhr.addEventListener('load', () => {
-                            // Server finished processing
-                            progressFill.style.width = '100%';
-                            progressText.textContent = 'Complete!';
-                            
-                            if (xhr.status >= 200 && xhr.status < 300) {
-                                resolve({
-                                    ok: true,
-                                    status: xhr.status,
-                                    json: () => Promise.resolve(JSON.parse(xhr.responseText))
-                                });
-                            } else {
-                                resolve({
-                                    ok: false,
-                                    status: xhr.status,
-                                    json: () => Promise.resolve(JSON.parse(xhr.responseText))
-                                });
-                            }
-                        });
-                        
-                        // Handle errors
-                        xhr.addEventListener('error', () => {
-                            reject(new Error('Upload failed'));
-                        });
-                        
-                        // Handle abort
-                        xhr.addEventListener('abort', () => {
-                            reject(new Error('Upload cancelled'));
-                        });
-                        
-                        // Set up abort signal
-                        controller.signal.addEventListener('abort', () => {
-                            xhr.abort();
-                        });
-                        
-                        // Start the upload
-                        xhr.open('POST', '/upload-image');
-                        xhr.send(formData);
-                    });
-                    
-                    if (response.ok) {
-                        const data = await response.json();
-                        
-                        // Small delay to show "Complete!" status
-                        await new Promise(resolve => setTimeout(resolve, 500));
-                        
-                        // Show appropriate message based on whether file was renamed
-                        if (data.renamed) {
-                            showMessage(`File uploaded as "${data.filename}" (original name "${data.original_filename}" already existed)`);
-                        } else {
-                            showMessage('Image uploaded successfully');
-                        }
-                        
-                        // Add the uploaded image to the table
-                        const tbody = document.querySelector('.image-list tbody');
-                        const newRow = document.createElement('tr');
-                        
-                        newRow.innerHTML = `
-                            <td>${data.filename}</td>
-                            <td class="sha256-cell" data-image="${data.filename}">Calculating...</td>
-                            <td></td>
-                            <td class="boot-package-cell" data-image="${data.filename}">Checking...</td>
-                            <td>
-                                <button class="use-btn" onclick="useImage('${data.filename}')">Use</button>
-                                <button class="delete-btn" onclick="deleteImage('${data.filename}')">Delete</button>
-                            </td>
-                        `;
-                        
-                        tbody.appendChild(newRow);
-                        
-                        // Start polling for SHA256 of the new image
-                        console.log(`Starting polling for newly uploaded image: ${data.filename}`);
-                        startPolling(data.filename);
-                        
-                        // Request boot package status via WebSocket
-                        requestBootPackage(data.filename);
-                    } else {
-                        const errorData = await response.json();
-                        showMessage(`Upload failed: ${errorData.message || 'Unknown error'}`, true);
-                    }
-                } catch (error) {
-                    if (error.message !== 'Upload cancelled') {
-                        showMessage(`Upload failed: ${error.message}`, true);
-                    }
-                } finally {
-                    // Reset the form
-                    form.reset();
-                    uploadButton.style.display = 'inline-block';
-                    cancelButton.style.display = 'none';
-                    progressContainer.style.display = 'none';
-                    controller = null;
+                // If WS connected, it will drive the progress UI from here.
+                // Otherwise fall back to indeterminate animation + elapsed timer.
+                if (!wsConnected) {
+                    progressFill.style.width = '100%';
+                    setTimeout(startFallbackProcessingUI, 300);
                 }
             });
-            
-            cancelButton.addEventListener('click', () => {
-                if (controller) {
-                    controller.abort();
-                    controller = null;
-                    
-                    // Reset the form
-                    form.reset();
-                    uploadButton.style.display = 'inline-block';
-                    cancelButton.style.display = 'none';
-                    progressContainer.style.display = 'none';
-                    
-                    showMessage('Upload cancelled');
+
+            xhr.onload = function() {
+                resetUI();
+
+                if (xhr.status === 200) {
+                    showSuccess('Image uploaded successfully');
+                    loadImageList();
+                    toggleImageUpload();
+                } else {
+                    try {
+                        const error = JSON.parse(xhr.responseText);
+                        showError(error.message || 'Upload failed');
+                    } catch (e) {
+                        showError('Upload failed');
+                    }
                 }
-            });
-        });
-    </script>
-</body>
-</html> 
+            };
+
+            xhr.onerror = function() {
+                resetUI();
+                showError('Upload failed');
+            };
+
+            xhr.open('POST', '/upload-image');
+            if (csrfToken) {
+                xhr.setRequestHeader('X-CSRF-Token', csrfToken);
+            }
+            xhr.setRequestHeader('X-Upload-Id', uploadId);
+            xhr.send(formData);
+        } catch (error) {
+            resetUI();
+            console.error('Error uploading image:', error);
+            showError('Upload failed');
+        }
+    }
+</script>
+<%view-end%>

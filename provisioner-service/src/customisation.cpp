@@ -4,8 +4,6 @@
 #include <fstream>
 #include <sstream>
 #include <iomanip>
-#include <openssl/evp.h>
-#include <openssl/sha.h>
 #include <drogon/drogon.h>
 
 namespace provisioner {
@@ -18,18 +16,46 @@ namespace provisioner {
 
         // Define available provisioners and stages using a map
         const std::map<std::string, std::vector<std::string>> PROVISIONER_STAGES = {
-            {"sb-provisioner", {"bootstrap", "bootfs-mounted", "rootfs-mounted", "post-flash"}},
-            {"fde-provisioner", {"bootstrap", "bootfs-mounted", "rootfs-mounted", "post-flash"}},
-            {"naked-provisioner", {"bootstrap", "post-flash"}}
+            {"sb-provisioner", {"bootstrap", "provision-started", "bootfs-mounted", "rootfs-mounted", "post-flash"}},
+            {"fde-provisioner", {"bootstrap", "provision-started", "bootfs-mounted", "rootfs-mounted", "post-flash"}},
+            {"naked-provisioner", {"bootstrap", "provision-started", "bootfs-mounted", "rootfs-mounted", "post-flash"}}
         };
 
         // Description of each stage for display in the UI
         const std::map<std::string, std::string> STAGE_DESCRIPTIONS = {
             {"bootstrap", "Executed when a device is detected, before provisioning begins"},
+            {"provision-started", "Executed at the start of provisioning, before image preparation. Use for LED control or rig signalling"},
             {"bootfs-mounted", "Executed after boot image is mounted, before modifications"},
             {"rootfs-mounted", "Executed after rootfs is mounted, before final packaging"},
             {"post-flash", "Executed after bootfs and rootfs have been flashed to the device"}
         };
+
+        // Helper function to find copy sources for a given provisioner+stage.
+        // Returns a JSON array of {provisioner, filename} for other provisioners
+        // that have an existing script for the same stage on disk.
+        Json::Value getCopySources(const std::string& currentProvisioner, const std::string& stage) {
+            namespace fs = std::filesystem;
+            Json::Value sources(Json::arrayValue);
+
+            for (const auto& [prov, validStages] : PROVISIONER_STAGES) {
+                // Skip the current provisioner
+                if (prov == currentProvisioner) continue;
+
+                // Check if this provisioner supports the same stage
+                if (std::find(validStages.begin(), validStages.end(), stage) == validStages.end()) continue;
+
+                // Check if the script file actually exists on disk
+                std::string scriptPath = SCRIPTS_DIR + prov + "-" + stage + ".sh";
+                if (fs::exists(scriptPath) && fs::is_regular_file(scriptPath)) {
+                    Json::Value source;
+                    source["provisioner"] = prov;
+                    source["filename"] = prov + "-" + stage;
+                    sources.append(source);
+                }
+            }
+
+            return sources;
+        }
 
         // Helper function to get script metadata
         Json::Value getScriptMetadata(const std::string& filepath, bool includeContent = false) {
@@ -59,30 +85,20 @@ namespace provisioner {
             }
 
             // Calculate SHA256
-            EVP_MD_CTX *mdctx = EVP_MD_CTX_new();
-            const EVP_MD *md = EVP_sha256();
-            unsigned char hash[EVP_MAX_MD_SIZE];
-            unsigned int hash_len;
             char buffer[4096];
-            
+
             std::ifstream file(fullPath, std::ios::binary);
             if (file) {
-                EVP_DigestInit_ex(mdctx, md, nullptr);
-                
+                provisioner::utils::SHA256Hasher hasher;
+
                 while (file.read(buffer, sizeof(buffer))) {
-                    EVP_DigestUpdate(mdctx, buffer, file.gcount());
+                    hasher.update(buffer, file.gcount());
                 }
                 if (file.gcount() > 0) {
-                    EVP_DigestUpdate(mdctx, buffer, file.gcount());
+                    hasher.update(buffer, file.gcount());
                 }
-                
-                EVP_DigestFinal_ex(mdctx, hash, &hash_len);
 
-                std::stringstream ss;
-                for (unsigned int i = 0; i < hash_len; i++) {
-                    ss << std::hex << std::setw(2) << std::setfill('0') << (int)hash[i];
-                }
-                script["sha256"] = ss.str();
+                script["sha256"] = hasher.finalize();
                 
                 // Reset file position to beginning
                 file.clear();
@@ -95,8 +111,7 @@ namespace provisioner {
                     script["content"] = contentSs.str();
                 }
             }
-            EVP_MD_CTX_free(mdctx);
-            
+
             // Extract provisioner and stage from filename
             for (const auto& [provisioner, stages] : PROVISIONER_STAGES) {
                 if (filename.find(provisioner) == 0) {
@@ -139,6 +154,7 @@ namespace provisioner {
          * Where <provisioner-name> is one of:
          * - "sb-provisioner" for secure boot provisioning
          * - "fde-provisioner" for full disk encryption provisioning
+         * - "naked-provisioner" for naked (unencrypted) provisioning
          *
          * bootfs-mounted and rootfs-mounted scripts receive two arguments:
          * 1. Path to the mounted boot image
@@ -362,6 +378,9 @@ namespace provisioner {
                         
                     }
                     
+                    // Find copy sources from other provisioners with the same stage
+                    Json::Value copySources = getCopySources(provisioner, stage);
+
                     auto acceptHeader = req->getHeader("accept");
                     if (acceptHeader.find("text/html") != std::string::npos) {
                         drogon::HttpViewData data;
@@ -369,6 +388,7 @@ namespace provisioner {
                         data.insert("script_name", filename);
                         data.insert("script_exists", false);
                         data.insert("script_enabled", false);
+                        data.insert("copy_sources", copySources);
                         data.insert("currentPage", std::string("customisation"));
                         callback(HttpResponse::newHttpViewResponse("get_script.csp", data));
                         return;
@@ -432,6 +452,18 @@ namespace provisioner {
             // Get script metadata
             Json::Value scriptMetadata = getScriptMetadata(scriptPath, true);
 
+            // Find copy sources from other provisioners with the same stage
+            Json::Value copySources(Json::arrayValue);
+            for (const auto& [prov, validStages] : PROVISIONER_STAGES) {
+                if (filename.find(prov + "-") == 0) {
+                    std::string stage = filename.substr(prov.length() + 1);
+                    if (std::find(validStages.begin(), validStages.end(), stage) != validStages.end()) {
+                        copySources = getCopySources(prov, stage);
+                    }
+                    break;
+                }
+            }
+
             auto acceptHeader = req->getHeader("accept");
             if (acceptHeader.find("text/html") != std::string::npos) {
                 drogon::HttpViewData data;
@@ -439,6 +471,7 @@ namespace provisioner {
                 data.insert("script_name", filename);
                 data.insert("script_exists", true);
                 data.insert("script_enabled", scriptMetadata["enabled"].asBool());
+                data.insert("copy_sources", copySources);
                 data.insert("currentPage", std::string("customisation"));
                 callback(HttpResponse::newHttpViewResponse("get_script.csp", data));
             } else {
@@ -1210,6 +1243,9 @@ namespace provisioner {
                 defaultContent += "# Exit with success\nexit 0\n";
             }
             
+            // Find copy sources from other provisioners with the same stage
+            Json::Value copySources = getCopySources(provisioner, stage);
+
             auto acceptHeader = req->getHeader("accept");
             if (acceptHeader.find("text/html") != std::string::npos) {
                 drogon::HttpViewData data;
@@ -1217,6 +1253,7 @@ namespace provisioner {
                 data.insert("script_name", filename);
                 data.insert("script_exists", false);
                 data.insert("script_enabled", false);
+                data.insert("copy_sources", copySources);
                 data.insert("currentPage", std::string("customisation"));
                 callback(HttpResponse::newHttpViewResponse("get_script.csp", data));
             } else {

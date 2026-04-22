@@ -1,164 +1,13 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <title>Manufacturing Database</title>
     <%view stylesheet %>
-    <style>
-        .table-container {
-            overflow-x: auto;
-            max-height: 80vh;
-            margin-top: 20px;
-            /* Make scrollbars always visible */
-            scrollbar-width: thin;  /* For Firefox */
-            scrollbar-color: rgba(0, 0, 0, 0.5) rgba(0, 0, 0, 0.1);  /* For Firefox */
-            /* Additional visual cues for Safari */
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            background-color: #fafafa;
-            padding: 2px;
-            position: relative;
-        }
-        
-        /* For Webkit browsers (Chrome, Safari, etc.) */
-        .table-container::-webkit-scrollbar {
-            width: 10px;
-            height: 10px;
-            display: block;
-            -webkit-appearance: scrollbar;
-        }
-        
-        .table-container::-webkit-scrollbar-track {
-            background: rgba(0, 0, 0, 0.1);
-            border-radius: 4px;
-        }
-        
-        .table-container::-webkit-scrollbar-thumb {
-            background: rgba(0, 0, 0, 0.5);
-            border-radius: 4px;
-        }
-        
-        /* Scroll indicator for Safari */
-        .scroll-indicator {
-            position: absolute;
-            right: 10px;
-            bottom: 10px;
-            background-color: rgba(0,0,0,0.6);
-            color: white;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 12px;
-            z-index: 100;
-            opacity: 0.8;
-        }
-        
-        .page-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .export-btn {
-            background-color: #4CAF50;
-            color: white;
-            padding: 8px 15px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-        .export-btn:hover {
-            background-color: #45a049;
-        }
-        
-        /* Tooltip styles */
-        .emmc-size {
-            cursor: help;
-            text-decoration: underline dotted #666;
-        }
-
-        /* Toggle switch styles */
-        .toggle-container {
-            display: flex;
-            align-items: center;
-            margin-bottom: 15px;
-        }
-        .toggle-switch {
-            position: relative;
-            display: inline-block;
-            width: 50px;
-            height: 24px;
-            margin-right: 10px;
-        }
-        .toggle-switch input {
-            opacity: 0;
-            width: 0;
-            height: 0;
-        }
-        .toggle-slider {
-            position: absolute;
-            cursor: pointer;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: #ccc;
-            transition: .4s;
-            border-radius: 24px;
-        }
-        .toggle-slider:before {
-            position: absolute;
-            content: "";
-            height: 18px;
-            width: 18px;
-            left: 3px;
-            bottom: 3px;
-            background-color: white;
-            transition: .4s;
-            border-radius: 50%;
-        }
-        input:checked + .toggle-slider {
-            background-color: #0066cc;
-        }
-        input:checked + .toggle-slider:before {
-            transform: translateX(26px);
-        }
-        #refresh-status {
-            margin-left: 10px;
-            font-size: 0.9em;
-            color: #666;
-        }
-        
-        .error-message {
-            background-color: #ffebee;
-            color: #d32f2f;
-            padding: 15px;
-            border-radius: 4px;
-            margin: 15px 0;
-            border-left: 5px solid #d32f2f;
-        }
-        
-        .security-field {
-            text-align: center;
-            font-weight: bold;
-        }
-        
-        .security-enabled {
-            color: #28a745;
-            font-size: 14px;
-        }
-        
-        .security-disabled {
-            color: #dc3545;
-            font-size: 14px;
-        }
-        
-        .security-unknown {
-            color: #6c757d;
-            font-size: 14px;
-        }
-    </style>
 </head>
 <body>
     <%view navbar %>
 
+    <main id="main-content">
     <%c++ 
     bool hasWarning = false;
     std::string warningMessage;
@@ -171,7 +20,7 @@
     
     if (hasWarning) { 
     %>
-    <div class="warning-block">
+    <div class="warning-block" role="alert">
         <%c++ $$ << warningMessage; %>
     </div>
     <%c++ } %>
@@ -183,53 +32,86 @@
     
     <div class="toggle-container">
         <label class="toggle-switch">
-            <input type="checkbox" id="auto-refresh" checked>
+            <input type="checkbox" id="auto-refresh" checked aria-label="Auto Refresh">
             <span class="toggle-slider"></span>
         </label>
-        <span>Auto Refresh</span>
-        <span id="refresh-status">(Enabled - refreshing every 5s)</span>
+        <label for="auto-refresh">Auto Refresh</label>
+        <span id="refresh-status" aria-live="polite">(Enabled - refreshing every 5s)</span>
     </div>
     
-    <div id="error-container"></div>
+    <div id="error-container" aria-live="polite"></div>
     
     <div class="table-container" id="manu-table-container">
-        <div class="scroll-indicator">Scroll to see more</div>
-        <!-- Initial table will be created by JavaScript -->
+        <div class="loading-container">
+            <div class="loading-spinner"></div>
+            <p>Loading manufacturing data&hellip;</p>
+        </div>
     </div>
+    <div id="pagination-controls" class="pagination-controls" style="display:none;" aria-live="polite"></div>
 
     <script>
-        // Function to format security field values
+        // Prevent stored XSS by escaping untrusted data before HTML insertion
+        function escapeHtml(str) {
+            if (str === null || str === undefined) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        // Function to format security field values with accessibility
         function formatSecurityField(value) {
             if (value === null || value === undefined || value === '') {
-                return '<span class="security-unknown">?</span>';
+                return '<span class="security-unknown" aria-label="Unknown" title="Unknown">?</span>';
             } else if (value === '1') {
-                return '<span class="security-enabled">✓</span>';
+                return '<span class="security-enabled" aria-label="Yes" title="Yes">✓</span>';
             } else if (value === '0') {
-                return '<span class="security-disabled">✗</span>';
+                return '<span class="security-disabled" aria-label="No" title="No">✗</span>';
             } else {
-                return '<span class="security-unknown">?</span>';
+                return '<span class="security-unknown" aria-label="Unknown" title="Unknown">?</span>';
             }
         }
 
-        // Handle scroll indicator visibility
+        // Scroll indicator state -- kept outside the function to avoid
+        // accumulating listeners and timeouts on every refresh cycle.
+        let scrollIndicatorTimeout = null;
+        let scrollIndicatorShown = false;
+        
+        function handleScrollHide() {
+            const ind = document.querySelector('.scroll-indicator');
+            if (ind) ind.style.display = 'none';
+            scrollIndicatorShown = false;
+            if (scrollIndicatorTimeout) { clearTimeout(scrollIndicatorTimeout); scrollIndicatorTimeout = null; }
+        }
+        
         function updateScrollIndicator() {
-            const container = document.querySelector('.table-container');
-            const indicator = document.querySelector('.scroll-indicator');
+            const container = document.getElementById('manu-table-container');
+            if (!container) return;
             
-            // Show indicator only if horizontal scrolling is possible
+            // Ensure the indicator element exists (innerHTML destroys it each cycle)
+            let indicator = container.querySelector('.scroll-indicator');
+            if (!indicator) {
+                indicator = document.createElement('div');
+                indicator.className = 'scroll-indicator';
+                indicator.textContent = 'Scroll to see more';
+                container.appendChild(indicator);
+            }
+            
             if (container.scrollWidth > container.clientWidth) {
-                indicator.style.display = 'block';
-                
-                // Hide after scrolling or after 5 seconds
-                container.addEventListener('scroll', function() {
-                    indicator.style.display = 'none';
-                }, {once: true});
-                
-                setTimeout(function() {
-                    indicator.style.display = 'none';
-                }, 5000);
+                if (!scrollIndicatorShown) {
+                    indicator.style.display = 'block';
+                    scrollIndicatorShown = true;
+                    
+                    container.addEventListener('scroll', handleScrollHide, { once: true });
+                    
+                    if (scrollIndicatorTimeout) clearTimeout(scrollIndicatorTimeout);
+                    scrollIndicatorTimeout = setTimeout(handleScrollHide, 5000);
+                }
             } else {
                 indicator.style.display = 'none';
+                scrollIndicatorShown = false;
             }
         }
         
@@ -254,7 +136,178 @@
             });
         }
         
-        // Function to fetch and update the manufacturing table
+        // Pagination state
+        let allData = [];
+        let currentPage = 1;
+        let pageSize = 50;
+        const COLUMN_COUNT = 24;
+        
+        function totalPages() {
+            return Math.max(1, Math.ceil(allData.length / pageSize));
+        }
+        
+        function renderCurrentPage() {
+            const start = (currentPage - 1) * pageSize;
+            const pageData = allData.slice(start, start + pageSize);
+            
+            let tableHtml = `
+                <table id="manufacturingTable">
+                    <caption class="sr-only">Manufacturing database showing provisioned device information</caption>
+                    <thead>
+                        <tr>
+                            <th scope="col">Provision Time</th>
+                            <th scope="col">ID</th>
+                            <th scope="col">Board</th>
+                            <th scope="col">Serial</th>
+                            <th scope="col">Ethernet MAC</th>
+                            <th scope="col">WiFi MAC</th>
+                            <th scope="col">Bluetooth MAC</th>
+                            <th scope="col">eMMC Size</th>
+                            <th scope="col">eMMC CID</th>
+                            <th scope="col">RPi DUID</th>
+                            <th scope="col">Revision</th>
+                            <th scope="col">Processor</th>
+                            <th scope="col">Memory</th>
+                            <th scope="col">Manufacturer</th>
+                            <th scope="col">Secure</th>
+                            <th scope="col">JTAG Locked</th>
+                            <th scope="col">EEPROM WP</th>
+                            <th scope="col">Pubkey Prog.</th>
+                            <th scope="col">Devkey Revoked</th>
+                            <th scope="col">Signed Boot</th>
+                            <th scope="col">OS Image Filename</th>
+                            <th scope="col">OS Image SHA256</th>
+                            <th scope="col">Connect Reg.</th>
+                            <th scope="col">Connect Device ID</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            if (pageData.length > 0) {
+                pageData.forEach(device => {
+                    tableHtml += `
+                        <tr>
+                            <td>${escapeHtml(device.provision_ts)}</td>
+                            <td>${escapeHtml(device.id)}</td>
+                            <td>${escapeHtml(device.boardname)}</td>
+                            <td>${escapeHtml(device.serial)}</td>
+                            <td>${escapeHtml(device.eth_mac)}</td>
+                            <td>${escapeHtml(device.wifi_mac)}</td>
+                            <td>${escapeHtml(device.bt_mac)}</td>
+                            <td class="emmc-size" data-size="${escapeHtml(device.mmc_size)}">${escapeHtml(device.mmc_size)}</td>
+                            <td>${escapeHtml(device.mmc_cid)}</td>
+                            <td>${escapeHtml(device.rpi_duid)}</td>
+                            <td>${escapeHtml(device.board_revision)}</td>
+                            <td>${escapeHtml(device.processor)}</td>
+                            <td>${escapeHtml(device.memory)}</td>
+                            <td>${escapeHtml(device.manufacturer)}</td>
+                            <td>${escapeHtml(device.secure)}</td>
+                            <td class="security-field">${formatSecurityField(device.jtag_locked)}</td>
+                            <td class="security-field">${formatSecurityField(device.eeprom_write_protected)}</td>
+                            <td class="security-field">${formatSecurityField(device.pubkey_programmed)}</td>
+                            <td class="security-field">${formatSecurityField(device.devkey_revoked)}</td>
+                            <td class="security-field">${formatSecurityField(device.signed_boot_enabled)}</td>
+                            <td>${escapeHtml(device.os_image_filename)}</td>
+                            <td style="font-family: monospace;">${escapeHtml(device.os_image_sha256)}</td>
+                            <td class="security-field">${formatSecurityField(device.connect_registered)}</td>
+                            <td>${escapeHtml(device.connect_device_id)}</td>
+                        </tr>
+                    `;
+                });
+            } else {
+                tableHtml += `
+                    <tr>
+                        <td colspan="${COLUMN_COUNT}" class="no-devices">No manufacturing data available</td>
+                    </tr>
+                `;
+            }
+            
+            tableHtml += `
+                    </tbody>
+                </table>
+            `;
+            
+            // Preserve scroll position across the table rebuild
+            const container = document.getElementById('manu-table-container');
+            const prevScrollTop = container.scrollTop;
+            const prevScrollLeft = container.scrollLeft;
+            
+            container.innerHTML = tableHtml;
+            
+            container.scrollTop = prevScrollTop;
+            container.scrollLeft = prevScrollLeft;
+            
+            applyEmmcSizeTooltips();
+            updateScrollIndicator();
+            renderPaginationControls();
+        }
+        
+        function renderPaginationControls() {
+            const total = allData.length;
+            const pages = totalPages();
+            const controlsEl = document.getElementById('pagination-controls');
+            
+            if (total === 0) {
+                controlsEl.style.display = 'none';
+                return;
+            }
+            controlsEl.style.display = 'flex';
+            
+            const start = (currentPage - 1) * pageSize + 1;
+            const end = Math.min(currentPage * pageSize, total);
+            
+            let html = '<span class="page-info">Showing ' + start + '–' + end + ' of ' + total + ' devices</span>';
+            html += '<div class="page-buttons">';
+            html += '<button id="pg-prev" ' + (currentPage <= 1 ? 'disabled' : '') + '>&laquo; Prev</button>';
+            
+            // Show a window of page buttons around the current page
+            const maxButtons = 7;
+            let rangeStart = Math.max(1, currentPage - Math.floor(maxButtons / 2));
+            let rangeEnd = Math.min(pages, rangeStart + maxButtons - 1);
+            if (rangeEnd - rangeStart < maxButtons - 1) {
+                rangeStart = Math.max(1, rangeEnd - maxButtons + 1);
+            }
+            
+            if (rangeStart > 1) {
+                html += '<button class="pg-goto" data-page="1">1</button>';
+                if (rangeStart > 2) html += '<span class="page-info">&hellip;</span>';
+            }
+            for (let p = rangeStart; p <= rangeEnd; p++) {
+                html += '<button class="pg-goto' + (p === currentPage ? ' active-page' : '') + '" data-page="' + p + '">' + p + '</button>';
+            }
+            if (rangeEnd < pages) {
+                if (rangeEnd < pages - 1) html += '<span class="page-info">&hellip;</span>';
+                html += '<button class="pg-goto" data-page="' + pages + '">' + pages + '</button>';
+            }
+            
+            html += '<button id="pg-next" ' + (currentPage >= pages ? 'disabled' : '') + '>Next &raquo;</button>';
+            html += '</div>';
+            html += '<label class="page-info">Per page: <select id="pg-size">';
+            [25, 50, 100, 250].forEach(s => {
+                html += '<option value="' + s + '"' + (s === pageSize ? ' selected' : '') + '>' + s + '</option>';
+            });
+            html += '</select></label>';
+            
+            controlsEl.innerHTML = html;
+            
+            // Bind events
+            const prevBtn = document.getElementById('pg-prev');
+            const nextBtn = document.getElementById('pg-next');
+            if (prevBtn) prevBtn.addEventListener('click', () => { currentPage--; renderCurrentPage(); });
+            if (nextBtn) nextBtn.addEventListener('click', () => { currentPage++; renderCurrentPage(); });
+            controlsEl.querySelectorAll('.pg-goto').forEach(btn => {
+                btn.addEventListener('click', () => { currentPage = parseInt(btn.dataset.page); renderCurrentPage(); });
+            });
+            const sizeSelect = document.getElementById('pg-size');
+            if (sizeSelect) sizeSelect.addEventListener('change', () => {
+                pageSize = parseInt(sizeSelect.value);
+                currentPage = 1;
+                renderCurrentPage();
+            });
+        }
+        
+        // Fetch data from API and re-render
         async function refreshManufacturingTable() {
             try {
                 const response = await fetch('/api/v2/manufacturing');
@@ -264,96 +317,27 @@
                 }
                 
                 const data = await response.json();
+                allData = Array.isArray(data) ? data : [];
                 
-                // Create a new table with the updated data
-                let tableHtml = `
-                    <table id="manufacturingTable">
-                        <thead>
-                            <tr>
-                                <th>Provision Time</th>
-                                <th>ID</th>
-                                <th>Board</th>
-                                <th>Serial</th>
-                                <th>Ethernet MAC</th>
-                                <th>WiFi MAC</th>
-                                <th>Bluetooth MAC</th>
-                                <th>eMMC Size</th>
-                                <th>eMMC CID</th>
-                                <th>RPi DUID</th>
-                                <th>Revision</th>
-                                <th>Processor</th>
-                                <th>Memory</th>
-                                <th>Manufacturer</th>
-                                <th>Secure</th>
-                                <th>JTAG Locked</th>
-                                <th>EEPROM WP</th>
-                                <th>Pubkey Prog.</th>
-                                <th>Devkey Revoked</th>
-                                <th>Signed Boot</th>
-                                <th>OS Image Filename</th>
-                                <th>OS Image SHA256</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                `;
+                // Clamp current page if the dataset shrank
+                if (currentPage > totalPages()) currentPage = totalPages();
                 
-                if (data && data.length > 0) {
-                    data.forEach(device => {
-                        tableHtml += `
-                            <tr>
-                                <td>${device.provision_ts || ''}</td>
-                                <td>${device.id || ''}</td>
-                                <td>${device.boardname || ''}</td>
-                                <td>${device.serial || ''}</td>
-                                <td>${device.eth_mac || ''}</td>
-                                <td>${device.wifi_mac || ''}</td>
-                                <td>${device.bt_mac || ''}</td>
-                                <td class="emmc-size" data-size="${device.mmc_size || ''}">${device.mmc_size || ''}</td>
-                                <td>${device.mmc_cid || ''}</td>
-                                <td>${device.rpi_duid || ''}</td>
-                                <td>${device.board_revision || ''}</td>
-                                <td>${device.processor || ''}</td>
-                                <td>${device.memory || ''}</td>
-                                <td>${device.manufacturer || ''}</td>
-                                <td>${device.secure || ''}</td>
-                                <td class="security-field">${formatSecurityField(device.jtag_locked)}</td>
-                                <td class="security-field">${formatSecurityField(device.eeprom_write_protected)}</td>
-                                <td class="security-field">${formatSecurityField(device.pubkey_programmed)}</td>
-                                <td class="security-field">${formatSecurityField(device.devkey_revoked)}</td>
-                                <td class="security-field">${formatSecurityField(device.signed_boot_enabled)}</td>
-                                <td>${device.os_image_filename || ''}</td>
-                                <td style="font-family: monospace;">${device.os_image_sha256 || ''}</td>
-                            </tr>
-                        `;
-                    });
-                } else {
-                    tableHtml += `
-                        <tr>
-                            <td colspan="21" class="no-devices">No manufacturing data available</td>
-                        </tr>
-                    `;
-                }
+                renderCurrentPage();
                 
-                tableHtml += `
-                        </tbody>
-                    </table>
-                `;
-                
-                // Update the table container without showing/hiding elements
-                document.getElementById('manu-table-container').innerHTML = tableHtml;
-                
-                // Apply tooltips and update UI after the table is updated
-                applyEmmcSizeTooltips();
-                updateScrollIndicator();
+                // Clear any previous error
+                document.getElementById('error-container').innerHTML = '';
                 
                 return true;
             } catch (error) {
                 console.error('Error fetching manufacturing data:', error);
                 
-                // Show error message
+                // Remove loading spinner if this is the first load
+                const loader = document.querySelector('#manu-table-container .loading-container');
+                if (loader) loader.remove();
+                
                 document.getElementById('error-container').innerHTML = `
                     <div class="error-message">
-                        <strong>Error loading data:</strong> ${error.message || 'Failed to fetch manufacturing data'}
+                        <strong>Error loading data:</strong> ${escapeHtml(error.message) || 'Failed to fetch manufacturing data'}
                     </div>
                 `;
                 
@@ -361,53 +345,58 @@
             }
         }
         
-        // Export table to CSV
+        // Export ALL data to CSV (not just the current page)
         document.getElementById('exportCsv').addEventListener('click', function() {
-            // Get the table
-            const table = document.getElementById('manufacturingTable');
-            let csvContent = "data:text/csv;charset=utf-8,";
+            if (!allData || allData.length === 0) return;
             
-            // Get header row
-            const headerRow = table.querySelector('thead tr');
-            const headers = [];
-            headerRow.querySelectorAll('th').forEach(th => {
-                headers.push('"' + th.innerText + '"');
+            function csvEscape(val) {
+                const s = (val === null || val === undefined) ? '' : String(val);
+                return '"' + s.replace(/"/g, '""') + '"';
+            }
+            
+            function securityLabel(val) {
+                if (val === '1') return 'Yes';
+                if (val === '0') return 'No';
+                return 'Unknown';
+            }
+            
+            const headers = [
+                'Provision Time','ID','Board','Serial','Ethernet MAC','WiFi MAC',
+                'Bluetooth MAC','eMMC Size','eMMC CID','RPi DUID','Revision',
+                'Processor','Memory','Manufacturer','Secure','JTAG Locked',
+                'EEPROM WP','Pubkey Prog.','Devkey Revoked','Signed Boot',
+                'OS Image Filename','OS Image SHA256',
+                'Connect Reg.','Connect Device ID'
+            ];
+
+            const rows = [headers.map(csvEscape).join(',')];
+            allData.forEach(d => {
+                rows.push([
+                    csvEscape(d.provision_ts), csvEscape(d.id), csvEscape(d.boardname),
+                    csvEscape(d.serial), csvEscape(d.eth_mac), csvEscape(d.wifi_mac),
+                    csvEscape(d.bt_mac), csvEscape(d.mmc_size), csvEscape(d.mmc_cid),
+                    csvEscape(d.rpi_duid), csvEscape(d.board_revision), csvEscape(d.processor),
+                    csvEscape(d.memory), csvEscape(d.manufacturer), csvEscape(d.secure),
+                    csvEscape(securityLabel(d.jtag_locked)),
+                    csvEscape(securityLabel(d.eeprom_write_protected)),
+                    csvEscape(securityLabel(d.pubkey_programmed)),
+                    csvEscape(securityLabel(d.devkey_revoked)),
+                    csvEscape(securityLabel(d.signed_boot_enabled)),
+                    csvEscape(d.os_image_filename), csvEscape(d.os_image_sha256),
+                    csvEscape(securityLabel(d.connect_registered)),
+                    csvEscape(d.connect_device_id)
+                ].join(','));
             });
-            csvContent += headers.join(',') + '\r\n';
             
-            // Get data rows
-            const rows = table.querySelectorAll('tbody tr');
-            rows.forEach(row => {
-                const rowData = [];
-                row.querySelectorAll('td').forEach(cell => {
-                    // For security fields, extract the symbol and convert to readable text
-                    let cellText = cell.innerText || '';
-                    if (cell.classList.contains('security-field')) {
-                        const span = cell.querySelector('span');
-                        if (span) {
-                            const symbol = span.innerText;
-                            if (symbol === '✓') cellText = 'Yes';
-                            else if (symbol === '✗') cellText = 'No';
-                            else if (symbol === '?') cellText = 'Unknown';
-                        }
-                    }
-                    rowData.push('"' + cellText + '"');
-                });
-                if (rowData.length > 1) { // Skip empty rows
-                    csvContent += rowData.join(',') + '\r\n';
-                }
-            });
-            
-            // Create download link
-            const encodedUri = encodeURI(csvContent);
+            const blob = new Blob([rows.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
-            link.setAttribute('href', encodedUri);
-            link.setAttribute('download', 'manufacturing_data_' + new Date().toISOString().split('T')[0] + '.csv');
+            link.href = url;
+            link.download = 'manufacturing_data_' + new Date().toISOString().split('T')[0] + '.csv';
             document.body.appendChild(link);
-            
-            // Download the CSV file
             link.click();
             document.body.removeChild(link);
+            URL.revokeObjectURL(url);
         });
 
         // Auto-refresh functionality
@@ -460,5 +449,6 @@
             stopRefresh();
         });
     </script>
+    </main>
 </body>
 </html> 

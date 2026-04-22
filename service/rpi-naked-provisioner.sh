@@ -34,6 +34,7 @@ log() {
 read_config
 
 TMP_DIR=""
+CLEANUP_DONE=0
 
 # check_file_is_expected ${path_to_file} ${expected_file_extension}
 # Checks if a file exists, is not a directory, is not zero and has the right extension.
@@ -89,6 +90,12 @@ check_pidevice_storage_type() {
     esac
 }
 
+# Check if a customisation script exists and is executable
+customisation_script_is_runnable() {
+    SCRIPT_PATH="/etc/rpi-sb-provisioner/scripts/$1-$2.sh"
+    [ -x "${SCRIPT_PATH}" ]
+}
+
 # TODO: Refactor these two functions to use the same logic, but with different consequences for failure.
 timeout_nonfatal() {
     command="$*"
@@ -126,7 +133,24 @@ timeout_fatal() {
 }
 
 cleanup() {
+    # Guard against multiple invocations (signal + EXIT trap)
+    [ "$CLEANUP_DONE" -eq 1 ] && return
+    CLEANUP_DONE=1
+
     return_value=$?
+
+    # Disable errexit so cleanup runs to completion even if umount/sync fail
+    set +e
+
+    # Unmount any mounted partitions from image customisation
+    [ -d "${TMP_DIR}/rpi-boot-img-mount" ] && { umount "${TMP_DIR}"/rpi-boot-img-mount 2>/dev/null; sync; }
+    [ -d "${TMP_DIR}/rpi-rootfs-img-mount" ] && { umount "${TMP_DIR}"/rpi-rootfs-img-mount 2>/dev/null; sync; }
+
+    # Detach any loop devices associated with the modified image copy
+    if [ -n "${TMP_DIR}" ] && [ -f "${TMP_DIR}/gold-master-modified.img" ]; then
+        unmount_image "${TMP_DIR}/gold-master-modified.img" 2>/dev/null
+    fi
+
     if [ -d "${TMP_DIR}" ]; then
         rm -rf "${TMP_DIR}"
     fi
@@ -134,14 +158,16 @@ cleanup() {
     if [ -n "${DELETE_PRIVATE_TMPDIR}" ]; then
         announce_start "Deleting customised intermediates"
         # shellcheck disable=SC2086
-        rm -rf "${DELETE_PRIVATE_TMPDIR}" ${DEBUG}
+        rm -rf "${RPI_SB_WORKDIR}" ${DEBUG}
         DELETE_PRIVATE_TMPDIR=
         announce_stop "Deleting customised intermediates"
     fi
 
+    cleanup_orphans
+
     exit ${return_value}
 }
-trap cleanup INT TERM
+trap cleanup EXIT INT TERM
 
 # Start the provisioner phase
 
@@ -160,25 +186,26 @@ check_command_exists blockdev
 
 check_command_exists grep
 
-check_command_exists img2simg
-
 check_command_exists systemd-notify
 
 setup_fastboot_and_id_vars "$1"
 
 record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_STARTED}" "${TARGET_USB_PATH}"
 
-TMP_DIR=$(mktemp -d)
+# Run provision-started hook (e.g. LED control on programming rigs)
+run_customisation_script "naked-provisioner" "provision-started" "${FASTBOOT_DEVICE_SPECIFIER}" "${TARGET_DEVICE_SERIAL}" "${RPI_DEVICE_STORAGE_TYPE}"
+
+TMP_DIR=$(make_temp_dir)
 RPI_DEVICE_STORAGE_TYPE="$(check_pidevice_storage_type "${RPI_DEVICE_STORAGE_TYPE}")"
 DELETE_PRIVATE_TMPDIR=
 announce_start "Finding the cache directory"
 if [ -z "${RPI_SB_WORKDIR}" ]; then
-    RPI_SB_WORKDIR=$(mktemp -d "rpi-sb-provisioner.XXX" --tmpdir="/srv/")
-    announce_stop "Finding the cache directory: Created a new one as unspecified"
+    RPI_SB_WORKDIR=$(make_temp_dir "rpi-sb-provisioner.XXX")
+    announce_stop "Finding the cache directory: Created ${RPI_SB_WORKDIR} (none configured)"
     DELETE_PRIVATE_TMPDIR="true"
 elif [ ! -d "${RPI_SB_WORKDIR}" ]; then
-    RPI_SB_WORKDIR=$(mktemp -d "rpi-sb-provisioner.XXX" --tmpdir="/srv/")
-    announce_stop "Finding the cache directory: Created a new one in /srv, as supplied path isn't a directory"
+    RPI_SB_WORKDIR=$(make_temp_dir "rpi-sb-provisioner.XXX")
+    announce_stop "Finding the cache directory: Created ${RPI_SB_WORKDIR} (configured path isn't a directory)"
     DELETE_PRIVATE_TMPDIR="true"
 else
     # Deliberately do nothing
@@ -190,6 +217,72 @@ systemd-notify --ready --status="Provisioning started"
 
 announce_start "Writing OS images"
 
+# Determine which image to flash. If bootfs-mounted or rootfs-mounted customisation
+# scripts are present and executable, we need to mount the image, run the scripts,
+# and flash the modified copy. Otherwise, flash the gold master directly.
+FLASH_IMAGE="${GOLD_MASTER_OS_FILE}"
+
+if customisation_script_is_runnable "naked-provisioner" "bootfs-mounted" || \
+   customisation_script_is_runnable "naked-provisioner" "rootfs-mounted"; then
+
+    announce_start "OS Image Customisation"
+
+    announce_start "Copying gold master image for customisation"
+    cp --reflink=auto "${GOLD_MASTER_OS_FILE}" "${TMP_DIR}"/gold-master-modified.img
+    announce_stop "Copying gold master image for customisation"
+
+    announce_start "OS Image Mounting"
+
+    # Mount the image as a series of partitions via loop device
+    cnt=0
+    until ensure_next_loopdev && LOOP_DEV="$(losetup --show --find --partscan "${TMP_DIR}/gold-master-modified.img")"; do
+        if [ $cnt -lt 5 ]; then
+            cnt=$((cnt + 1))
+            log "Error in losetup.  Retrying..."
+            sleep 5
+        else
+            log "ERROR: losetup failed; exiting"
+            die "Failed to set up loop device for image customisation"
+        fi
+    done
+
+    ensure_loopdev_partitions "$LOOP_DEV"
+    BOOT_DEV="${LOOP_DEV}"p1
+    ROOT_DEV="${LOOP_DEV}"p2
+
+    # shellcheck disable=SC2086
+    mkdir -p "${TMP_DIR}"/rpi-boot-img-mount ${DEBUG}
+    # shellcheck disable=SC2086
+    mkdir -p "${TMP_DIR}"/rpi-rootfs-img-mount ${DEBUG}
+
+    # OS Images are, by convention, packed as a MBR whole-disk file,
+    # containing two partitions: A FAT boot partition, which contains the kernel, command line,
+    # and supporting boot infrastructure for the Raspberry Pi Device.
+    # And in partition 2, the OS rootfs itself.
+    # shellcheck disable=SC2086
+    mount -t vfat "${BOOT_DEV}" "${TMP_DIR}"/rpi-boot-img-mount ${DEBUG}
+    # shellcheck disable=SC2086
+    mount -t ext4 "${ROOT_DEV}" "${TMP_DIR}"/rpi-rootfs-img-mount ${DEBUG}
+
+    announce_stop "OS Image Mounting"
+
+    # Run customisation script for bootfs-mounted stage
+    run_customisation_script "naked-provisioner" "bootfs-mounted" "${TMP_DIR}/rpi-boot-img-mount" "${TMP_DIR}/rpi-rootfs-img-mount"
+
+    # Run customisation script for rootfs-mounted stage
+    run_customisation_script "naked-provisioner" "rootfs-mounted" "${TMP_DIR}/rpi-boot-img-mount" "${TMP_DIR}/rpi-rootfs-img-mount"
+
+    announce_start "OS Image Unmounting"
+    umount "${TMP_DIR}"/rpi-boot-img-mount
+    umount "${TMP_DIR}"/rpi-rootfs-img-mount
+    sync; sync; sync;
+    losetup -d "${LOOP_DEV}"
+    announce_stop "OS Image Unmounting"
+
+    FLASH_IMAGE="${TMP_DIR}/gold-master-modified.img"
+    announce_stop "OS Image Customisation"
+fi
+
 announce_start "Erase Device Storage"
 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" erase "${RPI_DEVICE_STORAGE_TYPE}"
 sleep 3
@@ -198,7 +291,15 @@ announce_stop "Erase Device Storage"
 # Re-check the fastboot devices specifier, as it may take a while for a device to gain IP connectivity
 setup_fastboot_and_id_vars "${FASTBOOT_DEVICE_SPECIFIER}"
 
-fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}" "${GOLD_MASTER_OS_FILE}"
+fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}" "${FLASH_IMAGE}"
+
+# If we customised the image, delete the modified copy immediately after flash.
+# The bootfs-mounted/rootfs-mounted scripts may have injected per-device material
+# (keys, certificates, unique configs), so the modified image must not linger on disk.
+if [ "${FLASH_IMAGE}" != "${GOLD_MASTER_OS_FILE}" ]; then
+    rm -f "${FLASH_IMAGE}"
+    log "Deleted per-device customised image"
+fi
 announce_stop "Writing OS images"
 
 announce_start "Set LED status"
@@ -222,4 +323,3 @@ log "Provisioning completed. Remove the device from this machine."
 systemd-notify --status="Provisioning completed successfully" STOPPING=1
 
 true
-cleanup

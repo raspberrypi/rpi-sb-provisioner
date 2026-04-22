@@ -185,36 +185,26 @@ This tool has a simple web interface for configuration. Open it in your browser:
 xdg-open http://localhost:3142
 ----
 
-You will see a web page with several tabs. You need to configure two things: *Images* and *Options*.
+You will see a web page with several tabs. Click the *Options* tab to configure your provisioning settings.
 
-=== Step 3: Upload Your Operating System Image
-
-Click the *Images* tab.
-
-You need a "master" operating system image. This is the operating system that will be installed on all your devices.
-
-* The image must be created with `pi-gen` (the standard Raspberry Pi OS image builder)
-* For information about `pi-gen`, see https://github.com/RPi-Distro/pi-gen
-* The image must be *uncompressed* (not a `.zip` or `.gz` file)
-
-Upload your image file using the web interface.
-
-=== Step 4: Configure Options
+=== Step 3: Configure Options
 
 Click the *Options* tab.
 
-You need to set these basic options:
+You need to set these options:
 
 * *Security mode:* Choose `secure-boot`, `fde-only`, or `naked` (see <<three-levels-of-security,Three Levels of Security>> above)
 * *Device family:* Which Raspberry Pi devices are you preparing? (4, 5, 2W)
 * *Storage type:* Are your devices using SD cards, eMMC, or NVMe? Choose one: `sd`, `emmc`, or `nvme`
 * *Signing key:* For secure boot mode, you need a signing key (the web interface will guide you through creating one)
+* *OS Image:* Upload a "master" operating system image. This is the operating system that will be installed on all your devices. The image must be created with `pi-gen` (see https://github.com/RPi-Distro/pi-gen) and must be *uncompressed* (not a `.zip` or `.gz` file)
+* *Device firmware:* Select the firmware version to use for your devices
 
 The web interface includes help text for each option. Read it carefully.
 
 For complete details about all configuration options, see the link:docs/config_vars.adoc[Configuration Reference].
 
-=== Step 5: Start Provisioning
+=== Step 4: Start Provisioning
 
 Configuration is now complete.
 
@@ -395,8 +385,9 @@ Sometimes old files cause problems. Clear the cache:
 
 *Web Interface:*
 
-1. Go to the *Images* page
-2. Click *Clear caches*
+1. Go to the *Options* page
+2. Find the OS image in the *OS Image & Firmware* section
+3. Click *Clear Cached Files*
 
 *Command line:*
 
@@ -656,7 +647,7 @@ This documentation provides all necessary information to begin provisioning secu
 |`sudo apt install rpi-sb-provisioner`
 
 |*Configure*
-|Open http://localhost:3142 → Images tab + Options tab
+|Open http://localhost:3142 → Options tab
 
 |*Monitor devices*
 |Open http://localhost:3142 → Services tab
@@ -669,7 +660,7 @@ This documentation provides all necessary information to begin provisioning secu
 |Web interface → Manufacturing Database → Export CSV
 
 |*Clear cache*
-|Web interface → Images → Clear caches
+|Web interface → Options → Clear Cached Files
 
 |*Device ready?*
 |Both LEDs off = Ready

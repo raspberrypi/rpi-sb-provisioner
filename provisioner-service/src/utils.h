@@ -2,13 +2,240 @@
 
 #include <drogon/HttpResponse.h>
 #include <drogon/HttpTypes.h>
+#include <openssl/evp.h>
 #include <string>
+#include <sstream>
+#include <iomanip>
 #include <regex>
 #include <optional>
 #include <map>
+#include <vector>
+#include <random>
+#include <mutex>
+#include <chrono>
+#include <unordered_map>
 
 namespace provisioner {
     namespace utils {
+
+        /**
+         * RAII wrapper for incremental SHA256 hashing using the OpenSSL 3.0 EVP API.
+         *
+         * Usage:
+         *   SHA256Hasher hasher;
+         *   hasher.update(data1, len1);
+         *   hasher.update(data2, len2);
+         *   std::string hex = hasher.finalize();
+         */
+        class SHA256Hasher {
+            EVP_MD_CTX *ctx_;
+        public:
+            SHA256Hasher() : ctx_(EVP_MD_CTX_new()) {
+                EVP_DigestInit_ex(ctx_, EVP_sha256(), nullptr);
+            }
+            ~SHA256Hasher() { if (ctx_) EVP_MD_CTX_free(ctx_); }
+
+            SHA256Hasher(const SHA256Hasher&) = delete;
+            SHA256Hasher& operator=(const SHA256Hasher&) = delete;
+            SHA256Hasher(SHA256Hasher&& o) noexcept : ctx_(o.ctx_) { o.ctx_ = nullptr; }
+            SHA256Hasher& operator=(SHA256Hasher&& o) noexcept {
+                if (ctx_) EVP_MD_CTX_free(ctx_);
+                ctx_ = o.ctx_; o.ctx_ = nullptr;
+                return *this;
+            }
+
+            void update(const void *data, size_t len) {
+                EVP_DigestUpdate(ctx_, data, len);
+            }
+
+            std::string finalize() {
+                unsigned char hash[EVP_MAX_MD_SIZE];
+                unsigned int len = 0;
+                EVP_DigestFinal_ex(ctx_, hash, &len);
+                std::ostringstream oss;
+                for (unsigned int i = 0; i < len; ++i)
+                    oss << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(hash[i]);
+                return oss.str();
+            }
+        };
+        
+        // ===== Configuration Paths =====
+        // Package defaults are read first, then user config overrides
+        constexpr const char* CONFIG_DEFAULTS_PATH = "/usr/share/rpi-sb-provisioner/defaults/config";
+        constexpr const char* CONFIG_USER_PATH = "/etc/rpi-sb-provisioner/config";
+        
+        // ===== Firmware Information =====
+        
+        /**
+         * Information about a firmware file
+         */
+        struct FirmwareInfo {
+            std::string version;        // e.g., "2024-01-15"
+            std::string filename;       // e.g., "pieeprom-2024-01-15.bin"
+            std::string filepath;       // Full path to file
+            std::string releaseChannel; // e.g., "default", "latest", "beta"
+            uintmax_t size;             // File size in bytes
+        };
+        
+        // ===== Key Information =====
+        
+        /**
+         * Information about a cryptographic key
+         */
+        struct KeyInfo {
+            std::string algorithm;      // "RSA", "EC", "DSA", etc.
+            int keySize;                // Key size in bits (e.g., 2048, 4096)
+            bool isPrivateKey;          // Whether this is a private key
+            std::string fingerprint;    // SHA256 fingerprint of the public key
+            bool isFitForPurpose;       // Whether key meets Pi secure boot requirements (RSA-2048)
+            std::string statusMessage;  // Human-readable status message
+            std::string statusLevel;    // "valid", "warning", or "error"
+            std::string errorMessage;   // Error details if parsing failed
+            bool success;               // Whether key parsing succeeded
+            
+            KeyInfo() : keySize(0), isPrivateKey(false), isFitForPurpose(false), success(false) {}
+        };
+        
+        /**
+         * Parse a PEM key file and extract metadata
+         * 
+         * @param path Path to the PEM key file
+         * @return KeyInfo struct with key metadata
+         */
+        KeyInfo parseKeyFile(const std::string& path);
+        
+        /**
+         * Parse a PKCS#11 key and extract metadata
+         * Requires the HSM to be connected and accessible
+         * 
+         * @param uri PKCS#11 URI (e.g., pkcs11:object=mykey;type=private)
+         * @param pin Optional PIN to use for validation (if empty, uses stored PIN file)
+         * @return KeyInfo struct with key metadata
+         */
+        KeyInfo parsePkcs11Key(const std::string& uri, const std::string& pin = "");
+        
+        // ===== PKCS#11 PIN Management =====
+        
+        /**
+         * Path to the PKCS#11 PIN file
+         */
+        constexpr const char* PKCS11_PIN_FILE = "/etc/rpi-sb-provisioner/keys/pkcs11.pin";
+        
+        /**
+         * Check if a PKCS#11 PIN is configured
+         * 
+         * @return true if PIN file exists and is non-empty
+         */
+        bool isPkcs11PinConfigured();
+        
+        /**
+         * Save a PKCS#11 PIN securely
+         * The PIN is stored in a separate file with restrictive permissions (0400)
+         * 
+         * @param pin The PIN to save
+         * @return true if successful, false otherwise
+         */
+        bool savePkcs11Pin(const std::string& pin);
+        
+        /**
+         * Remove the PKCS#11 PIN file
+         * 
+         * @return true if successful or file didn't exist, false on error
+         */
+        bool removePkcs11Pin();
+        
+        /**
+         * Build a PKCS#11 URI with pin-source if PIN is configured
+         * 
+         * @param baseUri The base PKCS#11 URI without PIN
+         * @return URI with pin-source appended if PIN is configured
+         */
+        std::string buildPkcs11UriWithPinSource(const std::string& baseUri);
+        
+        /**
+         * Scan the firmware directory for available firmware versions
+         * 
+         * @param deviceFamily The device family ("4", "5", or "2W")
+         * @return A vector of FirmwareInfo sorted by version (newest first)
+         */
+        std::vector<FirmwareInfo> scanFirmwareDirectory(const std::string& deviceFamily);
+        
+        /**
+         * Get the chip number for a device family
+         * 
+         * @param deviceFamily The device family ("4", "5", or "2W")
+         * @return The chip number ("2711", "2712") or empty string if unknown
+         */
+        inline std::string getChipNumberForFamily(const std::string& deviceFamily) {
+            if (deviceFamily == "4") return "2711";
+            if (deviceFamily == "5") return "2712";
+            return "";
+        }
+        
+        // ===== CSRF Protection =====
+        
+        /**
+         * CSRF token manager - handles generation and validation of tokens
+         * Tokens are time-limited and single-use for maximum security
+         */
+        class CsrfTokenManager {
+        public:
+            static CsrfTokenManager& getInstance();
+            
+            /**
+             * Generate a new CSRF token for a session
+             * 
+             * @param sessionId A unique identifier for the session (can be IP + User-Agent hash)
+             * @return The generated token
+             */
+            std::string generateToken(const std::string& sessionId);
+            
+            /**
+             * Validate a CSRF token
+             * 
+             * @param sessionId The session identifier
+             * @param token The token to validate
+             * @return true if valid, false otherwise
+             */
+            bool validateToken(const std::string& sessionId, const std::string& token);
+            
+            /**
+             * Clean up expired tokens (call periodically)
+             */
+            void cleanupExpiredTokens();
+            
+        private:
+            CsrfTokenManager() = default;
+            
+            struct TokenInfo {
+                std::string token;
+                std::chrono::steady_clock::time_point createdAt;
+                bool used = false;
+            };
+            
+            std::mutex mutex_;
+            std::unordered_map<std::string, std::vector<TokenInfo>> sessionTokens_;
+            
+            static constexpr int TOKEN_VALIDITY_SECONDS = 3600;  // 1 hour
+            static constexpr int MAX_TOKENS_PER_SESSION = 10;
+            static constexpr int TOKEN_LENGTH = 32;
+        };
+        
+        /**
+         * Generate a session ID from request (IP + User-Agent hash)
+         * 
+         * @param req The HTTP request
+         * @return A session identifier string
+         */
+        std::string getSessionIdFromRequest(const drogon::HttpRequestPtr& req);
+        
+        /**
+         * Validate CSRF token from request header or body
+         * 
+         * @param req The HTTP request
+         * @return true if valid, false otherwise
+         */
+        bool validateCsrfToken(const drogon::HttpRequestPtr& req);
         /**
          * Sanitize path components to prevent directory traversal attacks
          * 

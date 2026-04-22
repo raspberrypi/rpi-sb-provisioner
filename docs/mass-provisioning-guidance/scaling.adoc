@@ -112,13 +112,10 @@ Testing with a 2.6GB system image:
 |Approximately 2.5 minutes per device
 
 |*Operator capacity*
-|Up to 7 provisioning heads per operator
+|Up to 5 provisioning heads per operator
 
 |*Throughput (single operator)*
-|~150 devices per 8-hour shift (with pipeline)
-
-|*Throughput (batch mode)*
-|~90 devices per 8-hour shift (less efficient)
+|~650 devices per 8-hour shift (with pipeline)
 |===
 
 === Performance Variables
@@ -221,7 +218,7 @@ Track key performance indicators:
 * Single provisioning head with manual workflow
 * Direct USB connection, Ethernet optional
 * Standard workspace with basic cable management
-* Estimated setup time: 1–2 hours
+* Estimated setup time: 30-90 minutes
 * No special infrastructure required
 
 === Medium-Scale Operations (50–500 devices)

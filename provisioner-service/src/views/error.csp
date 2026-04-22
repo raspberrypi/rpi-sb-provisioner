@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <title>Error</title>
     <%view stylesheet %>
@@ -7,6 +7,7 @@
 <body>
     <%view navbar %>
 
+    <main id="main-content" role="alert">
     <a href="javascript:history.back()" class="back-link">← Back</a>
 
     <div class="error-container">
@@ -85,5 +86,6 @@
             font-size: 16px;
         }
     </style>
+    </main>
 </body>
 </html> 

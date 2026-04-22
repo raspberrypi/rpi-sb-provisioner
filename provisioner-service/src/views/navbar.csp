@@ -1,5 +1,15 @@
 <style>
 /* Navigation Bar Styles */
+/* Navigation Bar Styles - using nav element for accessibility */
+nav.rpi-navbar {
+    background-color: #333;
+    margin-bottom: 20px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    min-height: 50px;
+}
+
 .rpi-navbar {
     background-color: #333;
     margin-bottom: 20px;
@@ -102,18 +112,35 @@
 }
 </style>
 
+<!-- Skip to main content link for accessibility -->
+<a href="#main-content" class="skip-link">Skip to main content</a>
+
+<!-- Security Warning Banner for Public Binding -->
+<%c++ extern bool g_isPublicBinding; %>
+<%c++ extern std::string g_listenerAddress; %>
+<%c++ if(g_isPublicBinding) { %>
+<div class="security-warning-banner" role="alert">
+    <span class="warning-icon" aria-hidden="true">⚠️</span>
+    <div class="warning-content">
+        <div class="warning-title">Security Warning: Public Network Binding Detected</div>
+        <div class="warning-text">
+            This provisioner is bound to <strong><%c++ $$ << g_listenerAddress; %></strong> and may be accessible from external networks. 
+            This service is intended for local use only. Consider binding to 127.0.0.1 or implementing authentication.
+        </div>
+    </div>
+</div>
+<%c++ } %>
+
 <!-- Navigation Bar -->
-<div class="rpi-navbar">
+<nav class="rpi-navbar" role="navigation" aria-label="Main navigation">
     <div class="rpi-nav-items">
-        <a href="/devices" <%c++ if(@@.get<std::string>("currentPage") == "devices") { %>class="active"<%c++ } %>>Devices</a>
-        <a href="/get-images" <%c++ if(@@.get<std::string>("currentPage") == "images") { %>class="active"<%c++ } %>>Images</a>
-        <a href="/options/get" <%c++ if(@@.get<std::string>("currentPage") == "options") { %>class="active"<%c++ } %>>Options</a>
-        <a href="/options/firmware" <%c++ if(@@.get<std::string>("currentPage") == "firmware") { %>class="active"<%c++ } %>>Firmware</a>
-        <a href="/customisation/list-scripts" <%c++ if(@@.get<std::string>("currentPage") == "customisation") { %>class="active"<%c++ } %>>Customisation</a>
-        <a href="/services" <%c++ if(@@.get<std::string>("currentPage") == "services") { %>class="active"<%c++ } %>>Services</a>
-        <a href="/manu-db" <%c++ if(@@.get<std::string>("currentPage") == "manufacturing") { %>class="active"<%c++ } %>>Manufacturing Database</a>
-        <a href="/auditlog" <%c++ if(@@.get<std::string>("currentPage") == "auditlog") { %>class="active"<%c++ } %>>Audit Log</a>
-        <a href="/scantool" <%c++ if(@@.get<std::string>("currentPage") == "scantool") { %>class="active"<%c++ } %>>QR Scanner</a>
+        <a href="/devices" <%c++ if(@@.get<std::string>("currentPage") == "devices") { %>class="active" aria-current="page"<%c++ } %>>Devices</a>
+        <a href="/options/get" <%c++ if(@@.get<std::string>("currentPage") == "options") { %>class="active" aria-current="page"<%c++ } %>>Options</a>
+        <a href="/customisation/list-scripts" <%c++ if(@@.get<std::string>("currentPage") == "customisation") { %>class="active" aria-current="page"<%c++ } %>>Customisation</a>
+        <a href="/services" <%c++ if(@@.get<std::string>("currentPage") == "services") { %>class="active" aria-current="page"<%c++ } %>>Services</a>
+        <a href="/manu-db" <%c++ if(@@.get<std::string>("currentPage") == "manufacturing") { %>class="active" aria-current="page"<%c++ } %>>Manufacturing Database</a>
+        <a href="/auditlog" <%c++ if(@@.get<std::string>("currentPage") == "auditlog") { %>class="active" aria-current="page"<%c++ } %>>Audit Log</a>
+        <a href="/scantool" <%c++ if(@@.get<std::string>("currentPage") == "scantool") { %>class="active" aria-current="page"<%c++ } %>>QR Scanner</a>
     </div>
     
     <div class="rpi-right-items">
@@ -125,7 +152,7 @@
             <%c++ if(g_hasNewerVersion && !g_releaseUrl.empty()) { %>
                 <a href="<%c++ $$ << g_releaseUrl; %>" target="_blank" class="rpi-version-link">
                     v<%c++ $$ << g_packageVersion; %>
-                    <span class="rpi-version-warning">⚠</span>
+                    <span class="rpi-version-warning" aria-label="Update available">⚠</span>
                 </a>
             <%c++ } else { %>
                 v<%c++ $$ << g_packageVersion; %>
@@ -133,5 +160,5 @@
         </span>
         <a href="https://github.com/raspberrypi/rpi-sb-provisioner" target="_blank" class="rpi-github-link">GitHub</a>
     </div>
-</div>
+</nav>
 <%view-end%> 

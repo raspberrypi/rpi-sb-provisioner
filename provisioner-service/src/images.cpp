@@ -6,7 +6,9 @@
 #include <drogon/HttpSimpleController.h>
 #include <drogon/HttpTypes.h>
 #include <drogon/WebSocketController.h>
+#include <drogon/RequestStream.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/inotify.h>
@@ -14,8 +16,13 @@
 #include <errno.h>
 #include <systemd/sd-bus.h>
 #include "utils.h"
+#include "include/schema_validator.h"
+
+#include <archive.h>
+#include <archive_entry.h>
 
 #include <filesystem>
+#include <set>
 #include <string>
 #include <vector>
 #include <fstream>
@@ -25,12 +32,15 @@
 #include <mutex>
 #include <unordered_map>
 #include <queue>
+#include <deque>
 #include <thread>
 #include <condition_variable>
 #include <atomic>
 #include <chrono>
 #include <cmath>
 #include <random>
+#include <cstdlib>
+#include <array>
 
 #include <images.h>
 #include "utils.h"
@@ -346,6 +356,45 @@ public:
 std::unordered_map<std::string, std::vector<drogon::WebSocketConnectionPtr>> BootPackageWebSocketController::activeConnections;
 std::mutex BootPackageWebSocketController::connectionsMutex;
 
+#include "include/topic_hub.h"
+
+// Generic progress WebSocket controller — delegates everything to TopicHub.
+// Clients send {"subscribe":"upload:<id>"} / {"unsubscribe":"upload:<id>"}.
+class ProgressWebSocketController : public drogon::WebSocketController<ProgressWebSocketController> {
+public:
+    void handleNewMessage(const drogon::WebSocketConnectionPtr& wsConnPtr,
+                          std::string&& message,
+                          const drogon::WebSocketMessageType& type) override
+    {
+        if (type != drogon::WebSocketMessageType::Text) return;
+
+        Json::CharReaderBuilder rbuilder;
+        Json::Value root;
+        std::string errs;
+        std::istringstream s(message);
+        if (!Json::parseFromStream(rbuilder, s, &root, &errs)) return;
+
+        auto& hub = provisioner::TopicHub::instance();
+
+        if (root.isMember("subscribe") && root["subscribe"].isString()) {
+            hub.subscribe(root["subscribe"].asString(), wsConnPtr);
+        } else if (root.isMember("unsubscribe") && root["unsubscribe"].isString()) {
+            hub.unsubscribe(root["unsubscribe"].asString(), wsConnPtr);
+        }
+    }
+
+    void handleNewConnection(const drogon::HttpRequestPtr&,
+                             const drogon::WebSocketConnectionPtr&) override {}
+
+    void handleConnectionClosed(const drogon::WebSocketConnectionPtr& wsConnPtr) override {
+        provisioner::TopicHub::instance().removeConnection(wsConnPtr);
+    }
+
+    WS_PATH_LIST_BEGIN
+    WS_PATH_ADD("/ws/progress");
+    WS_PATH_LIST_END
+};
+
 namespace provisioner {
 
     namespace {
@@ -357,6 +406,180 @@ namespace provisioner {
         std::condition_variable queueCV;
         std::atomic<bool> workerRunning{false};
         std::thread workerThread;
+
+        // ---- IDP artefact helpers ----
+
+        // Check if a directory is an IDP artefact (contains exactly one .json file)
+        bool isIdpArtefactDirectory(const std::filesystem::path& dirPath) {
+            if (!std::filesystem::is_directory(dirPath)) return false;
+            int jsonCount = 0;
+            try {
+                for (const auto& entry : std::filesystem::directory_iterator(dirPath)) {
+                    if (entry.is_regular_file() && entry.path().extension() == ".json") {
+                        jsonCount++;
+                    }
+                }
+            } catch (...) {
+                return false;
+            }
+            return jsonCount == 1;
+        }
+
+        // Find the single .json file in an IDP artefact directory
+        std::filesystem::path findIdpJsonFile(const std::filesystem::path& dirPath) {
+            for (const auto& entry : std::filesystem::directory_iterator(dirPath)) {
+                if (entry.is_regular_file() && entry.path().extension() == ".json") {
+                    return entry.path();
+                }
+            }
+            return {};
+        }
+
+        // Translate IDP device class (e.g., "pi5", "cm4") to provisioner RPI_DEVICE_FAMILY convention
+        std::string mapIdpDeviceClassToFamily(const std::string& idpClass) {
+            if (idpClass == "pi5" || idpClass == "cm5") return "5";
+            if (idpClass == "pi4" || idpClass == "cm4") return "4";
+            if (idpClass == "pi2w") return "2W";
+            return idpClass; // pass through unknown values
+        }
+
+        // Translate IDP storage type to provisioner RPI_DEVICE_STORAGE_TYPE convention
+        std::string mapIdpStorageType(const std::string& idpStorage) {
+            // IDP uses the same values as the provisioner: "sd", "emmc", "nvme"
+            return idpStorage;
+        }
+
+        // Parse an IDP JSON file and return analysis metadata
+        Json::Value analyzeIdpArtefact(const std::filesystem::path& dirPath) {
+            Json::Value result;
+            result["type"] = "idp";
+
+            auto jsonPath = findIdpJsonFile(dirPath);
+            if (jsonPath.empty()) {
+                result["error"] = "No JSON description file found";
+                return result;
+            }
+
+            std::ifstream jsonFile(jsonPath);
+            if (!jsonFile.is_open()) {
+                result["error"] = "Cannot open JSON description file";
+                return result;
+            }
+
+            Json::Value json;
+            Json::CharReaderBuilder builder;
+            std::string errors;
+            if (!Json::parseFromStream(builder, jsonFile, &json, &errors)) {
+                result["error"] = "JSON parse error: " + errors;
+                return result;
+            }
+
+            // Schema-validate the image description
+            auto schemaResult = provisioner::schema::validateImageJsonFull(json);
+            result["schema_valid"] = schemaResult.valid;
+            if (!schemaResult.valid) {
+                result["schema_errors"] = schemaResult.errorsToJson();
+            }
+
+            // Extract IGmeta fields
+            if (json.isMember("IGmeta")) {
+                const auto& meta = json["IGmeta"];
+                if (meta.isMember("IGconf_device_class")) {
+                    std::string rawClass = meta["IGconf_device_class"].asString();
+                    result["device_class_raw"] = rawClass;
+                    result["device_class"] = mapIdpDeviceClassToFamily(rawClass);
+                }
+                if (meta.isMember("IGconf_device_storage_type")) {
+                    std::string rawStorage = meta["IGconf_device_storage_type"].asString();
+                    result["storage_type_raw"] = rawStorage;
+                    result["storage_type"] = mapIdpStorageType(rawStorage);
+                }
+                if (meta.isMember("IGconf_image_version")) {
+                    result["image_version"] = meta["IGconf_image_version"].asString();
+                }
+            }
+
+            // Extract attributes
+            if (json.isMember("attributes")) {
+                const auto& attrs = json["attributes"];
+                if (attrs.isMember("image-name")) {
+                    result["image_name"] = attrs["image-name"].asString();
+                }
+            }
+
+            // Check encryption -- look for encrypted partitions in the provisionmap
+            bool hasEncryption = false;
+            std::string cipher;
+            if (json.isMember("layout")) {
+                const auto& layout = json["layout"];
+                if (layout.isMember("provisionmap")) {
+                    const auto& pmap = layout["provisionmap"];
+                    for (const auto& entry : pmap) {
+                        if (entry.isMember("encrypted") && entry["encrypted"].isObject()) {
+                            hasEncryption = true;
+                            const auto& enc = entry["encrypted"];
+                            if (enc.isMember("luks2") && enc["luks2"].isMember("cipher")) {
+                                cipher = enc["luks2"]["cipher"].asString();
+                            }
+                        }
+                    }
+                }
+
+                // Count partitions
+                if (layout.isMember("partitionimages")) {
+                    result["partition_count"] = static_cast<Json::UInt>(layout["partitionimages"].size());
+                }
+            }
+            result["encryption"] = hasEncryption;
+            if (!cipher.empty()) {
+                result["cipher"] = cipher;
+            }
+
+            // Count sparse image files referenced by the IDP descriptor
+            int simgCount = 0;
+            if (json.isMember("layout") && json["layout"].isMember("partitionimages")) {
+                std::set<std::string> seen;
+                const auto& pimages = json["layout"]["partitionimages"];
+                for (const auto& key : pimages.getMemberNames()) {
+                    if (pimages[key].isMember("simage")) {
+                        std::string name = pimages[key]["simage"].asString();
+                        if (!name.empty() && seen.insert(name).second) {
+                            std::filesystem::path p = dirPath / name;
+                            if (std::filesystem::exists(p) && std::filesystem::is_regular_file(p)) {
+                                simgCount++;
+                            }
+                        }
+                    }
+                }
+            }
+            result["simg_file_count"] = simgCount;
+
+            return result;
+        }
+
+        // Validate archive entry path for security (no path traversal)
+        bool isArchivePathSafe(const std::string& entryPath) {
+            // Reject absolute paths
+            if (!entryPath.empty() && entryPath[0] == '/') return false;
+            // Reject path traversal
+            if (entryPath.find("..") != std::string::npos) return false;
+            return true;
+        }
+
+        // Check available disk space at a path (returns bytes available)
+        std::uintmax_t getAvailableDiskSpace(const std::string& path) {
+            struct statvfs stat;
+            if (statvfs(path.c_str(), &stat) != 0) {
+                return 0;
+            }
+            return static_cast<std::uintmax_t>(stat.f_bavail) * stat.f_frsize;
+        }
+
+        // Run an external command and return exit code
+        int runCommand(const std::string& cmd) {
+            return std::system(cmd.c_str());
+        }
+
     } // namespace anonymous
     
     // In-memory cache for SHA256 results
@@ -381,20 +604,14 @@ namespace provisioner {
 
     // Calculate SHA256 of a file
     std::string calculateSHA256(const std::filesystem::path& imagePath, const std::string& imageName, std::shared_ptr<SHA256CancellationToken> cancellationToken) {
-        // Use smaller chunks (1MB) for more responsive cancellation
-        constexpr size_t CHUNK_SIZE = 1 * 1024 * 1024; 
-        // For very large files, process in even smaller sub-chunks within each chunk
-        constexpr size_t SUB_CHUNK_SIZE = 256 * 1024; // 256KB sub-chunks
+        constexpr size_t CHUNK_SIZE = 1 * 1024 * 1024;
+        constexpr size_t SUB_CHUNK_SIZE = 256 * 1024;
         std::vector<unsigned char> buffer(CHUNK_SIZE);
-        unsigned char hash[EVP_MAX_MD_SIZE];
-        unsigned int hash_len;
-        
-        EVP_MD_CTX* mdctx = EVP_MD_CTX_new();
-        EVP_DigestInit_ex(mdctx, EVP_sha256(), nullptr);
+
+        provisioner::utils::SHA256Hasher hasher;
         
         std::ifstream file(imagePath, std::ios::binary);
         if (!file) {
-            EVP_MD_CTX_free(mdctx);
             return "file-read-error";
         }
         
@@ -403,7 +620,6 @@ namespace provisioner {
         std::streamsize fileSize = file.tellg();
         file.seekg(0, std::ios::beg);
         
-        // Log start of calculation
         LOG_INFO << "Starting SHA256 calculation for " << imagePath.filename().string() 
                  << " (" << (fileSize / (1024 * 1024)) << " MB)";
         
@@ -411,12 +627,9 @@ namespace provisioner {
         int lastProgressPercent = 0;
         
         while (file) {
-            // Check for cancellation before each chunk
             if (cancellationToken) {
                 if (cancellationToken->is_cancelled()) {
                     LOG_INFO << "SHA256 calculation cancelled for " << imageName;
-                    EVP_MD_CTX_free(mdctx);
-                    file.close();
                     return "calculation-cancelled";
                 }
             } else {
@@ -426,53 +639,43 @@ namespace provisioner {
             file.read(reinterpret_cast<char*>(buffer.data()), CHUNK_SIZE);
             std::streamsize bytes_read = file.gcount();
             if (bytes_read > 0) {
-                // Process in smaller sub-chunks for more frequent cancellation checks
                 std::streamsize processed = 0;
                 while (processed < bytes_read) {
-                    // Check for cancellation every sub-chunk
                     if (cancellationToken && cancellationToken->is_cancelled()) {
                         LOG_INFO << "SHA256 calculation cancelled during sub-chunk processing for " << imageName;
-                        EVP_MD_CTX_free(mdctx);
-                        file.close();
                         return "calculation-cancelled";
                     }
                     
                     std::streamsize sub_chunk_size = std::min(static_cast<std::streamsize>(SUB_CHUNK_SIZE), bytes_read - processed);
-                    EVP_DigestUpdate(mdctx, buffer.data() + processed, sub_chunk_size);
+                    hasher.update(buffer.data() + processed, sub_chunk_size);
                     processed += sub_chunk_size;
                 }
                 
                 totalBytesRead += bytes_read;
                 
-                // Log progress every 10%
                 if (fileSize > 0) {
                     int progressPercent = static_cast<int>((totalBytesRead * 100) / fileSize);
                     double progressFraction = static_cast<double>(totalBytesRead) / fileSize;
                     
                     if (progressPercent >= lastProgressPercent + 5) {
-                        lastProgressPercent = (progressPercent / 5) * 5; // Round to nearest 5%
+                        lastProgressPercent = (progressPercent / 5) * 5;
                         LOG_INFO << "SHA256 calculation: " << lastProgressPercent << "% complete for "
                                  << imagePath.filename().string();
                         
-                        // Update the progress in the cache
                         if (!imageName.empty()) {
                             std::lock_guard<std::mutex> lock(sha256Cache_mutex);
                             auto it = sha256Cache.find(imageName);
                             if (it != sha256Cache.end() && it->second.status == SHA256Status::PENDING) {
-                                // Update progress while keeping other fields the same
                                 SHA256Result updatedResult("", SHA256Status::PENDING, progressFraction);
                                 
-                                // Preserve the timestamp if it exists
                                 if (it->second.timestamp.has_value()) {
                                     updatedResult.timestamp = it->second.timestamp;
                                 }
                                 
-                                // CRITICAL: Preserve the cancellation token!
                                 updatedResult.cancellation_token = it->second.cancellation_token;
                                 
                                 sha256Cache.insert_or_assign(imageName, updatedResult);
                                 
-                                // Broadcast progress update to connected WebSocket clients
                                 SHA256WebSocketController::broadcastUpdate(imageName, updatedResult);
                             }
                         }
@@ -481,24 +684,12 @@ namespace provisioner {
             }
         }
         
-        // Final check for cancellation before completing
         if (cancellationToken && cancellationToken->is_cancelled()) {
             LOG_INFO << "SHA256 calculation cancelled at completion for " << imageName;
-            EVP_MD_CTX_free(mdctx);
-            file.close();
             return "calculation-cancelled";
         }
         
-        EVP_DigestFinal_ex(mdctx, hash, &hash_len);
-        EVP_MD_CTX_free(mdctx);
-        file.close();
-        
-        std::stringstream ss;
-        for(unsigned int i = 0; i < hash_len; i++) {
-            ss << std::hex << std::setw(2) << std::setfill('0') << (int)hash[i];
-        }
-        std::string sha256 = ss.str();
-        std::memset(hash, 0, EVP_MAX_MD_SIZE);
+        std::string sha256 = hasher.finalize();
         
         LOG_INFO << "Completed SHA256 calculation for " << imagePath.filename().string();
         
@@ -1213,53 +1404,86 @@ namespace provisioner {
             callback(resp);
         });
         
-        app.registerHandler("/get-images", [](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
-            LOG_INFO << "Images::get-images";
-
-            // Add audit log entry for handler access
-            AuditLog::logHandlerAccess(req, "/get-images");
+        // JSON endpoint for listing images (used by Options page image browser)
+        app.registerHandler("/images/list", [](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
+            LOG_INFO << "Images::list (JSON)";
+            AuditLog::logHandlerAccess(req, "/images/list");
 
             std::vector<ImageInfo> imageInfos;
             
-            LOG_INFO << "Scanning directory: " << IMAGES_PATH;
-            for (const auto &entry : std::filesystem::directory_iterator(IMAGES_PATH)) {
-                LOG_INFO << "Found entry: " << entry.path().string();
-                if (entry.is_regular_file()) {
-                    std::filesystem::path imagePath = entry.path();
-                    // Skip SHA256 sidecar files from the listing
-                    if (imagePath.extension() == ".sha256") {
+            try {
+                for (const auto &entry : std::filesystem::directory_iterator(IMAGES_PATH)) {
+                    // Include IDP artefact directories
+                    if (entry.is_directory()) {
+                        if (entry.path().filename().string()[0] == '.') continue;
+                        if (isIdpArtefactDirectory(entry.path())) {
+                            ImageInfo info;
+                            info.name = entry.path().filename().string();
+                            info.is_idp = true;
+                            // Read SHA256 from sidecar file (hash of the original archive)
+                            info.sha256 = "IDP Artefact";
+                            try {
+                                std::filesystem::path sidecarPath = entry.path();
+                                sidecarPath += ".sha256";
+                                if (std::filesystem::exists(sidecarPath)) {
+                                    std::ifstream in(sidecarPath);
+                                    std::string line;
+                                    if (in && std::getline(in, line)) {
+                                        while (!line.empty() && (line.back()==' ' || line.back()=='\t' || line.back()=='\n' || line.back()=='\r')) {
+                                            line.pop_back();
+                                        }
+                                        if (!line.empty()) info.sha256 = line;
+                                    }
+                                }
+                            } catch (...) {}
+                            // Sum up directory size
+                            try {
+                                std::uintmax_t totalSize = 0;
+                                for (const auto& f : std::filesystem::recursive_directory_iterator(entry.path())) {
+                                    if (f.is_regular_file()) totalSize += std::filesystem::file_size(f);
+                                }
+                                info.size = totalSize;
+                            } catch (...) {
+                                info.size = 0;
+                            }
+                            imageInfos.push_back(info);
+                        }
                         continue;
                     }
-                    ImageInfo info;
-                    info.name = imagePath.filename().string();
-                    
-                    // Prefer sidecar file if present; fall back to cache status
-                    try {
-                        std::filesystem::path sidecarPath = imagePath;
-                        sidecarPath += ".sha256";
-                        if (std::filesystem::exists(sidecarPath)) {
-                            std::ifstream in(sidecarPath);
-                            std::string line;
-                            if (in && std::getline(in, line)) {
-                                // Trim trailing whitespace
-                                while (!line.empty() && (line.back()==' ' || line.back()=='\t' || line.back()=='\n' || line.back()=='\r')) {
-                                    line.pop_back();
-                                }
-                                info.sha256 = line;
-                            }
+
+                    if (entry.is_regular_file()) {
+                        std::filesystem::path imagePath = entry.path();
+                        // Skip SHA256 sidecar files from the listing
+                        if (imagePath.extension() == ".sha256") {
+                            continue;
                         }
-                    } catch (const std::filesystem::filesystem_error& e) {
-                        // Ignore filesystem errors while reading sidecar, but log at debug level
-                        LOG_DEBUG << "Ignoring sidecar filesystem read error for " << imagePath.filename().string() << ": " << e.what();
-                    } catch (const std::ios_base::failure& e) {
-                        LOG_DEBUG << "Ignoring sidecar IO error for " << imagePath.filename().string() << ": " << e.what();
-                    } catch (const std::exception& e) {
-                        LOG_DEBUG << "Ignoring sidecar generic read error for " << imagePath.filename().string() << ": " << e.what();
-                    }
-                    
-                    if (info.sha256.empty()) {
-                        // Get SHA256 from cache if available
-                        {
+                        ImageInfo info;
+                        info.name = imagePath.filename().string();
+                        
+                        // Get file size
+                        try {
+                            info.size = std::filesystem::file_size(imagePath);
+                        } catch (...) {
+                            info.size = 0;
+                        }
+                        
+                        // Get SHA256 - prefer sidecar file, then cache
+                        try {
+                            std::filesystem::path sidecarPath = imagePath;
+                            sidecarPath += ".sha256";
+                            if (std::filesystem::exists(sidecarPath)) {
+                                std::ifstream in(sidecarPath);
+                                std::string line;
+                                if (in && std::getline(in, line)) {
+                                    while (!line.empty() && (line.back()==' ' || line.back()=='\t' || line.back()=='\n' || line.back()=='\r')) {
+                                        line.pop_back();
+                                    }
+                                    info.sha256 = line;
+                                }
+                            }
+                        } catch (...) {}
+                        
+                        if (info.sha256.empty()) {
                             std::lock_guard<std::mutex> lock(sha256Cache_mutex);
                             auto it = sha256Cache.find(info.name);
                             if (it != sha256Cache.end()) {
@@ -1271,66 +1495,46 @@ namespace provisioner {
                                     info.sha256 = "Error";
                                 }
                             } else {
-                                // Not in cache yet, calculation may still be pending
                                 info.sha256 = "Calculating...";
                             }
                         }
+                        
+                        imageInfos.push_back(info);
                     }
-                    
-                    imageInfos.push_back(info);
-                    LOG_INFO << "Added image: " << info.name;
                 }
+            } catch (const std::filesystem::filesystem_error& e) {
+                LOG_ERROR << "Error scanning images directory: " << e.what();
             }
             
-            LOG_INFO << "Total images found: " << imageInfos.size();
+            // Get current gold master for comparison
+            std::string currentGoldMaster;
+            auto goldMasterPath = provisioner::utils::getConfigValue("GOLD_MASTER_OS_FILE");
+            if (goldMasterPath) {
+                currentGoldMaster = *goldMasterPath;
+            }
+            
+            // Build JSON response
+            Json::Value response;
+            Json::Value imageArray(Json::arrayValue);
+            
+            for (const auto& info : imageInfos) {
+                Json::Value imageObj;
+                imageObj["name"] = info.name;
+                imageObj["path"] = std::string(IMAGES_PATH) + "/" + info.name;
+                imageObj["sha256"] = info.sha256;
+                imageObj["size_mb"] = info.size / (1024.0 * 1024.0);
+                imageObj["is_gold_master"] = (currentGoldMaster.find(info.name) != std::string::npos);
+                imageObj["is_idp"] = info.is_idp;
+                imageObj["type"] = info.is_idp ? "idp" : "traditional";
+                imageArray.append(imageObj);
+            }
+            
+            response["images"] = imageArray;
             
             auto resp = drogon::HttpResponse::newHttpResponse();
-            
-            // Check if the client accepts HTML
-            auto acceptHeader = req->getHeader("Accept");
-            if (!acceptHeader.empty() && (acceptHeader.find("text/html") != std::string::npos)) {
-                LOG_INFO << "HTML response requested";
-
-                // Get current gold master image
-                std::string currentGoldMaster;
-                auto goldMasterPath = provisioner::utils::getConfigValue("GOLD_MASTER_OS_FILE");
-                if (goldMasterPath) {
-                    currentGoldMaster = *goldMasterPath;
-                    // Extract just the filename from the full path
-                    std::filesystem::path path(currentGoldMaster);
-                    currentGoldMaster = path.filename().string();
-                } else {
-                    LOG_ERROR << "Failed to read GOLD_MASTER_OS_FILE from config";
-                }
-
-                drogon::HttpViewData viewData;
-                std::vector<std::map<std::string, std::string>> imageMaps;
-                for (const auto& info : imageInfos) {
-                    std::map<std::string, std::string> imageMap;
-                    imageMap["name"] = info.name;
-                    imageMap["sha256"] = info.sha256;
-                    imageMap["is_gold_master"] = (info.name == currentGoldMaster) ? "true" : "false";
-                    imageMaps.push_back(imageMap);
-                }
-                viewData.insert("images", imageMaps);
-                viewData.insert("currentPage", std::string("images"));
-                viewData.insert("useWebSocket", true); // Tell the template to use WebSocket
-                LOG_INFO << "View data populated with " << imageMaps.size() << " images";
-                resp = drogon::HttpResponse::newHttpViewResponse("images.csp", viewData);
-            } else {
-                LOG_INFO << "JSON response requested";
-                Json::Value imageArray(Json::arrayValue);
-                for (const auto& info : imageInfos) {
-                    Json::Value imageObj;
-                    imageObj["name"] = info.name;
-                    imageObj["sha256"] = info.sha256;
-                    imageArray.append(imageObj);
-                }
-                resp->setStatusCode(drogon::k200OK);
-                resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
-                resp->setBody(imageArray.toStyledString());
-            }
-            
+            resp->setStatusCode(drogon::k200OK);
+            resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+            resp->setBody(response.toStyledString());
             callback(resp);
         });
 
@@ -1366,6 +1570,45 @@ namespace provisioner {
                     "IMAGE_NOT_FOUND",
                     "Requested image: " + imageName
                 );
+                callback(resp);
+                return;
+            }
+
+            // For IDP artefact directories, return the sidecar hash immediately
+            if (std::filesystem::is_directory(imagePath)) {
+                auto resp = drogon::HttpResponse::newHttpResponse();
+                resp->setStatusCode(drogon::k200OK);
+                resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+                Json::Value result;
+                result["name"] = imageName;
+
+                std::filesystem::path sidecarPath = imagePath;
+                sidecarPath += ".sha256";
+                if (std::filesystem::exists(sidecarPath)) {
+                    try {
+                        std::ifstream in(sidecarPath);
+                        std::string line;
+                        if (in && std::getline(in, line)) {
+                            while (!line.empty() && (line.back()==' ' || line.back()=='\t' || line.back()=='\n' || line.back()=='\r')) {
+                                line.pop_back();
+                            }
+                            result["sha256"] = line;
+                            result["status"] = "complete";
+                        } else {
+                            result["sha256"] = "IDP Artefact";
+                            result["status"] = "complete";
+                        }
+                    } catch (...) {
+                        result["sha256"] = "IDP Artefact";
+                        result["status"] = "error";
+                    }
+                } else {
+                    result["sha256"] = "IDP Artefact";
+                    result["status"] = "complete";
+                    result["message"] = "No archive hash available (sidecar file missing).";
+                }
+
+                resp->setBody(result.toStyledString());
                 callback(resp);
                 return;
             }
@@ -1434,136 +1677,794 @@ namespace provisioner {
             callback(resp);
         });
 
-        app.registerHandler("/upload-image", [](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
+        app.registerHandler("/upload-image", [](const drogon::HttpRequestPtr &req, drogon::RequestStreamPtr &&stream, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
             LOG_INFO << "Images::uploadImage";
-            
-            // Add audit log entry for handler access
+
             AuditLog::logHandlerAccess(req, "/upload-image");
-            
-            auto resp = drogon::HttpResponse::newHttpResponse();
 
-            // Get the file from the request
-            drogon::MultiPartParser parser;
-            if (parser.parse(req) != 0 || parser.getFiles().size() != 1) {
-                auto resp = provisioner::utils::createErrorResponse(
-                    req,
-                    "Invalid request: Expected exactly one file in multipart form data",
-                    drogon::k400BadRequest,
-                    "Invalid Request",
-                    "INVALID_UPLOAD_REQUEST"
-                );
-                callback(resp);
-                return;
-            }
-            auto files = parser.getFiles();
+            // Helper: case-insensitive suffix check
+            auto endsWith = [](const std::string& s, const std::string& suffix) -> bool {
+                return s.size() >= suffix.size() &&
+                       s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
+            };
 
-            const auto& file = files[0];
-            std::string originalFilename = file.getFileName();
-            
-            // Function to generate a unique filename (race-condition safe with timestamp fallback)
+            // Helper: generate a unique filename (race-condition safe with timestamp fallback)
             auto generateUniqueFilename = [](const std::string& originalName, const std::string& basePath) -> std::string {
                 std::filesystem::path targetDir(basePath);
                 std::filesystem::path originalPath = targetDir / originalName;
-                
-                // If file doesn't exist, use original name
+
                 if (!std::filesystem::exists(originalPath)) {
                     return originalName;
                 }
-                
-                // Extract filename parts for numbered variants
+
                 std::filesystem::path nameOnly = originalPath.stem();
                 std::filesystem::path extension = originalPath.extension();
-                
-                // Try numbered variants
+
                 for (int i = 1; i <= 9999; ++i) {
                     std::string newName = nameOnly.string() + "_" + std::to_string(i) + extension.string();
-                    std::filesystem::path newPath = targetDir / newName;
-                    
-                    if (!std::filesystem::exists(newPath)) {
+                    if (!std::filesystem::exists(targetDir / newName)) {
                         return newName;
                     }
                 }
-                
-                // If we can't find a unique name after 9999 attempts, use timestamp + random
+
                 auto now = std::chrono::system_clock::now();
                 auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
                 std::random_device rd;
                 std::mt19937 gen(rd());
                 std::uniform_int_distribution<> dis(1000, 9999);
-                int random = dis(gen);
-                
-                return nameOnly.string() + "_" + std::to_string(timestamp) + "_" + std::to_string(random) + extension.string();
+                return nameOnly.string() + "_" + std::to_string(timestamp) + "_" + std::to_string(dis(gen)) + extension.string();
             };
-            
-            // Generate unique filename to avoid conflicts
-            std::string finalFilename = generateUniqueFilename(originalFilename, IMAGES_PATH);
-            
-            // Create target path with unique filename
-            std::filesystem::path targetPath(IMAGES_PATH);
-            targetPath /= finalFilename;
 
-            try {
-                // Move uploaded file to target location with unique name
-                file.saveAs(targetPath);
-                
-                // Log successful file upload
-                AuditLog::logFileSystemAccess("UPLOAD", targetPath.string(), true, "", 
-                    "Original filename: " + originalFilename + (originalFilename != finalFilename ? ", renamed to: " + finalFilename : ""));
-                
-                // Clear any stale cache entry for this filename
-                {
-                    std::lock_guard<std::mutex> lock(sha256Cache_mutex);
-                    sha256Cache.erase(finalFilename);
+            // Helper: strip archive extension to get the artefact name
+            auto stripArchiveExtension = [&endsWith](const std::string& filename, const std::string& lowerFilename) -> std::string {
+                if (endsWith(lowerFilename, ".tar.xz"))  return filename.substr(0, filename.size() - 7);
+                if (endsWith(lowerFilename, ".tar.zst")) return filename.substr(0, filename.size() - 8);
+                return filename;
+            };
+
+            // Helper: strip compression extension from .img.{xz,zst} -> .img
+            auto stripImgCompressionExtension = [&endsWith](const std::string& filename, const std::string& lowerFilename) -> std::string {
+                if (endsWith(lowerFilename, ".img.xz"))  return filename.substr(0, filename.size() - 3);
+                if (endsWith(lowerFilename, ".img.zst")) return filename.substr(0, filename.size() - 4);
+                return filename;
+            };
+
+            auto isSupportedUpload = [&endsWith](const std::string& lowerFilename) -> bool {
+                return endsWith(lowerFilename, ".img") ||
+                       endsWith(lowerFilename, ".img.xz") ||
+                       endsWith(lowerFilename, ".img.zst") ||
+                       endsWith(lowerFilename, ".tar.xz") ||
+                       endsWith(lowerFilename, ".tar.zst");
+            };
+
+            // ---- Non-stream fallback (if streaming is disabled) ----
+            if (!stream) {
+                LOG_WARN << "Request stream not available, falling back to buffered upload";
+                auto resp = drogon::HttpResponse::newHttpResponse();
+
+                drogon::MultiPartParser parser;
+                if (parser.parse(req) != 0 || parser.getFiles().size() != 1) {
+                    auto resp = provisioner::utils::createErrorResponse(
+                        req, "Invalid request: Expected exactly one file in multipart form data",
+                        drogon::k400BadRequest, "Invalid Request", "INVALID_UPLOAD_REQUEST");
+                    callback(resp);
+                    return;
                 }
-                
-                // Start SHA256 calculation in the background
-                requestSHA256Calculation(finalFilename);
-                
-                // Trigger boot.img generation for secure-boot configurations
-                triggerBootImgGeneration(finalFilename);
-                
-                // Set success response with JSON payload
-                resp->setStatusCode(drogon::k200OK);
-                resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
-                Json::Value result;
-                result["success"] = true;
-                
-                // Include both original and final filenames in response
-                if (originalFilename != finalFilename) {
-                    result["message"] = "File uploaded successfully (renamed to avoid conflict)";
-                    result["original_filename"] = originalFilename;
+                const auto& file = parser.getFiles()[0];
+                std::string originalFilename = file.getFileName();
+                std::string finalFilename = generateUniqueFilename(originalFilename, IMAGES_PATH);
+                std::filesystem::path targetPath = std::filesystem::path(IMAGES_PATH) / finalFilename;
+
+                try {
+                    file.saveAs(targetPath);
+                    AuditLog::logFileSystemAccess("UPLOAD", targetPath.string(), true, "",
+                        "Original filename: " + originalFilename + (originalFilename != finalFilename ? ", renamed to: " + finalFilename : ""));
+                    {
+                        std::lock_guard<std::mutex> lock(sha256Cache_mutex);
+                        sha256Cache.erase(finalFilename);
+                    }
+                    requestSHA256Calculation(finalFilename);
+                    triggerBootImgGeneration(finalFilename);
+
+                    resp->setStatusCode(drogon::k200OK);
+                    resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+                    Json::Value result;
+                    result["success"] = true;
+                    result["is_idp"] = false;
                     result["filename"] = finalFilename;
-                    result["renamed"] = true;
-                } else {
-                    result["message"] = "File uploaded successfully";
-                    result["filename"] = finalFilename;
-                    result["renamed"] = false;
+                    result["renamed"] = (originalFilename != finalFilename);
+                    if (originalFilename != finalFilename) result["original_filename"] = originalFilename;
+                    result["message"] = result["renamed"].asBool() ? "File uploaded successfully (renamed to avoid conflict)" : "File uploaded successfully";
+                    result["sha256"] = "Calculating...";
+                    resp->setBody(result.toStyledString());
+                } catch (const std::exception& e) {
+                    LOG_ERROR << "Failed to save uploaded file: " << e.what();
+                    AuditLog::logFileSystemAccess("UPLOAD", targetPath.string(), false, "",
+                        "Upload failed: " + std::string(e.what()));
+                    auto resp = provisioner::utils::createErrorResponse(
+                        req, "Failed to save uploaded file", drogon::k500InternalServerError,
+                        "Upload Error", "UPLOAD_SAVE_ERROR", e.what());
+                    callback(resp);
+                    return;
                 }
-                
-                result["sha256"] = "Calculating..."; // SHA256 calculation in progress
-                resp->setBody(result.toStyledString());
-            } catch (const std::filesystem::filesystem_error& e) {
-                LOG_ERROR << "Failed to save uploaded file (filesystem): " << e.what();
-            } catch (const std::exception& e) {
-                LOG_ERROR << "Failed to save uploaded file: " << e.what();
-                
-                // Log failed file upload
-                AuditLog::logFileSystemAccess("UPLOAD", targetPath.string(), false, "", 
-                    "Upload failed: " + std::string(e.what()) + ", Original filename: " + originalFilename);
-                
-                auto resp = provisioner::utils::createErrorResponse(
-                    req,
-                    "Failed to save uploaded file",
-                    drogon::k500InternalServerError,
-                    "Upload Error",
-                    "UPLOAD_SAVE_ERROR",
-                    e.what()
-                );
                 callback(resp);
                 return;
             }
 
-            callback(resp);
+            // ---- Streaming upload path ----
+
+            // Early disk space check using Content-Length header.
+            // This is a baseline check -- for compressed images, the worker thread
+            // performs exact pre-allocation via posix_fallocate after reading the
+            // container metadata (xz/zstd embed the uncompressed size).
+            size_t contentLength = req->realContentLength();
+            if (contentLength > 0) {
+                auto availableSpace = getAvailableDiskSpace(IMAGES_PATH);
+                // Use 5x multiplier to account for possible compression.
+                // At this point we don't know if the upload is compressed or not
+                // (the filename arrives later in the multipart headers), so we
+                // apply the multiplier conservatively. For uncompressed .img
+                // uploads this means we require 5x headroom, which is acceptable.
+                size_t spaceNeeded = contentLength * 5;
+                if (availableSpace < spaceNeeded) {
+                    LOG_ERROR << "Insufficient disk space for upload: need ~" << spaceNeeded
+                              << " bytes (5x Content-Length), have " << availableSpace;
+                    stream->setStreamReader(drogon::RequestStreamReader::newNullReader());
+                    auto resp = provisioner::utils::createErrorResponse(
+                        req, "Insufficient disk space for upload",
+                        drogon::k507InsufficientStorage, "Disk Space Error", "INSUFFICIENT_DISK_SPACE");
+                    callback(resp);
+                    return;
+                }
+            }
+
+            // Shared context for streaming callbacks
+            struct UploadContext {
+                // Common
+                std::string originalFilename;
+                std::string finalFilename;
+                bool isArchive = false;
+                bool isCompressedImg = false;
+                bool hadError = false;
+                std::string errorMessage;
+                drogon::HttpStatusCode errorCode = drogon::k500InternalServerError;
+
+                // .img direct-write state
+                int fd = -1;
+                size_t totalBytesWritten = 0;
+                std::string targetPath;
+
+                // Archive / compressed-img shared state (libarchive producer-consumer)
+                std::string artefactName;
+                std::filesystem::path tempDir;
+                std::filesystem::path finalDir;
+                std::mutex bufferMutex;
+                std::condition_variable bufferCv;
+                std::deque<std::vector<char>> chunks;
+                std::vector<char> currentReadChunk;
+                bool streamFinished = false;
+                std::thread extractionThread;
+                bool extractionOk = false;
+                std::string extractionError;
+
+                // SHA256 computed inline on the raw upload data (archives)
+                // For .img and compressed .img, SHA256 is on the decompressed data
+                std::unique_ptr<provisioner::utils::SHA256Hasher> sha256Hasher;
+
+                // SHA256 computed in worker thread on decompressed data (compressed .img only)
+                std::unique_ptr<provisioner::utils::SHA256Hasher> workerSha256Hasher;
+                std::string workerSha256Result;
+
+                // WebSocket progress push (set from X-Upload-Id header; empty = no push)
+                std::string uploadId;
+                std::atomic<int64_t> progressBytesWritten{0};
+                int64_t progressTotalBytes = 0;
+
+                // Response plumbing
+                std::function<void(const drogon::HttpResponsePtr &)> callback;
+                drogon::HttpRequestPtr req;
+                size_t contentLength = 0;
+
+                ~UploadContext() {
+                    if (fd >= 0) ::close(fd);
+                    if (extractionThread.joinable()) extractionThread.join();
+                }
+            };
+
+            auto ctx = std::make_shared<UploadContext>();
+            ctx->callback = std::move(callback);
+            ctx->req = req;
+            ctx->contentLength = contentLength;
+            ctx->uploadId = req->getHeader("X-Upload-Id");
+
+            // libarchive custom read callback: blocks on the producer-consumer buffer
+            auto archiveReadCb = [](struct archive*, void* clientData, const void** buffer) -> la_ssize_t {
+                auto* c = static_cast<UploadContext*>(clientData);
+                std::unique_lock<std::mutex> lock(c->bufferMutex);
+                c->bufferCv.wait(lock, [&] { return !c->chunks.empty() || c->streamFinished; });
+                if (c->chunks.empty()) return 0; // EOF
+                c->currentReadChunk = std::move(c->chunks.front());
+                c->chunks.pop_front();
+                *buffer = c->currentReadChunk.data();
+                return static_cast<la_ssize_t>(c->currentReadChunk.size());
+            };
+
+            auto reader = drogon::RequestStreamReader::newMultipartReader(
+                req,
+                // ---- headerCb: called when a new multipart part header is parsed ----
+                [ctx, endsWith, generateUniqueFilename, stripArchiveExtension, stripImgCompressionExtension, isSupportedUpload, archiveReadCb](drogon::MultipartHeader &&header) {
+                    if (ctx->hadError) return;
+
+                    ctx->originalFilename = header.filename;
+                    if (ctx->originalFilename.empty()) return;
+
+                    std::string lowerFilename = ctx->originalFilename;
+                    std::transform(lowerFilename.begin(), lowerFilename.end(), lowerFilename.begin(), ::tolower);
+
+                    if (!isSupportedUpload(lowerFilename)) {
+                        ctx->hadError = true;
+                        ctx->errorMessage = "Unsupported file type. Accepted formats: .img, .img.xz, .img.zst, .tar.xz, .tar.zst";
+                        return;
+                    }
+
+                    ctx->isArchive = endsWith(lowerFilename, ".tar.xz") ||
+                                     endsWith(lowerFilename, ".tar.zst");
+
+                    ctx->isCompressedImg = endsWith(lowerFilename, ".img.xz") ||
+                                           endsWith(lowerFilename, ".img.zst");
+
+                    // Initialize inline SHA256 for archives (hashes the compressed stream)
+                    // For plain .img and compressed .img, SHA256 is on decompressed data
+                    if (ctx->isArchive) {
+                        ctx->sha256Hasher = std::make_unique<provisioner::utils::SHA256Hasher>();
+                    }
+
+                    if (ctx->isArchive) {
+                        // --- Archive streaming path ---
+                        ctx->artefactName = stripArchiveExtension(ctx->originalFilename, lowerFilename);
+                        ctx->finalDir = std::filesystem::path(IMAGES_PATH) / ctx->artefactName;
+                        ctx->tempDir = std::filesystem::path(IMAGES_PATH) / ("." + ctx->artefactName + ".extracting");
+
+                        LOG_INFO << "Streaming archive upload (IDP artefact): " << ctx->originalFilename;
+
+                        try {
+                            std::filesystem::create_directories(ctx->tempDir);
+                        } catch (const std::exception& e) {
+                            ctx->hadError = true;
+                            ctx->errorMessage = "Failed to create extraction directory: " + std::string(e.what());
+                            return;
+                        }
+
+                        // Spawn worker thread for libarchive extraction
+                        std::string tempDirStr = ctx->tempDir.string();
+                        ctx->extractionThread = std::thread([ctx, archiveReadCb, tempDirStr]() {
+                            struct archive *a = archive_read_new();
+                            archive_read_support_filter_xz(a);
+                            archive_read_support_filter_zstd(a);
+                            archive_read_support_format_tar(a);
+
+                            if (archive_read_open(a, ctx.get(), nullptr, archiveReadCb, nullptr) != ARCHIVE_OK) {
+                                ctx->extractionError = "Failed to open archive stream: " + std::string(archive_error_string(a));
+                                archive_read_free(a);
+                                return;
+                            }
+
+                            struct archive *ext = archive_write_disk_new();
+                            archive_write_disk_set_options(ext,
+                                ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM | ARCHIVE_EXTRACT_NO_OVERWRITE);
+                            archive_write_disk_set_standard_lookup(ext);
+
+                            struct archive_entry *entry;
+                            int r;
+                            size_t archiveBytesWritten = 0;
+                            auto lastPublish = std::chrono::steady_clock::now() - std::chrono::seconds(1);
+                            while ((r = archive_read_next_header(a, &entry)) == ARCHIVE_OK) {
+                                std::string entryPath = archive_entry_pathname(entry);
+                                if (!isArchivePathSafe(entryPath)) {
+                                    ctx->extractionError = "Archive contains unsafe path: " + entryPath;
+                                    break;
+                                }
+
+                                std::string fullPath = tempDirStr + "/" + entryPath;
+                                archive_entry_set_pathname(entry, fullPath.c_str());
+
+                                r = archive_write_header(ext, entry);
+                                if (r != ARCHIVE_OK) {
+                                    ctx->extractionError = "Failed to write header: " + std::string(archive_error_string(ext));
+                                    break;
+                                }
+
+                                if (archive_entry_size(entry) > 0) {
+                                    const void *buff;
+                                    size_t size;
+                                    la_int64_t offset;
+                                    while ((r = archive_read_data_block(a, &buff, &size, &offset)) == ARCHIVE_OK) {
+                                        if (archive_write_data_block(ext, buff, size, offset) != ARCHIVE_OK) {
+                                            ctx->extractionError = "Failed to write data: " + std::string(archive_error_string(ext));
+                                            break;
+                                        }
+                                        archiveBytesWritten += size;
+                                        if (!ctx->uploadId.empty()) {
+                                            auto now = std::chrono::steady_clock::now();
+                                            if (now - lastPublish >= std::chrono::milliseconds(250)) {
+                                                lastPublish = now;
+                                                Json::Value p;
+                                                p["phase"] = "extracting";
+                                                p["bytes_written"] = static_cast<Json::Int64>(archiveBytesWritten);
+                                                p["current_entry"] = entryPath;
+                                                provisioner::TopicHub::instance().publish("upload:" + ctx->uploadId, p);
+                                            }
+                                        }
+                                    }
+                                    if (!ctx->extractionError.empty()) break;
+                                    if (r != ARCHIVE_EOF) {
+                                        ctx->extractionError = "Error reading data: " + std::string(archive_error_string(a));
+                                        break;
+                                    }
+                                }
+                                archive_write_finish_entry(ext);
+                            }
+
+                            if (ctx->extractionError.empty() && r != ARCHIVE_EOF && r != ARCHIVE_OK) {
+                                ctx->extractionError = "Archive read error: " + std::string(archive_error_string(a));
+                            }
+
+                            ctx->extractionOk = ctx->extractionError.empty();
+                            archive_write_free(ext);
+                            archive_read_free(a);
+                        });
+                    } else if (ctx->isCompressedImg) {
+                        // --- Compressed .img streaming path ---
+                        // Decompress on-the-fly via libarchive format_raw, write plain .img
+                        std::string imgFilename = stripImgCompressionExtension(ctx->originalFilename, lowerFilename);
+                        ctx->finalFilename = generateUniqueFilename(imgFilename, IMAGES_PATH);
+                        ctx->targetPath = (std::filesystem::path(IMAGES_PATH) / ctx->finalFilename).string();
+
+                        LOG_INFO << "Streaming compressed .img upload: " << ctx->originalFilename
+                                 << " -> " << ctx->finalFilename;
+
+                        ctx->fd = ::open(ctx->targetPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                        if (ctx->fd < 0) {
+                            ctx->hadError = true;
+                            ctx->errorMessage = "Failed to open target file: " + std::string(strerror(errno));
+                            return;
+                        }
+
+                        // Spawn decompression worker thread
+                        ctx->extractionThread = std::thread([ctx, archiveReadCb]() {
+                            struct archive *a = archive_read_new();
+                            archive_read_support_filter_xz(a);
+                            archive_read_support_filter_zstd(a);
+                            archive_read_support_format_raw(a);
+
+                            if (archive_read_open(a, ctx.get(), nullptr, archiveReadCb, nullptr) != ARCHIVE_OK) {
+                                ctx->extractionError = "Failed to open compressed stream: " + std::string(archive_error_string(a));
+                                archive_read_free(a);
+                                return;
+                            }
+
+                            struct archive_entry *entry;
+                            if (archive_read_next_header(a, &entry) != ARCHIVE_OK) {
+                                ctx->extractionError = "Failed to read compressed stream header: " + std::string(archive_error_string(a));
+                                archive_read_free(a);
+                                return;
+                            }
+
+                            // Pre-allocate using the decompressed size from container metadata.
+                            // xz and zstd both embed the uncompressed size reliably.
+                            la_int64_t entrySize = archive_entry_size(entry);
+                            if (entrySize > 0) {
+                                int fa_ret = posix_fallocate(ctx->fd, 0, static_cast<off_t>(entrySize));
+                                if (fa_ret != 0) {
+                                    ctx->extractionError = "Failed to pre-allocate disk space for decompressed image: " + std::string(strerror(fa_ret));
+                                    ctx->errorCode = drogon::k507InsufficientStorage;
+                                    ctx->hadError = true;
+                                    archive_read_free(a);
+                                    return;
+                                }
+                                LOG_INFO << "Pre-allocated " << entrySize << " bytes for decompressed image";
+                                ctx->progressTotalBytes = static_cast<int64_t>(entrySize);
+                            }
+
+                            // Initialize SHA256 for the decompressed data
+                            ctx->workerSha256Hasher = std::make_unique<provisioner::utils::SHA256Hasher>();
+
+                            // Read decompressed data blocks and write to disk
+                            const void *buff;
+                            size_t size;
+                            la_int64_t offset;
+                            int r;
+                            auto lastPublish = std::chrono::steady_clock::now() - std::chrono::seconds(1);
+                            while ((r = archive_read_data_block(a, &buff, &size, &offset)) == ARCHIVE_OK) {
+                                ctx->workerSha256Hasher->update(buff, size);
+
+                                const char *ptr = static_cast<const char*>(buff);
+                                size_t remaining = size;
+                                while (remaining > 0) {
+                                    ssize_t written = ::write(ctx->fd, ptr, remaining);
+                                    if (written < 0) {
+                                        if (errno == EINTR) continue;
+                                        ctx->extractionError = "Write failed: " + std::string(strerror(errno));
+                                        if (errno == ENOSPC) ctx->errorCode = drogon::k507InsufficientStorage;
+                                        ctx->hadError = true;
+                                        archive_read_free(a);
+                                        return;
+                                    }
+                                    ptr += written;
+                                    remaining -= static_cast<size_t>(written);
+                                }
+                                ctx->totalBytesWritten += size;
+
+                                if (!ctx->uploadId.empty()) {
+                                    auto now = std::chrono::steady_clock::now();
+                                    if (now - lastPublish >= std::chrono::milliseconds(250)) {
+                                        lastPublish = now;
+                                        Json::Value p;
+                                        p["phase"] = "decompressing";
+                                        p["bytes_written"] = static_cast<Json::Int64>(ctx->totalBytesWritten);
+                                        if (ctx->progressTotalBytes > 0)
+                                            p["total_bytes"] = static_cast<Json::Int64>(ctx->progressTotalBytes);
+                                        provisioner::TopicHub::instance().publish("upload:" + ctx->uploadId, p);
+                                    }
+                                }
+                            }
+
+                            if (r != ARCHIVE_EOF) {
+                                ctx->extractionError = "Decompression error: " + std::string(archive_error_string(a));
+                                archive_read_free(a);
+                                return;
+                            }
+
+                            // Finalize SHA256 in the worker
+                            ctx->workerSha256Result = ctx->workerSha256Hasher->finalize();
+
+                            ctx->extractionOk = true;
+                            archive_read_free(a);
+                        });
+                    } else {
+                        // --- .img direct-write path ---
+                        ctx->finalFilename = generateUniqueFilename(ctx->originalFilename, IMAGES_PATH);
+                        ctx->targetPath = (std::filesystem::path(IMAGES_PATH) / ctx->finalFilename).string();
+
+                        LOG_INFO << "Streaming .img upload: " << ctx->originalFilename << " -> " << ctx->finalFilename;
+
+                        // Initialize inline SHA256 for plain .img
+                        ctx->sha256Hasher = std::make_unique<provisioner::utils::SHA256Hasher>();
+
+                        ctx->fd = ::open(ctx->targetPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                        if (ctx->fd < 0) {
+                            ctx->hadError = true;
+                            ctx->errorMessage = "Failed to open target file: " + std::string(strerror(errno));
+                            return;
+                        }
+
+                        // Pre-allocate disk space using Content-Length as an upper bound
+                        if (ctx->contentLength > 0) {
+                            int fa_ret = posix_fallocate(ctx->fd, 0, static_cast<off_t>(ctx->contentLength));
+                            if (fa_ret != 0) {
+                                ctx->hadError = true;
+                                ctx->errorCode = drogon::k507InsufficientStorage;
+                                ctx->errorMessage = "Failed to pre-allocate disk space: " + std::string(strerror(fa_ret));
+                                ::close(ctx->fd);
+                                ctx->fd = -1;
+                                ::unlink(ctx->targetPath.c_str());
+                                return;
+                            }
+                        }
+                    }
+                },
+                // ---- dataCb: called for each chunk of data ----
+                [ctx](const char *data, size_t length) {
+                    if (ctx->hadError) return;
+
+                    if (length == 0) {
+                        // Part complete
+                        if (ctx->isArchive || ctx->isCompressedImg) {
+                            // Signal EOF to the extraction/decompression thread
+                            {
+                                std::lock_guard<std::mutex> lock(ctx->bufferMutex);
+                                ctx->streamFinished = true;
+                            }
+                            ctx->bufferCv.notify_one();
+                        } else if (ctx->fd >= 0) {
+                            // Trim the pre-allocated file to actual size and close
+                            if (::ftruncate(ctx->fd, static_cast<off_t>(ctx->totalBytesWritten)) != 0) {
+                                LOG_WARN << "ftruncate failed: " << strerror(errno);
+                            }
+                            ::close(ctx->fd);
+                            ctx->fd = -1;
+                        }
+                        return;
+                    }
+
+                    // Update inline SHA256 for archives (hashes compressed stream)
+                    // and plain .img (hashes raw data). Compressed .img computes
+                    // SHA256 on decompressed data inside the worker thread instead.
+                    if (ctx->sha256Hasher) {
+                        ctx->sha256Hasher->update(data, length);
+                    }
+
+                    if (ctx->isArchive || ctx->isCompressedImg) {
+                        // Push chunk to the producer-consumer buffer for libarchive
+                        {
+                            std::lock_guard<std::mutex> lock(ctx->bufferMutex);
+                            ctx->chunks.emplace_back(data, data + length);
+                        }
+                        ctx->bufferCv.notify_one();
+                    } else if (ctx->fd >= 0) {
+                        // Write directly to the pre-allocated file
+                        const char *ptr = data;
+                        size_t remaining = length;
+                        while (remaining > 0) {
+                            ssize_t written = ::write(ctx->fd, ptr, remaining);
+                            if (written < 0) {
+                                if (errno == EINTR) continue;
+                                ctx->hadError = true;
+                                ctx->errorMessage = "Write failed: " + std::string(strerror(errno));
+                                if (errno == ENOSPC) ctx->errorCode = drogon::k507InsufficientStorage;
+                                return;
+                            }
+                            ptr += written;
+                            remaining -= static_cast<size_t>(written);
+                        }
+                        ctx->totalBytesWritten += length;
+                    }
+                },
+                // ---- finishCb: called when the stream completes or errors ----
+                [ctx, endsWith](std::exception_ptr ex) {
+                    // Finalize inline SHA256
+                    std::string sha256Hex;
+                    if (ctx->sha256Hasher) {
+                        sha256Hex = ctx->sha256Hasher->finalize();
+                    }
+
+                    // Helper: signal the worker thread and clean up on error
+                    auto signalWorkerAndCleanup = [&ctx]() {
+                        if (ctx->isArchive || ctx->isCompressedImg) {
+                            { std::lock_guard<std::mutex> lock(ctx->bufferMutex); ctx->streamFinished = true; }
+                            ctx->bufferCv.notify_one();
+                            if (ctx->extractionThread.joinable()) ctx->extractionThread.join();
+                            if (ctx->isArchive && std::filesystem::exists(ctx->tempDir))
+                                std::filesystem::remove_all(ctx->tempDir);
+                        }
+                        if (!ctx->targetPath.empty()) ::unlink(ctx->targetPath.c_str());
+                    };
+
+                    // Helper: publish an error/completion message and tear down the topic
+                    auto publishProgress = [&ctx](const std::string& phase, const std::string& errMsg = "") {
+                        if (ctx->uploadId.empty()) return;
+                        Json::Value p;
+                        p["phase"] = phase;
+                        if (!errMsg.empty()) p["message"] = errMsg;
+                        auto& hub = provisioner::TopicHub::instance();
+                        hub.publish("upload:" + ctx->uploadId, p);
+                        hub.removeTopic("upload:" + ctx->uploadId);
+                    };
+
+                    // Handle stream-level errors
+                    if (ex) {
+                        try { std::rethrow_exception(ex); }
+                        catch (const drogon::StreamError& e) { LOG_ERROR << "Stream error: " << e.what(); }
+                        catch (const std::exception& e) { LOG_ERROR << "Upload stream error: " << e.what(); }
+
+                        signalWorkerAndCleanup();
+                        publishProgress("error", "Upload stream failed");
+
+                        auto resp = provisioner::utils::createErrorResponse(
+                            ctx->req, "Upload stream failed", drogon::k400BadRequest,
+                            "Upload Error", "STREAM_ERROR");
+                        ctx->callback(resp);
+                        return;
+                    }
+
+                    // Handle write errors detected during streaming
+                    if (ctx->hadError) {
+                        signalWorkerAndCleanup();
+                        publishProgress("error", ctx->errorMessage);
+                        auto resp = provisioner::utils::createErrorResponse(
+                            ctx->req, ctx->errorMessage, ctx->errorCode,
+                            "Upload Error", "UPLOAD_WRITE_ERROR");
+                        ctx->callback(resp);
+                        return;
+                    }
+
+                    if (ctx->isArchive) {
+                        // ---- Archive post-processing ----
+                        // Wait for extraction thread to finish
+                        if (ctx->extractionThread.joinable()) ctx->extractionThread.join();
+
+                        if (!ctx->extractionOk) {
+                            LOG_ERROR << "Archive extraction failed: " << ctx->extractionError;
+                            if (std::filesystem::exists(ctx->tempDir)) std::filesystem::remove_all(ctx->tempDir);
+                            AuditLog::logFileSystemAccess("UPLOAD_ARCHIVE", ctx->finalDir.string(), false, "",
+                                "Archive extraction failed: " + ctx->extractionError);
+                            publishProgress("error", "Archive extraction failed: " + ctx->extractionError);
+                            auto resp = provisioner::utils::createErrorResponse(
+                                ctx->req, "Failed to extract archive: " + ctx->extractionError,
+                                drogon::k500InternalServerError, "Extraction Error", "ARCHIVE_EXTRACT_ERROR");
+                            ctx->callback(resp);
+                            return;
+                        }
+
+                        // Security: validate all extracted paths
+                        try {
+                            for (const auto& entry : std::filesystem::recursive_directory_iterator(ctx->tempDir)) {
+                                auto relativePath = std::filesystem::relative(entry.path(), ctx->tempDir).string();
+                                if (!isArchivePathSafe(relativePath)) {
+                                    LOG_ERROR << "Archive contains unsafe path: " << relativePath;
+                                    std::filesystem::remove_all(ctx->tempDir);
+                                    auto resp = provisioner::utils::createErrorResponse(
+                                        ctx->req, "Archive contains unsafe paths (path traversal detected)",
+                                        drogon::k400BadRequest, "Security Error", "ARCHIVE_PATH_TRAVERSAL");
+                                    ctx->callback(resp);
+                                    return;
+                                }
+                            }
+                        } catch (const std::exception& e) {
+                            std::filesystem::remove_all(ctx->tempDir);
+                            auto resp = provisioner::utils::createErrorResponse(
+                                ctx->req, "Failed to validate extracted paths",
+                                drogon::k500InternalServerError, "Extraction Error", "ARCHIVE_VALIDATE_ERROR", e.what());
+                            ctx->callback(resp);
+                            return;
+                        }
+
+                        // If single top-level directory, promote its contents
+                        int topLevelEntries = 0;
+                        std::filesystem::path singleSubdir;
+                        for (const auto& entry : std::filesystem::directory_iterator(ctx->tempDir)) {
+                            topLevelEntries++;
+                            if (entry.is_directory()) singleSubdir = entry.path();
+                        }
+                        if (topLevelEntries == 1 && !singleSubdir.empty()) {
+                            auto promotedTemp = std::filesystem::path(IMAGES_PATH) / ("." + ctx->artefactName + ".promoted");
+                            std::filesystem::rename(singleSubdir, promotedTemp);
+                            std::filesystem::remove_all(ctx->tempDir);
+                            ctx->tempDir = promotedTemp;
+                        }
+
+                        // Replace any existing artefact directory with minimal downtime.
+                        // Move the old directory aside first (atomic rename), then rename
+                        // the new one into place (atomic rename), then delete the old one.
+                        // This avoids a window where finalDir doesn't exist at all, which
+                        // would cause /analyze-image to return 404 during a concurrent request.
+                        if (std::filesystem::exists(ctx->finalDir)) {
+                            auto oldDir = std::filesystem::path(IMAGES_PATH) / ("." + ctx->artefactName + ".old");
+                            if (std::filesystem::exists(oldDir)) std::filesystem::remove_all(oldDir);
+                            std::filesystem::rename(ctx->finalDir, oldDir);
+                            std::filesystem::rename(ctx->tempDir, ctx->finalDir);
+                            std::filesystem::remove_all(oldDir);
+                        } else {
+                            std::filesystem::rename(ctx->tempDir, ctx->finalDir);
+                        }
+
+                        AuditLog::logFileSystemAccess("UPLOAD_ARCHIVE", ctx->finalDir.string(), true, "",
+                            "IDP artefact archive streamed and extracted: " + ctx->originalFilename + " -> " + ctx->artefactName);
+
+                        // Write SHA256 sidecar
+                        if (!sha256Hex.empty()) {
+                            std::filesystem::path sidecarPath = ctx->finalDir;
+                            sidecarPath += ".sha256";
+                            try {
+                                std::ofstream sidecarFile(sidecarPath, std::ios::out | std::ios::trunc);
+                                if (sidecarFile.is_open()) {
+                                    sidecarFile << sha256Hex << "\n";
+                                    sidecarFile.close();
+                                    LOG_INFO << "Wrote IDP archive SHA256 sidecar: " << sidecarPath.string();
+                                }
+                            } catch (const std::exception& e) {
+                                LOG_ERROR << "Failed to write IDP SHA256 sidecar: " << e.what();
+                            }
+                        }
+
+                        // Build success response
+                        auto resp = drogon::HttpResponse::newHttpResponse();
+                        resp->setStatusCode(drogon::k200OK);
+                        resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+                        Json::Value result;
+                        result["success"] = true;
+                        result["message"] = "IDP artefact uploaded and extracted successfully";
+                        result["filename"] = ctx->artefactName;
+                        result["is_idp"] = true;
+                        result["renamed"] = false;
+                        result["sha256"] = sha256Hex;
+
+                        if (isIdpArtefactDirectory(ctx->finalDir)) {
+                            result["analysis"] = analyzeIdpArtefact(ctx->finalDir);
+                        }
+
+                        publishProgress("complete");
+                        resp->setBody(result.toStyledString());
+                        ctx->callback(resp);
+                    } else if (ctx->isCompressedImg) {
+                        // ---- Compressed .img post-processing ----
+                        if (ctx->extractionThread.joinable()) ctx->extractionThread.join();
+
+                        if (!ctx->extractionOk) {
+                            LOG_ERROR << "Decompression failed: " << ctx->extractionError;
+                            if (!ctx->targetPath.empty()) ::unlink(ctx->targetPath.c_str());
+                            publishProgress("error", "Decompression failed: " + ctx->extractionError);
+                            auto resp = provisioner::utils::createErrorResponse(
+                                ctx->req, "Failed to decompress image: " + ctx->extractionError,
+                                ctx->errorCode, "Decompression Error", "DECOMPRESS_ERROR");
+                            ctx->callback(resp);
+                            return;
+                        }
+
+                        // Trim the file to actual decompressed size
+                        if (ctx->fd >= 0) {
+                            if (::ftruncate(ctx->fd, static_cast<off_t>(ctx->totalBytesWritten)) != 0) {
+                                LOG_WARN << "ftruncate failed: " << strerror(errno);
+                            }
+                            ::close(ctx->fd);
+                            ctx->fd = -1;
+                        }
+
+                        AuditLog::logFileSystemAccess("UPLOAD", ctx->targetPath, true, "",
+                            "Compressed image decompressed: " + ctx->originalFilename + " -> " + ctx->finalFilename);
+
+                        {
+                            std::lock_guard<std::mutex> lock(sha256Cache_mutex);
+                            sha256Cache.erase(ctx->finalFilename);
+                        }
+
+                        // Store the worker-computed SHA256 in the cache directly
+                        if (!ctx->workerSha256Result.empty()) {
+                            std::lock_guard<std::mutex> lock(sha256Cache_mutex);
+                            sha256Cache.insert_or_assign(ctx->finalFilename,
+                                SHA256Result(ctx->workerSha256Result, SHA256Status::COMPLETE));
+                        }
+
+                        triggerBootImgGeneration(ctx->finalFilename);
+
+                        auto resp = drogon::HttpResponse::newHttpResponse();
+                        resp->setStatusCode(drogon::k200OK);
+                        resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+                        Json::Value result;
+                        result["success"] = true;
+                        result["is_idp"] = false;
+                        result["filename"] = ctx->finalFilename;
+                        result["renamed"] = (ctx->originalFilename != (ctx->finalFilename));
+                        if (ctx->originalFilename != ctx->finalFilename) result["original_filename"] = ctx->originalFilename;
+                        result["message"] = "Compressed image uploaded and decompressed successfully";
+                        result["sha256"] = ctx->workerSha256Result.empty() ? "Calculating..." : ctx->workerSha256Result;
+                        publishProgress("complete");
+                        resp->setBody(result.toStyledString());
+                        ctx->callback(resp);
+                    } else {
+                        // ---- .img post-processing ----
+                        AuditLog::logFileSystemAccess("UPLOAD", ctx->targetPath, true, "",
+                            "Original filename: " + ctx->originalFilename +
+                            (ctx->originalFilename != ctx->finalFilename ? ", renamed to: " + ctx->finalFilename : ""));
+
+                        {
+                            std::lock_guard<std::mutex> lock(sha256Cache_mutex);
+                            sha256Cache.erase(ctx->finalFilename);
+                        }
+
+                        requestSHA256Calculation(ctx->finalFilename);
+                        triggerBootImgGeneration(ctx->finalFilename);
+
+                        auto resp = drogon::HttpResponse::newHttpResponse();
+                        resp->setStatusCode(drogon::k200OK);
+                        resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+                        Json::Value result;
+                        result["success"] = true;
+                        result["is_idp"] = false;
+                        result["filename"] = ctx->finalFilename;
+                        result["renamed"] = (ctx->originalFilename != ctx->finalFilename);
+                        if (ctx->originalFilename != ctx->finalFilename) result["original_filename"] = ctx->originalFilename;
+                        result["message"] = result["renamed"].asBool()
+                            ? "File uploaded successfully (renamed to avoid conflict)"
+                            : "File uploaded successfully";
+                        result["sha256"] = sha256Hex.empty() ? "Calculating..." : sha256Hex;
+                        resp->setBody(result.toStyledString());
+                        ctx->callback(resp);
+                    }
+                }
+            );
+
+            stream->setStreamReader(std::move(reader));
         });
 
         app.registerHandler("/get-boot-package-info", [](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
@@ -1802,6 +2703,69 @@ namespace provisioner {
             }
         });
 
+        // Analyze an image: returns type (traditional or IDP) and metadata for IDP artefacts
+        app.registerHandler("/analyze-image", [](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
+            LOG_INFO << "Images::analyzeImage";
+            AuditLog::logHandlerAccess(req, "/analyze-image");
+
+            std::string imageName = req->getParameter("name");
+            if (imageName.empty()) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Image name is required",
+                    drogon::k400BadRequest,
+                    "Missing Parameter",
+                    "MISSING_IMAGE_NAME"
+                );
+                callback(resp);
+                return;
+            }
+
+            std::filesystem::path imagePath(IMAGES_PATH);
+            imagePath /= imageName;
+
+            if (!std::filesystem::exists(imagePath)) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "The requested image was not found",
+                    drogon::k404NotFound,
+                    "Image Not Found",
+                    "IMAGE_NOT_FOUND",
+                    "Requested image: " + imageName
+                );
+                callback(resp);
+                return;
+            }
+
+            Json::Value result;
+            result["name"] = imageName;
+
+            if (std::filesystem::is_directory(imagePath) && isIdpArtefactDirectory(imagePath)) {
+                // IDP artefact directory
+                result = analyzeIdpArtefact(imagePath);
+                result["name"] = imageName;
+                result["path"] = imagePath.string();
+            } else if (std::filesystem::is_regular_file(imagePath)) {
+                // Traditional .img file
+                result["type"] = "traditional";
+                result["path"] = imagePath.string();
+                try {
+                    result["size_bytes"] = static_cast<Json::UInt64>(std::filesystem::file_size(imagePath));
+                } catch (...) {}
+            } else if (std::filesystem::is_directory(imagePath)) {
+                // Directory but not a valid IDP artefact
+                result["type"] = "unknown_directory";
+                result["error"] = "Directory does not contain exactly one JSON file";
+                result["path"] = imagePath.string();
+            } else {
+                result["type"] = "unknown";
+                result["path"] = imagePath.string();
+            }
+
+            auto resp = drogon::HttpResponse::newHttpJsonResponse(result);
+            callback(resp);
+        });
+
         app.registerHandler("/delete-image", [](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
             LOG_INFO << "Images::deleteImage";
             
@@ -1838,11 +2802,28 @@ namespace provisioner {
                         sha256Cache.erase(imageName);
                     }
                     
-                    std::filesystem::remove(imagePath);
-                    
-                    // Log successful file deletion
-                    AuditLog::logFileSystemAccess("DELETE", imagePath.string(), true, "", 
-                        "Image file deleted: " + imageName);
+                    if (std::filesystem::is_directory(imagePath)) {
+                        // IDP artefact directory -- remove recursively
+                        std::filesystem::remove_all(imagePath);
+                        // Also remove the sidecar .sha256 file if it exists
+                        std::filesystem::path sidecarPath = imagePath;
+                        sidecarPath += ".sha256";
+                        if (std::filesystem::exists(sidecarPath)) {
+                            std::filesystem::remove(sidecarPath);
+                        }
+                        AuditLog::logFileSystemAccess("DELETE", imagePath.string(), true, "", 
+                            "IDP artefact directory deleted: " + imageName);
+                    } else {
+                        std::filesystem::remove(imagePath);
+                        // Also remove the sidecar .sha256 file if it exists
+                        std::filesystem::path sidecarPath = imagePath;
+                        sidecarPath += ".sha256";
+                        if (std::filesystem::exists(sidecarPath)) {
+                            std::filesystem::remove(sidecarPath);
+                        }
+                        AuditLog::logFileSystemAccess("DELETE", imagePath.string(), true, "", 
+                            "Image file deleted: " + imageName);
+                    }
                     
                     resp->setStatusCode(drogon::k200OK);
                     callback(resp);

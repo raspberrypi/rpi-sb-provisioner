@@ -16,7 +16,6 @@ export BOOTSTRAP_STARTED="BOOTSTRAP-STARTED"
 LOCK_BASE="/var/lock/rpi-sb-bootstrap"
 STATE_BASE="/var/run/rpi-sb-state"
 LOG_BASE="/var/log/rpi-sb-provisioner"
-TEMP_BASE="/srv/rpi-sb-bootstrap"
 
 # Source common helper functions
 # shellcheck disable=SC1091
@@ -43,7 +42,13 @@ log() {
     printf "[%s] %s\n" "${timestamp}" "$message"
 }
 
+CLEANUP_DONE=0
+
 cleanup() {
+    # Guard against multiple invocations (signal + EXIT trap)
+    [ "$CLEANUP_DONE" -eq 1 ] && return
+    CLEANUP_DONE=1
+
     returnvalue=$?
     if [ ${HOLDING_LOCKFILE} -eq 1 ]; then
         rm -rf "$DEVICE_LOCK"
@@ -62,10 +67,14 @@ cleanup() {
         announce_stop "Deleting public key"
     fi
 
+    if [ -n "${FASTBOOT_STAGING_DIR}" ] && [ -d "${FASTBOOT_STAGING_DIR}" ]; then
+        rm -rf "${FASTBOOT_STAGING_DIR}"
+    fi
+
     if [ -n "${DELETE_PRIVATE_TMPDIR}" ]; then
         announce_start "Deleting customised intermediates"
         # shellcheck disable=SC2086
-        rm -rf "${DELETE_PRIVATE_TMPDIR}" ${DEBUG}
+        rm -rf "${RPI_SB_WORKDIR}" ${DEBUG}
         DELETE_PRIVATE_TMPDIR=
         announce_stop "Deleting customised intermediates"
     fi
@@ -82,7 +91,7 @@ cleanup() {
     exit $returnvalue
 }
 
-trap cleanup INT TERM
+trap cleanup EXIT INT TERM
 
 # On pre-Pi4 devices, only TARGET_DEVICE_PATH is likely to be unique.
 TARGET_DEVICE_PATH="$1"
@@ -119,6 +128,22 @@ fi
 EARLY_LOG_DIRECTORY="/var/log/rpi-sb-provisioner/early/${TARGET_DEVICE_PATH}"
 mkdir -p "${EARLY_LOG_DIRECTORY}"
 
+# Create symlinks so the web UI can find pre-fastboot logs while bootstrap is running.
+# The USB endpoint (e.g. "1-1.2") is always a clean path-safe identifier and is stored
+# in the DB, so the web UI can fall back to it when the serial-keyed directory has no logs.
+# When the serial IS a real serial (not a device-path fallback), also symlink by serial.
+# These symlinks are replaced by real files when bootstrap completes (see mv below).
+if [ -n "${TARGET_USB_PATH}" ]; then
+    _endpoint_log_dir="/var/log/rpi-sb-provisioner/${TARGET_USB_PATH}"
+    mkdir -p "${_endpoint_log_dir}"
+    ln -sf "${EARLY_LOG_DIRECTORY}/bootstrap.log" "${_endpoint_log_dir}/bootstrap.log"
+fi
+if [ -n "${TARGET_DEVICE_SERIAL}" ] && [ "${TARGET_DEVICE_SERIAL}" != "${TARGET_DEVICE_PATH}" ]; then
+    _serial_log_dir="/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}"
+    mkdir -p "${_serial_log_dir}"
+    ln -sf "${EARLY_LOG_DIRECTORY}/bootstrap.log" "${_serial_log_dir}/bootstrap.log"
+fi
+
 die() {
     # shellcheck disable=SC2086
     echo "$@" ${DEBUG}
@@ -126,7 +151,50 @@ die() {
     cleanup
 }
 
+# Snapshot special flags into variables so they can be checked multiple times
+# without re-reading the filesystem. One-time flags are consumed at the end
+# of the bootstrap process (see consume_onetime_special_flags below).
+SPECIAL_FLAG_SKIP_EEPROM=0
+SPECIAL_FLAG_REPROVISION_DEVICE=0
+
+_flag_path="/etc/rpi-sb-provisioner/special-skip-eeprom/${TARGET_DEVICE_SERIAL}"
+if [ -f "${_flag_path}" ]; then
+    SPECIAL_FLAG_SKIP_EEPROM=1
+    log "Special flag active: skip-eeprom for ${TARGET_DEVICE_SERIAL}"
+fi
+
+_flag_path="/etc/rpi-sb-provisioner/special-reprovision-device/${TARGET_DEVICE_SERIAL}"
+if [ -f "${_flag_path}" ]; then
+    SPECIAL_FLAG_REPROVISION_DEVICE=1
+    log "Special flag active: reprovision-device for ${TARGET_DEVICE_SERIAL}"
+fi
+
+# Consume any one-time special flags. Called at the end of the bootstrap process.
+# One-time flags have "once" as their file content; persistent flags are left intact.
+consume_onetime_special_flags() {
+    for _flag_dir in \
+        "/etc/rpi-sb-provisioner/special-skip-eeprom" \
+        "/etc/rpi-sb-provisioner/special-reprovision-device"; do
+        _fp="${_flag_dir}/${TARGET_DEVICE_SERIAL}"
+        if [ -f "${_fp}" ]; then
+            _content=$(head -n1 "${_fp}" 2>/dev/null | tr -d '[:space:]') || true
+            if [ "${_content}" = "once" ]; then
+                log "Consuming one-time special flag: ${_fp}"
+                rm -f "${_fp}"
+            fi
+        fi
+    done
+}
+
 read_config
+
+# Initialize signing context (validates key config, derives public key)
+# This is safe to call even for naked provisioning - it will set SIGNING_MODE="none"
+if ! init_signing_context; then
+    log "Warning: Failed to initialize signing context"
+    # Don't fail here - naked provisioning doesn't need signing
+fi
+
 systemd-notify --ready --status="Provisioning started"
 # Create device-specific lock
 DEVICE_LOCK="${LOCK_BASE}/${TARGET_DEVICE_SERIAL}"
@@ -222,29 +290,12 @@ timeout_fatal() {
     set -e
 }
 
-get_signing_directives() {
-    if [ -n "${CUSTOMER_KEY_PKCS11_NAME}" ]; then
-        echo "${CUSTOMER_KEY_PKCS11_NAME} -engine pkcs11 -keyform engine"
-    else
-        if [ -n "${CUSTOMER_KEY_FILE_PEM}" ]; then
-            if [ -f "${CUSTOMER_KEY_FILE_PEM}" ]; then
-                echo "${CUSTOMER_KEY_FILE_PEM} -keyform PEM"
-            else
-                record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
-                die "RSA private key \"${CUSTOMER_KEY_FILE_PEM}\" not a file. Aborting."
-            fi
-        else
-            record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
-            die "Neither PKCS11 key name, or PEM key file specified. Aborting."
-        fi
-    fi
-}
-
-CUSTOMER_PUBLIC_KEY_FILE=
-derivePublicKey() {
-    CUSTOMER_PUBLIC_KEY_FILE="$(mktemp)"
-    "${OPENSSL}" rsa -in "${CUSTOMER_KEY_FILE_PEM}" -pubout > "${CUSTOMER_PUBLIC_KEY_FILE}"
-}
+# NOTE: get_signing_directives() and derivePublicKey() have been moved to rpi-sb-common.sh
+# Use init_signing_context() to initialize signing, then:
+#   - get_openssl_sign_args() for OpenSSL signing
+#   - get_eeprom_digest_sign_args() for rpi-eeprom-digest
+#   - get_sign_bootcode_key_args() for rpi-sign-bootcode
+#   - CUSTOMER_PUBLIC_KEY_FILE is set by init_signing_context()
 
 enforceSecureBootloaderConfig() {
     if ! grep -Fxq "SIGNED_BOOT=1" "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"; then
@@ -269,16 +320,19 @@ identifyBootloaderConfig() {
 
 # This function is adapted from the functions in the usbboot repo.
 # It handles both signed (secure-boot) and unsigned (naked) EEPROM updates
+# Uses the global signing context (must call init_signing_context first)
+#
+# Arguments:
+#   $1 - src_image: Source EEPROM image
+#   $2 - dst_image: Destination EEPROM image
 update_eeprom() {
     src_image="$1"
     dst_image="$2"
-    pem_file="$3" 
-    public_pem_file="$4"
     sign_args=""
 
     log "update_eeprom() src_image: \"${src_image}\""
 
-    if [ -n "${pem_file}" ]; then
+    if signing_available; then
         if ! grep -q "SIGNED_BOOT=1" "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"; then
             # If the OTP bit to require secure boot are set then then
             # SIGNED_BOOT=1 is implicitly set in the EEPROM config.
@@ -290,21 +344,22 @@ update_eeprom() {
 
         TMP_CONFIG_SIG="$(mktemp)"
         log "Signing bootloader config"
-        rpi-eeprom-digest -i "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" -o "${TMP_CONFIG_SIG}" -k "${pem_file}"
+        # shellcheck disable=SC2046
+        rpi-eeprom-digest $(get_eeprom_digest_sign_args) -i "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" -o "${TMP_CONFIG_SIG}"
 
         # shellcheck disable=SC2086
         cat "${TMP_CONFIG_SIG}" ${DEBUG}
 
-        # rpi-eeprom-config extracts the public key args from the specified
-        # PEM file.
-        sign_args="-d ${TMP_CONFIG_SIG} -p ${public_pem_file}"
+        # rpi-eeprom-config needs the public key for embedding
+        sign_args="-d ${TMP_CONFIG_SIG} -p ${CUSTOMER_PUBLIC_KEY_FILE}"
 
         case ${TARGET_DEVICE_FAMILY} in
             2712)
                 customer_signed_bootcode_binary_workdir=$(mktemp -d)
                 cd "${customer_signed_bootcode_binary_workdir}" || return
                 rpi-eeprom-config -x "${src_image}"
-                rpi-sign-bootcode --debug -c 2712 -i bootcode.bin -o bootcode.bin.signed -k "${pem_file}" -v 0 -n 16
+                # shellcheck disable=SC2046
+                rpi-sign-bootcode --debug -c 2712 -i bootcode.bin -o bootcode.bin.signed $(get_sign_bootcode_key_args) -v 0 -n 16
                 rpi-eeprom-config \
                     --out "${dst_image}.intermediate" --bootcode "${customer_signed_bootcode_binary_workdir}/bootcode.bin.signed" \
                     "${src_image}" || die "Failed to update signed bootcode in the EEPROM image"
@@ -382,12 +437,12 @@ check_command_exists grep
 DELETE_PRIVATE_TMPDIR=
 announce_start "Finding the cache directory"
 if [ -z "${RPI_SB_WORKDIR}" ]; then
-    RPI_SB_WORKDIR=$(mktemp -d "rpi-sb-bootstrap.XXX" --tmpdir="$TEMP_BASE")
-    announce_stop "Finding the cache directory: Created a new one as unspecified"
+    RPI_SB_WORKDIR=$(make_temp_dir "rpi-sb-bootstrap.XXX")
+    announce_stop "Finding the cache directory: Created ${RPI_SB_WORKDIR} (none configured)"
     DELETE_PRIVATE_TMPDIR="true"
 elif [ ! -d "${RPI_SB_WORKDIR}" ]; then
-    RPI_SB_WORKDIR=$(mktemp -d "rpi-sb-bootstrap.XXX" --tmpdir="$TEMP_BASE")
-    announce_stop "Finding the cache directory: Created a new one in $TEMP_BASE, as supplied path isn't a directory"
+    RPI_SB_WORKDIR=$(make_temp_dir "rpi-sb-bootstrap.XXX")
+    announce_stop "Finding the cache directory: Created ${RPI_SB_WORKDIR} (configured path isn't a directory)"
     DELETE_PRIVATE_TMPDIR="true"
 else
     # Deliberately do nothing
@@ -396,6 +451,12 @@ fi
 
 # Ensure work directory has proper permissions
 chmod 700 "$RPI_SB_WORKDIR"
+
+# Create a per-run staging directory inside the persistent workdir for fastboot
+# assets. This prevents concurrent device bootstraps from colliding and ensures
+# rpiboot always finds a clean set of bootcode files, while the parent workdir
+# retains cached data (signed bootloader images, EEPROM configs) across runs.
+FASTBOOT_STAGING_DIR=$(mktemp -d "${RPI_SB_WORKDIR}/fastboot.XXXXXX")
 
 ALLOW_SIGNED_BOOT=0
 case $TARGET_DEVICE_FAMILY in
@@ -437,14 +498,14 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
         mkdir -p "${SECURE_BOOTLOADER_DIRECTORY}"
         if [ -f "${SECURE_BOOTLOADER_DIRECTORY}/config.txt" ]; then
             log "Secure bootloader directory already exists, skipping setup"
-            if [ -f "/etc/rpi-sb-provisioner/special-reprovision-device/${TARGET_DEVICE_SERIAL}" ]; then
+            if [ "${SPECIAL_FLAG_REPROVISION_DEVICE}" -eq 1 ]; then
                 # This only makes sense if you're re-provisioning a device that's already been provisioned.
                 # It's a special case, and should not be used in normal operation.
                 # Additionally, this only works on Raspberry Pi 5-family devices.
                 if [ "${TARGET_DEVICE_FAMILY}" = "2712" ]; then
-                    if [ ! -f "${CUSTOMER_KEY_FILE_PEM}" ]; then
+                    if ! signing_available; then
                         record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
-                        die "No customer key file to use for re-provisioning. Aborting."
+                        die "No signing key configured for re-provisioning. Aborting."
                     fi
                     log "Re-signing bootcode for special re-provisioning case"
                     # For special reprovision, use the original firmware recovery.bin as source, not the cached signed bootcode
@@ -452,14 +513,15 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                     FIRMWARE_IMAGE_DIR="${FIRMWARE_ROOT}-${BCM_CHIP}/${FIRMWARE_RELEASE_STATUS}"
                     BOOTCODE_BINARY_IMAGE="${FIRMWARE_IMAGE_DIR}/recovery.bin"
                     BOOTCODE_FLASHING_NAME="${SECURE_BOOTLOADER_DIRECTORY}/bootcode5.bin"
-                    rpi-sign-bootcode --debug -c 2712 -i "${BOOTCODE_BINARY_IMAGE}" -o "${BOOTCODE_FLASHING_NAME}" -k "${CUSTOMER_KEY_FILE_PEM}" -v 0 -n 16
+                    # shellcheck disable=SC2046
+                    rpi-sign-bootcode --debug -c 2712 -i "${BOOTCODE_BINARY_IMAGE}" -o "${BOOTCODE_FLASHING_NAME}" $(get_sign_bootcode_key_args) -v 0 -n 16
                 else
                     log "Warning: Special re-provisioning only supported on Pi 5 (2712), skipping for device family ${TARGET_DEVICE_FAMILY}"
                 fi
             else
                 log "Normal provisioning mode (reusing cached bootloader)"
             fi
-            if [ ! -f "/etc/rpi-sb-provisioner/special-reprovision-device/${TARGET_DEVICE_SERIAL}" ]; then
+            if [ "${SPECIAL_FLAG_REPROVISION_DEVICE}" -eq 0 ]; then
                 # Normal case: reuse cached bootcode
                 case ${TARGET_DEVICE_FAMILY} in
                     2712)
@@ -472,7 +534,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                         ;;
                 esac
             fi
-            [ ! -f "/etc/rpi-sb-provisioner/special-skip-eeprom/${TARGET_DEVICE_SERIAL}" ] && timeout_fatal rpiboot -d "${SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
+            [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal rpiboot -d "${SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
         else
             log "Creating secure bootloader for future reuse"
             touch "${SECURE_BOOTLOADER_DIRECTORY}/config.txt"
@@ -521,8 +583,8 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
             cp "${BOOTCODE_BINARY_IMAGE}" "${BOOTCODE_FLASHING_NAME}"
             ####
 
-            if [ -n "${CUSTOMER_KEY_FILE_PEM}" ] || [ -n "${CUSTOMER_KEY_PKCS11_NAME}" ]; then
-                derivePublicKey
+            if signing_available; then
+                # Public key already derived by init_signing_context()
                 identifyBootloaderConfig
                 enforceSecureBootloaderConfig
 
@@ -531,8 +593,9 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                         record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
                         die "No Raspberry Pi EEPROM file to use as key vector"
                     else
-                        update_eeprom "${SOURCE_EEPROM_IMAGE}" "${DESTINATION_EEPROM_IMAGE}" "${CUSTOMER_KEY_FILE_PEM}" "${CUSTOMER_PUBLIC_KEY_FILE}"
-                        rpi-eeprom-digest -i "${DESTINATION_EEPROM_IMAGE}" -o "${DESTINATION_EEPROM_SIGNATURE}" -k "${CUSTOMER_KEY_FILE_PEM}"
+                        update_eeprom "${SOURCE_EEPROM_IMAGE}" "${DESTINATION_EEPROM_IMAGE}"
+                        # shellcheck disable=SC2046
+                        rpi-eeprom-digest $(get_eeprom_digest_sign_args) -i "${DESTINATION_EEPROM_IMAGE}" -o "${DESTINATION_EEPROM_SIGNATURE}"
                     fi
                 else
                     log "Using existing EEPROM signature: ${DESTINATION_EEPROM_SIGNATURE}"
@@ -551,53 +614,81 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                     echo "eeprom_write_protect=1" >> "${SECURE_BOOTLOADER_DIRECTORY}/config.txt"
                 fi
 
+                # Raspberry Pi 4 family (2711) requires program_rpiboot_gpio to program the RPIBOOT GPIO into OTP
+                # alongside the secure boot public key. Without this, recovery.bin fails with:
+                # "Failed to set RPIBOOT OTP gpio0 c800 -> 0"
+                # Valid GPIO pins: 2, 4, 5, 6, 7, 8 (GPIO 8 is recommended)
+                if [ "${TARGET_DEVICE_FAMILY}" = "2711" ]; then
+                    if [ -n "${RPI_DEVICE_RPIBOOT_GPIO}" ]; then
+                        echo "program_rpiboot_gpio=${RPI_DEVICE_RPIBOOT_GPIO}" >> "${SECURE_BOOTLOADER_DIRECTORY}/config.txt"
+                        log "Programming RPIBOOT GPIO ${RPI_DEVICE_RPIBOOT_GPIO} into OTP for Raspberry Pi 4 family device"
+                    else
+                        log "WARNING: RPI_DEVICE_RPIBOOT_GPIO is not set for Raspberry Pi 4 family device."
+                        log "WARNING: Secure boot provisioning may fail with 'Failed to set RPIBOOT OTP gpio0' error."
+                        log "WARNING: Set RPI_DEVICE_RPIBOOT_GPIO=8 (recommended) in the configuration."
+                    fi
+                fi
+
                 log "Writing key and EEPROM configuration to the device"
-                if [ -f "/etc/rpi-sb-provisioner/special-reprovision-device/${TARGET_DEVICE_SERIAL}" ]; then
+                if [ "${SPECIAL_FLAG_REPROVISION_DEVICE}" -eq 1 ]; then
                     if [ "${TARGET_DEVICE_FAMILY}" = "2712" ]; then
                         # This only makes sense if you're re-provisioning a device that's already been provisioned.
                         # It's a special case, and should not be used in normal operation.
                         # Additionally, this only works on Raspberry Pi 5-family devices.
                         log "Re-signing bootcode for special re-provisioning case"
-                        rpi-sign-bootcode --debug -c 2712 -i "${BOOTCODE_BINARY_IMAGE}" -o "${BOOTCODE_FLASHING_NAME}" -k "${CUSTOMER_KEY_FILE_PEM}" -v 0 -n 16
+                        # shellcheck disable=SC2046
+                        rpi-sign-bootcode --debug -c 2712 -i "${BOOTCODE_BINARY_IMAGE}" -o "${BOOTCODE_FLASHING_NAME}" $(get_sign_bootcode_key_args) -v 0 -n 16
                     else
                         log "Warning: Special re-provisioning only supported on Pi 5 (2712), skipping for device family ${TARGET_DEVICE_FAMILY}"
                     fi
                 else
                     log "Normal provisioning mode (not re-provisioning)"
                 fi
-                [ ! -f "/etc/rpi-sb-provisioner/special-skip-eeprom/${TARGET_DEVICE_SERIAL}" ] && timeout_fatal rpiboot -d "${SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
+                [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal rpiboot -d "${SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
             else
                 log "No key specified, skipping eeprom update"
             fi
             log "Keywriting completed. Silently rebooting for next phase."
+        fi
 
+        # Cache signed fastboot assets in the persistent workdir so that
+        # subsequent runs (which take the cached-bootloader path above) do
+        # not need to re-sign them.  Only recreate when the cache is missing
+        # (e.g. after a workdir clear).
+        if [ ! -f "${RPI_SB_WORKDIR}/bootfiles.bin" ]; then
             case $TARGET_DEVICE_FAMILY in
                 2712)
                     FASTBOOT_SIGN_DIR=$(mktemp -d)
                     cd "${FASTBOOT_SIGN_DIR}"
                     tar -vxf /usr/share/rpiboot/mass-storage-gadget64/bootfiles.bin
-                    rpi-sign-bootcode --debug -c 2712 -i 2712/bootcode5.bin -o 2712/bootcode5.bin.signed -k "${CUSTOMER_KEY_FILE_PEM}" -v 0 -n 16
+                    # shellcheck disable=SC2046
+                    rpi-sign-bootcode --debug -c 2712 -i 2712/bootcode5.bin -o 2712/bootcode5.bin.signed $(get_sign_bootcode_key_args) -v 0 -n 16
                     mv -f "2712/bootcode5.bin.signed" "2712/bootcode5.bin"
                     tar -vcf "${RPI_SB_WORKDIR}/bootfiles.bin" -- *
                     cd -
                     rm -rf "${FASTBOOT_SIGN_DIR}"
                     ;;
                 *)
-                    # Raspberry Pi 4-class devices do not use signed bootcode files, so just copy the file into the relevant place.
                     cp /usr/share/rpiboot/mass-storage-gadget64/bootfiles.bin "${RPI_SB_WORKDIR}/bootfiles.bin"
                     ;;
             esac
+        fi
 
+        if [ ! -f "${RPI_SB_WORKDIR}/boot.img" ] || [ ! -f "${RPI_SB_WORKDIR}/boot.sig" ]; then
             announce_start "Signing fastboot image"
             cp "$(get_fastboot_gadget)" "${RPI_SB_WORKDIR}"/boot.img
             sha256sum "${RPI_SB_WORKDIR}"/boot.img | awk '{print $1}' > "${RPI_SB_WORKDIR}"/boot.sig
             printf 'rsa2048: ' >> "${RPI_SB_WORKDIR}"/boot.sig
-            # Prefer PKCS11 over PEM keyfiles, if both are specified.
             # shellcheck disable=SC2046
             ${OPENSSL} dgst -sign $(get_signing_directives) -sha256 "${RPI_SB_WORKDIR}"/boot.img | xxd -c 4096 -p >> "${RPI_SB_WORKDIR}"/boot.sig
-            cp "$(get_fastboot_config_file)" "${RPI_SB_WORKDIR}"/config.txt
             announce_stop "Signing fastboot image"
         fi
+
+        # Stage cached assets into the per-run fastboot directory
+        cp "${RPI_SB_WORKDIR}/bootfiles.bin" "${FASTBOOT_STAGING_DIR}/bootfiles.bin"
+        cp "${RPI_SB_WORKDIR}/boot.img" "${FASTBOOT_STAGING_DIR}/boot.img"
+        cp "${RPI_SB_WORKDIR}/boot.sig" "${FASTBOOT_STAGING_DIR}/boot.sig"
+        cp "$(get_fastboot_config_file)" "${FASTBOOT_STAGING_DIR}/config.txt"
     else # !PROVISIONING_STYLE=secure-boot
         # For non-secure-boot provisioning on 2711/2712, still update EEPROM but without signing
         case ${TARGET_DEVICE_FAMILY} in
@@ -658,11 +749,11 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                             die "No Raspberry Pi EEPROM file found for update"
                         else
                             log "Updating EEPROM with bootloader configuration (unsigned)"
-                            # Call update_eeprom without signing parameters
-                            update_eeprom "${SOURCE_EEPROM_IMAGE}" "${DESTINATION_EEPROM_IMAGE}" "" ""
+                            # Call update_eeprom - signing_available() will be false for naked mode
+                            update_eeprom "${SOURCE_EEPROM_IMAGE}" "${DESTINATION_EEPROM_IMAGE}"
                             
                             # Create unsigned signature using rpi-eeprom-digest
-                            # Without -k parameter, creates hash + timestamp only
+                            # Without -k/-H parameter, creates hash + timestamp only
                             log "Creating unsigned pieeprom.sig using rpi-eeprom-digest"
                             rpi-eeprom-digest -i "${DESTINATION_EEPROM_IMAGE}" -o "${DESTINATION_EEPROM_SIGNATURE}"
                         fi
@@ -674,35 +765,35 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                     echo "recovery_reboot=1" > "${NON_SECURE_BOOTLOADER_DIRECTORY}/config.txt"
                     
                     log "Updating EEPROM to latest version"
-                    [ ! -f "/etc/rpi-sb-provisioner/special-skip-eeprom/${TARGET_DEVICE_SERIAL}" ] && timeout_fatal rpiboot -d "${NON_SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
+                    [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal rpiboot -d "${NON_SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
                     log "EEPROM update completed. Device rebooted."
                 else
                     log "Reusing existing non-secure bootloader configuration"
                 fi
                 
                 # Prepare fastboot files
-                cp /usr/share/rpiboot/mass-storage-gadget64/bootfiles.bin "${RPI_SB_WORKDIR}/bootfiles.bin"
-                cp "$(get_fastboot_gadget)" "${RPI_SB_WORKDIR}"/boot.img
-                cp "$(get_fastboot_config_file)" "${RPI_SB_WORKDIR}"/config.txt
+                cp /usr/share/rpiboot/mass-storage-gadget64/bootfiles.bin "${FASTBOOT_STAGING_DIR}/bootfiles.bin"
+                cp "$(get_fastboot_gadget)" "${FASTBOOT_STAGING_DIR}"/boot.img
+                cp "$(get_fastboot_config_file)" "${FASTBOOT_STAGING_DIR}"/config.txt
                 ;;
             *)
-                cp "$(get_fastboot_gadget_2710)" "${RPI_SB_WORKDIR}/bootfiles.bin"
+                cp "$(get_fastboot_gadget_2710)" "${FASTBOOT_STAGING_DIR}/bootfiles.bin"
                 ;;
         esac
     fi
 else # !ALLOW_SIGNED_BOOT
     # No allowed signed boot? Must be pre-Pi4!
-    cp "$(get_fastboot_gadget_2710)" "${RPI_SB_WORKDIR}/bootfiles.bin"
+    cp "$(get_fastboot_gadget_2710)" "${FASTBOOT_STAGING_DIR}/bootfiles.bin"
 fi
 record_state "${TARGET_DEVICE_SERIAL}" "bootstrap-firmware-updated" "${TARGET_USB_PATH}"
 
 announce_start "fastboot initialisation"
 record_state "${TARGET_DEVICE_SERIAL}" "bootstrap-fastboot-initialisation-started" "${TARGET_USB_PATH}"
 
-timeout_fatal rpiboot -v -d "${RPI_SB_WORKDIR}" -p "${TARGET_USB_PATH}"
+timeout_fatal rpiboot -v -d "${FASTBOOT_STAGING_DIR}" -p "${TARGET_USB_PATH}"
 set +e
 
-if [ -n "${TARGET_DEVICE_SERIAL}" ]; then
+if [ -n "${TARGET_DEVICE_SERIAL}" ] && [ "${TARGET_DEVICE_SERIAL}" != "${TARGET_DEVICE_PATH}" ]; then
     target_log_dir="/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}"
     early_log_dir="${EARLY_LOG_DIRECTORY}"
     
@@ -711,15 +802,33 @@ if [ -n "${TARGET_DEVICE_SERIAL}" ]; then
         mv "${early_log_dir}/metadata" "${target_log_dir}/metadata"
     fi
     mv "${early_log_dir}/bootstrap.log" "${target_log_dir}/bootstrap.log"
+    # Also link into the endpoint-keyed directory so the web UI can find it by either key
+    if [ -n "${TARGET_USB_PATH}" ]; then
+        _endpoint_log_dir="/var/log/rpi-sb-provisioner/${TARGET_USB_PATH}"
+        mkdir -p "${_endpoint_log_dir}"
+        ln -sf "${target_log_dir}/bootstrap.log" "${_endpoint_log_dir}/bootstrap.log"
+    fi
+elif [ -n "${TARGET_USB_PATH}" ]; then
+    # No real serial available - move logs to the endpoint-keyed directory instead
+    target_log_dir="/var/log/rpi-sb-provisioner/${TARGET_USB_PATH}"
+    early_log_dir="${EARLY_LOG_DIRECTORY}"
+    
+    mkdir -p "${target_log_dir}"
+    if [ -d "${early_log_dir}/metadata" ]; then
+        mv "${early_log_dir}/metadata" "${target_log_dir}/metadata"
+    fi
+    mv "${early_log_dir}/bootstrap.log" "${target_log_dir}/bootstrap.log"
 else
-    log "Warning: TARGET_DEVICE_SERIAL is empty, logs will remain in ${EARLY_LOG_DIRECTORY}"
-    echo "[$(date +"%Y-%m-%d %H:%M:%S.$(date +%N | cut -c1-3)")] Warning: TARGET_DEVICE_SERIAL is empty, logs will remain in ${EARLY_LOG_DIRECTORY}" >> "${EARLY_LOG_DIRECTORY}/bootstrap.log"
+    log "Warning: Neither serial nor USB path available, logs will remain in ${EARLY_LOG_DIRECTORY}"
+    echo "[$(date +"%Y-%m-%d %H:%M:%S.$(date +%N | cut -c1-3)")] Warning: Neither serial nor USB path available, logs remain in ${EARLY_LOG_DIRECTORY}" >> "${EARLY_LOG_DIRECTORY}/bootstrap.log"
 fi
 
 announce_stop "fastboot initialisation"
 record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_FINISHED}" "${TARGET_USB_PATH}"
 set -e
 
+# Consume any one-time special flags now that bootstrap has completed successfully
+consume_onetime_special_flags
+
 # Exit with success code for systemd
 true
-cleanup

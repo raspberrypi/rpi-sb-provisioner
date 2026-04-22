@@ -4,26 +4,31 @@ set -e
 # Create necessary directories
 mkdir -p /etc/rpi-sb-provisioner
 mkdir -p /srv/rpi-sb-provisioner
+mkdir -p /srv/rpi-sb-provisioner/tmp
+mkdir -p /srv/rpi-sb-bootstrap
 mkdir -p /var/log/rpi-sb-provisioner
 
 # Default manufacturing DB path
 MFG_DB_PATH="/srv/rpi-sb-provisioner/manufacturing.db"
 STATE_DB_PATH="/srv/rpi-sb-provisioner/state.db"
 
-# Check if config file exists and try to get manufacturing DB path from it
-if [ -f "/etc/rpi-sb-provisioner/config" ]; then
-    # Source the config file to get shell variables
-    . /etc/rpi-sb-provisioner/config
-    
-    # Use the RPI_SB_PROVISIONER_MANUFACTURING_DB variable if it exists
-    if [ -n "$RPI_SB_PROVISIONER_MANUFACTURING_DB" ]; then
-        MFG_DB_PATH="$RPI_SB_PROVISIONER_MANUFACTURING_DB"
-    fi
+# Source package defaults first
+if [ -f "/usr/share/rpi-sb-provisioner/defaults/config" ]; then
+    . /usr/share/rpi-sb-provisioner/defaults/config
+fi
 
-    # Use the RPI_SB_PROVISIONER_STATE_DB variable if it exists
-    if [ -n "$RPI_SB_PROVISIONER_STATE_DB" ]; then
-        STATE_DB_PATH="$RPI_SB_PROVISIONER_STATE_DB"
-    fi
+# Source user config overrides if present
+if [ -f "/etc/rpi-sb-provisioner/config" ]; then
+    . /etc/rpi-sb-provisioner/config
+fi
+
+# Use the configured paths if set
+if [ -n "$RPI_SB_PROVISIONER_MANUFACTURING_DB" ]; then
+    MFG_DB_PATH="$RPI_SB_PROVISIONER_MANUFACTURING_DB"
+fi
+
+if [ -n "$RPI_SB_PROVISIONER_STATE_DB" ]; then
+    STATE_DB_PATH="$RPI_SB_PROVISIONER_STATE_DB"
 fi
 
 # Create directory for state DB if needed
@@ -118,6 +123,8 @@ MFG_DB_SCHEMA="id              integer primary key,
     signed_boot_enabled integer         DEFAULT NULL,
     os_image_filename varchar(255)      DEFAULT NULL,
     os_image_sha256  char(64)           DEFAULT NULL,
+    connect_registered integer          DEFAULT NULL,
+    connect_device_id varchar(255)      DEFAULT NULL,
     provision_ts    timestamp           default current_timestamp"
 
 # Ensure WAL journal mode
@@ -135,7 +142,7 @@ else
     CURRENT_COLUMNS=$(sqlite3 "$MFG_DB_PATH" "PRAGMA table_info(devices);" | awk -F'|' '{print $2}' | tr '\n' ',')
     
     # Check if any expected columns are missing
-    for COL in id boardname serial eth_mac wifi_mac bt_mac mmc_size mmc_cid rpi_duid board_revision processor memory manufacturer secure jtag_locked eeprom_write_protected pubkey_programmed devkey_revoked signed_boot_enabled os_image_filename os_image_sha256 provision_ts; do
+    for COL in id boardname serial eth_mac wifi_mac bt_mac mmc_size mmc_cid rpi_duid board_revision processor memory manufacturer secure jtag_locked eeprom_write_protected pubkey_programmed devkey_revoked signed_boot_enabled os_image_filename os_image_sha256 connect_registered connect_device_id provision_ts; do
         if ! echo "$CURRENT_COLUMNS" | grep -q "$COL"; then
             echo "Migration needed: column $COL is missing from manufacturing.db devices table"
             
