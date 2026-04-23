@@ -277,7 +277,7 @@ HTTP 200 OK with no body on success.
 |Field|Description
 |type|`idp` for IDP artefact directories, `traditional` for `.img` files
 |schema_valid|Whether the IDP JSON passes schema validation
-|device_class_raw|Raw device class from the JSON (e.g. `pi5`, `cm4`, `pi2w`)
+|device_class_raw|Raw device class from the JSON (e.g. `pi5`, `cm4`, `zero2w`)
 |device_class|Mapped device family matching `RPI_DEVICE_FAMILY` convention (`5`, `4`, `2W`)
 |storage_type|Storage type from the JSON (`sd`, `emmc`, `nvme`)
 |image_version|Image version string from JSON metadata
