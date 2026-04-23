@@ -234,6 +234,13 @@ run_customisation_script() {
         if [ "${STAGE_NAME}" = "post-flash" ]; then
             # For post-flash stage, pass device info that can be used with fastboot
             "${SCRIPT_PATH}" "${FASTBOOT_DEVICE_SPECIFIER}" "${TARGET_DEVICE_SERIAL}" "${RPI_DEVICE_STORAGE_TYPE}"
+        elif [ "${STAGE_NAME}" = "provision-started" ]; then
+            # For provision-started stage, forward (fastboot specifier, serial,
+            # storage type) so hooks can signal programming rigs (e.g. LED).
+            FASTBOOT_SPEC_ARG="$3"
+            TARGET_SERIAL_ARG="$4"
+            STORAGE_TYPE_ARG="$5"
+            "${SCRIPT_PATH}" "${FASTBOOT_SPEC_ARG}" "${TARGET_SERIAL_ARG}" "${STORAGE_TYPE_ARG}"
         elif [ "${STAGE_NAME}" = "bootstrap" ]; then
             # For bootstrap stage, pass device detection info
             TARGET_DEVICE_SERIAL_ARG="$3"
