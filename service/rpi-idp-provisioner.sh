@@ -234,7 +234,7 @@ map_device_class_to_family() {
     case "$1" in
         pi5|cm5)   echo "5" ;;
         pi4|cm4)   echo "4" ;;
-        pi2w)      echo "2W" ;;
+        zero2w)    echo "2W" ;;
         *)         echo "$1" ;;
     esac
 }
