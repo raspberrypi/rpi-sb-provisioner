@@ -84,8 +84,8 @@ check_pidevice_storage_type() {
         "nvme")
             echo "nvme0n1"
             ;;
-        ?)
-            die "Unexpected storage device type. Wanted sd, nvme or emmc, got $1"
+        *)
+            die "Unexpected storage device type. Wanted sd, nvme or emmc, got '$1'"
             ;;
     esac
 }

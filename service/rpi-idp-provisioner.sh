@@ -63,10 +63,53 @@ check_pidevice_storage_type() {
         "nvme")
             echo "nvme0n1"
             ;;
-        ?)
-            die "Unexpected storage device type. Wanted sd, nvme or emmc, got $1"
+        *)
+            die "Unexpected storage device type. Wanted sd, nvme or emmc, got '$1'"
             ;;
     esac
+}
+
+timeout_nonfatal() {
+    command="$*"
+    set +e
+    log "Running command with 10-second timeout: \"${command}\""
+    # shellcheck disable=SC2086
+    timeout 10 ${command}
+    command_exit_status=$?
+
+    # Handle different exit codes from the timeout command
+    case ${command_exit_status} in
+        0)
+            # Command completed successfully within the time limit
+            log "\"$command\" succeeded with exit code 0."
+            ;;
+        124)
+            # Exit code 124 means the command timed out (TERM signal sent but command didn't exit)
+            log "\"${command}\" FAILED: Timed out after 10 seconds (exit code 124)."
+            ;;
+        125)
+            # Exit code 125 means the timeout command itself failed
+            log "\"${command}\" FAILED: The timeout command itself failed (exit code 125)."
+            ;;
+        126)
+            # Exit code 126 means the command was found but could not be executed
+            log "\"${command}\" FAILED: Command found but could not be executed (exit code 126)."
+            ;;
+        127)
+            # Exit code 127 means the command was not found
+            log "\"${command}\" FAILED: Command not found (exit code 127)."
+            ;;
+        137)
+            # Exit code 137 (128+9) means the command was killed by SIGKILL (kill -9)
+            log "\"${command}\" FAILED: Command was killed by SIGKILL (exit code 137)."
+            ;;
+        *)
+            # Any other non-zero exit code is a general failure
+            log "\"${command}\" FAILED: Command returned exit code ${command_exit_status}."
+            ;;
+    esac
+    set -e
+    return ${command_exit_status}
 }
 
 # timeout_fatal: 30-second default used by rpi-sb-common.sh helpers.
@@ -130,11 +173,6 @@ record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_STARTED}" "${TARGET_USB_PA
 
 systemd-notify --ready --status="Provisioning started"
 
-# Run provision-started hook (e.g. LED control on programming rigs)
-run_customisation_script "idp-provisioner" "provision-started" "${FASTBOOT_DEVICE_SPECIFIER}" "${TARGET_DEVICE_SERIAL}" "${RPI_DEVICE_STORAGE_TYPE}"
-
-RPI_DEVICE_STORAGE_TYPE="$(check_pidevice_storage_type "${RPI_DEVICE_STORAGE_TYPE}")"
-
 ### Resolve the IDP artefact directory
 
 if [ -d "${GOLD_MASTER_OS_FILE}" ]; then
@@ -171,7 +209,7 @@ IDP_IMAGE_NAME=$(jq -r '.attributes."image-name" // "unknown"' < "${IDP_JSON}")
 IDP_IMAGE_VERSION=$(jq -r '.IGmeta.IGconf_image_version // "unknown"' < "${IDP_JSON}")
 IDP_DEVICE_CLASS=$(jq -r '.IGmeta.IGconf_device_class // "unknown"' < "${IDP_JSON}")
 IDP_STORAGE_TYPE=$(jq -r '.IGmeta.IGconf_device_storage_type // "unknown"' < "${IDP_JSON}")
-IDP_HAS_ENCRYPTION=$(jq -r 'if .layout.provisionmap[]? | .encrypted? then "yes" else "no" end' < "${IDP_JSON}" | head -1)
+IDP_HAS_ENCRYPTION=$(jq -r 'any(.. | objects; has("encrypted")) | if . then "yes" else "no" end' < "${IDP_JSON}")
 
 log "IDP image name: ${IDP_IMAGE_NAME}"
 log "IDP image version: ${IDP_IMAGE_VERSION}"
@@ -196,7 +234,7 @@ map_device_class_to_family() {
     case "$1" in
         pi5|cm5)   echo "5" ;;
         pi4|cm4)   echo "4" ;;
-        pi2w)      echo "2W" ;;
+        zero2w)    echo "2W" ;;
         *)         echo "$1" ;;
     esac
 }
@@ -206,18 +244,29 @@ if [ -n "${RPI_DEVICE_FAMILY}" ] && [ "${EXPECTED_FAMILY}" != "${RPI_DEVICE_FAMI
     die "IDP artefact is for device family '${EXPECTED_FAMILY}' (${IDP_DEVICE_CLASS}), but this station is configured for '${RPI_DEVICE_FAMILY}'."
 fi
 
-# Cross-check storage type against host configuration
+# Cross-check storage type against host configuration, or adopt it from the
+# JSON if the host didn't set one. The JSON's IGconf_device_storage_type is
+# authoritative for IDP artefacts; RPI_DEVICE_STORAGE_TYPE is kept as an
+# optional assertion so a misconfigured station still fails loudly.
 if [ -n "${RPI_DEVICE_STORAGE_TYPE}" ]; then
-    # RPI_DEVICE_STORAGE_TYPE has already been mapped to block device name (mmcblk0/nvme0n1)
-    # Map IDP storage type to the same convention for comparison
-    IDP_STORAGE_BLOCK=$(check_pidevice_storage_type "${IDP_STORAGE_TYPE}" 2>/dev/null || true)
-    if [ -n "${IDP_STORAGE_BLOCK}" ] && [ "${IDP_STORAGE_BLOCK}" != "${RPI_DEVICE_STORAGE_TYPE}" ]; then
-        die "IDP artefact is for storage type '${IDP_STORAGE_TYPE}', but this station is configured for storage device '${RPI_DEVICE_STORAGE_TYPE}'."
+    if [ "${RPI_DEVICE_STORAGE_TYPE}" != "${IDP_STORAGE_TYPE}" ]; then
+        die "IDP artefact is for storage type '${IDP_STORAGE_TYPE}', but this station is configured with RPI_DEVICE_STORAGE_TYPE='${RPI_DEVICE_STORAGE_TYPE}'."
     fi
+else
+    log "RPI_DEVICE_STORAGE_TYPE is not set; adopting '${IDP_STORAGE_TYPE}' from IDP artefact."
+    RPI_DEVICE_STORAGE_TYPE="${IDP_STORAGE_TYPE}"
 fi
+
+# Resolve the raw storage type to its block device name for fastboot.
+RPI_DEVICE_STORAGE_TYPE="$(check_pidevice_storage_type "${RPI_DEVICE_STORAGE_TYPE}")"
 
 log "Pre-flight validation passed"
 announce_stop "IDP pre-flight validation"
+
+# Run provision-started hook (e.g. LED control on programming rigs).
+# Deferred until after pre-flight so the hook receives the resolved block
+# device name rather than the raw IDP value.
+run_customisation_script "idp-provisioner" "provision-started" "${FASTBOOT_DEVICE_SPECIFIER}" "${TARGET_DEVICE_SERIAL}" "${RPI_DEVICE_STORAGE_TYPE}"
 
 ### IDP Provisioning Protocol
 
