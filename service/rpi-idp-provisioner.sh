@@ -173,11 +173,6 @@ record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_STARTED}" "${TARGET_USB_PA
 
 systemd-notify --ready --status="Provisioning started"
 
-# Run provision-started hook (e.g. LED control on programming rigs)
-run_customisation_script "idp-provisioner" "provision-started" "${FASTBOOT_DEVICE_SPECIFIER}" "${TARGET_DEVICE_SERIAL}" "${RPI_DEVICE_STORAGE_TYPE}"
-
-RPI_DEVICE_STORAGE_TYPE="$(check_pidevice_storage_type "${RPI_DEVICE_STORAGE_TYPE}")"
-
 ### Resolve the IDP artefact directory
 
 if [ -d "${GOLD_MASTER_OS_FILE}" ]; then
@@ -261,6 +256,11 @@ fi
 
 log "Pre-flight validation passed"
 announce_stop "IDP pre-flight validation"
+
+# Run provision-started hook (e.g. LED control on programming rigs).
+# Deferred until after pre-flight so the hook receives the resolved block
+# device name rather than the raw IDP value.
+run_customisation_script "idp-provisioner" "provision-started" "${FASTBOOT_DEVICE_SPECIFIER}" "${TARGET_DEVICE_SERIAL}" "${RPI_DEVICE_STORAGE_TYPE}"
 
 ### IDP Provisioning Protocol
 
