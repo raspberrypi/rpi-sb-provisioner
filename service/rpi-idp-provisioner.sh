@@ -244,15 +244,21 @@ if [ -n "${RPI_DEVICE_FAMILY}" ] && [ "${EXPECTED_FAMILY}" != "${RPI_DEVICE_FAMI
     die "IDP artefact is for device family '${EXPECTED_FAMILY}' (${IDP_DEVICE_CLASS}), but this station is configured for '${RPI_DEVICE_FAMILY}'."
 fi
 
-# Cross-check storage type against host configuration
+# Cross-check storage type against host configuration, or adopt it from the
+# JSON if the host didn't set one. The JSON's IGconf_device_storage_type is
+# authoritative for IDP artefacts; RPI_DEVICE_STORAGE_TYPE is kept as an
+# optional assertion so a misconfigured station still fails loudly.
 if [ -n "${RPI_DEVICE_STORAGE_TYPE}" ]; then
-    # RPI_DEVICE_STORAGE_TYPE has already been mapped to block device name (mmcblk0/nvme0n1)
-    # Map IDP storage type to the same convention for comparison
-    IDP_STORAGE_BLOCK=$(check_pidevice_storage_type "${IDP_STORAGE_TYPE}" 2>/dev/null || true)
-    if [ -n "${IDP_STORAGE_BLOCK}" ] && [ "${IDP_STORAGE_BLOCK}" != "${RPI_DEVICE_STORAGE_TYPE}" ]; then
-        die "IDP artefact is for storage type '${IDP_STORAGE_TYPE}', but this station is configured for storage device '${RPI_DEVICE_STORAGE_TYPE}'."
+    if [ "${RPI_DEVICE_STORAGE_TYPE}" != "${IDP_STORAGE_TYPE}" ]; then
+        die "IDP artefact is for storage type '${IDP_STORAGE_TYPE}', but this station is configured with RPI_DEVICE_STORAGE_TYPE='${RPI_DEVICE_STORAGE_TYPE}'."
     fi
+else
+    log "RPI_DEVICE_STORAGE_TYPE is not set; adopting '${IDP_STORAGE_TYPE}' from IDP artefact."
+    RPI_DEVICE_STORAGE_TYPE="${IDP_STORAGE_TYPE}"
 fi
+
+# Resolve the raw storage type to its block device name for fastboot.
+RPI_DEVICE_STORAGE_TYPE="$(check_pidevice_storage_type "${RPI_DEVICE_STORAGE_TYPE}")"
 
 log "Pre-flight validation passed"
 announce_stop "IDP pre-flight validation"
