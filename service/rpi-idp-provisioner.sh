@@ -209,7 +209,7 @@ IDP_IMAGE_NAME=$(jq -r '.attributes."image-name" // "unknown"' < "${IDP_JSON}")
 IDP_IMAGE_VERSION=$(jq -r '.IGmeta.IGconf_image_version // "unknown"' < "${IDP_JSON}")
 IDP_DEVICE_CLASS=$(jq -r '.IGmeta.IGconf_device_class // "unknown"' < "${IDP_JSON}")
 IDP_STORAGE_TYPE=$(jq -r '.IGmeta.IGconf_device_storage_type // "unknown"' < "${IDP_JSON}")
-IDP_HAS_ENCRYPTION=$(jq -r 'if .layout.provisionmap[]? | .encrypted? then "yes" else "no" end' < "${IDP_JSON}" | head -1)
+IDP_HAS_ENCRYPTION=$(jq -r 'any(.. | objects; has("encrypted")) | if . then "yes" else "no" end' < "${IDP_JSON}")
 
 log "IDP image name: ${IDP_IMAGE_NAME}"
 log "IDP image version: ${IDP_IMAGE_VERSION}"
