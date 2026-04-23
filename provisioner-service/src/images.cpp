@@ -439,7 +439,7 @@ namespace provisioner {
         std::string mapIdpDeviceClassToFamily(const std::string& idpClass) {
             if (idpClass == "pi5" || idpClass == "cm5") return "5";
             if (idpClass == "pi4" || idpClass == "cm4") return "4";
-            if (idpClass == "pi2w") return "2W";
+            if (idpClass == "zero2w") return "2W";
             return idpClass; // pass through unknown values
         }
 
