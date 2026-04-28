@@ -20,6 +20,7 @@ export PROVISIONER_STARTED="SB-PROVISIONER-STARTED"
 . "$(dirname "$0")/rpi-sb-common.sh"
 
 read_config
+compute_image_summary
 
 # Initialize signing context (validates key config, derives public key if needed)
 if ! init_signing_context; then
@@ -465,8 +466,7 @@ prepare_pre_boot_auth_images() {
         # lock_device_private_key=1 causes firmware to set the OTP ECDSA
         # key-slot to LOCKED before userspace runs, which is a precondition
         # for the rpi-verity-verifier boot-time check. Safe to apply in all
-        # images — it has no effect when secure-boot is disabled, and
-        # becomes load-bearing once it is.
+        # images — signing is offered via the rpi-fw-crypto API
         ensure_lock_device_private_key "${TMP_DIR}/rpi-boot-img-mount/config.txt" enforce
 
         announce_stop "config.txt modification"

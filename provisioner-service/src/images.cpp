@@ -435,6 +435,185 @@ namespace provisioner {
             return {};
         }
 
+        // Walk an Android sparse image (.simg) and verify the chunk stream is
+        // self-consistent: header is well-formed, every chunk fits within the
+        // file, and the per-chunk-type size invariants hold. Catches truncated
+        // or partially-written artefacts before the device sees them.
+        // Returns an empty string on success, or a human-readable error.
+        std::string validateAndroidSparseFile(const std::filesystem::path& path) {
+            std::error_code ec;
+            auto fileSize = std::filesystem::file_size(path, ec);
+            if (ec) return "cannot stat: " + ec.message();
+            if (fileSize < 28) return "file shorter than sparse header (" + std::to_string(fileSize) + " B)";
+
+            std::ifstream f(path, std::ios::binary);
+            if (!f) return "cannot open for reading";
+
+            auto le16 = [](const uint8_t* p) -> uint16_t {
+                return static_cast<uint16_t>(p[0]) | (static_cast<uint16_t>(p[1]) << 8);
+            };
+            auto le32 = [](const uint8_t* p) -> uint32_t {
+                return static_cast<uint32_t>(p[0]) |
+                       (static_cast<uint32_t>(p[1]) << 8) |
+                       (static_cast<uint32_t>(p[2]) << 16) |
+                       (static_cast<uint32_t>(p[3]) << 24);
+            };
+
+            uint8_t hdr[28];
+            f.read(reinterpret_cast<char*>(hdr), sizeof(hdr));
+            if (!f) return "short read of sparse header";
+
+            uint32_t magic       = le32(hdr + 0);
+            uint16_t major       = le16(hdr + 4);
+            uint16_t fileHdrSz   = le16(hdr + 8);
+            uint16_t chunkHdrSz  = le16(hdr + 10);
+            uint32_t blkSz       = le32(hdr + 12);
+            uint32_t totalBlks   = le32(hdr + 16);
+            uint32_t totalChunks = le32(hdr + 20);
+
+            if (magic != 0xed26ff3a) {
+                std::ostringstream os;
+                os << "bad magic 0x" << std::hex << magic << " (expected 0xed26ff3a)";
+                return os.str();
+            }
+            if (major != 1) return "unsupported major version " + std::to_string(major);
+            if (fileHdrSz < 28) return "file_hdr_sz " + std::to_string(fileHdrSz) + " < 28";
+            if (chunkHdrSz < 12) return "chunk_hdr_sz " + std::to_string(chunkHdrSz) + " < 12";
+            if (blkSz == 0 || (blkSz % 4) != 0) {
+                return "invalid block size " + std::to_string(blkSz);
+            }
+            if (totalBlks == 0) return "zero total_blks";
+
+            if (fileHdrSz > 28) f.seekg(fileHdrSz - 28, std::ios::cur);
+            if (!f) return "failed to skip extended file header";
+
+            uint64_t pos = fileHdrSz;
+            uint64_t curBlock = 0;
+
+            for (uint32_t i = 0; i < totalChunks; ++i) {
+                if (pos + chunkHdrSz > fileSize) {
+                    return "chunk " + std::to_string(i + 1) + "/" + std::to_string(totalChunks) +
+                           " header would start at " + std::to_string(pos) +
+                           " but file is only " + std::to_string(fileSize) + " B (truncated)";
+                }
+                uint8_t chdr[12];
+                f.read(reinterpret_cast<char*>(chdr), sizeof(chdr));
+                if (!f) return "short read of chunk " + std::to_string(i + 1) + " header";
+                if (chunkHdrSz > 12) f.seekg(chunkHdrSz - 12, std::ios::cur);
+
+                uint16_t chunkType   = le16(chdr + 0);
+                uint32_t chunkBlocks = le32(chdr + 4);
+                uint32_t totalSz     = le32(chdr + 8);
+
+                if (totalSz < chunkHdrSz) {
+                    return "chunk " + std::to_string(i + 1) + ": total_sz " +
+                           std::to_string(totalSz) + " < chunk_hdr_sz " + std::to_string(chunkHdrSz);
+                }
+                uint32_t dataSz = totalSz - chunkHdrSz;
+
+                auto typeName = [chunkType]() -> std::string {
+                    switch (chunkType) {
+                        case 0xCAC1: return "raw";
+                        case 0xCAC2: return "fill";
+                        case 0xCAC3: return "dont_care";
+                        case 0xCAC4: return "crc32";
+                        default: return "unknown";
+                    }
+                }();
+
+                switch (chunkType) {
+                    case 0xCAC1: // RAW
+                        if (dataSz % blkSz != 0 || dataSz / blkSz != chunkBlocks) {
+                            return "chunk " + std::to_string(i + 1) + " (raw): data " +
+                                   std::to_string(dataSz) + " B is not " +
+                                   std::to_string(chunkBlocks) + " * " + std::to_string(blkSz);
+                        }
+                        break;
+                    case 0xCAC2: // FILL
+                        if (dataSz != 4) {
+                            return "chunk " + std::to_string(i + 1) + " (fill): data " +
+                                   std::to_string(dataSz) + " B != 4";
+                        }
+                        break;
+                    case 0xCAC3: // DONT_CARE
+                        if (dataSz != 0) {
+                            return "chunk " + std::to_string(i + 1) + " (dont_care): data " +
+                                   std::to_string(dataSz) + " B != 0";
+                        }
+                        break;
+                    case 0xCAC4: // CRC32
+                        if (dataSz != 4) {
+                            return "chunk " + std::to_string(i + 1) + " (crc32): data " +
+                                   std::to_string(dataSz) + " B != 4";
+                        }
+                        break;
+                    default: {
+                        std::ostringstream os;
+                        os << "chunk " << (i + 1) << ": unknown type 0x" << std::hex << chunkType;
+                        return os.str();
+                    }
+                }
+
+                if (pos + totalSz > fileSize) {
+                    return "chunk " + std::to_string(i + 1) + "/" + std::to_string(totalChunks) +
+                           " (" + typeName + ") declares " + std::to_string(dataSz) +
+                           " B of data but only " + std::to_string(fileSize - pos - chunkHdrSz) +
+                           " B remain in file (truncated mid-chunk)";
+                }
+
+                f.seekg(dataSz, std::ios::cur);
+                if (!f) return "failed to skip chunk " + std::to_string(i + 1) + " data";
+
+                pos += totalSz;
+                curBlock += chunkBlocks;
+            }
+
+            if (curBlock != totalBlks) {
+                return "chunk-block sum " + std::to_string(curBlock) +
+                       " != header total_blks " + std::to_string(totalBlks);
+            }
+            return "";
+        }
+
+        // For an IDP artefact directory: walk the JSON descriptor's
+        // partitionimages and structurally validate every referenced .simg.
+        // Returns an empty string on success, or "<filename>: <error>".
+        // Returns an empty string for non-IDP directories (nothing to validate).
+        std::string validateIdpSparseImages(const std::filesystem::path& dirPath) {
+            auto jsonPath = findIdpJsonFile(dirPath);
+            if (jsonPath.empty()) return "";
+
+            std::ifstream jsonFile(jsonPath);
+            if (!jsonFile.is_open()) return "cannot open IDP descriptor " + jsonPath.filename().string();
+
+            Json::Value json;
+            Json::CharReaderBuilder builder;
+            std::string parseErr;
+            if (!Json::parseFromStream(builder, jsonFile, &json, &parseErr)) {
+                return "IDP descriptor JSON parse error: " + parseErr;
+            }
+
+            if (!json.isMember("layout") || !json["layout"].isMember("partitionimages")) {
+                return "";
+            }
+
+            const auto& pimages = json["layout"]["partitionimages"];
+            std::set<std::string> seen;
+            for (const auto& key : pimages.getMemberNames()) {
+                if (!pimages[key].isMember("simage")) continue;
+                std::string name = pimages[key]["simage"].asString();
+                if (name.empty() || !seen.insert(name).second) continue;
+
+                std::filesystem::path imgPath = dirPath / name;
+                if (!std::filesystem::is_regular_file(imgPath)) {
+                    return name + ": missing (referenced by IDP descriptor)";
+                }
+                std::string err = validateAndroidSparseFile(imgPath);
+                if (!err.empty()) return name + ": " + err;
+            }
+            return "";
+        }
+
         // Translate IDP device class (e.g., "pi5", "cm4") to provisioner RPI_DEVICE_FAMILY convention
         std::string mapIdpDeviceClassToFamily(const std::string& idpClass) {
             if (idpClass == "pi5" || idpClass == "cm5") return "5";
@@ -2321,6 +2500,27 @@ namespace provisioner {
                             std::filesystem::rename(singleSubdir, promotedTemp);
                             std::filesystem::remove_all(ctx->tempDir);
                             ctx->tempDir = promotedTemp;
+                        }
+
+                        // Structurally validate any sparse images named by the
+                        // IDP descriptor before we promote the directory into
+                        // place. Catches truncated / partially-written artefacts
+                        // here, where we can return an actionable error, rather
+                        // than mid-provision after the device has been erased.
+                        if (isIdpArtefactDirectory(ctx->tempDir)) {
+                            std::string sparseErr = validateIdpSparseImages(ctx->tempDir);
+                            if (!sparseErr.empty()) {
+                                LOG_ERROR << "IDP sparse image validation failed: " << sparseErr;
+                                std::filesystem::remove_all(ctx->tempDir);
+                                AuditLog::logFileSystemAccess("UPLOAD_ARCHIVE", ctx->finalDir.string(), false, "",
+                                    "IDP sparse image validation failed: " + sparseErr);
+                                publishProgress("error", "Sparse image validation failed: " + sparseErr);
+                                auto resp = provisioner::utils::createErrorResponse(
+                                    ctx->req, "IDP sparse image validation failed: " + sparseErr,
+                                    drogon::k400BadRequest, "Validation Error", "IDP_SPARSE_INVALID");
+                                ctx->callback(resp);
+                                return;
+                            }
                         }
 
                         // Replace any existing artefact directory with minimal downtime.

@@ -20,6 +20,7 @@ export PROVISIONER_STARTED="FDE-PROVISIONER-STARTED"
 . "$(dirname "$0")/rpi-sb-common.sh"
 
 read_config
+compute_image_summary
 
 : "${RPI_DEVICE_STORAGE_CIPHER:=aes-xts-plain64}"
 

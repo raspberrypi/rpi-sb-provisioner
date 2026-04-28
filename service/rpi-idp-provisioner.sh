@@ -40,6 +40,7 @@ log() {
 }
 
 read_config
+compute_image_summary
 
 CLEANUP_DONE=0
 

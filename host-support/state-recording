@@ -1,11 +1,94 @@
 #!/bin/sh
 
+# compute_image_summary() - Sets the global IMAGE_SUMMARY to a one-line
+# human-readable description of the image referenced by GOLD_MASTER_OS_FILE.
+#
+# This must be called after read_config() so GOLD_MASTER_OS_FILE is in scope.
+# The result is what the device-details page shows in the "Image" column,
+# both during provisioning (via state.db) and after (via manufacturing.db).
+#
+# Behaviour:
+#   - regular file:    basename (e.g. "raspios-2025-04-01.img")
+#   - IDP directory:   "<name> v<version> (<class>/<storage>[, encrypted])"
+#                      built from the descriptor JSON's IGmeta/attributes
+#   - unset / missing: empty string
+compute_image_summary() {
+    IMAGE_SUMMARY=""
+
+    src="${GOLD_MASTER_OS_FILE:-}"
+    if [ -z "${src}" ]; then
+        return 0
+    fi
+
+    if [ -f "${src}" ]; then
+        IMAGE_SUMMARY="$(basename -- "${src}")"
+        return 0
+    fi
+
+    if [ ! -d "${src}" ]; then
+        return 0
+    fi
+
+    # IDP artefact directory.  Locate the single descriptor JSON and pull
+    # name/version/class/storage/encryption out of it.
+    idp_json=""
+    if command -v jq >/dev/null 2>&1; then
+        idp_json="$(find "${src}" -maxdepth 1 -name '*.json' -type f 2>/dev/null | head -n1)"
+    fi
+    if [ -z "${idp_json}" ] || [ ! -f "${idp_json}" ]; then
+        IMAGE_SUMMARY="$(basename -- "${src}")"
+        return 0
+    fi
+
+    name=$(jq -r '.attributes."image-name" // ""' < "${idp_json}" 2>/dev/null)
+    version=$(jq -r '.IGmeta.IGconf_image_version // ""' < "${idp_json}" 2>/dev/null)
+    class=$(jq -r '.IGmeta.IGconf_device_class // ""' < "${idp_json}" 2>/dev/null)
+    storage=$(jq -r '.IGmeta.IGconf_device_storage_type // ""' < "${idp_json}" 2>/dev/null)
+    encrypted=$(jq -r 'if any(.. | objects; has("encrypted")) then "encrypted" else "" end' < "${idp_json}" 2>/dev/null)
+
+    summary="${name}"
+    if [ -z "${summary}" ] || [ "${summary}" = "unknown" ]; then
+        summary="$(basename -- "${src}")"
+    fi
+    if [ -n "${version}" ] && [ "${version}" != "unknown" ]; then
+        summary="${summary} v${version}"
+    fi
+
+    qualifiers=""
+    if [ -n "${class}" ] && [ "${class}" != "unknown" ]; then
+        qualifiers="${class}"
+    fi
+    if [ -n "${storage}" ] && [ "${storage}" != "unknown" ]; then
+        if [ -n "${qualifiers}" ]; then
+            qualifiers="${qualifiers}/${storage}"
+        else
+            qualifiers="${storage}"
+        fi
+    fi
+    if [ -n "${encrypted}" ]; then
+        if [ -n "${qualifiers}" ]; then
+            qualifiers="${qualifiers}, ${encrypted}"
+        else
+            qualifiers="${encrypted}"
+        fi
+    fi
+    if [ -n "${qualifiers}" ]; then
+        summary="${summary} (${qualifiers})"
+    fi
+
+    IMAGE_SUMMARY="${summary}"
+}
+
 # record_state() - Records device provisioning state in SQLite database
 #
 # Parameters:
 #   $1 (serial)   - Device serial number (e.g. "DC:A6:32:12:34:56")
 #   $2 (state)    - Current state of device (e.g. "PROVISIONER-STARTED", "PROVISIONER-FINISHED")
 #   $3 (endpoint) - Name of provisioning endpoint (e.g. "triage", "sb-provisioner", "fde-provisioner")
+#   $4 (image)    - Optional one-line image summary.  Defaults to the global
+#                   ${IMAGE_SUMMARY} (set by compute_image_summary), so callers
+#                   that have run compute_image_summary need not pass it.
+#   $5 (ip)       - Optional IP address.
 #
 # The function creates/updates an SQLite database at /var/log/rpi-sb-provisioner/state.db
 # tracking the provisioning state of devices over time. Each state change creates a new
@@ -29,8 +112,11 @@ record_state() {
     serial=$1
     state=$2
     endpoint=$3
-    image=${4:-""}
+    image=${4:-${IMAGE_SUMMARY:-}}
     ip_address=${5:-""}
+    # Escape single quotes for safe inline SQL (image may contain spaces,
+    # parentheses, etc. when it carries an IDP one-line summary).
+    image=$(printf '%s' "${image}" | sed "s/'/''/g")
     sqlite3 "/srv/rpi-sb-provisioner/state.db" "PRAGMA busy_timeout=5000; INSERT INTO devices(serial, endpoint, state, image, ip_address) VALUES ('$serial', '$endpoint', '$state', '$image', '$ip_address');" > /dev/null 2>&1
 }
 

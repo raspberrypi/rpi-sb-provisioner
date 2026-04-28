@@ -32,6 +32,7 @@ log() {
 }
 
 read_config
+compute_image_summary
 
 TMP_DIR=""
 CLEANUP_DONE=0

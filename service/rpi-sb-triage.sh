@@ -123,6 +123,13 @@ timeout_fatal() {
     set -e
 }
 
+# Load config early so the image summary is populated before any
+# record_state call -- otherwise the device-details page shows an empty
+# image for the lifetime of triage and only fills in later, which looks
+# inconsistent.
+read_config
+compute_image_summary
+
 TARGET_USB_PATH=$(get_usb_path_for_serial "${TARGET_DEVICE_SERIAL32}")
 
 # Record state changes atomically
@@ -133,7 +140,6 @@ if [ -d "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL32}" ]; then
     rm -rf "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL32}"
 fi
 
-read_config
 setup_fastboot_and_id_vars "${TARGET_DEVICE_SERIAL}"
 
 # Ensure the device has a firmware crypto ECDSA key.  Every provisioned

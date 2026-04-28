@@ -190,6 +190,7 @@ consume_onetime_special_flags() {
 }
 
 read_config
+compute_image_summary
 
 # Initialize signing context (validates key config, derives public key)
 # This is safe to call even for naked provisioning - it will set SIGNING_MODE="none"
