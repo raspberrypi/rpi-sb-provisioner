@@ -544,6 +544,9 @@ prepare_pre_boot_auth_images_as_bootimg() {
 
         echo 'initramfs initramfs8' >> "${TMP_DIR}"/rpi-boot-img-mount/config.txt
 
+        # See rpi-sb-common.sh; required by rpi-verity-verifier.
+        ensure_lock_device_private_key "${TMP_DIR}/rpi-boot-img-mount/config.txt" enforce
+
         announce_stop "config.txt modification"
 
         # Run customisation script for bootfs-mounted stage

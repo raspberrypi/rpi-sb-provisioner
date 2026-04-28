@@ -462,6 +462,13 @@ prepare_pre_boot_auth_images() {
 
         echo 'initramfs initramfs8' >> "${TMP_DIR}"/rpi-boot-img-mount/config.txt
 
+        # lock_device_private_key=1 causes firmware to set the OTP ECDSA
+        # key-slot to LOCKED before userspace runs, which is a precondition
+        # for the rpi-verity-verifier boot-time check. Safe to apply in all
+        # images — it has no effect when secure-boot is disabled, and
+        # becomes load-bearing once it is.
+        ensure_lock_device_private_key "${TMP_DIR}/rpi-boot-img-mount/config.txt" enforce
+
         announce_stop "config.txt modification"
 
         # Run customisation script for bootfs-mounted stage

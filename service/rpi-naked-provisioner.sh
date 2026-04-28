@@ -269,6 +269,11 @@ if customisation_script_is_runnable "naked-provisioner" "bootfs-mounted" || \
 
     announce_stop "OS Image Mounting"
 
+    # Naked mode leaves the customer's image as-is; warn rather than modify
+    # if lock_device_private_key=1 is missing, because rpi-verity-verifier
+    # (if installed in the image) will abort at boot with KEY_NOT_LOCKED.
+    ensure_lock_device_private_key "${TMP_DIR}/rpi-boot-img-mount/config.txt" warn
+
     # Run customisation script for bootfs-mounted stage
     run_customisation_script "naked-provisioner" "bootfs-mounted" "${TMP_DIR}/rpi-boot-img-mount" "${TMP_DIR}/rpi-rootfs-img-mount"
 

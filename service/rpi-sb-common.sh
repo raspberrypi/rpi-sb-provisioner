@@ -632,3 +632,57 @@ copy_kernel_modules_with_deps() {
     log "Kernel modules copied successfully"
     return 0
 }
+
+# Ensure `lock_device_private_key=1` is present in the given config.txt
+# (which must live inside the signed boot.img the firmware authenticates).
+# Firmware reads this key before any userspace runs and sets the OTP
+# ECDSA key-slot to LOCKED, which blocks the raw-key export API for the
+# rest of the boot session. Required by the rpi-verity-verifier boot-time
+# runtime check.
+#
+# Modes:
+#   enforce  — append the line under [all] if missing; no-op if present.
+#   warn     — log a warning if missing; do not modify.
+#
+# Parameters:
+#   $1 - path to config.txt (inside the boot.img mount)
+#   $2 - mode: "enforce" or "warn" (default: "enforce")
+ensure_lock_device_private_key() {
+    _cfg="$1"
+    _mode="${2:-enforce}"
+
+    if [ ! -f "${_cfg}" ]; then
+        log "ensure_lock_device_private_key: ${_cfg} not found; skipping"
+        return 1
+    fi
+
+    # Match `lock_device_private_key=1` anywhere in the file (case-sensitive,
+    # allow trailing whitespace/comments). Lines like "lock_device_private_key=0"
+    # or any other value are NOT considered present — we want exactly =1.
+    if grep -Eq '^[[:space:]]*lock_device_private_key[[:space:]]*=[[:space:]]*1([[:space:]]|#|$)' "${_cfg}"; then
+        log "lock_device_private_key=1 already present in ${_cfg}"
+        return 0
+    fi
+
+    if [ "${_mode}" = "warn" ]; then
+        log "WARNING: lock_device_private_key=1 is MISSING from ${_cfg}."
+        log "  The rpi-verity-verifier will abort at boot with KEY_NOT_LOCKED."
+        log "  Add the line under [all] in your image's config.txt."
+        return 1
+    fi
+
+    # Defensive: refuse to enforce if a conflicting value is already present.
+    if grep -Eq '^[[:space:]]*lock_device_private_key[[:space:]]*=[[:space:]]*[^1][[:space:]]*' "${_cfg}"; then
+        log "ERROR: ${_cfg} contains a conflicting lock_device_private_key setting."
+        log "  Refusing to overwrite; correct the image's config.txt manually."
+        return 1
+    fi
+
+    log "Appending lock_device_private_key=1 to ${_cfg} (under [all])"
+    # Ensure there's an [all] section; if not, add one at the end.
+    if ! grep -Eq '^[[:space:]]*\[all\][[:space:]]*$' "${_cfg}"; then
+        printf '\n[all]\n' >> "${_cfg}"
+    fi
+    printf 'lock_device_private_key=1\n' >> "${_cfg}"
+    return 0
+}
