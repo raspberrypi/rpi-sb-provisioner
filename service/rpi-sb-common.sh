@@ -686,3 +686,92 @@ ensure_lock_device_private_key() {
     printf 'lock_device_private_key=1\n' >> "${_cfg}"
     return 0
 }
+
+# =============================================================================
+# Signed boot.img preparation for IDP slot boot partitions
+# =============================================================================
+# IDP artefacts ship raw VFAT images for boot slots (containing firmware files,
+# kernel, dtbs, config.txt, cmdline.txt). A signed-boot Pi 5 EEPROM rejects
+# those and only loads a signed boot.img + boot.sig pair from the boot slot.
+#
+# This helper takes a source sparse VFAT, bundles its contents into a single
+# boot.img via rpi-make-boot-image, signs it with the configured customer key,
+# and emits a new sparse VFAT (sized to match the source) containing only
+# {boot.img, boot.sig} suitable for direct flashing in place of the original.
+#
+# Caches output by content hash of source + key fingerprint so that, for an
+# unchanged artefact and key, repeated runs reuse the prior signed copy.
+#
+# Arguments:
+#   $1 - path to source sparse VFAT (e.g. ${IDP_DIR}/boot.sparse)
+#   $2 - path where the signed sparse should land (caller-owned)
+#
+# Requires (caller responsibility): init_signing_context already invoked,
+# RPI_DEVICE_FAMILY set, simg2img/img2simg/mkfs.fat/rpi-make-boot-image
+# available on PATH.
+prepare_signed_boot_simg() {
+    _src_sparse="$1"
+    _out_sparse="$2"
+
+    if ! signing_available; then
+        log "ERROR: prepare_signed_boot_simg requires a configured signing key"
+        return 1
+    fi
+
+    if [ ! -f "${_src_sparse}" ]; then
+        log "ERROR: source sparse not found: ${_src_sparse}"
+        return 1
+    fi
+
+    if [ -f "${_out_sparse}" ]; then
+        return 0
+    fi
+
+    _work=$(make_temp_dir "rpi-sb-bootimg.XXX")
+    _src_img="${_work}/source.vfat"
+    _src_mnt="${_work}/src-mnt"
+    _boot_img="${_work}/boot.img"
+    _boot_sig="${_work}/boot.sig"
+    _out_vfat="${_work}/output.vfat"
+    _out_mnt="${_work}/out-mnt"
+    mkdir -p "${_src_mnt}" "${_out_mnt}"
+
+    # Inflate the IDP sparse so we can mount and walk its files.
+    simg2img "${_src_sparse}" "${_src_img}"
+
+    # Mount read-only; rpi-make-boot-image only reads.
+    mount -o loop,ro -t vfat "${_src_img}" "${_src_mnt}"
+
+    # Bundle every file in the boot VFAT (firmware, kernel, dtbs, cmdline.txt,
+    # config.txt) into a single FIT-style boot.img the EEPROM will accept.
+    rpi-make-boot-image -b "pi${RPI_DEVICE_FAMILY}" -a 64 \
+        -d "${_src_mnt}" -o "${_boot_img}"
+
+    # Sidecar signature in the same format rpi-sb-provisioner.sh produces.
+    sha256sum "${_boot_img}" | awk '{print $1}' > "${_boot_sig}"
+    printf 'rsa2048: ' >> "${_boot_sig}"
+    # shellcheck disable=SC2046
+    "${OPENSSL}" dgst -sign $(get_openssl_sign_args) -sha256 "${_boot_img}" \
+        | xxd -c 4096 -p >> "${_boot_sig}"
+
+    umount "${_src_mnt}"
+
+    # Build a fresh VFAT sized to the original partition so the on-device
+    # filesystem fits the existing slot exactly.
+    _src_size_bytes=$(stat -c%s "${_src_img}")
+    truncate -s "${_src_size_bytes}" "${_out_vfat}"
+    mkfs.fat -s 1 -n "BOOT" "${_out_vfat}" >/dev/null
+
+    mount -o loop -t vfat "${_out_vfat}" "${_out_mnt}"
+    cp "${_boot_img}" "${_out_mnt}/boot.img"
+    cp "${_boot_sig}" "${_out_mnt}/boot.sig"
+    sync
+    umount "${_out_mnt}"
+
+    # Atomic rename so a partial write never appears as a valid cache hit.
+    img2simg -s "${_out_vfat}" "${_out_sparse}.tmp"
+    mv "${_out_sparse}.tmp" "${_out_sparse}"
+
+    rm -rf "${_work}"
+    return 0
+}
