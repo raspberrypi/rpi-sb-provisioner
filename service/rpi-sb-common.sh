@@ -727,44 +727,70 @@ prepare_signed_boot_simg() {
         return 0
     fi
 
-    _work=$(make_temp_dir "rpi-sb-bootimg.XXX")
+    # POSIX errexit is suspended inside a function called via "if !", which is
+    # how callers invoke us. Check every critical step explicitly so a failure
+    # cannot be silently turned into a 0-byte sparse cache entry.
+    _fail() {
+        log "ERROR: prepare_signed_boot_simg: $1"
+        rm -rf "${_work}" 2>/dev/null
+        return 1
+    }
+
+    _work=$(make_temp_dir "rpi-sb-bootimg.XXX") || return 1
     _src_img="${_work}/source.vfat"
     _src_mnt="${_work}/src-mnt"
     _boot_img="${_work}/boot.img"
     _boot_sig="${_work}/boot.sig"
     _out_vfat="${_work}/output.vfat"
     _out_mnt="${_work}/out-mnt"
-    mkdir -p "${_src_mnt}" "${_out_mnt}"
+    mkdir -p "${_src_mnt}" "${_out_mnt}" || _fail "mkdir mountpoints" || return 1
 
     # Inflate the IDP sparse so we can mount and walk its files.
-    simg2img "${_src_sparse}" "${_src_img}"
+    simg2img "${_src_sparse}" "${_src_img}" || _fail "simg2img source" || return 1
 
     # Mount read-only; rpi-make-boot-image only reads.
-    mount -o loop,ro -t vfat "${_src_img}" "${_src_mnt}"
+    mount -o loop,ro -t vfat "${_src_img}" "${_src_mnt}" \
+        || _fail "mount source vfat" || return 1
 
     # Bundle every file in the boot VFAT (firmware, kernel, dtbs, cmdline.txt,
     # config.txt) into a single FIT-style boot.img the EEPROM will accept.
     rpi-make-boot-image -b "pi${RPI_DEVICE_FAMILY}" -a 64 \
-        -d "${_src_mnt}" -o "${_boot_img}"
+        -d "${_src_mnt}" -o "${_boot_img}" \
+        || { umount "${_src_mnt}" 2>/dev/null; _fail "rpi-make-boot-image"; return 1; }
 
     # Sidecar signature in the same format rpi-sb-provisioner.sh produces.
-    sha256sum "${_boot_img}" | awk '{print $1}' > "${_boot_sig}"
+    sha256sum "${_boot_img}" | awk '{print $1}' > "${_boot_sig}" \
+        || { umount "${_src_mnt}" 2>/dev/null; _fail "sha256sum boot.img"; return 1; }
     printf 'rsa2048: ' >> "${_boot_sig}"
     # shellcheck disable=SC2046
     "${OPENSSL}" dgst -sign $(get_openssl_sign_args) -sha256 "${_boot_img}" \
-        | xxd -c 4096 -p >> "${_boot_sig}"
+        | xxd -c 4096 -p >> "${_boot_sig}" \
+        || { umount "${_src_mnt}" 2>/dev/null; _fail "sign boot.img"; return 1; }
 
-    umount "${_src_mnt}"
+    umount "${_src_mnt}" || _fail "umount source vfat" || return 1
 
     # Build a fresh VFAT sized to the original partition so the on-device
-    # filesystem fits the existing slot exactly.
-    _src_size_bytes=$(stat -c%s "${_src_img}")
-    truncate -s "${_src_size_bytes}" "${_out_vfat}"
-    mkfs.fat -s 1 -n "BOOT" "${_out_vfat}" >/dev/null
+    # filesystem fits the existing slot exactly. -s 1 (one sector per cluster)
+    # is required for compatibility with how rpi-make-boot-image lays out the
+    # inner FAT, but at boot-slot sizes (typ. 128MB) that cluster count exceeds
+    # FAT16's 65525-cluster ceiling, so we must force FAT32 explicitly. Without
+    # -F 32 mkfs.fat fails with "Not enough or too many clusters" and -- with
+    # errexit suspended -- the function would otherwise continue and write a
+    # 40-byte stub sparse to the cache, leaving the device with a partition
+    # the EEPROM finds boot.img in but cannot actually read.
+    _src_size_bytes=$(stat -c%s "${_src_img}") \
+        || _fail "stat source size" || return 1
+    truncate -s "${_src_size_bytes}" "${_out_vfat}" \
+        || _fail "truncate output vfat" || return 1
+    mkfs.fat -s 1 -F 32 -n "BOOT" "${_out_vfat}" >/dev/null \
+        || _fail "mkfs.fat -s 1 -F 32 (size=${_src_size_bytes})" || return 1
 
-    mount -o loop -t vfat "${_out_vfat}" "${_out_mnt}"
-    cp "${_boot_img}" "${_out_mnt}/boot.img"
-    cp "${_boot_sig}" "${_out_mnt}/boot.sig"
+    mount -o loop -t vfat "${_out_vfat}" "${_out_mnt}" \
+        || _fail "mount output vfat" || return 1
+    cp "${_boot_img}" "${_out_mnt}/boot.img" \
+        || { umount "${_out_mnt}" 2>/dev/null; _fail "cp boot.img"; return 1; }
+    cp "${_boot_sig}" "${_out_mnt}/boot.sig" \
+        || { umount "${_out_mnt}" 2>/dev/null; _fail "cp boot.sig"; return 1; }
     # The Pi 5 EEPROM only chainloads boot.img when config.txt in the
     # boot slot has boot_ramdisk=1. Without it the bootloader looks for
     # the legacy start4.elf/kernel_2712.img layout, which we replaced.
@@ -777,11 +803,13 @@ prepare_signed_boot_simg() {
         printf 'boot_ramdisk=1\n' > "${_out_mnt}/config.txt"
     fi
     sync
-    umount "${_out_mnt}"
+    umount "${_out_mnt}" || _fail "umount output vfat" || return 1
 
     # Atomic rename so a partial write never appears as a valid cache hit.
-    img2simg -s "${_out_vfat}" "${_out_sparse}.tmp"
-    mv "${_out_sparse}.tmp" "${_out_sparse}"
+    img2simg -s "${_out_vfat}" "${_out_sparse}.tmp" \
+        || _fail "img2simg output" || return 1
+    mv "${_out_sparse}.tmp" "${_out_sparse}" \
+        || _fail "mv output into cache" || return 1
 
     rm -rf "${_work}"
     return 0
