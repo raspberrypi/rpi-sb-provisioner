@@ -765,6 +765,17 @@ prepare_signed_boot_simg() {
     mount -o loop -t vfat "${_out_vfat}" "${_out_mnt}"
     cp "${_boot_img}" "${_out_mnt}/boot.img"
     cp "${_boot_sig}" "${_out_mnt}/boot.sig"
+    # The Pi 5 EEPROM only chainloads boot.img when config.txt in the
+    # boot slot has boot_ramdisk=1. Without it the bootloader looks for
+    # the legacy start4.elf/kernel_2712.img layout, which we replaced.
+    # Mirrors get_fastboot_config_file() in the per-script callers.
+    if [ -f /etc/rpi-sb-provisioner/boot_ramdisk_config.txt ]; then
+        cp /etc/rpi-sb-provisioner/boot_ramdisk_config.txt "${_out_mnt}/config.txt"
+    elif [ -f /var/lib/rpi-sb-provisioner/boot_ramdisk_config.txt ]; then
+        cp /var/lib/rpi-sb-provisioner/boot_ramdisk_config.txt "${_out_mnt}/config.txt"
+    else
+        printf 'boot_ramdisk=1\n' > "${_out_mnt}/config.txt"
+    fi
     sync
     umount "${_out_mnt}"
 

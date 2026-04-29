@@ -362,7 +362,10 @@ if [ "${PROVISIONING_STYLE}" = "secure-boot" ]; then
         fi
 
         SRC_HASH=$(sha256sum "${SRC_PATH}" | awk '{print $1}')
-        CACHE_NAME="${src_simg%.sparse}-${SRC_HASH}-${PUBKEY_HASH}.sparse"
+        # v2: VFAT now also contains config.txt with boot_ramdisk=1 so the
+        # EEPROM actually chainloads boot.img. Bump on any future on-disk
+        # format change so stale cache entries don't get reused.
+        CACHE_NAME="${src_simg%.sparse}-v2-${SRC_HASH}-${PUBKEY_HASH}.sparse"
         CACHE_PATH="${SIGNED_CACHE_DIR}/${CACHE_NAME}"
 
         log "Signing boot slot source ${src_simg} -> ${CACHE_PATH}"
