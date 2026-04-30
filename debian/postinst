@@ -7,6 +7,7 @@ mkdir -p /srv/rpi-sb-provisioner
 mkdir -p /srv/rpi-sb-provisioner/tmp
 mkdir -p /srv/rpi-sb-bootstrap
 mkdir -p /var/log/rpi-sb-provisioner
+[ -d /var/lock/rpi-sb-provisioner ] || mkdir -p /var/lock/rpi-sb-provisioner
 
 # Default manufacturing DB path
 MFG_DB_PATH="/srv/rpi-sb-provisioner/manufacturing.db"
