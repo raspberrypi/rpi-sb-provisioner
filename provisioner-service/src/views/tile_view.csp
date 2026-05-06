@@ -94,6 +94,8 @@
     }
     .tile-badge-gen { background: #d32f2f; }
     .tile-badge-model { background: #5c6bc0; }
+    .tile-badge-replug { background: #ffd54f; color: #1a1a1a; animation: tileReplugPulse 1.6s ease-in-out infinite; }
+    @keyframes tileReplugPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(255, 213, 79, 0.7); } 50% { box-shadow: 0 0 0 6px rgba(255, 213, 79, 0); } }
 
     /* Progress stepper */
     .tile-progress {
@@ -364,6 +366,7 @@
             headerHTML += '<span class="tile-serial">' + escapeHtml(displayName) + '</span>';
             if (n.model) headerHTML += '<span class="tile-badge tile-badge-model">' + escapeHtml(n.model) + '</span>';
             if (n.modelGen) headerHTML += '<span class="tile-badge tile-badge-gen">' + n.modelGen + '</span>';
+            if (n.needsReplug) headerHTML += '<span class="tile-badge tile-badge-replug" title="Raspberry Pi 5 needs the USB-C cable removed and re-inserted after the bootloader update">Re-plug</span>';
             headerHTML += '</div>';
 
             el.innerHTML = headerHTML + createStepperHTML() + '<div class="tile-meta"></div>';
@@ -484,6 +487,26 @@
                             const header = existing.element.querySelector('.tile-header');
                             if (header) { modelBadge = document.createElement('span'); modelBadge.className = 'tile-badge tile-badge-model'; modelBadge.textContent = n.model; header.appendChild(modelBadge); }
                         }
+                    }
+
+                    // The replug badge can flip on between ticks (the
+                    // bootstrap script populates board_type only after the
+                    // first rpiboot phase) and back off once the device
+                    // finishes provisioning, so reconcile it on every update.
+                    let replugBadge = existing.element.querySelector('.tile-badge-replug');
+                    if (n.needsReplug) {
+                        if (!replugBadge) {
+                            const header = existing.element.querySelector('.tile-header');
+                            if (header) {
+                                replugBadge = document.createElement('span');
+                                replugBadge.className = 'tile-badge tile-badge-replug';
+                                replugBadge.textContent = 'Re-plug';
+                                replugBadge.title = 'Raspberry Pi 5 needs the USB-C cable removed and re-inserted after the bootloader update';
+                                header.appendChild(replugBadge);
+                            }
+                        }
+                    } else if (replugBadge) {
+                        replugBadge.remove();
                     }
 
                     if (changed) {

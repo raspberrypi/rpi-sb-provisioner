@@ -106,6 +106,7 @@ record_state() {
         state           TEXT                not null,   \
         image           TEXT                not null,   \
         ip_address      TEXT                not null,   \
+        board_type      TEXT                not null default '', \
         ts              timestamp           default current_timestamp \
         );" > /dev/null 2>&1
 
@@ -114,10 +115,15 @@ record_state() {
     endpoint=$3
     image=${4:-${IMAGE_SUMMARY:-}}
     ip_address=${5:-""}
+    # Sticky board_type: callers don't have to thread it through every call --
+    # any record_state after the bootstrap metadata extraction picks up the
+    # global ${BOARD_TYPE} so the latest-row queries always see it.
+    board_type=${6:-${BOARD_TYPE:-}}
     # Escape single quotes for safe inline SQL (image may contain spaces,
     # parentheses, etc. when it carries an IDP one-line summary).
     image=$(printf '%s' "${image}" | sed "s/'/''/g")
-    sqlite3 "/srv/rpi-sb-provisioner/state.db" "PRAGMA busy_timeout=5000; INSERT INTO devices(serial, endpoint, state, image, ip_address) VALUES ('$serial', '$endpoint', '$state', '$image', '$ip_address');" > /dev/null 2>&1
+    board_type=$(printf '%s' "${board_type}" | sed "s/'/''/g")
+    sqlite3 "/srv/rpi-sb-provisioner/state.db" "PRAGMA busy_timeout=5000; INSERT INTO devices(serial, endpoint, state, image, ip_address, board_type) VALUES ('$serial', '$endpoint', '$state', '$image', '$ip_address', '$board_type');" > /dev/null 2>&1
 }
 
 # get_usb_path_for_serial() - Finds the USB path for a device with a specific serial number

@@ -48,6 +48,7 @@ STATE_DB_SCHEMA="id              integer primary key,
     state           TEXT                not null,
     image           TEXT                not null,
     ip_address      TEXT                not null,
+    board_type      TEXT                not null default '',
     ts              timestamp           default current_timestamp"
 
 # Ensure WAL journal mode
@@ -65,7 +66,7 @@ else
     CURRENT_COLUMNS=$(sqlite3 "$STATE_DB_PATH" "PRAGMA table_info(devices);" | awk -F'|' '{print $2}' | tr '\n' ',')
     
     # Check if any expected columns are missing
-    for COL in id serial endpoint state image ip_address ts; do
+    for COL in id serial endpoint state image ip_address board_type ts; do
         if ! echo "$CURRENT_COLUMNS" | grep -q "$COL"; then
             echo "Migration needed: column $COL is missing from state.db devices table"
             
