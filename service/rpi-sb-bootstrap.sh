@@ -131,6 +131,46 @@ fi
 EARLY_LOG_DIRECTORY="/var/log/rpi-sb-provisioner/early/${TARGET_DEVICE_PATH}"
 mkdir -p "${EARLY_LOG_DIRECTORY}"
 
+# rpiboot writes <serial>.json into this directory as it collects OTP
+# metadata from the device.  We parse USER_BOARDREV out of it after the
+# first rpiboot call to identify whether this is a Raspberry Pi 5 -- which
+# is the trigger for the "please re-plug after EEPROM update" annotation
+# in the visualisers (Pi 5's power button means the user has to manually
+# unplug and reconnect after the bootloader reboot).
+METADATA_DIR="${EARLY_LOG_DIRECTORY}/metadata"
+mkdir -p "${METADATA_DIR}"
+
+# Sets the global BOARD_TYPE (2-digit hex string of bits 4..11 of OTP
+# USER_BOARDREV; e.g. "17" for Pi 5, "18" for CM5) and BOARD_NAME for
+# logging.  Best-effort: if the metadata file is missing or unparseable
+# (older firmware, non-2712/2711 device, recovery_metadata=0) the globals
+# stay empty and downstream record_state calls record an empty board_type.
+# Idempotent: subsequent rpiboot phases re-call this and it returns early
+# if BOARD_TYPE is already set.
+extract_board_type() {
+    [ -n "${BOARD_TYPE}" ] && return 0
+    json_file=$(find "${METADATA_DIR}" -maxdepth 1 -type f -name '*.json' 2>/dev/null | head -n1)
+    [ -z "${json_file}" ] && return 0
+    [ ! -s "${json_file}" ] && return 0
+    user_boardrev=$(sed -nE 's/.*"USER_BOARDREV"[[:space:]]*:[[:space:]]*"([0-9a-fA-F]+)".*/\1/p' "${json_file}" | head -n1)
+    [ -z "${user_boardrev}" ] && return 0
+    board_type_decimal=$(( (0x${user_boardrev} >> 4) & 0xff ))
+    BOARD_TYPE=$(printf '%02x' "${board_type_decimal}")
+    case ${BOARD_TYPE} in
+        11) BOARD_NAME="Raspberry Pi 4" ;;
+        13) BOARD_NAME="Raspberry Pi 400" ;;
+        14) BOARD_NAME="Compute Module 4" ;;
+        15) BOARD_NAME="Compute Module 4S" ;;
+        17) BOARD_NAME="Raspberry Pi 5" ;;
+        18) BOARD_NAME="Compute Module 5" ;;
+        19) BOARD_NAME="Raspberry Pi 500" ;;
+        1a) BOARD_NAME="Compute Module 5 Lite" ;;
+        *)  BOARD_NAME="Board type 0x${BOARD_TYPE}" ;;
+    esac
+    export BOARD_TYPE BOARD_NAME
+    log "rpiboot metadata: USER_BOARDREV=0x${user_boardrev} -> board_type=0x${BOARD_TYPE} (${BOARD_NAME})"
+}
+
 # Create symlinks so the web UI can find pre-fastboot logs while bootstrap is running.
 # The USB endpoint (e.g. "1-1.2") is always a clean path-safe identifier and is stored
 # in the DB, so the web UI can fall back to it when the serial-keyed directory has no logs.
@@ -538,7 +578,8 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                         ;;
                 esac
             fi
-            [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal rpiboot -d "${SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
+            [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal rpiboot -j "${METADATA_DIR}" -d "${SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
+            extract_board_type
         else
             log "Creating secure bootloader for future reuse"
             touch "${SECURE_BOOTLOADER_DIRECTORY}/config.txt"
@@ -648,7 +689,8 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                 else
                     log "Normal provisioning mode (not re-provisioning)"
                 fi
-                [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal rpiboot -d "${SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
+                [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal rpiboot -j "${METADATA_DIR}" -d "${SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
+            extract_board_type
             else
                 log "No key specified, skipping eeprom update"
             fi
@@ -769,7 +811,8 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                     echo "recovery_reboot=1" > "${NON_SECURE_BOOTLOADER_DIRECTORY}/config.txt"
                     
                     log "Updating EEPROM to latest version"
-                    [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal rpiboot -d "${NON_SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
+                    [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal rpiboot -j "${METADATA_DIR}" -d "${NON_SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
+                    extract_board_type
                     log "EEPROM update completed. Device rebooted."
                 else
                     log "Reusing existing non-secure bootloader configuration"
@@ -794,7 +837,8 @@ record_state "${TARGET_DEVICE_SERIAL}" "bootstrap-firmware-updated" "${TARGET_US
 announce_start "fastboot initialisation"
 record_state "${TARGET_DEVICE_SERIAL}" "bootstrap-fastboot-initialisation-started" "${TARGET_USB_PATH}"
 
-timeout_fatal rpiboot -v -d "${FASTBOOT_STAGING_DIR}" -p "${TARGET_USB_PATH}"
+timeout_fatal rpiboot -v -j "${METADATA_DIR}" -d "${FASTBOOT_STAGING_DIR}" -p "${TARGET_USB_PATH}"
+extract_board_type
 set +e
 
 if [ -n "${TARGET_DEVICE_SERIAL}" ] && [ "${TARGET_DEVICE_SERIAL}" != "${TARGET_DEVICE_PATH}" ]; then

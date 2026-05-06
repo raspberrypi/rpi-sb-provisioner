@@ -66,6 +66,14 @@ rpi-sb-provisioner (2.3.0) unstable; urgency=medium
     - Add rpi-idp-provisioner.sh to /usr/bin and
       rpi-idp-provisioner@.service to /usr/lib/systemd/system in
       debian/install
+    - Create /var/lock/rpi-sb-provisioner in postinst so with_lock()
+      works on fresh installs; LOCK_BASE was previously assumed to
+      exist but never created by the package
+    - Remove redundant per-call board_type migration probe from
+      record_state() in host-support/state-recording: postinst
+      already performs a more thorough state.db schema migration on
+      upgrade, so the runtime probe added two SQLite invocations to
+      every device state transition for no benefit
 
   * Raspberry Pi Connect Device Identity Registration:
     - Automatically register provisioned devices with the Raspberry Pi
@@ -108,7 +116,6 @@ rpi-sb-provisioner (2.3.0) unstable; urgency=medium
     - Capture $? as the first statement of cleanup() so the original
       exit status propagates through to systemd and the manufacturing
       database
-
  -- Tom Dewey <tom.dewey@raspberrypi.com>  Fri, 17 Apr 2026 12:00:00 +0100
 
 rpi-sb-provisioner (2.2.0) unstable; urgency=medium
