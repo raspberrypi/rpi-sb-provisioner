@@ -464,7 +464,10 @@ while true; do
     fi
 
     FLASH_START=$(date +%s)
-    timeout_fatal_secs 600 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${BLOCKDEV}" "${FLASH_SOURCE}"
+    # Prefer the TCP data-plane specifier when the daemon advertises split
+    # mode (-i usb+tcp); fall back to whatever the control plane is using.
+    FLASH_SPECIFIER="${FASTBOOT_TCP_FLASH_SPECIFIER:-${FASTBOOT_DEVICE_SPECIFIER}}"
+    timeout_fatal_secs 600 fastboot -s "${FLASH_SPECIFIER}" flash "${BLOCKDEV}" "${FLASH_SOURCE}"
     FLASH_END=$(date +%s)
     FLASH_DURATION=$((FLASH_END - FLASH_START))
     log "Flashed ${SIMG} to ${BLOCKDEV} in ${FLASH_DURATION}s"

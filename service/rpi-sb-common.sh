@@ -144,25 +144,41 @@ read_config() {
 # Takes a fastboot device specifier (USB serial or network address) and:
 # 1. Verifies fastboot connectivity
 # 2. Gets the device serial number
-# 3. Tests both IPv4 and IPv6 connectivity, preferring IPv6 if available
-# 4. Determines the USB path for the device
+# 3. Discovers whether the daemon advertises a data-plane-only TCP path
+# 4. Tests both IPv4 and IPv6 connectivity, preferring IPv6 if available
+# 5. Determines the USB path for the device
 #
 # Arguments:
-#   $1 - Fastboot device specifier (required)
+#   $1 - Fastboot device specifier (required, USB serial)
 #
 # Sets the following global variables:
-#   FASTBOOT_DEVICE_SPECIFIER - Final fastboot connection string (USB/IPv4/IPv6)
-#   TARGET_DEVICE_SERIAL - Device serial number
-#   TARGET_USB_PATH - USB device path
+#   FASTBOOT_DEVICE_SPECIFIER       - Control-plane specifier (USB serial,
+#                                     unless the daemon is in legacy TCP-full
+#                                     mode and a TCP route is reachable, in
+#                                     which case it is promoted to tcp:<addr>)
+#   FASTBOOT_TCP_FLASH_SPECIFIER    - Set to tcp:<addr> when the daemon
+#                                     advertises tcp-data-plane-only=yes and a
+#                                     TCP route is reachable; empty otherwise.
+#                                     Callers should use this for `flash` and
+#                                     fall back to FASTBOOT_DEVICE_SPECIFIER.
+#   TARGET_DEVICE_SERIAL            - Device serial number
+#   TARGET_USB_PATH                 - USB device path
 #
 # Exits with error if:
 #   - Cannot establish fastboot connection
 #   - Cannot determine USB path
 setup_fastboot_and_id_vars() {
     FASTBOOT_DEVICE_SPECIFIER="$1"
+    FASTBOOT_TCP_FLASH_SPECIFIER=""
+    export FASTBOOT_TCP_FLASH_SPECIFIER
 
     timeout_fatal fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar version
     TARGET_DEVICE_SERIAL="$(get_variable serialno)"
+
+    # Returns "yes" if the device-side fastbootd is running in -i usb+tcp
+    # split mode. Empty/missing/"no" means legacy behaviour (TCP, when
+    # reachable, carries the full command stream).
+    TCP_DATA_PLANE_ONLY="$(get_variable tcp-data-plane-only)"
 
     announce_start "Testing Fastboot IP connectivity"
     USE_IPV4=
@@ -176,13 +192,33 @@ setup_fastboot_and_id_vars() {
     USE_IPV4=$?
     set -e
 
-    # Favour using IPv6 if available, and ethernet regardless to get 1024-byte chunks in Fastboot without USB3
+    # Pick the best reachable TCP specifier (IPv6 preferred).
     if [ "${USE_IPV6}" -eq 0 ]; then
-    FASTBOOT_DEVICE_SPECIFIER="tcp:${IPV6_ADDRESS}"
+        TCP_SPEC="tcp:${IPV6_ADDRESS}"
     elif [ "${USE_IPV4}" -eq 0 ]; then
-    FASTBOOT_DEVICE_SPECIFIER="tcp:${IPV4_ADDRESS}"
+        TCP_SPEC="tcp:${IPV4_ADDRESS}"
     else
-    FASTBOOT_DEVICE_SPECIFIER="${TARGET_DEVICE_SERIAL}"
+        TCP_SPEC=""
+    fi
+
+    if [ "${TCP_DATA_PLANE_ONLY}" = "yes" ]; then
+        # Split mode: keep control plane on USB and route flash over TCP if
+        # we have a route. Falling back to USB-only flashing is fine — the
+        # daemon's USB FastbootDevice carries the full command set.
+        FASTBOOT_DEVICE_SPECIFIER="${TARGET_DEVICE_SERIAL}"
+        FASTBOOT_TCP_FLASH_SPECIFIER="${TCP_SPEC}"
+        if [ -n "${FASTBOOT_TCP_FLASH_SPECIFIER}" ]; then
+            log "Split-mode daemon: control over USB ${FASTBOOT_DEVICE_SPECIFIER}, flash over ${FASTBOOT_TCP_FLASH_SPECIFIER}"
+        else
+            log "Split-mode daemon advertised but no TCP route reachable; flash will fall back to USB"
+        fi
+    else
+        # Legacy daemon: promote everything to TCP when reachable.
+        if [ -n "${TCP_SPEC}" ]; then
+            FASTBOOT_DEVICE_SPECIFIER="${TCP_SPEC}"
+        else
+            FASTBOOT_DEVICE_SPECIFIER="${TARGET_DEVICE_SERIAL}"
+        fi
     fi
 
     # Set TARGET_USB_PATH based on TARGET_DEVICE_SERIAL
