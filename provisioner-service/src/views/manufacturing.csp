@@ -178,7 +178,7 @@
                             <th scope="col">OS Image Filename</th>
                             <th scope="col">OS Image SHA256</th>
                             <th scope="col">Connect Reg.</th>
-                            <th scope="col">Connect Device ID</th>
+                            <th scope="col">Connect Identity ID</th>
                         </tr>
                     </thead>
                     <tbody>
