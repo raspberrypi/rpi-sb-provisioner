@@ -454,7 +454,7 @@ namespace provisioner {
                     // Reject values containing whitespace
                     if (fieldValue.find_first_of(" \t\r\n") != std::string::npos) {
                         jsonResponse["valid"] = false;
-                        jsonResponse["error"] = "API key must not contain whitespace";
+                        jsonResponse["error"] = "Management API access token must not contain whitespace";
                     }
                 }
             } else if (fieldName == "RPI_CONNECT_DESCRIPTION") {
