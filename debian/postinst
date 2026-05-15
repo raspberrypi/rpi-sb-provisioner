@@ -23,6 +23,24 @@ if [ -f "/etc/rpi-sb-provisioner/config" ]; then
     . /etc/rpi-sb-provisioner/config
 fi
 
+# Invalidate every cached provisioning artefact in the configured workdir.
+# rpi-sb-bootstrap.sh and the provisioner scripts treat $RPI_SB_WORKDIR as a
+# persistent cache for signed fastboot gadget images (boot.img, boot.sig),
+# signed bootcode (bootfiles.bin), signed EEPROM + config + bootcode
+# (secure-bootloader/, non-secure-bootloader/), IDP boot artefacts
+# (idp-signed-boot/), and staging .simg files. None of these are user data —
+# they're all regenerable from /var/lib/rpi-sb-provisioner/ inputs and the
+# firmware tree — but every one of them can silently mask a configuration
+# change made via the UI/config until manually deleted.
+#
+# Wipe contents but keep the workdir itself, otherwise rpi-sb-bootstrap.sh's
+# missing-dir check (`elif [ ! -d "${RPI_SB_WORKDIR}" ]`) falls back to a
+# fresh temp dir and the user loses their configured path.
+if [ -n "$RPI_SB_WORKDIR" ] && [ -d "$RPI_SB_WORKDIR" ]; then
+    echo "Invalidating all cached provisioning artefacts in $RPI_SB_WORKDIR"
+    find "$RPI_SB_WORKDIR" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+fi
+
 # Use the configured paths if set
 if [ -n "$RPI_SB_PROVISIONER_MANUFACTURING_DB" ]; then
     MFG_DB_PATH="$RPI_SB_PROVISIONER_MANUFACTURING_DB"
