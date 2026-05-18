@@ -624,7 +624,7 @@
             if (logFetchPending) return;
             logFetchPending = true;
             var id = deviceSerial || initialPort;
-            fetch('/devices/' + encodeURIComponent(id))
+            fetch('/devices/' + encodeURIComponent(id), { headers: { 'Accept': 'text/html' } })
                 .then(function(r) { return r.text(); })
                 .then(function(html) {
                     logFetchPending = false;
@@ -638,6 +638,11 @@
                         if (newContent && oldContent && newContent.textContent !== oldContent.textContent) {
                             oldContent.textContent = newContent.textContent;
                         }
+                    }
+                    var newHistory = doc.querySelector('.state-history-section');
+                    var oldHistory = document.querySelector('.state-history-section');
+                    if (newHistory && oldHistory && newHistory.innerHTML !== oldHistory.innerHTML) {
+                        oldHistory.innerHTML = newHistory.innerHTML;
                     }
                     try { console.log('detail: logs refreshed'); } catch(e) {}
                 })

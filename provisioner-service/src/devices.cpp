@@ -7,11 +7,15 @@
 #include <fstream>
 #include <sstream>
 #include <systemd/sd-bus.h>
+#include <systemd/sd-device.h>
+#include <systemd/sd-event.h>
+#include <sys/inotify.h>
 #include <filesystem>
 #include <unordered_map>
 #include <set>
 #include <thread>
 #include <mutex>
+#include <condition_variable>
 #include <atomic>
 #include <chrono>
 #include <algorithm>
@@ -119,6 +123,24 @@ namespace provisioner {
         std::mutex topologyMutex;
         // Map id -> node
         std::unordered_map<std::string, UsbNode> currentTopology;
+
+        // Event-driven scan trigger: USB uevents (sd_device_monitor) and
+        // state.db-wal writes (inotify) push scanRequested=true and notify scanCv,
+        // collapsing the worker's wait. A 10s wait_for backstop covers anything
+        // that slips past both event sources.
+        std::mutex scanMu;
+        std::condition_variable scanCv;
+        bool scanRequested{false};
+        std::thread eventSourceThread;
+        sd_event *eventSourceLoop{nullptr};
+
+        void requestScan() {
+            {
+                std::lock_guard<std::mutex> lk(scanMu);
+                scanRequested = true;
+            }
+            scanCv.notify_all();
+        }
         // App start time in milliseconds since epoch; used to ignore stale DB rows
         std::atomic<long long> appStartMs{0};
         
@@ -1117,9 +1139,10 @@ namespace provisioner {
             while (topologyRunning) {
                 // Skip real USB scanning when test mode is enabled
                 if (testModeEnabled) {
-                    for (int i=0; i<10 && topologyRunning; ++i) {
-                        std::this_thread::sleep_for(std::chrono::milliseconds(300));
-                    }
+                    std::unique_lock<std::mutex> lk(scanMu);
+                    scanCv.wait_for(lk, std::chrono::seconds(10),
+                        [] { return scanRequested || !topologyRunning.load(); });
+                    scanRequested = false;
                     continue;
                 }
                 
@@ -1162,11 +1185,88 @@ namespace provisioner {
                     DevicesWebSocketController::broadcast(msg);
                 }
 
-                for (int i=0; i<10 && topologyRunning; ++i) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(300));
-                }
+                std::unique_lock<std::mutex> lk(scanMu);
+                scanCv.wait_for(lk, std::chrono::seconds(10),
+                    [] { return scanRequested || !topologyRunning.load(); });
+                scanRequested = false;
             }
             LOG_INFO << "Topology worker stopped";
+        }
+
+        // Callback for USB hotplug events from sd_device_monitor: any add/remove/
+        // change on the "usb" subsystem wakes the topology worker for an
+        // immediate scan. We don't inspect the device — the scanner is the
+        // source of truth and will pick up whatever changed.
+        int onUsbDeviceEvent(sd_device_monitor *, sd_device *, void *) {
+            requestScan();
+            return 0;
+        }
+
+        // Callback for inotify events on /srv/rpi-sb-provisioner/: filter to
+        // state.db / state.db-wal so unrelated files don't trigger scans.
+        // Why state.db-wal: provisioning scripts write state transitions in
+        // SQLite WAL mode, so most state changes hit the -wal file first.
+        // Why state.db: covers non-WAL writes and checkpoints.
+        int onStateDbEvent(sd_event_source *, const struct inotify_event *ev, void *) {
+            if (ev && ev->len > 0) {
+                std::string name(ev->name);
+                if (name == "state.db" || name == "state.db-wal") {
+                    requestScan();
+                }
+            }
+            return 0;
+        }
+
+        // Hosts sd_device_monitor (USB hotplug) and an inotify watch on the
+        // state directory in a single sd_event loop. Shutdown is driven from
+        // ~Devices() via sd_event_exit(), which is thread-safe.
+        void eventSourceWorker() {
+            LOG_INFO << "Event source worker started";
+
+            sd_event *event = nullptr;
+            if (sd_event_new(&event) < 0) {
+                LOG_ERROR << "sd_event_new failed; falling back to timer-only scanning";
+                return;
+            }
+            eventSourceLoop = event;
+
+            sd_device_monitor *monitor = nullptr;
+            if (sd_device_monitor_new(&monitor) < 0) {
+                LOG_ERROR << "sd_device_monitor_new failed";
+                sd_event_unref(event);
+                eventSourceLoop = nullptr;
+                return;
+            }
+            if (sd_device_monitor_filter_add_match_subsystem_devtype(monitor, "usb", nullptr) < 0) {
+                LOG_WARN << "sd_device_monitor subsystem filter failed; will receive all uevents";
+            }
+            if (sd_device_monitor_attach_event(monitor, event) < 0 ||
+                sd_device_monitor_start(monitor, onUsbDeviceEvent, nullptr) < 0) {
+                LOG_ERROR << "sd_device_monitor_start failed";
+                sd_device_monitor_unref(monitor);
+                sd_event_unref(event);
+                eventSourceLoop = nullptr;
+                return;
+            }
+
+            // Watch the state directory; we filter by filename in the callback
+            // because the WAL file can be created/deleted around checkpoints.
+            sd_event_source *inotifySrc = nullptr;
+            const char *stateDir = "/srv/rpi-sb-provisioner";
+            if (sd_event_add_inotify(event, &inotifySrc, stateDir,
+                    IN_MODIFY | IN_CREATE | IN_MOVED_TO | IN_CLOSE_WRITE,
+                    onStateDbEvent, nullptr) < 0) {
+                LOG_WARN << "inotify watch on " << stateDir << " failed; "
+                         << "state.db changes will rely on the 10s backstop";
+            }
+
+            sd_event_loop(event);
+
+            if (inotifySrc) sd_event_source_unref(inotifySrc);
+            sd_device_monitor_unref(monitor);
+            sd_event_unref(event);
+            eventSourceLoop = nullptr;
+            LOG_INFO << "Event source worker stopped";
         }
     }
     
@@ -1188,18 +1288,24 @@ namespace provisioner {
             throw std::runtime_error("Failed to connect to system bus: " + std::string(strerror(-ret)));
         }
         systemd_bus = std::unique_ptr<sd_bus, decltype(&sd_bus_unref)>(bus, sd_bus_unref);
-        // Start topology watcher
+        // Start topology watcher and event-driven scan triggers
         if (!topologyRunning) {
             topologyRunning = true;
             topologyThread = std::thread(topologyWorker);
+            eventSourceThread = std::thread(eventSourceWorker);
         }
     }
 
     Devices::~Devices() {
-        // Stop topology watcher
+        // Stop topology watcher and event sources. Order: flip the flag,
+        // wake the topology worker via the cv, tell sd_event to exit, then
+        // join both threads.
         if (topologyRunning) {
             topologyRunning = false;
+            scanCv.notify_all();
+            if (eventSourceLoop) sd_event_exit(eventSourceLoop, 0);
             if (topologyThread.joinable()) topologyThread.join();
+            if (eventSourceThread.joinable()) eventSourceThread.join();
         }
     }
 
