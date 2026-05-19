@@ -574,11 +574,13 @@
         var isUnloading = false;
         var disappearTimer = null;
         var logFetchPending = false;
-        // Latched once the topology has reported this device as a Pi 5 -- we
-        // keep the latch on after the device disappears so the banner stays
-        // pointing at "please re-plug" instead of falling back to the generic
-        // "rebooting" copy while the user is actively cycling the cable.
-        var needsReplugLatched = false;
+        // Mirrors device.needsReplug from the most recent topology tick.
+        // The server now gates this on the bootstrap state being in the
+        // exact transition window (and emits it on placeholder ports too),
+        // so we no longer need a sticky client-side latch — the latch
+        // previously kept the banner showing into TRIAGE-STARTED because
+        // "TRIAGE-STARTED" contains no "FINISHED" substring.
+        var needsReplug = false;
 
         function setWsStatus(status) {
             wsDot.classList.remove('connected', 'reconnecting');
@@ -658,12 +660,8 @@
 
             if (device) {
                 if (disappearTimer) { clearTimeout(disappearTimer); disappearTimer = null; }
-                if (device.needsReplug) needsReplugLatched = true;
-                // Show a persistent re-plug prompt as soon as we see the
-                // bootloader-update phase land on a Pi 5, so the operator
-                // knows the imminent disappearance is expected.  Suppress
-                // once provisioning is done.
-                if (needsReplugLatched && !((device.state || '').toUpperCase().includes('FINISHED'))) {
+                needsReplug = !!device.needsReplug;
+                if (needsReplug) {
                     showBanner('replug', 'Raspberry Pi 5: unplug and re-insert the USB-C cable after the bootloader update to continue provisioning.');
                 } else {
                     hideBanner();
@@ -694,7 +692,7 @@
                 });
                 if (isGone && !disappearTimer) {
                     var transitional = isTransitional(lastKnownState);
-                    if (needsReplugLatched) {
+                    if (needsReplug) {
                         showBanner('replug', 'Raspberry Pi 5: unplug and re-insert the USB-C cable to continue provisioning.');
                     } else if (transitional) {
                         showBanner('rebooting', 'Device is rebooting between provisioning phases\u2026');

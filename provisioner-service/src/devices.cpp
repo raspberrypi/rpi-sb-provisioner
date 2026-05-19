@@ -899,8 +899,24 @@ namespace provisioner {
                 auto it = nodes.find(endpoint);
                 if (it == nodes.end()) continue; // endpoint not present in current topology
                 UsbNode &n = it->second;
-                if (n.isPlaceholder) continue; // not connected
                 if (n.isHub) continue; // never apply provisioning state to hubs
+                if (n.isPlaceholder) {
+                    // Empty port: don't apply runtime fields (image/ip
+                    // describe a device that isn't here), but DO surface
+                    // the latest board_type and state for this endpoint so
+                    // the UI can keep the "please re-plug" badge on a Pi 5
+                    // that has just powered off after its EEPROM-update
+                    // reboot — exactly the moment the operator needs to
+                    // see it.  State is needed downstream to gate the
+                    // badge emission to the actual transition window.
+                    if (n.boardType.empty() && !rec.boardType.empty()) {
+                        n.boardType = rec.boardType;
+                    }
+                    if (n.state.empty() && !rec.state.empty()) {
+                        n.state = rec.state;
+                    }
+                    continue;
+                }
                 n.state = rec.state;
                 // Do not clobber existing non-empty image (used for model inference) with empty DB values
                 if (!rec.image.empty()) {
@@ -1063,7 +1079,24 @@ namespace provisioner {
                 // EEPROM update -- the power button means there's no other
                 // way to bring it back into RPIBOOT mode.  CM5/Pi 500/etc.
                 // either share a jumper-style flow or aren't covered here.
-                if (n.boardType == "17") j["needsReplug"] = true;
+                //
+                // Gate the badge on the actual transition window: between
+                // bootstrap-firmware-updated (EEPROM just written, device
+                // about to disappear) and the next phase taking over
+                // (anything past fastboot-initialisation-started — once
+                // BOOTSTRAP-FINISHED or TRIAGE-STARTED lands the replug
+                // has happened, and the badge would be stale noise).
+                // Without this gate the boardTypeBySerial sticky-lookup
+                // re-asserts the badge on every fresh BOOTSTRAP-STARTED
+                // for a previously-seen Pi 5 — banner shows before the
+                // EEPROM has even been touched, and lingers into triage.
+                if (n.boardType == "17") {
+                    const std::string &s = n.state;
+                    if (s == "bootstrap-firmware-updated" ||
+                        s == "bootstrap-fastboot-initialisation-started") {
+                        j["needsReplug"] = true;
+                    }
+                }
                 arr.append(j);
             }
             root["nodes"] = arr;

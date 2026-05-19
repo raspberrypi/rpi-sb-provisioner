@@ -103,7 +103,13 @@ cleanup_orphans() {
         -mmin +"$((MAX_TEMP_DIR_AGE_HOURS * 60))" \
         -exec rm -rf {} + 2>/dev/null || true
 
-    find "$LOG_BASE" -type d -empty -delete 2>/dev/null || true
+    # -mmin +5: skip directories younger than 5 minutes.  Without this gate
+    # a concurrent bootstrap@.service that fails fast (e.g. lock contention)
+    # racing through cleanup_orphans will reap the empty metadata/ directory
+    # of an in-progress sibling bootstrap *between* its mkdir and rpiboot's
+    # OTP write -- causing rpiboot's fopen for <serial>.json to ENOENT and
+    # the board_type to never reach state.db.
+    find "$LOG_BASE" -type d -empty -mmin +5 -delete 2>/dev/null || true
     find "$LOCK_BASE" -type f -mtime +1 -delete 2>/dev/null || true
 }
 
