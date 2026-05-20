@@ -176,7 +176,7 @@ metadata_gather() {
         "0x17") BOARD_STR="5" ;;
         "0x18") BOARD_STR="CM5" ;;
         "0x19") BOARD_STR="500" ;;
-        "0x1a") BOARD_STR="CM5 Lite" ;;
+        "0x1A") BOARD_STR="CM5 Lite" ;;
         *)
             BOARD_STR="Unsupported Board: ${TYPE}"
     esac
