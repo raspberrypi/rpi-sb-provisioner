@@ -822,6 +822,7 @@ namespace provisioner {
             if (rc) {
                 return;
             }
+            sqlite3_busy_timeout(db, 5000);
             const char* sql = "SELECT serial, endpoint, state, image, ip_address, board_type FROM devices WHERE ts >= ? ORDER BY ts DESC";
             sqlite3_stmt* stmt;
             rc = sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr);
@@ -867,6 +868,7 @@ namespace provisioner {
                 sqlite3* mdb = nullptr;
                 int rc2 = sqlite3_open("/srv/rpi-sb-provisioner/manufacturing.db", &mdb);
                 if (rc2 == SQLITE_OK) {
+                    sqlite3_busy_timeout(mdb, 5000);
                     const char* msql = "SELECT serial, boardname, processor, os_image_filename FROM devices ORDER BY provision_ts DESC";
                     sqlite3_stmt* mstmt = nullptr;
                     rc2 = sqlite3_prepare_v2(mdb, msql, -1, &mstmt, nullptr);
@@ -1506,6 +1508,7 @@ namespace provisioner {
                 callback(resp);
                 return;
             }
+            sqlite3_busy_timeout(db, 5000);
 
             // Try matching by serial first, then fall back to matching by
             // USB endpoint path.  This allows the detail page to be reached
@@ -1593,6 +1596,7 @@ namespace provisioner {
                 sqlite3* mdb = nullptr;
                 int mrc = sqlite3_open("/srv/rpi-sb-provisioner/manufacturing.db", &mdb);
                 if (mrc == SQLITE_OK) {
+                    sqlite3_busy_timeout(mdb, 5000);
                     sqlite3_stmt* mstmt = nullptr;
                     const char* msql = "SELECT os_image_filename FROM devices WHERE serial = ? ORDER BY provision_ts DESC LIMIT 1";
                     mrc = sqlite3_prepare_v2(mdb, msql, -1, &mstmt, nullptr);
@@ -1651,6 +1655,7 @@ namespace provisioner {
                     sqlite3* histDb;
                     int histRc = sqlite3_open("/srv/rpi-sb-provisioner/state.db", &histDb);
                     if (histRc == SQLITE_OK) {
+                        sqlite3_busy_timeout(histDb, 5000);
                         sqlite3_stmt* histStmt;
                         const char* histSql = matchedByEndpoint
                             ? "SELECT state, ts FROM devices WHERE endpoint = ? ORDER BY ts DESC LIMIT 10"
