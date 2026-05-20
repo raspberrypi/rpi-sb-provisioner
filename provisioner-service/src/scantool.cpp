@@ -35,7 +35,8 @@ namespace provisioner {
             sqlite3_close(db);
             return false;
         }
-        
+        sqlite3_busy_timeout(db, 5000);
+
         // Prepare SQL query to check if QR code value exists as rpi_duid
         std::string sql = "SELECT COUNT(*) FROM devices WHERE rpi_duid = ?;";
         sqlite3_stmt *stmt;

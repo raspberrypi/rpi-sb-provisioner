@@ -40,7 +40,8 @@ namespace provisioner {
             sqlite3_close(db);
             return false;
         }
-        
+        sqlite3_busy_timeout(db, 5000);
+
         // Create the audit log table if it doesn't exist
         const char* create_table_sql = 
             "CREATE TABLE IF NOT EXISTS audit_log ("
@@ -125,6 +126,7 @@ namespace provisioner {
             sqlite3_close(db);
             return;
         }
+        sqlite3_busy_timeout(db, 5000);
         
         // Get current timestamp in ISO 8601 format
         auto now = std::chrono::system_clock::now();
@@ -178,6 +180,7 @@ namespace provisioner {
             sqlite3_close(db);
             return;
         }
+        sqlite3_busy_timeout(db, 5000);
         
         // Get current timestamp in ISO 8601 format
         auto now = std::chrono::system_clock::now();
@@ -228,6 +231,7 @@ namespace provisioner {
             sqlite3_close(db);
             return;
         }
+        sqlite3_busy_timeout(db, 5000);
         
         // Get current timestamp in ISO 8601 format
         auto now = std::chrono::system_clock::now();
@@ -295,7 +299,8 @@ namespace provisioner {
                 callback(resp);
                 return;
             }
-            
+            sqlite3_busy_timeout(db, 5000);
+
             // Build query with optional filters
             std::stringstream query;
             query << "SELECT * FROM audit_log WHERE 1=1 ";
