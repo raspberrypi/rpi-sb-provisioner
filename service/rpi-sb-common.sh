@@ -113,6 +113,39 @@ cleanup_orphans() {
     find "$LOCK_BASE" -type f -mtime +1 -delete 2>/dev/null || true
 }
 
+# Resolve the on-disk path for a special flag, accounting for the fact that a
+# device's serial representation changes across phases. Pre-triage we typically
+# only have the truncated 32-bit ROM serial (8 hex chars, lowercase) or a USB
+# path; post-triage we have the full 64-bit DUID (16 hex chars), whose lower
+# 32 bits equal the short serial. A flag toggled in one phase must still be
+# honoured by the other, so when TARGET_DEVICE_SERIAL is a 16-hex-char DUID we
+# also probe the lowercased 8-char suffix.
+#
+# Arguments:
+#   $1 - Special flag directory (e.g. /etc/rpi-sb-provisioner/special-skip-eeprom)
+#
+# Output (stdout): full path of the matching flag file, or empty if none.
+# Exit:   0 if a file was found, 1 otherwise. Safe under `set -e` via `|| true`.
+resolve_special_flag_path() {
+    _flag_dir="$1"
+    _primary="${_flag_dir}/${TARGET_DEVICE_SERIAL}"
+    if [ -f "${_primary}" ]; then
+        printf '%s\n' "${_primary}"
+        return 0
+    fi
+    case "${TARGET_DEVICE_SERIAL}" in
+        [0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F])
+            _short=$(printf '%s' "${TARGET_DEVICE_SERIAL}" | tr 'A-F' 'a-f' | cut -c9-16)
+            _fallback="${_flag_dir}/${_short}"
+            if [ -f "${_fallback}" ]; then
+                printf '%s\n' "${_fallback}"
+                return 0
+            fi
+            ;;
+    esac
+    return 1
+}
+
 announce_start() {
     log "================================================================================"
 

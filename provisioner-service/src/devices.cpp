@@ -1344,6 +1344,82 @@ namespace provisioner {
         }
     }
 
+    // Resolves a URL identifier (which may be a real device serial or a USB
+    // endpoint path used before the device reported its serial) to the real
+    // device serial recorded in state.db. Returns an empty string when no
+    // matching device exists or the device has not yet reported a serial.
+    // Special flags are keyed by real serial only — bootstrap.sh looks them
+    // up via TARGET_DEVICE_SERIAL — so this resolution is required to keep
+    // flag writes and reads aligned with what the bootstrap script honours.
+    static std::string resolveDeviceSerial(const std::string &identifier)
+    {
+        if (identifier.empty()) return {};
+
+        sqlite3* db = nullptr;
+        if (sqlite3_open("/srv/rpi-sb-provisioner/state.db", &db) != SQLITE_OK) {
+            if (db) sqlite3_close(db);
+            return {};
+        }
+        sqlite3_busy_timeout(db, 5000);
+
+        std::string resolved;
+        for (const char* sql : {
+                "SELECT serial FROM devices WHERE serial = ? ORDER BY ts DESC LIMIT 1",
+                "SELECT serial FROM devices WHERE endpoint = ? ORDER BY ts DESC LIMIT 1"}) {
+            sqlite3_stmt* stmt = nullptr;
+            if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+                if (stmt) sqlite3_finalize(stmt);
+                continue;
+            }
+            sqlite3_bind_text(stmt, 1, identifier.c_str(), -1, SQLITE_STATIC);
+            if (sqlite3_step(stmt) == SQLITE_ROW) {
+                const unsigned char* s = sqlite3_column_text(stmt, 0);
+                if (s && *s) {
+                    resolved = reinterpret_cast<const char*>(s);
+                    sqlite3_finalize(stmt);
+                    break;
+                }
+            }
+            sqlite3_finalize(stmt);
+        }
+
+        sqlite3_close(db);
+        return resolved;
+    }
+
+    // Probe for an active special-flag file, honouring the short-vs-full
+    // serial representation that rpi-sb-bootstrap.sh's resolve_special_flag_path
+    // accepts: when `serial` is a 16-hex-char DUID we also probe the
+    // lowercased 8-char suffix, which is the truncated serial form recorded
+    // pre-triage. Keep this in lockstep with the shell helper so the UI
+    // reflects exactly what the bootstrap script will honour.
+    // Returns the matching path, or empty if no flag file is present.
+    static std::string findSpecialFlagFile(const std::string &flagId, const std::string &serial)
+    {
+        if (serial.empty()) return {};
+        const std::string dir = "/etc/rpi-sb-provisioner/special-" + flagId + "/";
+
+        std::string sanitised = provisioner::utils::sanitize_path_component(serial);
+        if (!sanitised.empty()) {
+            std::string p = dir + sanitised;
+            if (std::filesystem::is_regular_file(p)) return p;
+        }
+
+        if (serial.size() == 16 &&
+            std::all_of(serial.begin(), serial.end(),
+                        [](unsigned char c) { return std::isxdigit(c) != 0; })) {
+            std::string suffix = serial.substr(8);
+            std::transform(suffix.begin(), suffix.end(), suffix.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            std::string sanitisedSuffix = provisioner::utils::sanitize_path_component(suffix);
+            if (!sanitisedSuffix.empty()) {
+                std::string p = dir + sanitisedSuffix;
+                if (std::filesystem::is_regular_file(p)) return p;
+            }
+        }
+        return {};
+    }
+
     void Devices::registerHandlers(drogon::HttpAppFramework &app)
     {
         app.registerHandler("/devices", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
@@ -1382,6 +1458,7 @@ namespace provisioner {
                     return;
                 }
             }
+            sqlite3_busy_timeout(db, 5000);
 
             std::vector<std::string> serials;
             sqlite3_stmt* stmt;
@@ -1678,8 +1755,10 @@ namespace provisioner {
                     }
                 }
 
-                // Read special flag status for this device
-                std::string sanitizedSerial = provisioner::utils::sanitize_path_component(device.serial);
+                // Read special flag status for this device. Bootstrap.sh
+                // accepts a flag file keyed on either the full DUID or its
+                // lowercased 8-char truncation, so findSpecialFlagFile probes
+                // both forms.
                 std::vector<std::map<std::string, std::string>> flagsList;
                 struct FlagDef {
                     std::string id;
@@ -1694,13 +1773,15 @@ namespace provisioner {
                      "Re-provisions an already-provisioned device by re-signing bootcode from original firmware. Only works on Pi 5 family.", "Pi 5 only (BCM2712)"},
                 };
                 for (const auto &fd : flagDefs) {
-                    std::string filePath = "/etc/rpi-sb-provisioner/special-" + fd.id + "/" + sanitizedSerial;
                     std::map<std::string, std::string> flagMap;
                     flagMap["id"] = fd.id;
                     flagMap["label"] = fd.label;
                     flagMap["description"] = fd.description;
                     flagMap["constraint"] = fd.constraint;
-                    if (std::filesystem::exists(filePath)) {
+                    flagMap["active"] = "false";
+                    flagMap["mode"] = "off";
+                    std::string filePath = findSpecialFlagFile(fd.id, device.serial);
+                    if (!filePath.empty()) {
                         flagMap["active"] = "true";
                         std::ifstream ff(filePath);
                         std::string content;
@@ -1710,9 +1791,6 @@ namespace provisioner {
                                 content.pop_back();
                         }
                         flagMap["mode"] = (content == "once") ? "once" : "persistent";
-                    } else {
-                        flagMap["active"] = "false";
-                        flagMap["mode"] = "off";
                     }
                     flagsList.push_back(flagMap);
                 }
@@ -2101,42 +2179,42 @@ namespace provisioner {
                 return;
             }
 
-            std::string sanitizedSerial = provisioner::utils::sanitize_path_component(serialno);
+            // The URL identifier may be a USB endpoint path for devices that
+            // haven't reported their serial yet. Resolve to the real serial,
+            // then probe both the full and truncated forms via
+            // findSpecialFlagFile so the response matches what bootstrap.sh
+            // will honour at flag-evaluation time.
+            std::string realSerial = resolveDeviceSerial(serialno);
 
             Json::Value root;
             Json::Value flagsArray(Json::arrayValue);
 
             for (const auto &fi : knownFlags) {
-                std::string dirPath = "/etc/rpi-sb-provisioner/special-" + fi.id;
-                std::string filePath = dirPath + "/" + sanitizedSerial;
-
                 Json::Value flag;
                 flag["id"] = fi.id;
                 flag["label"] = fi.label;
                 flag["description"] = fi.description;
                 if (!fi.constraint.empty()) flag["constraint"] = fi.constraint;
+                flag["active"] = false;
+                flag["mode"] = "off";
 
-                if (std::filesystem::exists(filePath)) {
+                std::string filePath = findSpecialFlagFile(fi.id, realSerial);
+                if (!filePath.empty()) {
                     flag["active"] = true;
-                    // Read file content to determine mode
                     std::ifstream f(filePath);
                     std::string content;
                     if (f.is_open()) {
                         std::getline(f, content);
-                        // Trim whitespace
                         while (!content.empty() && (content.back() == '\n' || content.back() == '\r' || content.back() == ' '))
                             content.pop_back();
                     }
                     flag["mode"] = (content == "once") ? "once" : "persistent";
-                } else {
-                    flag["active"] = false;
-                    flag["mode"] = "off";
                 }
 
                 flagsArray.append(flag);
             }
 
-            root["serial"] = serialno;
+            root["serial"] = realSerial.empty() ? serialno : realSerial;
             root["flags"] = flagsArray;
 
             Json::FastWriter writer;
@@ -2203,7 +2281,23 @@ namespace provisioner {
                 return;
             }
 
-            std::string sanitizedSerial = provisioner::utils::sanitize_path_component(serialno);
+            // Flags are honoured by bootstrap.sh keyed on the real device
+            // serial. If the request came in via a USB endpoint URL (used
+            // before the device has reported its serial), resolve it so the
+            // file we write is one the bootstrap script will actually read.
+            std::string realSerial = resolveDeviceSerial(serialno);
+            if (realSerial.empty()) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Device has not reported a serial yet; flag cannot be set until it does. "
+                    "Wait for the device to progress past the initial bootloader stage and retry.",
+                    drogon::k409Conflict, "Serial Not Available", "SERIAL_NOT_RESOLVED",
+                    "Requested identifier: " + serialno);
+                callback(resp);
+                return;
+            }
+
+            std::string sanitizedSerial = provisioner::utils::sanitize_path_component(realSerial);
             std::string dirPath = "/etc/rpi-sb-provisioner/special-" + flagId;
             std::string filePath = dirPath + "/" + sanitizedSerial;
 
@@ -2213,8 +2307,8 @@ namespace provisioner {
                     try {
                         std::filesystem::remove(filePath);
                         AuditLog::logFileSystemAccess("DELETE_FLAG", filePath, true, "",
-                            "Special flag removed: " + flagId + " for device " + serialno);
-                        LOG_INFO << "Removed special flag: " << flagId << " for device " << serialno;
+                            "Special flag removed: " + flagId + " for device " + realSerial);
+                        LOG_INFO << "Removed special flag: " << flagId << " for device " << realSerial;
                     } catch (const std::exception &e) {
                         LOG_ERROR << "Failed to remove flag file: " << e.what();
                         auto resp = provisioner::utils::createErrorResponse(
@@ -2253,16 +2347,17 @@ namespace provisioner {
                 f.close();
 
                 AuditLog::logFileSystemAccess("SET_FLAG", filePath, true, "",
-                    "Special flag set: " + flagId + " (" + mode + ") for device " + serialno);
-                LOG_INFO << "Set special flag: " << flagId << " (" << mode << ") for device " << serialno;
+                    "Special flag set: " + flagId + " (" + mode + ") for device " + realSerial);
+                LOG_INFO << "Set special flag: " << flagId << " (" << mode << ") for device " << realSerial;
             }
 
-            // Return the updated flag status
+            // Return the updated flag status. Report the real serial so the
+            // client can reconcile against /devices/{serial}.
             Json::Value result;
             result["success"] = true;
             result["flag"] = flagId;
             result["mode"] = mode;
-            result["serial"] = serialno;
+            result["serial"] = realSerial;
 
             Json::FastWriter writer;
             resp->setStatusCode(k200OK);

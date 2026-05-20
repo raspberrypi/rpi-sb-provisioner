@@ -200,16 +200,16 @@ die() {
 SPECIAL_FLAG_SKIP_EEPROM=0
 SPECIAL_FLAG_REPROVISION_DEVICE=0
 
-_flag_path="/etc/rpi-sb-provisioner/special-skip-eeprom/${TARGET_DEVICE_SERIAL}"
-if [ -f "${_flag_path}" ]; then
+_flag_path=$(resolve_special_flag_path "/etc/rpi-sb-provisioner/special-skip-eeprom" || true)
+if [ -n "${_flag_path}" ]; then
     SPECIAL_FLAG_SKIP_EEPROM=1
-    log "Special flag active: skip-eeprom for ${TARGET_DEVICE_SERIAL}"
+    log "Special flag active: skip-eeprom for ${TARGET_DEVICE_SERIAL} (path: ${_flag_path})"
 fi
 
-_flag_path="/etc/rpi-sb-provisioner/special-reprovision-device/${TARGET_DEVICE_SERIAL}"
-if [ -f "${_flag_path}" ]; then
+_flag_path=$(resolve_special_flag_path "/etc/rpi-sb-provisioner/special-reprovision-device" || true)
+if [ -n "${_flag_path}" ]; then
     SPECIAL_FLAG_REPROVISION_DEVICE=1
-    log "Special flag active: reprovision-device for ${TARGET_DEVICE_SERIAL}"
+    log "Special flag active: reprovision-device for ${TARGET_DEVICE_SERIAL} (path: ${_flag_path})"
 fi
 
 # Consume any one-time special flags. Called at the end of the bootstrap process.
@@ -218,8 +218,8 @@ consume_onetime_special_flags() {
     for _flag_dir in \
         "/etc/rpi-sb-provisioner/special-skip-eeprom" \
         "/etc/rpi-sb-provisioner/special-reprovision-device"; do
-        _fp="${_flag_dir}/${TARGET_DEVICE_SERIAL}"
-        if [ -f "${_fp}" ]; then
+        _fp=$(resolve_special_flag_path "${_flag_dir}" || true)
+        if [ -n "${_fp}" ]; then
             _content=$(head -n1 "${_fp}" 2>/dev/null | tr -d '[:space:]') || true
             if [ "${_content}" = "once" ]; then
                 log "Consuming one-time special flag: ${_fp}"
