@@ -1,19 +1,16 @@
-= Configuration API
-
 The Configuration API provides endpoints for managing system configuration options, firmware selection, and working directory management.
 
-== /options/get
+# /options/get
 
-*HTTP Method:* GET
+**HTTP Method:** GET
 
-*Description:* Retrieves all current configuration values.
+**Description:** Retrieves all current configuration values.
 
-*Parameters:* None
+**Parameters:** None
 
-*Response Format:*
+**Response Format:**
 
-[source,json]
-----
+``` json
 {
   "GOLD_MASTER_OS_FILE": "/srv/rpi-sb-provisioner/images/raspios-2025-04-01.img",
   "RPI_SB_WORKDIR": "/srv/rpi-sb-provisioner/work",
@@ -21,37 +18,36 @@ The Configuration API provides endpoints for managing system configuration optio
   "RPI_DEVICE_FAMILY": "5",
   "RPI_DEVICE_FIRMWARE_FILE": "/lib/firmware/raspberrypi/bootloader-2712/default/pieeprom-2025-01-17.bin"
 }
-----
+```
 
-*Notes:*
+**Notes:**
 
 - Returns all configuration key-value pairs from `/etc/rpi-sb-provisioner/config`
+
 - Configuration values control provisioning behavior
 
-== /options/set
+# /options/set
 
-*HTTP Method:* POST
+**HTTP Method:** POST
 
-*Description:* Updates one or more configuration values.
+**Description:** Updates one or more configuration values.
 
-*Request Format:*
+**Request Format:**
 
-[source,json]
-----
+``` json
 {
   "GOLD_MASTER_OS_FILE": "/srv/rpi-sb-provisioner/images/new-image.img",
   "RPI_DEVICE_FAMILY": "5"
 }
-----
+```
 
-*Response Format:*
+**Response Format:**
 
 HTTP 200 OK with no body on success.
 
-*Error Responses:*
+**Error Responses:**
 
-[source,json]
-----
+``` json
 {
   "error": {
     "status": 500,
@@ -60,73 +56,74 @@ HTTP 200 OK with no body on success.
     "detail": "Failed to write configuration file"
   }
 }
-----
+```
 
-*Notes:*
+**Notes:**
 
 - Merges provided values with existing configuration
-- Automatically creates manufacturing database file if path is set and file doesn't exist
+
+- Automatically creates manufacturing database file if path is set and file doesn’t exist
+
 - Clears working directory contents if `RPI_SB_WORKDIR` is modified
 
-== /options/validate
+# /options/validate
 
-*HTTP Method:* POST
+**HTTP Method:** POST
 
-*Description:* Validates a single configuration field value before saving. Performs field-specific validation including file path checks on disk.
+**Description:** Validates a single configuration field value before saving. Performs field-specific validation including file path checks on disk.
 
-*Request Format:*
+**Request Format:**
 
-[source,json]
-----
+``` json
 {
   "field": "GOLD_MASTER_OS_FILE",
   "value": "/srv/rpi-sb-provisioner/images/raspios-2025-04-01.img"
 }
-----
+```
 
-*Response Format (Success):*
+**Response Format (Success):**
 
-[source,json]
-----
+``` json
 {
   "valid": true,
   "field": "GOLD_MASTER_OS_FILE"
 }
-----
+```
 
-*Response Format (Success with Info):*
+**Response Format (Success with Info):**
 
-[source,json]
-----
+``` json
 {
   "valid": true,
   "field": "RPI_SB_PROVISIONER_MANUFACTURING_DB",
   "message": "File will be created on save"
 }
-----
+```
 
-*Response Format (Validation Failure):*
+**Response Format (Validation Failure):**
 
-[source,json]
-----
+``` json
 {
   "valid": false,
   "field": "GOLD_MASTER_OS_FILE",
   "error": "Image file does not exist at specified path"
 }
-----
+```
 
-*Validation Rules:*
+**Validation Rules:**
 
 File Path Fields (must exist and be readable):
 
 - `CUSTOMER_KEY_FILE_PEM` - RSA private key file
+
 - `GOLD_MASTER_OS_FILE` - Must have .img extension (mandatory)
+
 - `RPI_DEVICE_BOOTLOADER_CONFIG_FILE` - Bootloader configuration file
 
 Directory Path Fields (must exist or be creatable):
 
 - `RPI_SB_WORKDIR` - Working directory for cached assets
+
 - `RPI_DEVICE_RETRIEVE_KEYPAIR` - Directory for storing device keypairs
 
 Database Path Fields:
@@ -136,93 +133,108 @@ Database Path Fields:
 Enumerated Values:
 
 - `PROVISIONING_STYLE` - Must be `secure-boot`, `fde-only`, or `naked`
+
 - `RPI_DEVICE_FAMILY` - Must be `4`, `5`, or `2W`
+
 - `RPI_DEVICE_STORAGE_TYPE` - Must be `sd`, `emmc`, or `nvme`
+
 - `RPI_DEVICE_STORAGE_CIPHER` - Must be `aes-xts-plain64` or `xchacha12,aes-adiantum-plain64`
 
 Format-Specific:
 
 - `CUSTOMER_KEY_PKCS11_NAME` - Must start with `pkcs11:` and include `object=` and `type=private` parameters
 
-*Security Measures:*
+**Security Measures:**
 
-- *HTTP Method Restriction:* Only accepts POST requests; returns 405 Method Not Allowed for other methods
-- *Dynamic Field Whitelist:* Only validates fields that exist in the configuration file; rejects unknown fields
-- *Path Canonicalization:* File paths are canonicalized to prevent path traversal attacks (../)
-- *Path Validation:* Rejects paths with suspicious patterns after normalization
-- *Audit Logging:* All validation requests are logged with client IP addresses
-- *Input Validation:* JSON body is validated before processing
-- *No Execution:* Endpoint only reads from filesystem, never writes or executes
+- **HTTP Method Restriction:** Only accepts POST requests; returns 405 Method Not Allowed for other methods
 
-*Notes:*
+- **Dynamic Field Whitelist:** Only validates fields that exist in the configuration file; rejects unknown fields
+
+- **Path Canonicalization:** File paths are canonicalized to prevent path traversal attacks (../)
+
+- **Path Validation:** Rejects paths with suspicious patterns after normalization
+
+- **Audit Logging:** All validation requests are logged with client IP addresses
+
+- **Input Validation:** JSON body is validated before processing
+
+- **No Execution:** Endpoint only reads from filesystem, never writes or executes
+
+**Notes:**
 
 - Used by the web UI for real-time field validation
+
 - Always returns HTTP 200 with JSON indicating validation success/failure
+
 - File system checks verify actual file/directory existence and permissions
+
 - Does not modify configuration - use `/options/set` to save values
+
 - Failed validation attempts for unknown fields are logged as security warnings
 
-== /options/clear-workdir
+# /options/clear-workdir
 
-*HTTP Method:* POST
+**HTTP Method:** POST
 
-*Description:* Clears all contents of the working directory specified in `RPI_SB_WORKDIR` configuration.
+**Description:** Clears all contents of the working directory specified in `RPI_SB_WORKDIR` configuration.
 
-*Parameters:* None
+**Parameters:** None
 
-*Response Format:*
+**Response Format:**
 
 HTTP 200 OK with no body on success.
 
-*Notes:*
+**Notes:**
 
 - Useful when switching OS images or resetting provisioning state
+
 - Does not delete the working directory itself, only its contents
-- Safe to call even if directory doesn't exist
 
-== Firmware Management
+- Safe to call even if directory doesn’t exist
 
-=== /options/firmware
+# Firmware Management
 
-*HTTP Method:* GET
+## /options/firmware
 
-*Description:* Lists available firmware versions for the configured device family.
+**HTTP Method:** GET
 
-*Parameters:* None
+**Description:** Lists available firmware versions for the configured device family.
 
-*Response Format:*
+**Parameters:** None
+
+**Response Format:**
 
 Returns HTML view with firmware list, release notes, and selection interface.
 
-*Notes:*
+**Notes:**
 
 - Scans `/lib/firmware/raspberrypi/bootloader-{chip}/` for available firmware
+
 - Automatically groups firmware by version across release channels
+
 - Shows firmware from default, latest, beta, stable, and critical channels
 
-=== /options/firmware/set
+## /options/firmware/set
 
-*HTTP Method:* POST
+**HTTP Method:** POST
 
-*Description:* Sets the selected firmware file for device provisioning.
+**Description:** Sets the selected firmware file for device provisioning.
 
-*Request Format:*
+**Request Format:**
 
-[source,json]
-----
+``` json
 {
   "firmware_path": "/lib/firmware/raspberrypi/bootloader-2712/default/pieeprom-2025-01-17.bin"
 }
-----
+```
 
-*Response Format:*
+**Response Format:**
 
 HTTP 200 OK with no body on success.
 
-*Error Responses:*
+**Error Responses:**
 
-[source,json]
-----
+``` json
 {
   "error": {
     "status": 400,
@@ -231,39 +243,33 @@ HTTP 200 OK with no body on success.
     "detail": "Selected firmware file does not exist"
   }
 }
-----
+```
 
-=== /options/firmware/notes/{version}
+## /options/firmware/notes/{version}
 
-*HTTP Method:* GET
+**HTTP Method:** GET
 
-*Description:* Retrieves release notes for a specific firmware version.
+**Description:** Retrieves release notes for a specific firmware version.
 
-*Path Parameters:*
+**Path Parameters:**
 
-[options="header"]
-|===
-|Parameter|Type|Required|Description
-|version|String|Yes|Firmware version in YYYY-MM-DD format
-|===
+| Parameter | Type   | Required | Description                           |
+|-----------|--------|----------|---------------------------------------|
+| version   | String | Yes      | Firmware version in YYYY-MM-DD format |
 
-*Response Format:*
+**Response Format:**
 
-[source,json]
-----
+``` json
 {
   "version": "2025-01-17",
   "notes": "## 2025-01-17: Description\n\n* Feature 1\n* Bug fix 2\n"
 }
-----
+```
 
-*Error Responses:*
+**Error Responses:**
 
-[source,json]
-----
+``` json
 {
   "error": "No release notes found for version 2025-01-17"
 }
-----
-
-
+```
