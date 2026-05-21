@@ -1,4 +1,4 @@
-rpi-sb-provisioner (2.3.0-pre1) unstable; urgency=medium
+rpi-sb-provisioner (2.3.0~pre1) unstable; urgency=medium
 
   * Pre-release:
     - First preview of the 2.3.0 line. Combines the IDP, Connect and
