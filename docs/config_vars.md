@@ -1,0 +1,347 @@
+This document describes the configuration variables used in /etc/rpi-sb-provisioner/config. You do not typically need to set these variables, and they are set by the WebUI. You may manually set them if you want to use a change management system or similar to update them.
+
+# Variables
+
+## PROVISIONING_STYLE
+
+**Mandatory, with a default**
+
+Select the provisioning style you wish to use. Supported values are `secure-boot`, `fde-only` and `naked`. For details on what each provisioning style does, see the [main documentation](../README.xml#using-rpi-sb-provisioner).
+
+If `PROVISIONING_STYLE` is not specified, it defaults to `secure-boot`.
+
+## CUSTOMER_KEY_FILE_PEM
+
+**Optional, mandatory if CUSTOMER_KEY_PKCS11_NAME is not set**
+
+The fully qualified path to your signing key, encoded in PEM format. This file is expected to contain an RSA 2048-bit Private Key.
+
+> **Warning**
+>
+> This file should be considered key material, and should be protected while at rest and in use according to your threat model.
+
+## CUSTOMER_KEY_PKCS11_NAME
+
+**Optional, mandatory if CUSTOMER_KEY_FILE_PEM is not set**
+
+The keypair alias for a PKCS11 keypair, typically stored on a Hardware Security Module (HSM) and provided through a helper tool. This is expected to act in place of the RSA 2048-bit Private key specified with CUSTOMER_KEY_FILE_PEM, and will be used as the signing device for all future pre-boot authentication images.
+
+The value should take the format:
+
+    'pkcs11:object=<keypair-alias>;type=private'
+
+> **Warning**
+>
+> You must use single quotes to enclose the value, and URI encode the value
+
+> **Warning**
+>
+> The PKCS11 provider, and it’s associated HSM, should be considered key material and should be protected while at rest and in use according to your threat model.
+
+## GOLD_MASTER_OS_FILE
+
+**Mandatory**
+
+> **Warning**
+>
+> Provisioning erases the device’s storage before writing the OS image. If this variable is not set or points to a missing file, the device storage will still be erased and provisioning will then fail — leaving the device with wiped storage. Always ensure a valid image is selected before connecting a device.
+
+This should be your 'gold master' OS image. This can be either:
+
+- A **traditional `.img` file** — an uncompressed disk image, typically created using `pi-gen`. No customisation should be present in this image that you would not expect to be deployed to your entire fleet. Using a non-`pi-gen` image may produce undefined behaviour.
+
+- An **IDP artefact directory** — a directory containing a JSON image descriptor and one or more sparse image (`.simg`) files, produced by `rpi-image-gen`. When a directory is specified, the provisioning system automatically uses the IDP protocol regardless of the `PROVISIONING_STYLE` setting. The artefact’s JSON descriptor defines the partition layout, encryption, storage type, and device family, so these fields are auto-populated by the WebUI.
+
+> **Warning**
+>
+> Traditional `.img` files **must** be uncompressed.
+
+> **Note**
+>
+> When selecting an IDP artefact through the WebUI, the device family, storage type, and cipher fields are locked to the values defined in the artefact’s metadata and cannot be overridden.
+
+## RPI_DEVICE_STORAGE_TYPE
+
+**Mandatory**
+
+Specify the kind of storage your target will use. Supported values are `sd`, `emmc`, `nvme`.
+
+## RPI_DEVICE_STORAGE_CIPHER
+
+**Optional**
+
+Specify the full-disk-encryption cipher. Supported values are `aes-xts-plain64`, `xchacha12,aes-adiantum-plain64`.
+
+If `RPI_DEVICE_STORAGE_CIPHER` is not specified, it defaults to `aes-xts-plain64`.
+
+`aes-xts-plain64` is recommended for Raspberry Pi 5 family devices (including Compute Module 5); all other Raspberry Pi devices are recommended to use `xchacha12,aes-adiantum-plain64` for improved performance.
+
+## RPI_DEVICE_FAMILY
+
+**Mandatory**
+
+Specify the family of Raspberry Pi device you are provisioning. Supported values are `4, 5, 2W`. For example:
+
+- A Raspberry Pi Compute Module 4 would be family `4`
+
+- A Raspberry Pi 5 would be family `5`
+
+- A Raspberry Pi Compute Module 5 would be family `5`
+
+- A Raspberry Pi Zero 2 W would be family `2W`
+
+## RPI_DEVICE_BOOTLOADER_CONFIG_FILE
+
+**Mandatory, with a default**
+
+> **Warning**
+>
+> `rpi-sb-provisioner` will ignore the Raspberry Pi Bootloader configuration built by `pi-gen`, and use the one provided in this variable.
+
+Specify the Raspberry Pi Bootloader configuration you want your provisioned devices to use. A default is provided.
+
+Further information on the format of this configuration file can be found in the Raspberry Pi Documentation, at <https://www.raspberrypi.com/documentation/computers/config_txt.html>
+
+## RPI_DEVICE_FIRMWARE_FILE
+
+**Optional**
+
+Specify an explicit path to a specific pieeprom firmware file to use during provisioning.
+
+When set, the provisioning system will use the exact firmware file specified. If not set, the system will automatically select the latest firmware from the 'default' release channel.
+
+Example: `RPI_DEVICE_FIRMWARE_FILE=/lib/firmware/raspberrypi/bootloader-2712/default/pieeprom-2025-05-08.bin`
+
+This setting is typically configured through the firmware selection web interface rather than manually.
+
+> **Warning**
+>
+> Ensure the specified firmware file exists and is compatible with your target device family before provisioning.
+
+## RPI_DEVICE_LOCK_JTAG
+
+**Optional**
+
+Raspberry Pi devices have a mechanism to restrict JTAG access to the device.
+
+Note that using this function will prevent Raspberry Pi engineers from being able to assist in debugging your device, should you request assitance.
+
+Set to any value to enable the JTAG restrictions.
+
+## RPI_DEVICE_EEPROM_WP_SET
+
+**Optional**
+
+Raspberry Pi devices that use an EEPROM as part of their boot flow can configure that EEPROM to enable write protection - preventing modification.
+
+Set to any value to enable EEPROM write protection.
+
+## RPI_DEVICE_RPIBOOT_GPIO
+
+**Required for Raspberry Pi 4 family secure-boot provisioning**
+
+Specifies the GPIO pin number to program into OTP for RPIBOOT mode on Raspberry Pi 4 family devices (including Compute Module 4).
+
+When secure-boot provisioning a Raspberry Pi 4 family device, the bootloader must program both the secure boot public key AND the RPIBOOT GPIO configuration into OTP. Without this setting, provisioning will fail with the error:
+
+    Failed to set RPIBOOT OTP gpio0 c800 -> 0
+    BOOT ERROR: code 34
+
+**Valid values:** `2`, `4`, `5`, `6`, `7`, `8`
+
+**Recommended value:** `8` (GPIO 8 is the standard RPIBOOT pin)
+
+These GPIO pins are valid because they are high by default, allowing them to enable RPIBOOT mode when pulled low.
+
+**Example:**
+
+    RPI_DEVICE_RPIBOOT_GPIO=8
+
+> **Note**
+>
+> This setting is only required for Raspberry Pi 4 family devices. Raspberry Pi 5 family devices do not require this setting as they have a built-in power button for RPIBOOT mode entry.
+
+> **Warning**
+>
+> This value is programmed into OTP (one-time programmable memory) and cannot be changed once set. Ensure you use the same GPIO pin that you will physically connect to ground when entering RPIBOOT mode.
+
+See the [Raspberry Pi 4 Connection Guide](device-guidance/pi4.md) for more information about GPIO configuration.
+
+## RPI_SB_PROVISIONER_MANUFACTURING_DB
+
+**Optional**
+
+Store manufacturing data in a sqlite3 database. This will include the board serial, board revision, the boot ROM version, the MAC address of the ethernet port, any set hash of the customer signing key, the JTAG lock state, the board attributes and the advanced boot flags. It will also include the OS image filename and its SHA256 used during provisioning.
+
+You must not specify the path of a database stored on a network drive or similar storage, as this mechanism is only safe to use on a single provisioning system. For merging the output with multiple provisioning systems, consider [Processing the manufacturing database](../README.xml#_processing_the_manufacturing_database) in the main documentation.
+
+Set to the path of a file to contain a SQLite database stored on local storage. The WebUI will create this file if it does not exist.
+
+> **Warning**
+>
+> If you are not using the WebUI, you must create this file before execution, for example using `touch`:
+
+    $ touch ${RPI_SB_PROVISIONER_MANUFACTURING_DB}
+
+## RPI_DEVICE_RETRIEVE_KEYPAIR
+
+**Optional**
+
+Specify a directory to copy the device unique keypair to. The keys will be named \<serial\>.der and \<serial\>.pub
+
+Set to the path of a directory to use, otherwise keys will be stored alongside provisioning logs in a directory named "keypair".
+
+> **Note**
+>
+> These keys are sensitive key material, and you must ensure they are handled appropriately.
+
+## RPI_SB_PROVISIONER_ENABLE_PRIVATE_KEY_API
+
+**Optional - SECURITY CRITICAL**
+
+> **Caution**
+>
+> **DANGER: This setting controls a highly dangerous feature that should NEVER be enabled in production environments.**
+
+Controls whether the HTTP API endpoint `/devices/{serialno}/key/private` is enabled. This endpoint allows downloading device private keys over HTTP.
+
+**Default:** `false` (endpoint is disabled)
+
+**Values:**
+
+- Not set or any value except `true`: Endpoint is **disabled** (secure default)
+
+- `true`: Endpoint is **enabled** (DANGEROUS - private keys can be downloaded via HTTP)
+
+**Security Implications:**
+
+When enabled, this setting allows device private keys to be retrieved via HTTP API calls. This presents severe security risks:
+
+- Private keys provide complete control over device cryptographic identity
+
+- Keys transmitted over HTTP (even on "private" networks) can be intercepted
+
+- Compromised keys allow impersonation and signature forgery
+
+- Keys cannot be revoked once compromised
+
+**Only enable this setting if:**
+
+- You are in a completely isolated development/test environment
+
+- The provisioning server is air-gapped from production networks
+
+- You have no alternative method to retrieve keys
+
+- You fully understand and accept the security implications
+
+- You can actively monitor audit logs for unauthorized access
+
+**Audit Logging:**
+
+When this endpoint is enabled and used:
+
+- All access attempts (successful and denied) are logged to the audit database
+
+- Each access generates WARNING level logs
+
+- Successful key downloads are logged as CRITICAL security events
+
+- Logs include client IP address, User-Agent, and serial numbers
+
+**Alternatives:**
+
+Instead of enabling this endpoint, consider:
+
+- Accessing keys directly from the filesystem: `/var/log/rpi-sb-provisioner/{serial}/keypair/`
+
+- Using secure file transfer over SSH (`scp` or `sftp`)
+
+- Delivering keys via physical media (USB drive)
+
+- Implementing a proper secrets management solution
+
+**Example Configuration:**
+
+To enable this endpoint (NOT RECOMMENDED):
+
+    # WARNING: Only enable in isolated test environments
+    # This exposes device private keys via HTTP API
+    RPI_SB_PROVISIONER_ENABLE_PRIVATE_KEY_API=true
+
+> **Warning**
+>
+> Raspberry Pi does not recommend enabling this setting under any circumstances in production environments. If you must retrieve keys programmatically, carefully consider the security implications.
+
+## RPI_SB_WORKDIR
+
+**Optional**
+
+> **Warning**
+>
+> If you do not set this variable, your modified OS intermediates will not be stored, and will be unavailable for inspection.
+
+Set to a location to cache OS assets between provisioning sessions. Recommended for use in production. For example:
+
+    /srv/rpi-sb-provisioner/workdir
+
+# Format of the config file
+
+The config file is a simple text file, with one variable per line. Variables are specified in the format:
+
+    VARIABLE_NAME=value
+
+For example:
+
+    RPI_SB_PROVISIONER_MANUFACTURING_DB=/var/lib/rpi-sb-provisioner/manufacturing.db
+
+Comments can be added to the file by starting a line with a `#` character.
+
+    # This is a comment
+    RPI_SB_PROVISIONER_MANUFACTURING_DB=/var/lib/rpi-sb-provisioner/manufacturing.db
+
+# Boot Image Package Configuration
+
+The boot image generator creates Debian packages for deploying boot updates to provisioned devices. Package metadata is configured in a separate file: `/etc/rpi-sb-provisioner/bootimg-package-config`
+
+## RPI_SB_PACKAGE_MAINTAINER_NAME
+
+**Optional**
+
+The maintainer name to use in generated Debian packages.
+
+**Default:** `System Administrator` (if not set)
+
+**Example:**
+
+    RPI_SB_PACKAGE_MAINTAINER_NAME="Acme Corporation"
+
+This value appears in the `Maintainer` field of the Debian package control file and changelog.
+
+## RPI_SB_PACKAGE_MAINTAINER_EMAIL
+
+**Optional**
+
+The maintainer email address to use in generated Debian packages.
+
+**Default:** `root@<hostname>` (uses the provisioner server’s hostname if not set)
+
+**Example:**
+
+    RPI_SB_PACKAGE_MAINTAINER_EMAIL="ops@acme.com"
+
+This value is combined with `RPI_SB_PACKAGE_MAINTAINER_NAME` to form the full maintainer field in Debian packages.
+
+**Complete Example Configuration:**
+
+File: `/etc/rpi-sb-provisioner/bootimg-package-config`
+
+    # Debian package metadata for boot image updates
+    RPI_SB_PACKAGE_MAINTAINER_NAME="Acme Corporation"
+    RPI_SB_PACKAGE_MAINTAINER_EMAIL="ops@acme.com"
+
+This will generate packages with:
+
+    Maintainer: Acme Corporation <ops@acme.com>
+
+See [Boot Image Generator Documentation](boot-img-generator.md) for more information about the automatic boot image generation feature.

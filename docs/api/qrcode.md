@@ -1,0 +1,69 @@
+The QR Code Verification API provides endpoints for validating QR codes against the manufacturing database.
+
+# /api/v2/verify-qrcode
+
+**HTTP Method:** POST
+
+**Description:** Verifies if a QR code value exists in the manufacturing database, typically used for device validation during scanning.
+
+**Request Format:**
+
+``` json
+{
+  "qrcode": "10000000abcdef"
+}
+```
+
+**Response Format:**
+
+The endpoint returns a JSON object with verification results:
+
+``` json
+{
+  "success": true,
+  "exists": true,
+  "qrcode": "10000000abcdef"
+}
+```
+
+**Field Descriptions:**
+
+| Field   | Description                                                            |
+|---------|------------------------------------------------------------------------|
+| success | Indicates if the verification check was performed successfully         |
+| exists  | Indicates if the QR code value was found in the manufacturing database |
+| qrcode  | The QR code value that was checked                                     |
+
+**Error Responses:**
+
+If using an invalid HTTP method:
+
+``` json
+{
+  "error": {
+    "status": 405,
+    "title": "Method Error",
+    "code": "METHOD_NOT_ALLOWED",
+    "detail": "Only POST method is allowed"
+  }
+}
+```
+
+If QR code parameter is missing:
+
+``` json
+{
+  "error": {
+    "status": 400,
+    "title": "Parameter Error",
+    "code": "INVALID_PARAMETER",
+    "detail": "Missing or invalid 'qrcode' parameter in request body"
+  }
+}
+```
+
+**Notes:**
+
+- This endpoint is particularly useful for integration with barcode scanners or mobile applications.
+
+- The QR code value is checked against the `rpi_duid` field in the manufacturing database.

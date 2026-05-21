@@ -53,5 +53,5 @@ Don't use this if:
 
 This is example/reference material. The nginx configuration is not officially supported as part of the rpi-sb-provisioner package, but is provided as a convenience for common deployment scenarios.
 
-For questions about the provisioner itself, see the main [README](../README.adoc).
+For questions about the provisioner itself, see the main [README](../README.md).
 

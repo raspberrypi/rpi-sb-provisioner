@@ -1,19 +1,16 @@
-= WebSocket APIs
-
 WebSocket endpoints provide real-time updates for long-running operations and dynamic data.
 
-== /ws/devices
+# /ws/devices
 
-*Protocol:* WebSocket
+**Protocol:** WebSocket
 
-*Description:* Provides real-time updates on device topology, including USB connections, provisioning status, and device states.
+**Description:** Provides real-time updates on device topology, including USB connections, provisioning status, and device states.
 
-*Message Format:*
+**Message Format:**
 
 Server sends JSON messages with current topology:
 
-[source,json]
-----
+``` json
 {
   "type": "topology",
   "timestamp": 1706191845000,
@@ -35,74 +32,74 @@ Server sends JSON messages with current topology:
   ],
   "removed": ["1-1.3"]
 }
-----
+```
 
-*Notes:*
+**Notes:**
 
 - Automatically sends topology snapshot on connection
+
 - Broadcasts updates when devices connect/disconnect or state changes
+
 - Includes placeholder nodes for empty hub ports
+
 - The `removed` array lists device IDs that were disconnected
 
-== /ws/sha256
+# /ws/sha256
 
-*Protocol:* WebSocket
+**Protocol:** WebSocket
 
-*Description:* Provides real-time progress updates for SHA256 hash calculations of image files.
+**Description:** Provides real-time progress updates for SHA256 hash calculations of image files.
 
-*Client Messages:*
+**Client Messages:**
 
 Request SHA256 calculation:
 
-[source,json]
-----
+``` json
 {
   "action": "get_sha256",
   "image_name": "raspios-2025-04-01.img"
 }
-----
+```
 
-*Server Messages:*
+**Server Messages:**
 
 Progress update:
 
-[source,json]
-----
+``` json
 {
   "image_name": "raspios-2025-04-01.img",
   "status": "pending",
   "progress": 0.45,
   "progress_percent": 45
 }
-----
+```
 
 Complete:
 
-[source,json]
-----
+``` json
 {
   "image_name": "raspios-2025-04-01.img",
   "status": "complete",
   "sha256": "abc123def456..."
 }
-----
+```
 
 Error:
 
-[source,json]
-----
+``` json
 {
   "image_name": "raspios-2025-04-01.img",
   "status": "error",
   "error": "Failed to read file"
 }
-----
+```
 
-*Notes:*
+**Notes:**
 
 - Multiple clients can subscribe to the same image calculation
+
 - Progress updates are sent approximately every 5% of completion
+
 - Calculations are automatically cancelled when no clients are listening
+
 - SHA256 sidecar files (.sha256) are not hashable and will return an error
-
-

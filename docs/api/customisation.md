@@ -1,21 +1,18 @@
-= Customisation API
-
 The Customisation API provides full CRUD (Create, Read, Update, Delete) operations for managing customisation scripts. These scripts allow you to customize the provisioning process at various stages.
 
-== /customisation/list-scripts
+# /customisation/list-scripts
 
-*HTTP Method:* GET
+**HTTP Method:** GET
 
-*Description:* Lists all available customisation scripts and hook points in the system.
+**Description:** Lists all available customisation scripts and hook points in the system.
 
-*Parameters:* None
+**Parameters:** None
 
-*Response Format:*
+**Response Format:**
 
 The endpoint returns a JSON object containing script information:
 
-[source,json]
-----
+``` json
 {
   "scripts": [
     {
@@ -29,42 +26,38 @@ The endpoint returns a JSON object containing script information:
     ...
   ]
 }
-----
+```
 
-== /customisation/get-script
+# /customisation/get-script
 
-*HTTP Method:* GET
+**HTTP Method:** GET
 
-*Description:* Retrieves the content and metadata of a specific customisation script.
+**Description:** Retrieves the content and metadata of a specific customisation script.
 
-*Parameters:*
+**Parameters:**
 
-[options="header"]
-|===
-|Parameter|Type|Required|Description
-|script|String|Yes|Name of the script file to retrieve
-|===
+| Parameter | Type   | Required | Description                         |
+|-----------|--------|----------|-------------------------------------|
+| script    | String | Yes      | Name of the script file to retrieve |
 
-*Response Format:*
+**Response Format:**
 
 The endpoint returns a JSON object with script details:
 
-[source,json]
-----
+``` json
 {
   "exists": true,
   "filename": "secure-boot-post-flash.sh",
   "content": "#!/bin/sh\n\n# Script content here...",
   "enabled": true
 }
-----
+```
 
-*Error Responses:*
+**Error Responses:**
 
 If the script name is missing:
 
-[source,json]
-----
+``` json
 {
   "error": {
     "status": 400,
@@ -73,12 +66,11 @@ If the script name is missing:
     "detail": "Script name is required"
   }
 }
-----
+```
 
 If the script is not found:
 
-[source,json]
-----
+``` json
 {
   "error": {
     "status": 400,
@@ -87,35 +79,33 @@ If the script is not found:
     "detail": "The requested script file could not be found"
   }
 }
-----
+```
 
-*Notes:*
+**Notes:**
 
-- For known hook points that don't exist yet, the API will return a template with default content.
+- For known hook points that don’t exist yet, the API will return a template with default content.
+
 - The `enabled` flag indicates if the script has executable permissions.
 
-== /customisation/delete-script
+# /customisation/delete-script
 
-*HTTP Method:* POST
+**HTTP Method:** POST
 
-*Description:* Deletes a customisation script from the system.
+**Description:** Deletes a customisation script from the system.
 
-*Parameters:*
+**Parameters:**
 
-[options="header"]
-|===
-|Parameter|Type|Required|Description
-|script|String|Yes|Name of the script to delete (without .sh extension)
-|===
+| Parameter | Type   | Required | Description                                          |
+|-----------|--------|----------|------------------------------------------------------|
+| script    | String | Yes      | Name of the script to delete (without .sh extension) |
 
-*Response Format:*
+**Response Format:**
 
 Plain text success message: "Script deleted successfully"
 
-*Error Responses:*
+**Error Responses:**
 
-[source,json]
-----
+``` json
 {
   "error": {
     "status": 500,
@@ -124,66 +114,60 @@ Plain text success message: "Script deleted successfully"
     "detail": "Failed to delete script file"
   }
 }
-----
+```
 
-== /customisation/disable-script
+# /customisation/disable-script
 
-*HTTP Method:* POST
+**HTTP Method:** POST
 
-*Description:* Disables a script by removing its executable permissions (sets permissions to 0644).
+**Description:** Disables a script by removing its executable permissions (sets permissions to 0644).
 
-*Parameters:*
+**Parameters:**
 
-[options="header"]
-|===
-|Parameter|Type|Required|Description
-|script|String|Yes|Name of the script to disable (without .sh extension)
-|===
+| Parameter | Type   | Required | Description                                           |
+|-----------|--------|----------|-------------------------------------------------------|
+| script    | String | Yes      | Name of the script to disable (without .sh extension) |
 
-*Response Format:*
+**Response Format:**
 
 Plain text success message: "Script disabled successfully"
 
-== /customisation/enable-script
+# /customisation/enable-script
 
-*HTTP Method:* POST
+**HTTP Method:** POST
 
-*Description:* Enables a script by adding executable permissions (sets permissions to 0755).
+**Description:** Enables a script by adding executable permissions (sets permissions to 0755).
 
-*Parameters:*
+**Parameters:**
 
-[options="header"]
-|===
-|Parameter|Type|Required|Description
-|script|String|Yes|Name of the script to enable (without .sh extension)
-|===
+| Parameter | Type   | Required | Description                                          |
+|-----------|--------|----------|------------------------------------------------------|
+| script    | String | Yes      | Name of the script to enable (without .sh extension) |
 
-*Response Format:*
+**Response Format:**
 
 Plain text success message: "Script enabled successfully"
 
-== /customisation/save-script
+# /customisation/save-script
 
-*HTTP Method:* POST
+**HTTP Method:** POST
 
-*Description:* Saves or updates a customisation script with new content.
+**Description:** Saves or updates a customisation script with new content.
 
-*Request Format:*
+**Request Format:**
 
-[source,json]
-----
+``` json
 {
   "filename": "sb-provisioner-post-flash",
   "content": "#!/bin/sh\n\necho \"Custom script content\"\nexit 0\n"
 }
-----
+```
 
-*Response Format:*
+**Response Format:**
 
 Returns JSON with updated script metadata including SHA256 hash:
 
-[source,json]
-----
+``` json
 {
   "filename": "sb-provisioner-post-flash.sh",
   "executable": true,
@@ -193,12 +177,11 @@ Returns JSON with updated script metadata including SHA256 hash:
   "stage": "post-flash",
   "description": "Runs after images have been flashed to the device"
 }
-----
+```
 
-*Error Responses:*
+**Error Responses:**
 
-[source,json]
-----
+``` json
 {
   "error": {
     "status": 400,
@@ -207,32 +190,33 @@ Returns JSON with updated script metadata including SHA256 hash:
     "detail": "Filename and content are required fields"
   }
 }
-----
+```
 
-*Notes:*
+**Notes:**
 
 - New scripts are created with non-executable permissions (0644)
+
 - Existing scripts preserve their original permissions when updated
+
 - The .sh extension is automatically added if not present
 
-== /customisation/upload-script
+# /customisation/upload-script
 
-*HTTP Method:* POST
+**HTTP Method:** POST
 
-*Description:* Uploads a script file via multipart/form-data.
+**Description:** Uploads a script file via multipart/form-data.
 
-*Request Format:*
+**Request Format:**
 
 Multipart form data with a field named "script" containing the file.
 
-*Response Format:*
+**Response Format:**
 
 Plain text success message: "Script file uploaded successfully"
 
-*Error Responses:*
+**Error Responses:**
 
-[source,json]
-----
+``` json
 {
   "error": {
     "status": 400,
@@ -241,25 +225,25 @@ Plain text success message: "Script file uploaded successfully"
     "detail": "Script file is required in the form data with field name 'script'"
   }
 }
-----
+```
 
-*Notes:*
+**Notes:**
 
 - Uploaded scripts are automatically set to executable (0755)
+
 - The .sh extension is automatically added if not present
 
-== /customisation/list-hooks
+# /customisation/list-hooks
 
-*HTTP Method:* GET
+**HTTP Method:** GET
 
-*Description:* Lists all available hook points for customisation scripts, including provisioners, stages, and their descriptions.
+**Description:** Lists all available hook points for customisation scripts, including provisioners, stages, and their descriptions.
 
-*Parameters:* None
+**Parameters:** None
 
-*Response Format:*
+**Response Format:**
 
-[source,json]
-----
+``` json
 {
   "provisioners": ["sb-provisioner", "fde-provisioner", "naked-provisioner"],
   "stages": [
@@ -282,44 +266,42 @@ Plain text success message: "Script file uploaded successfully"
     }
   ]
 }
-----
+```
 
-*Notes:*
+**Notes:**
 
 - This endpoint provides a comprehensive list of all possible customisation points
+
 - The `exists` field indicates whether a script file currently exists for that hook
+
 - The `enabled` field indicates whether the script has executable permissions
 
-== /customisation/create-script
+# /customisation/create-script
 
-*HTTP Method:* GET
+**HTTP Method:** GET
 
-*Description:* Returns a default template for creating a new customisation script.
+**Description:** Returns a default template for creating a new customisation script.
 
-*Parameters:*
+**Parameters:**
 
-[options="header"]
-|===
-|Parameter|Type|Required|Description
-|script|String|Yes|Name of the script (e.g., "sb-provisioner-bootstrap")
-|===
+| Parameter | Type   | Required | Description                                           |
+|-----------|--------|----------|-------------------------------------------------------|
+| script    | String | Yes      | Name of the script (e.g., "sb-provisioner-bootstrap") |
 
-*Response Format:*
+**Response Format:**
 
-[source,json]
-----
+``` json
 {
   "exists": false,
   "filename": "sb-provisioner-bootstrap",
   "content": "#!/bin/sh\n\n# Script template content...",
   "enabled": false
 }
-----
+```
 
-*Error Responses:*
+**Error Responses:**
 
-[source,json]
-----
+``` json
 {
   "error": {
     "status": 400,
@@ -328,6 +310,4 @@ Plain text success message: "Script file uploaded successfully"
     "detail": "The script name is not a valid hook point"
   }
 }
-----
-
-
+```
