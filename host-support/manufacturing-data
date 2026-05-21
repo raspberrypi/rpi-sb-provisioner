@@ -158,7 +158,15 @@ metadata_gather() {
     MANUFACTURER=$(metadata_get "revision-manufacturer")
     REVISION=$(metadata_get "revision-revision")
     SECURE=$(metadata_get "secure")
-    
+    # fastboot's GetSecure returns "yes"/"no"/"error" (see
+    # rpi-fastbootd variables.cpp GetSignedOtp/GetSecure); normalise
+    # to the 1/0 the schema and downstream comparisons expect.
+    case "${SECURE}" in
+        yes) SECURE="1" ;;
+        no)  SECURE="0" ;;
+        *)   SECURE=""  ;;
+    esac
+
     case ${TYPE} in
         "0x06") BOARD_STR="CM1" ;;
         "0x08") BOARD_STR="3B" ;;
@@ -269,67 +277,52 @@ metadata_gather() {
             sqlite3 "${RPI_SB_PROVISIONER_MANUFACTURING_DB}" "CREATE TABLE devices($EXPECTED_SCHEMA);" > /dev/null 2>&1
         fi
         
-        # Determine security flags based on provisioning configuration
-        # JTAG lock status: 1 if enabled, 0 if explicitly disabled, NULL if not configured
+        # Security flags: record observed state from the device, not
+        # provisioning intent. Each flag maps a firmware-published
+        # getvar to 1/0/NULL. "not available" (the device-tree node is
+        # absent on older firmware) and any unexpected value fall
+        # through to NULL.
+        signed_flag_value() {
+            case "$(printf "%s" "$1" | tr '[:upper:]' '[:lower:]')" in
+                present)            echo "1" ;;
+                "not present")      echo "0" ;;
+                *)                  echo "NULL" ;;
+            esac
+        }
+
+        # Customer pubkey hash programmed in OTP (bit 3 of
+        # /proc/device-tree/chosen/bootloader/signed). When present,
+        # firmware authenticates boot.img against this hash.
+        PUBKEY_PROGRAMMED_VALUE=$(signed_flag_value "$(metadata_get "secure-otp")")
+
+        # Development-key revocation bit (bit 2). 'present' means the
+        # in-firmware dev key has been revoked.
+        DEVKEY_REVOKED_VALUE=$(signed_flag_value "$(metadata_get "secure-devkey")")
+
+        # Signed boot enforcement is observable via the customer pubkey
+        # hash being programmed -- firmware will only honour signed
+        # boot.img once that hash is present.
+        SIGNED_BOOT_VALUE="${PUBKEY_PROGRAMMED_VALUE}"
+
+        # JTAG-lock and EEPROM-write-protect are not currently
+        # observable via fastboot -- the provisioner applies them via
+        # signed config.txt directives (program_jtag_lock /
+        # eeprom_write_protect) but cannot read the resulting OTP /
+        # SPI-WP state back. Record provisioning intent so the UI can
+        # surface a "Requested" state; switch these to true observed
+        # reads once rpi-fastbootd grows the corresponding getvars.
         JTAG_LOCKED_VALUE="NULL"
         if [ -n "${RPI_DEVICE_LOCK_JTAG}" ]; then
             JTAG_LOCKED_VALUE="1"
         elif [ "${SECURE}" = "1" ]; then
-            # For secure provisioning, explicitly track that JTAG locking was not enabled
             JTAG_LOCKED_VALUE="0"
         fi
-        
-        # EEPROM write protection status: 1 if enabled, 0 if explicitly disabled, NULL if not configured  
+
         EEPROM_WP_VALUE="NULL"
         if [ -n "${RPI_DEVICE_EEPROM_WP_SET}" ]; then
             EEPROM_WP_VALUE="1"
         elif [ "${SECURE}" = "1" ]; then
-            # For secure provisioning, explicitly track that EEPROM WP was not enabled
             EEPROM_WP_VALUE="0"
-        fi
-        
-        # Public key programming: read from fastboot metadata 'signed-otp'
-        # Map 'present' -> 1, 'not present' -> 0, common boolean forms as fallback, else NULL
-        PUBKEY_PROGRAMMED_VALUE="NULL"
-        SIGNED_OTP="$(metadata_get "secure-otp")"
-        if [ -n "${SIGNED_OTP}" ]; then
-            SIGNED_OTP_LC="$(printf "%s" "${SIGNED_OTP}" | tr '[:upper:]' '[:lower:]')"
-            case "${SIGNED_OTP_LC}" in
-                present|1|true|yes)
-                    PUBKEY_PROGRAMMED_VALUE="1"
-                    ;;
-                "not present"|notpresent|0|false|no)
-                    PUBKEY_PROGRAMMED_VALUE="0"
-                    ;;
-                *)
-                    : # leave as NULL
-                    ;;
-            esac
-        fi
-        
-        # Dev key revoked (signed-devkey): 'present' -> 1, 'not present' -> 0, else NULL
-        DEVKEY_REVOKED_VALUE="NULL"
-        SIGNED_DEVKEY="$(metadata_get "secure-devkey")"
-        if [ -n "${SIGNED_DEVKEY}" ]; then
-            SIGNED_DEVKEY_LC="$(printf "%s" "${SIGNED_DEVKEY}" | tr '[:upper:]' '[:lower:]')"
-            case "${SIGNED_DEVKEY_LC}" in
-                present)
-                    DEVKEY_REVOKED_VALUE="1"
-                    ;;
-                "not present"|notpresent)
-                    DEVKEY_REVOKED_VALUE="0"
-                    ;;
-                *)
-                    : ;;
-            esac
-        fi
-
-        # Signed boot: 1 for secure provisioning, 0 for non-secure, NULL for unknown
-        SIGNED_BOOT_VALUE="NULL"
-        if [ "${SECURE}" = "1" ]; then
-            SIGNED_BOOT_VALUE="1"
-        elif [ "${SECURE}" = "0" ]; then
-            SIGNED_BOOT_VALUE="0"
         fi
 
 	        # OS image identifier: use the same one-line summary that
