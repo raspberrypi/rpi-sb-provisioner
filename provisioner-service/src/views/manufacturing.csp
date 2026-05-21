@@ -74,6 +74,20 @@
             }
         }
 
+        // Format columns that record provisioning intent rather than
+        // observed device state (currently JTAG-lock and EEPROM-WP --
+        // see host-support/manufacturing-data). 1 = the config opted
+        // into the lock, 0 = secure provisioning explicitly did not
+        // request it, null = not configured.
+        function formatRequestedField(value) {
+            if (value === '1') {
+                return '<span class="security-enabled" aria-label="Requested" title="Locked by signed config.txt during provisioning; not verified against device state">Requested</span>';
+            } else if (value === '0') {
+                return '<span class="security-disabled" aria-label="Not requested" title="Secure provisioning did not opt into this lock">Not requested</span>';
+            }
+            return '<span class="security-unknown" aria-label="Not configured" title="Not configured">&mdash;</span>';
+        }
+
         // Scroll indicator state -- kept outside the function to avoid
         // accumulating listeners and timeouts on every refresh cycle.
         let scrollIndicatorTimeout = null;
@@ -170,8 +184,8 @@
                             <th scope="col">Memory</th>
                             <th scope="col">Manufacturer</th>
                             <th scope="col">Secure</th>
-                            <th scope="col">JTAG Locked</th>
-                            <th scope="col">EEPROM WP</th>
+                            <th scope="col">JTAG Lock (req.)</th>
+                            <th scope="col">EEPROM WP (req.)</th>
                             <th scope="col">Pubkey Prog.</th>
                             <th scope="col">Devkey Revoked</th>
                             <th scope="col">Signed Boot</th>
@@ -203,8 +217,8 @@
                             <td>${escapeHtml(device.memory)}</td>
                             <td>${escapeHtml(device.manufacturer)}</td>
                             <td>${escapeHtml(device.secure)}</td>
-                            <td class="security-field">${formatSecurityField(device.jtag_locked)}</td>
-                            <td class="security-field">${formatSecurityField(device.eeprom_write_protected)}</td>
+                            <td class="security-field">${formatRequestedField(device.jtag_locked)}</td>
+                            <td class="security-field">${formatRequestedField(device.eeprom_write_protected)}</td>
                             <td class="security-field">${formatSecurityField(device.pubkey_programmed)}</td>
                             <td class="security-field">${formatSecurityField(device.devkey_revoked)}</td>
                             <td class="security-field">${formatSecurityField(device.signed_boot_enabled)}</td>
@@ -359,12 +373,18 @@
                 if (val === '0') return 'No';
                 return 'Unknown';
             }
-            
+
+            function requestedLabel(val) {
+                if (val === '1') return 'Requested';
+                if (val === '0') return 'Not requested';
+                return '';
+            }
+
             const headers = [
                 'Provision Time','ID','Board','Serial','Ethernet MAC','WiFi MAC',
                 'Bluetooth MAC','eMMC Size','eMMC CID','RPi DUID','Revision',
-                'Processor','Memory','Manufacturer','Secure','JTAG Locked',
-                'EEPROM WP','Pubkey Prog.','Devkey Revoked','Signed Boot',
+                'Processor','Memory','Manufacturer','Secure','JTAG Lock (req.)',
+                'EEPROM WP (req.)','Pubkey Prog.','Devkey Revoked','Signed Boot',
                 'OS Image Filename','OS Image SHA256',
                 'Connect Reg.','Connect Device ID'
             ];
@@ -377,8 +397,8 @@
                     csvEscape(d.bt_mac), csvEscape(d.mmc_size), csvEscape(d.mmc_cid),
                     csvEscape(d.rpi_duid), csvEscape(d.board_revision), csvEscape(d.processor),
                     csvEscape(d.memory), csvEscape(d.manufacturer), csvEscape(d.secure),
-                    csvEscape(securityLabel(d.jtag_locked)),
-                    csvEscape(securityLabel(d.eeprom_write_protected)),
+                    csvEscape(requestedLabel(d.jtag_locked)),
+                    csvEscape(requestedLabel(d.eeprom_write_protected)),
                     csvEscape(securityLabel(d.pubkey_programmed)),
                     csvEscape(securityLabel(d.devkey_revoked)),
                     csvEscape(securityLabel(d.signed_boot_enabled)),

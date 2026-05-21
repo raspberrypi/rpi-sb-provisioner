@@ -39,7 +39,7 @@ The endpoint returns a JSON array where each element represents a provisioned de
     "processor": "BCM2712",
     "memory": "2GB",
     "manufacturer": "Sony UK",
-    "secure": "yes",
+    "secure": "1",
     "jtag_locked": "1",
     "eeprom_write_protected": "1",
     "pubkey_programmed": "1",
@@ -72,10 +72,11 @@ The endpoint returns a JSON array where each element represents a provisioned de
 |memory|Device memory size (e.g., "2GB")
 |manufacturer|Device manufacturer
 |secure|Whether a device has been provisioned with a device unique identity
-|jtag_locked|JTAG debugging lock status (1=locked, 0=unlocked, null=unknown)
-|eeprom_write_protected|EEPROM write protection status (1=enabled, 0=disabled, null=unknown)
-|pubkey_programmed|Customer public key programming status (1=programmed, 0=not programmed, null=unknown)
-|signed_boot_enabled|Signed boot enablement status (1=enabled, 0=disabled, null=unknown)
+|jtag_locked|JTAG-lock *provisioning intent* (1=requested via `RPI_DEVICE_LOCK_JTAG`, 0=secure provisioning explicitly did not request it, null=not configured). Not currently observable from fastboot, so this records intent rather than verified device state.
+|eeprom_write_protected|EEPROM-write-protect *provisioning intent* (1=requested via `RPI_DEVICE_EEPROM_WP_SET`, 0=secure provisioning explicitly did not request it, null=not configured). Not currently observable from fastboot.
+|pubkey_programmed|Customer public key programming status (1=programmed, 0=not programmed, null=unknown). Observed via fastboot `getvar secure-otp`.
+|devkey_revoked|Development-key revocation status (1=revoked, 0=not revoked, null=unknown). Observed via fastboot `getvar secure-devkey`.
+|signed_boot_enabled|Signed boot enforcement status (1=enabled, 0=disabled, null=unknown). Derived from `pubkey_programmed` -- firmware authenticates boot.img only when the customer pubkey hash is in OTP.
 |provision_ts|Timestamp of when the device was provisioned
 |===
 
