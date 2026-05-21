@@ -124,6 +124,29 @@ record_state() {
     image=$(printf '%s' "${image}" | sed "s/'/''/g")
     board_type=$(printf '%s' "${board_type}" | sed "s/'/''/g")
     sqlite3 "/srv/rpi-sb-provisioner/state.db" "PRAGMA busy_timeout=5000; INSERT INTO devices(serial, endpoint, state, image, ip_address, board_type) VALUES ('$serial', '$endpoint', '$state', '$image', '$ip_address', '$board_type');" > /dev/null 2>&1
+
+    # Nudge the UI service to rescan now that a row has been written. This
+    # replaces the inotify watch the service used to keep on state.db, which
+    # self-triggered against its own SQLite reads and pinned a core at 100%.
+    # Fire-and-forget: the service may be down, restarting, or simply not
+    # installed (API-only deployments), so any failure here must not break
+    # provisioning. The body is intentionally empty -- the service re-reads
+    # state.db on the resulting scan. Override the URL via the env var when
+    # provisioner-service runs on a non-default port or address.
+    #
+    # The internal endpoint is gated by a per-boot token written by the
+    # service to /run/rpi-sb-provisioner/internal.token with mode 0600. If
+    # the file does not yet exist (service still starting), skip the call
+    # entirely -- the worker's 10s backstop picks the row up either way.
+    notify_url=${PROVISIONER_NOTIFY_URL:-http://127.0.0.1:3142/internal/state-changed}
+    if [ -r /run/rpi-sb-provisioner/internal.token ]; then
+        internal_token=$(cat /run/rpi-sb-provisioner/internal.token 2>/dev/null || true)
+        if [ -n "${internal_token}" ]; then
+            curl --max-time 1 --connect-timeout 1 -fsS -X POST -o /dev/null \
+                -H "X-Internal-Token: ${internal_token}" \
+                "${notify_url}" >/dev/null 2>&1 || true
+        fi
+    fi
 }
 
 # get_usb_path_for_serial() - Finds the USB path for a device with a specific serial number

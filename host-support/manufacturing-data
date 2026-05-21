@@ -414,6 +414,23 @@ metadata_gather() {
                     ${CONNECT_REGISTERED_VALUE},  \
                     '${CONNECT_DEVICE_ID_VALUE}'  \
         );" > /dev/null 2>&1
+
+        # Nudge the UI service to re-read after a manufacturing.db row write.
+        # Without this push, manufacturing changes would rely on the next
+        # record_state call (which happens to follow in the current
+        # provisioning flow) -- an implicit ordering invariant we'd rather
+        # not bake in. Fire-and-forget so a UI outage can't fail manufacturing.
+        # See host-support/state-recording for the token rationale.
+        notify_url=${PROVISIONER_MANUFACTURING_NOTIFY_URL:-http://127.0.0.1:3142/internal/manufacturing-recorded}
+        if [ -r /run/rpi-sb-provisioner/internal.token ]; then
+            internal_token=$(cat /run/rpi-sb-provisioner/internal.token 2>/dev/null || true)
+            if [ -n "${internal_token}" ]; then
+                curl --max-time 1 --connect-timeout 1 -fsS -X POST -o /dev/null \
+                    -H "X-Internal-Token: ${internal_token}" \
+                    "${notify_url}" >/dev/null 2>&1 || true
+            fi
+        fi
+
         announce_stop "Manufacturing Database Insertion"
     fi
     announce_stop "Metadata extraction"

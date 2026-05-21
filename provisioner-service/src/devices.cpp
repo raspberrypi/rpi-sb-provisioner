@@ -9,7 +9,6 @@
 #include <systemd/sd-bus.h>
 #include <systemd/sd-device.h>
 #include <systemd/sd-event.h>
-#include <sys/inotify.h>
 #include <filesystem>
 #include <unordered_map>
 #include <set>
@@ -20,6 +19,9 @@
 #include <chrono>
 #include <algorithm>
 #include <cctype>
+#include <random>
+#include <cstdio>
+#include <sys/stat.h>
 #include "utils.h"
 #include "include/audit.h"
 
@@ -125,9 +127,10 @@ namespace provisioner {
         std::unordered_map<std::string, UsbNode> currentTopology;
 
         // Event-driven scan trigger: USB uevents (sd_device_monitor) and
-        // state.db-wal writes (inotify) push scanRequested=true and notify scanCv,
-        // collapsing the worker's wait. A 10s wait_for backstop covers anything
-        // that slips past both event sources.
+        // POSTs to /internal/state-changed from the provisioning scripts push
+        // scanRequested=true and notify scanCv, collapsing the worker's wait.
+        // A 10s wait_for backstop covers anything that slips past both event
+        // sources.
         std::mutex scanMu;
         std::condition_variable scanCv;
         bool scanRequested{false};
@@ -1237,24 +1240,13 @@ namespace provisioner {
             return 0;
         }
 
-        // Callback for inotify events on /srv/rpi-sb-provisioner/: filter to
-        // state.db / state.db-wal so unrelated files don't trigger scans.
-        // Why state.db-wal: provisioning scripts write state transitions in
-        // SQLite WAL mode, so most state changes hit the -wal file first.
-        // Why state.db: covers non-WAL writes and checkpoints.
-        int onStateDbEvent(sd_event_source *, const struct inotify_event *ev, void *) {
-            if (ev && ev->len > 0) {
-                std::string name(ev->name);
-                if (name == "state.db" || name == "state.db-wal") {
-                    requestScan();
-                }
-            }
-            return 0;
-        }
-
-        // Hosts sd_device_monitor (USB hotplug) and an inotify watch on the
-        // state directory in a single sd_event loop. Shutdown is driven from
-        // ~Devices() via sd_event_exit(), which is thread-safe.
+        // Hosts sd_device_monitor (USB hotplug) in a single sd_event loop.
+        // State.db changes used to be observed via inotify on the state
+        // directory, but the provisioning scripts now POST to
+        // /internal/state-changed after each row write, so the watch is
+        // gone — the self-trigger loop with our own SQLite reads goes
+        // with it. Shutdown is driven from ~Devices() via sd_event_exit(),
+        // which is thread-safe.
         void eventSourceWorker() {
             LOG_INFO << "Event source worker started";
 
@@ -1284,20 +1276,8 @@ namespace provisioner {
                 return;
             }
 
-            // Watch the state directory; we filter by filename in the callback
-            // because the WAL file can be created/deleted around checkpoints.
-            sd_event_source *inotifySrc = nullptr;
-            const char *stateDir = "/srv/rpi-sb-provisioner";
-            if (sd_event_add_inotify(event, &inotifySrc, stateDir,
-                    IN_MODIFY | IN_CREATE | IN_MOVED_TO | IN_CLOSE_WRITE,
-                    onStateDbEvent, nullptr) < 0) {
-                LOG_WARN << "inotify watch on " << stateDir << " failed; "
-                         << "state.db changes will rely on the 10s backstop";
-            }
-
             sd_event_loop(event);
 
-            if (inotifySrc) sd_event_source_unref(inotifySrc);
             sd_device_monitor_unref(monitor);
             sd_event_unref(event);
             eventSourceLoop = nullptr;
@@ -2409,8 +2389,101 @@ namespace provisioner {
             resp->setBody(writer.write(result));
             callback(resp);
         }); // devices/_test handler
+
+        // Localhost-only notification endpoints. The bash provisioning
+        // scripts POST here after writing rows that the topology worker
+        // cares about, in place of the inotify watch we used to keep on
+        // /srv/rpi-sb-provisioner. Inverting the dependency removes the
+        // self-trigger loop the inotify watch had with our own SQLite reads.
+        // Both endpoints share the same effect (kick the worker for a
+        // rescan); the split is for semantic clarity at the call site and
+        // in access logs. No body is required — the worker re-reads both
+        // DBs on the next scan, which requestScan() wakes immediately.
+        //
+        // Access control is two layers:
+        //   1. Transport-level loopback check via getPeerAddr().isLoopbackIp().
+        //      We must NOT use AuditLog::getClientIP here -- that one honours
+        //      X-Forwarded-For, which is attacker-controlled on a direct
+        //      connection and would let any reachable client spoof loopback.
+        //   2. Shared-secret token in /run/rpi-sb-provisioner/internal.token.
+        //      The file is mode 0600, root-owned; only callers in the same
+        //      security domain as the provisioning scripts can read it. This
+        //      closes the nginx-reverse-proxy hole (peer IP would be 127.0.0.1
+        //      even for external clients) and any local-non-root caller.
+        // Token: generated once per service start; lives in tmpfs, so a
+        // fresh value comes up on every boot.
+        const std::string internalToken = [] {
+            std::string hex;
+            hex.reserve(64);
+            std::random_device rd;
+            for (int i = 0; i < 32; ++i) {
+                const unsigned byte = rd() & 0xff;
+                static const char *digits = "0123456789abcdef";
+                hex.push_back(digits[byte >> 4]);
+                hex.push_back(digits[byte & 0x0f]);
+            }
+            const std::string tokenPath = "/run/rpi-sb-provisioner/internal.token";
+            std::filesystem::create_directories("/run/rpi-sb-provisioner");
+            const std::string tmpPath = tokenPath + ".tmp";
+            {
+                std::ofstream f(tmpPath, std::ios::trunc | std::ios::binary);
+                if (f) f << hex;
+            }
+            // Mode 0600 before rename so a reader never sees a too-permissive file.
+            (void)::chmod(tmpPath.c_str(), 0600);
+            (void)::rename(tmpPath.c_str(), tokenPath.c_str());
+            return hex;
+        }();
+
+        // Constant-time string compare (avoid timing-channel leak on the
+        // token). std::memcmp is famously *not* constant time on most libcs.
+        auto tokensEqual = [](const std::string &a, const std::string &b) {
+            if (a.size() != b.size()) return false;
+            unsigned char acc = 0;
+            for (size_t i = 0; i < a.size(); ++i) {
+                acc |= static_cast<unsigned char>(a[i]) ^ static_cast<unsigned char>(b[i]);
+            }
+            return acc == 0;
+        };
+
+        auto internalNotify = [internalToken, tokensEqual](
+                const HttpRequestPtr &req,
+                std::function<void(const HttpResponsePtr &)> &&callback) {
+            auto resp = HttpResponse::newHttpResponse();
+            // Layer 1: transport-level loopback. Reject before we even
+            // look at headers so spoofed X-Forwarded-For cannot influence
+            // the decision. Trantor's isLoopbackIp() refuses v4-mapped IPv6
+            // forms (::ffff:127.0.0.1) that show up on dual-stack listeners,
+            // so compare the stringified peer address explicitly.
+            const std::string peerIp = req->getPeerAddr().toIp();
+            const bool isLoopback = (peerIp == "127.0.0.1" || peerIp == "::1" ||
+                                     peerIp == "::ffff:127.0.0.1");
+            if (!isLoopback) {
+                resp->setStatusCode(k404NotFound);
+                resp->setBody("debug: non-loopback peer=" + peerIp);
+                callback(resp);
+                return;
+            }
+            // Layer 2: shared-secret token from the root-only file.
+            const std::string presented = req->getHeader("X-Internal-Token");
+            if (presented.empty() || !tokensEqual(presented, internalToken)) {
+                resp->setStatusCode(k404NotFound);
+                resp->setBody("debug: token mismatch presented_len=" +
+                              std::to_string(presented.size()) +
+                              " expected_len=" + std::to_string(internalToken.size()));
+                callback(resp);
+                return;
+            }
+            requestScan();
+            resp->setStatusCode(k204NoContent);
+            callback(resp);
+        };
+        // Paired with record_state() in host-support/state-recording.
+        app.registerHandler("/internal/state-changed", internalNotify, {Post});
+        // Paired with the manufacturing.db INSERT in host-support/manufacturing-data.
+        app.registerHandler("/internal/manufacturing-recorded", internalNotify, {Post});
     }
 
-    
+
 } // namespace provisioner
 
