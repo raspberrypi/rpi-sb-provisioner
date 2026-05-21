@@ -187,6 +187,29 @@ rpi-sb-provisioner (2.3.0-pre1) unstable; urgency=medium
     - Use SQL busy timeouts in provisioner-service to handle SQLite
       contention gracefully under high device throughput
 
+  * Provisioner Service State Change Notifications:
+    - Drop the inotify watch provisioner-service used to keep on
+      /srv/rpi-sb-provisioner/state.db and -wal; the watch self-
+      triggered against the service's own SQLite reads and pinned a
+      core at 100% during steady-state operation
+    - Introduce a localhost-only HTTP API on provisioner-service for
+      the bash provisioning scripts to push state-change and
+      manufacturing-row notifications: POST /internal/state-changed
+      (paired with record_state in host-support/state-recording) and
+      POST /internal/manufacturing-recorded (paired with the
+      manufacturing.db INSERT in host-support/manufacturing-data);
+      both kick the topology worker for an immediate rescan
+    - Gate the endpoints with two access layers: a transport-level
+      loopback check on the real peer address (X-Forwarded-For is
+      ignored so a reverse proxy cannot spoof 127.0.0.1), and a
+      per-boot shared-secret token written by the service to
+      /run/rpi-sb-provisioner/internal.token at mode 0600. Token
+      comparison is constant-time
+    - Calls from the provisioning scripts are fire-and-forget with
+      short curl timeouts; a missing token file or unreachable
+      service does not fail provisioning, and the worker's existing
+      10s wait_for backstop still covers anything that slips past
+
   * Common Filesystem Handling:
     - Force FAT32 when formatting the signed boot slot vfat, and
       propagate mkfs failures so a bad slot is not silently flashed
@@ -216,7 +239,7 @@ rpi-sb-provisioner (2.3.0-pre1) unstable; urgency=medium
     - Create the lockfile directory in postinst on install
     - Fix a missing comma in debian/rpi-sb-provisioner.udev
 
- -- Tom Dewey <tom.dewey@raspberrypi.com>  Thu, 21 May 2026 12:00:00 +0100
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Thu, 21 May 2026 16:30:00 +0100
 
 rpi-sb-provisioner (2.2.0) unstable; urgency=medium
 
