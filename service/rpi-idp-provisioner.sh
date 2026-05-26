@@ -40,6 +40,7 @@ log() {
 }
 
 read_config
+compute_image_summary
 
 CLEANUP_DONE=0
 
@@ -63,10 +64,53 @@ check_pidevice_storage_type() {
         "nvme")
             echo "nvme0n1"
             ;;
-        ?)
-            die "Unexpected storage device type. Wanted sd, nvme or emmc, got $1"
+        *)
+            die "Unexpected storage device type. Wanted sd, nvme or emmc, got '$1'"
             ;;
     esac
+}
+
+timeout_nonfatal() {
+    command="$*"
+    set +e
+    log "Running command with 10-second timeout: \"${command}\""
+    # shellcheck disable=SC2086
+    timeout 10 ${command}
+    command_exit_status=$?
+
+    # Handle different exit codes from the timeout command
+    case ${command_exit_status} in
+        0)
+            # Command completed successfully within the time limit
+            log "\"$command\" succeeded with exit code 0."
+            ;;
+        124)
+            # Exit code 124 means the command timed out (TERM signal sent but command didn't exit)
+            log "\"${command}\" FAILED: Timed out after 10 seconds (exit code 124)."
+            ;;
+        125)
+            # Exit code 125 means the timeout command itself failed
+            log "\"${command}\" FAILED: The timeout command itself failed (exit code 125)."
+            ;;
+        126)
+            # Exit code 126 means the command was found but could not be executed
+            log "\"${command}\" FAILED: Command found but could not be executed (exit code 126)."
+            ;;
+        127)
+            # Exit code 127 means the command was not found
+            log "\"${command}\" FAILED: Command not found (exit code 127)."
+            ;;
+        137)
+            # Exit code 137 (128+9) means the command was killed by SIGKILL (kill -9)
+            log "\"${command}\" FAILED: Command was killed by SIGKILL (exit code 137)."
+            ;;
+        *)
+            # Any other non-zero exit code is a general failure
+            log "\"${command}\" FAILED: Command returned exit code ${command_exit_status}."
+            ;;
+    esac
+    set -e
+    return ${command_exit_status}
 }
 
 # timeout_fatal: 30-second default used by rpi-sb-common.sh helpers.
@@ -103,11 +147,15 @@ timeout_fatal_secs() {
 }
 
 cleanup() {
+    # Capture the exit status that triggered the trap BEFORE any other
+    # command runs, otherwise $? is clobbered by the guard/assignment below
+    # and a genuine failure is reported as success.
+    return_value=$?
+
     # Guard against multiple invocations (signal + EXIT trap)
     [ "$CLEANUP_DONE" -eq 1 ] && return
     CLEANUP_DONE=1
 
-    return_value=$?
     exit ${return_value}
 }
 trap cleanup EXIT INT TERM
@@ -120,16 +168,34 @@ check_command_exists cut
 check_command_exists sed
 check_command_exists systemd-notify
 
+# Tools required when we have to re-sign boot slots for secure-boot.
+# Always present in the package's runtime deps; check up-front so we
+# fail before touching the device rather than mid-flight.
+if [ "${PROVISIONING_STYLE}" = "secure-boot" ]; then
+    check_command_exists simg2img
+    check_command_exists img2simg
+    check_command_exists mkfs.fat
+    check_command_exists mount
+    check_command_exists umount
+    check_command_exists truncate
+    check_command_exists rpi-make-boot-image
+    check_command_exists xxd
+    check_command_exists openssl
+    check_command_exists sha256sum
+
+    if ! init_signing_context; then
+        die "Failed to initialise signing context for secure-boot IDP run"
+    fi
+    if ! signing_available; then
+        die "PROVISIONING_STYLE=secure-boot but no customer signing key configured"
+    fi
+fi
+
 setup_fastboot_and_id_vars "$1"
 
 record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_STARTED}" "${TARGET_USB_PATH}"
 
 systemd-notify --ready --status="Provisioning started"
-
-# Run provision-started hook (e.g. LED control on programming rigs)
-run_customisation_script "idp-provisioner" "provision-started" "${FASTBOOT_DEVICE_SPECIFIER}" "${TARGET_DEVICE_SERIAL}" "${RPI_DEVICE_STORAGE_TYPE}"
-
-RPI_DEVICE_STORAGE_TYPE="$(check_pidevice_storage_type "${RPI_DEVICE_STORAGE_TYPE}")"
 
 ### Resolve the IDP artefact directory
 
@@ -167,7 +233,7 @@ IDP_IMAGE_NAME=$(jq -r '.attributes."image-name" // "unknown"' < "${IDP_JSON}")
 IDP_IMAGE_VERSION=$(jq -r '.IGmeta.IGconf_image_version // "unknown"' < "${IDP_JSON}")
 IDP_DEVICE_CLASS=$(jq -r '.IGmeta.IGconf_device_class // "unknown"' < "${IDP_JSON}")
 IDP_STORAGE_TYPE=$(jq -r '.IGmeta.IGconf_device_storage_type // "unknown"' < "${IDP_JSON}")
-IDP_HAS_ENCRYPTION=$(jq -r 'if .layout.provisionmap[]? | .encrypted? then "yes" else "no" end' < "${IDP_JSON}" | head -1)
+IDP_HAS_ENCRYPTION=$(jq -r 'any(.. | objects; has("encrypted")) | if . then "yes" else "no" end' < "${IDP_JSON}")
 
 log "IDP image name: ${IDP_IMAGE_NAME}"
 log "IDP image version: ${IDP_IMAGE_VERSION}"
@@ -192,7 +258,7 @@ map_device_class_to_family() {
     case "$1" in
         pi5|cm5)   echo "5" ;;
         pi4|cm4)   echo "4" ;;
-        pi2w)      echo "2W" ;;
+        zero2w)    echo "2W" ;;
         *)         echo "$1" ;;
     esac
 }
@@ -202,18 +268,134 @@ if [ -n "${RPI_DEVICE_FAMILY}" ] && [ "${EXPECTED_FAMILY}" != "${RPI_DEVICE_FAMI
     die "IDP artefact is for device family '${EXPECTED_FAMILY}' (${IDP_DEVICE_CLASS}), but this station is configured for '${RPI_DEVICE_FAMILY}'."
 fi
 
-# Cross-check storage type against host configuration
+# Cross-check storage type against host configuration, or adopt it from the
+# JSON if the host didn't set one. The JSON's IGconf_device_storage_type is
+# authoritative for IDP artefacts; RPI_DEVICE_STORAGE_TYPE is kept as an
+# optional assertion so a misconfigured station still fails loudly.
 if [ -n "${RPI_DEVICE_STORAGE_TYPE}" ]; then
-    # RPI_DEVICE_STORAGE_TYPE has already been mapped to block device name (mmcblk0/nvme0n1)
-    # Map IDP storage type to the same convention for comparison
-    IDP_STORAGE_BLOCK=$(check_pidevice_storage_type "${IDP_STORAGE_TYPE}" 2>/dev/null || true)
-    if [ -n "${IDP_STORAGE_BLOCK}" ] && [ "${IDP_STORAGE_BLOCK}" != "${RPI_DEVICE_STORAGE_TYPE}" ]; then
-        die "IDP artefact is for storage type '${IDP_STORAGE_TYPE}', but this station is configured for storage device '${RPI_DEVICE_STORAGE_TYPE}'."
+    if [ "${RPI_DEVICE_STORAGE_TYPE}" != "${IDP_STORAGE_TYPE}" ]; then
+        die "IDP artefact is for storage type '${IDP_STORAGE_TYPE}', but this station is configured with RPI_DEVICE_STORAGE_TYPE='${RPI_DEVICE_STORAGE_TYPE}'."
     fi
+else
+    log "RPI_DEVICE_STORAGE_TYPE is not set; adopting '${IDP_STORAGE_TYPE}' from IDP artefact."
+    RPI_DEVICE_STORAGE_TYPE="${IDP_STORAGE_TYPE}"
 fi
+
+# Resolve the raw storage type to its block device name for fastboot.
+RPI_DEVICE_STORAGE_TYPE="$(check_pidevice_storage_type "${RPI_DEVICE_STORAGE_TYPE}")"
 
 log "Pre-flight validation passed"
 announce_stop "IDP pre-flight validation"
+
+# Run provision-started hook (e.g. LED control on programming rigs).
+# Deferred until after pre-flight so the hook receives the resolved block
+# device name rather than the raw IDP value.
+run_customisation_script "idp-provisioner" "provision-started" "${FASTBOOT_DEVICE_SPECIFIER}" "${TARGET_DEVICE_SERIAL}" "${RPI_DEVICE_STORAGE_TYPE}"
+
+### Boot slot signing for secure-boot
+#
+# A signed-boot Pi 5 EEPROM rejects raw firmware/kernel files in the slot
+# VFAT and only loads {boot.img, boot.sig}. The IDP artefact ships unsigned
+# slot VFATs, so when running secure-boot we transform each boot-role slot
+# into a signed sparse and substitute it during the flash loop.
+#
+# Discovery rule: any partition under layout.partitionimages whose pmap entry
+# carries .static.role == "boot". The bootconfig partition is intentionally
+# left unmodified -- autoboot.txt is read by the early bootloader stage and
+# does not require signing; tryboot redirection still works as expected.
+
+# SIGNED_BOOT_SUBST is a newline-separated list of "<source-simg>=<replacement-path>"
+# entries. Empty when not in secure-boot mode.
+SIGNED_BOOT_SUBST=""
+
+if [ "${PROVISIONING_STYLE}" = "secure-boot" ]; then
+    announce_start "Sign boot slots for secure-boot"
+
+    if [ -z "${RPI_DEVICE_FAMILY}" ]; then
+        die "RPI_DEVICE_FAMILY not set; required for rpi-make-boot-image"
+    fi
+
+    if [ -z "${RPI_SB_WORKDIR}" ] || [ ! -d "${RPI_SB_WORKDIR}" ]; then
+        die "RPI_SB_WORKDIR is not a usable directory: '${RPI_SB_WORKDIR}'"
+    fi
+
+    SIGNED_CACHE_DIR="${RPI_SB_WORKDIR}/idp-signed-boot"
+    mkdir -p "${SIGNED_CACHE_DIR}"
+
+    # Cache key per (source-simg-content, public-key-content). Same artefact
+    # + same key signs identically on every run, so we can flash many devices
+    # from one transform.
+    PUBKEY_HASH=$(sha256sum "${CUSTOMER_PUBLIC_KEY_FILE}" | awk '{print $1}')
+
+    # Find every pmap partition with role=boot and dereference its image name
+    # to the source simg filename.  jq returns nothing if no matches; treat
+    # that as a hard error in secure-boot mode (no boot.img to load = brick).
+    BOOT_IMAGE_NAMES=$(jq -r '
+        [ .layout.provisionmap[]?
+          | .. | objects
+          | select(.static? and .static.role? == "boot")
+          | .image ] | unique | .[]
+    ' < "${IDP_JSON}")
+
+    if [ -z "${BOOT_IMAGE_NAMES}" ]; then
+        die "secure-boot configured but no partitions with static.role=\"boot\" in ${IDP_JSON}"
+    fi
+
+    # Each slot's pmap "image" key resolves to a partitionimages entry; that
+    # entry's "simage" is the source sparse filename inside IDP_DIR.  Multiple
+    # slots typically share the same source (boot_a and boot_b both reference
+    # boot.sparse), so we dedupe and transform each unique source once.
+    UNIQUE_SOURCE_SIMGS=$(
+        for img_name in ${BOOT_IMAGE_NAMES}; do
+            jq -r --arg n "${img_name}" '.layout.partitionimages[$n].simage // empty' < "${IDP_JSON}"
+        done | sort -u
+    )
+
+    if [ -z "${UNIQUE_SOURCE_SIMGS}" ]; then
+        die "could not resolve simage filenames for boot partitions"
+    fi
+
+    for src_simg in ${UNIQUE_SOURCE_SIMGS}; do
+        SRC_PATH="${IDP_DIR}/${src_simg}"
+        if [ ! -f "${SRC_PATH}" ]; then
+            die "boot slot source missing: ${SRC_PATH}"
+        fi
+
+        SRC_HASH=$(sha256sum "${SRC_PATH}" | awk '{print $1}')
+        # v2: VFAT now also contains config.txt with boot_ramdisk=1 so the
+        # EEPROM actually chainloads boot.img. Bump on any future on-disk
+        # format change so stale cache entries don't get reused.
+        CACHE_NAME="${src_simg%.sparse}-v2-${SRC_HASH}-${PUBKEY_HASH}.sparse"
+        CACHE_PATH="${SIGNED_CACHE_DIR}/${CACHE_NAME}"
+
+        log "Signing boot slot source ${src_simg} -> ${CACHE_PATH}"
+        if ! with_lock "${LOCK_BASE}/idp-signed-boot.lock" 600 \
+                prepare_signed_boot_simg "${SRC_PATH}" "${CACHE_PATH}"; then
+            die "Failed to produce signed boot sparse for ${src_simg}"
+        fi
+
+        SIGNED_BOOT_SUBST="${SIGNED_BOOT_SUBST}
+${src_simg}=${CACHE_PATH}"
+    done
+
+    announce_stop "Sign boot slots for secure-boot"
+fi
+
+# Resolve a source simg name to the path that should actually be flashed.
+# Returns the substituted path on stdout if the simg is in the boot-slot
+# substitution table; otherwise echoes ${IDP_DIR}/${simg} unchanged.
+resolve_flash_source() {
+    _simg="$1"
+    if [ -n "${SIGNED_BOOT_SUBST}" ]; then
+        _hit=$(printf '%s\n' "${SIGNED_BOOT_SUBST}" \
+            | awk -F= -v k="${_simg}" '$1 == k { print $2; exit }')
+        if [ -n "${_hit}" ]; then
+            printf '%s\n' "${_hit}"
+            return 0
+        fi
+    fi
+    printf '%s/%s\n' "${IDP_DIR}" "${_simg}"
+}
 
 ### IDP Provisioning Protocol
 
@@ -268,16 +450,24 @@ while true; do
         die "Malformed idpgetblk response: '${INFO_LINE}' (full response: ${RESPONSE})"
     fi
 
-    if [ ! -f "${IDP_DIR}/${SIMG}" ]; then
-        die "idpgetblk referenced image not found: ${IDP_DIR}/${SIMG}"
+    FLASH_SOURCE=$(resolve_flash_source "${SIMG}")
+    if [ ! -f "${FLASH_SOURCE}" ]; then
+        die "idpgetblk referenced image not found: ${FLASH_SOURCE}"
     fi
 
     PARTITION_INDEX=$((PARTITION_INDEX + 1))
-    SIMG_SIZE=$(stat -c%s "${IDP_DIR}/${SIMG}" 2>/dev/null || echo "unknown")
-    log "Flashing partition ${PARTITION_INDEX}: ${SIMG} (${SIMG_SIZE} bytes) -> ${BLOCKDEV}"
+    SIMG_SIZE=$(stat -c%s "${FLASH_SOURCE}" 2>/dev/null || echo "unknown")
+    if [ "${FLASH_SOURCE}" != "${IDP_DIR}/${SIMG}" ]; then
+        log "Flashing partition ${PARTITION_INDEX}: ${SIMG} (signed: ${FLASH_SOURCE}, ${SIMG_SIZE} bytes) -> ${BLOCKDEV}"
+    else
+        log "Flashing partition ${PARTITION_INDEX}: ${SIMG} (${SIMG_SIZE} bytes) -> ${BLOCKDEV}"
+    fi
 
     FLASH_START=$(date +%s)
-    timeout_fatal_secs 600 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${BLOCKDEV}" "${IDP_DIR}/${SIMG}"
+    # Prefer the TCP data-plane specifier when the daemon advertises split
+    # mode (-i usb+tcp); fall back to whatever the control plane is using.
+    FLASH_SPECIFIER="${FASTBOOT_TCP_FLASH_SPECIFIER:-${FASTBOOT_DEVICE_SPECIFIER}}"
+    timeout_fatal_secs 600 fastboot -s "${FLASH_SPECIFIER}" flash "${BLOCKDEV}" "${FLASH_SOURCE}"
     FLASH_END=$(date +%s)
     FLASH_DURATION=$((FLASH_END - FLASH_START))
     log "Flashed ${SIMG} to ${BLOCKDEV} in ${FLASH_DURATION}s"

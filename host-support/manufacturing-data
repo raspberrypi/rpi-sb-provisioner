@@ -158,7 +158,15 @@ metadata_gather() {
     MANUFACTURER=$(metadata_get "revision-manufacturer")
     REVISION=$(metadata_get "revision-revision")
     SECURE=$(metadata_get "secure")
-    
+    # fastboot's GetSecure returns "yes"/"no"/"error" (see
+    # rpi-fastbootd variables.cpp GetSignedOtp/GetSecure); normalise
+    # to the 1/0 the schema and downstream comparisons expect.
+    case "${SECURE}" in
+        yes) SECURE="1" ;;
+        no)  SECURE="0" ;;
+        *)   SECURE=""  ;;
+    esac
+
     case ${TYPE} in
         "0x06") BOARD_STR="CM1" ;;
         "0x08") BOARD_STR="3B" ;;
@@ -176,7 +184,7 @@ metadata_gather() {
         "0x17") BOARD_STR="5" ;;
         "0x18") BOARD_STR="CM5" ;;
         "0x19") BOARD_STR="500" ;;
-        "0x1a") BOARD_STR="CM5 Lite" ;;
+        "0x1A") BOARD_STR="CM5 Lite" ;;
         *)
             BOARD_STR="Unsupported Board: ${TYPE}"
     esac
@@ -269,77 +277,65 @@ metadata_gather() {
             sqlite3 "${RPI_SB_PROVISIONER_MANUFACTURING_DB}" "CREATE TABLE devices($EXPECTED_SCHEMA);" > /dev/null 2>&1
         fi
         
-        # Determine security flags based on provisioning configuration
-        # JTAG lock status: 1 if enabled, 0 if explicitly disabled, NULL if not configured
+        # Security flags: record observed state from the device, not
+        # provisioning intent. Each flag maps a firmware-published
+        # getvar to 1/0/NULL. "not available" (the device-tree node is
+        # absent on older firmware) and any unexpected value fall
+        # through to NULL.
+        signed_flag_value() {
+            case "$(printf "%s" "$1" | tr '[:upper:]' '[:lower:]')" in
+                present)            echo "1" ;;
+                "not present")      echo "0" ;;
+                *)                  echo "NULL" ;;
+            esac
+        }
+
+        # Customer pubkey hash programmed in OTP (bit 3 of
+        # /proc/device-tree/chosen/bootloader/signed). When present,
+        # firmware authenticates boot.img against this hash.
+        PUBKEY_PROGRAMMED_VALUE=$(signed_flag_value "$(metadata_get "secure-otp")")
+
+        # Development-key revocation bit (bit 2). 'present' means the
+        # in-firmware dev key has been revoked.
+        DEVKEY_REVOKED_VALUE=$(signed_flag_value "$(metadata_get "secure-devkey")")
+
+        # Signed boot enforcement is observable via the customer pubkey
+        # hash being programmed -- firmware will only honour signed
+        # boot.img once that hash is present.
+        SIGNED_BOOT_VALUE="${PUBKEY_PROGRAMMED_VALUE}"
+
+        # JTAG-lock and EEPROM-write-protect are not currently
+        # observable via fastboot -- the provisioner applies them via
+        # signed config.txt directives (program_jtag_lock /
+        # eeprom_write_protect) but cannot read the resulting OTP /
+        # SPI-WP state back. Record provisioning intent so the UI can
+        # surface a "Requested" state; switch these to true observed
+        # reads once rpi-fastbootd grows the corresponding getvars.
         JTAG_LOCKED_VALUE="NULL"
         if [ -n "${RPI_DEVICE_LOCK_JTAG}" ]; then
             JTAG_LOCKED_VALUE="1"
         elif [ "${SECURE}" = "1" ]; then
-            # For secure provisioning, explicitly track that JTAG locking was not enabled
             JTAG_LOCKED_VALUE="0"
         fi
-        
-        # EEPROM write protection status: 1 if enabled, 0 if explicitly disabled, NULL if not configured  
+
         EEPROM_WP_VALUE="NULL"
         if [ -n "${RPI_DEVICE_EEPROM_WP_SET}" ]; then
             EEPROM_WP_VALUE="1"
         elif [ "${SECURE}" = "1" ]; then
-            # For secure provisioning, explicitly track that EEPROM WP was not enabled
             EEPROM_WP_VALUE="0"
         fi
-        
-        # Public key programming: read from fastboot metadata 'signed-otp'
-        # Map 'present' -> 1, 'not present' -> 0, common boolean forms as fallback, else NULL
-        PUBKEY_PROGRAMMED_VALUE="NULL"
-        SIGNED_OTP="$(metadata_get "secure-otp")"
-        if [ -n "${SIGNED_OTP}" ]; then
-            SIGNED_OTP_LC="$(printf "%s" "${SIGNED_OTP}" | tr '[:upper:]' '[:lower:]')"
-            case "${SIGNED_OTP_LC}" in
-                present|1|true|yes)
-                    PUBKEY_PROGRAMMED_VALUE="1"
-                    ;;
-                "not present"|notpresent|0|false|no)
-                    PUBKEY_PROGRAMMED_VALUE="0"
-                    ;;
-                *)
-                    : # leave as NULL
-                    ;;
-            esac
-        fi
-        
-        # Dev key revoked (signed-devkey): 'present' -> 1, 'not present' -> 0, else NULL
-        DEVKEY_REVOKED_VALUE="NULL"
-        SIGNED_DEVKEY="$(metadata_get "secure-devkey")"
-        if [ -n "${SIGNED_DEVKEY}" ]; then
-            SIGNED_DEVKEY_LC="$(printf "%s" "${SIGNED_DEVKEY}" | tr '[:upper:]' '[:lower:]')"
-            case "${SIGNED_DEVKEY_LC}" in
-                present)
-                    DEVKEY_REVOKED_VALUE="1"
-                    ;;
-                "not present"|notpresent)
-                    DEVKEY_REVOKED_VALUE="0"
-                    ;;
-                *)
-                    : ;;
-            esac
-        fi
 
-        # Signed boot: 1 for secure provisioning, 0 for non-secure, NULL for unknown
-        SIGNED_BOOT_VALUE="NULL"
-        if [ "${SECURE}" = "1" ]; then
-            SIGNED_BOOT_VALUE="1"
-        elif [ "${SECURE}" = "0" ]; then
-            SIGNED_BOOT_VALUE="0"
-        fi
-
-	        # Determine OS image metadata if available
-	        OS_IMAGE_FILENAME=""
+	        # OS image identifier: use the same one-line summary that
+	        # state.db carries during provisioning so the device-details
+	        # page stays coherent before and after the manufacturing record
+	        # is written.  compute_image_summary is provided by
+	        # state-recording and was called by the calling provisioner
+	        # right after read_config.
+	        OS_IMAGE_FILENAME="${IMAGE_SUMMARY:-}"
 	        OS_IMAGE_SHA256=""
 	        if [ -n "${GOLD_MASTER_OS_FILE}" ] && [ -f "${GOLD_MASTER_OS_FILE}" ]; then
-	            OS_IMAGE_FILENAME="$(basename -- "${GOLD_MASTER_OS_FILE}")"
 	            # Prefer sidecar file written by UI backend: <image>.sha256 (first token/line)
 	            if [ -f "${GOLD_MASTER_OS_FILE}.sha256" ]; then
-	                # Read first non-empty token from sidecar
 	                OS_IMAGE_SHA256="$(head -n1 "${GOLD_MASTER_OS_FILE}.sha256" | awk '{print $1}')"
 	            fi
 	            # Fallback to calculating if sidecar missing or empty
@@ -349,18 +345,10 @@ metadata_gather() {
 	                printf '%s\n' "${OS_IMAGE_SHA256}" > "${GOLD_MASTER_OS_FILE}.sha256" 2>/dev/null || true
 	            fi
 	        elif [ -n "${GOLD_MASTER_OS_FILE}" ] && [ -d "${GOLD_MASTER_OS_FILE}" ]; then
-	            # IDP artefact directory — use the image name from the JSON
-	            # metadata (set by rpi-idp-provisioner.sh before calling us),
-	            # falling back to the directory basename.
-	            if [ -n "${IDP_IMAGE_NAME}" ] && [ "${IDP_IMAGE_NAME}" != "unknown" ]; then
-	                OS_IMAGE_FILENAME="${IDP_IMAGE_NAME}"
-	            else
-	                OS_IMAGE_FILENAME="$(basename -- "${GOLD_MASTER_OS_FILE}")"
-	            fi
-	            # Read the archive SHA256 from the sidecar written by the UI
-	            # at upload time (<directory>.sha256).  This is the hash of
-	            # the original .tar.xz/.tar.zst archive, consistent with
-	            # what the web UI displays.
+	            # IDP artefact directory: read the archive SHA256 from the
+	            # sidecar written by the UI at upload time (<directory>.sha256).
+	            # This is the hash of the original .tar.xz/.tar.zst archive,
+	            # consistent with what the web UI displays.
 	            if [ -f "${GOLD_MASTER_OS_FILE}.sha256" ]; then
 	                OS_IMAGE_SHA256="$(head -n1 "${GOLD_MASTER_OS_FILE}.sha256" | awk '{print $1}')"
 	            fi
@@ -372,6 +360,10 @@ metadata_gather() {
         set +e
         connect_register_device
         set -e
+
+        # Escape single quotes so the inline SQL stays well-formed when the
+        # image summary carries spaces/parentheses/slashes (e.g. IDP one-liner).
+        OS_IMAGE_FILENAME=$(printf '%s' "${OS_IMAGE_FILENAME}" | sed "s/'/''/g")
 
         # Insert new device data
         sqlite3 "${RPI_SB_PROVISIONER_MANUFACTURING_DB}" \
@@ -422,6 +414,23 @@ metadata_gather() {
                     ${CONNECT_REGISTERED_VALUE},  \
                     '${CONNECT_DEVICE_ID_VALUE}'  \
         );" > /dev/null 2>&1
+
+        # Nudge the UI service to re-read after a manufacturing.db row write.
+        # Without this push, manufacturing changes would rely on the next
+        # record_state call (which happens to follow in the current
+        # provisioning flow) -- an implicit ordering invariant we'd rather
+        # not bake in. Fire-and-forget so a UI outage can't fail manufacturing.
+        # See host-support/state-recording for the token rationale.
+        notify_url=${PROVISIONER_MANUFACTURING_NOTIFY_URL:-http://127.0.0.1:3142/internal/manufacturing-recorded}
+        if [ -r /run/rpi-sb-provisioner/internal.token ]; then
+            internal_token=$(cat /run/rpi-sb-provisioner/internal.token 2>/dev/null || true)
+            if [ -n "${internal_token}" ]; then
+                curl --max-time 1 --connect-timeout 1 -fsS -X POST -o /dev/null \
+                    -H "X-Internal-Token: ${internal_token}" \
+                    "${notify_url}" >/dev/null 2>&1 || true
+            fi
+        fi
+
         announce_stop "Manufacturing Database Insertion"
     fi
     announce_stop "Metadata extraction"

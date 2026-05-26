@@ -454,7 +454,7 @@ namespace provisioner {
                     // Reject values containing whitespace
                     if (fieldValue.find_first_of(" \t\r\n") != std::string::npos) {
                         jsonResponse["valid"] = false;
-                        jsonResponse["error"] = "API key must not contain whitespace";
+                        jsonResponse["error"] = "Management API access token must not contain whitespace";
                     }
                 }
             } else if (fieldName == "RPI_CONNECT_DESCRIPTION") {
@@ -896,6 +896,26 @@ namespace provisioner {
             }
             config_write.close();
 
+            // Mirror /options/set: a firmware change invalidates every cached
+            // signed/staged artefact under $RPI_SB_WORKDIR. Without this, the
+            // bootstrap script's "secure-bootloader/config.txt exists, skip
+            // signing" path at rpi-sb-bootstrap.sh:543 reuses the previously
+            // signed EEPROM and the new selection silently never reaches the
+            // device.
+            {
+                auto workdirValue = utils::getConfigValue("RPI_SB_WORKDIR");
+                std::string workdir = workdirValue ? *workdirValue : "";
+                if (!workdir.empty()) {
+                    if (std::filesystem::exists(workdir) && std::filesystem::is_directory(workdir)) {
+                        LOG_INFO << "Firmware changed - removing contents of RPI_SB_WORKDIR at " << workdir;
+                        AuditLog::logFileSystemAccess("DELETE_CONTENTS", workdir, true, "", "firmware selection changed");
+                        removeDirectoryContents(workdir);
+                    } else {
+                        LOG_WARN << "RPI_SB_WORKDIR path does not exist or is not a directory: " << workdir;
+                    }
+                }
+            }
+
             auto resp = HttpResponse::newHttpResponse();
             resp->setStatusCode(k200OK);
             callback(resp);
@@ -1234,6 +1254,24 @@ namespace provisioner {
                 config_write << k << "=" << v << "\n";
             }
             config_write.close();
+
+            // A new customer key means every cached signed/staged artefact
+            // under $RPI_SB_WORKDIR was signed with the *previous* key and is
+            // now unusable for this device. Same invalidation pattern as
+            // /options/set and /options/firmware/set.
+            {
+                auto workdirValue = utils::getConfigValue("RPI_SB_WORKDIR");
+                std::string workdir = workdirValue ? *workdirValue : "";
+                if (!workdir.empty()) {
+                    if (std::filesystem::exists(workdir) && std::filesystem::is_directory(workdir)) {
+                        LOG_INFO << "Customer key changed - removing contents of RPI_SB_WORKDIR at " << workdir;
+                        AuditLog::logFileSystemAccess("DELETE_CONTENTS", workdir, true, "", "customer key uploaded");
+                        removeDirectoryContents(workdir);
+                    } else {
+                        LOG_WARN << "RPI_SB_WORKDIR path does not exist or is not a directory: " << workdir;
+                    }
+                }
+            }
 
             // Parse the key to extract metadata
             auto keyInfo = utils::parseKeyFile(destPath);

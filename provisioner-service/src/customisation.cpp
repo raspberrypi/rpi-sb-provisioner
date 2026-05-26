@@ -14,11 +14,15 @@ namespace provisioner {
         const std::string CUSTOMISATION_PATH = "/customisation";
         const std::string SCRIPTS_DIR = "/etc/rpi-sb-provisioner/scripts/";
 
-        // Define available provisioners and stages using a map
+        // Define available provisioners and stages using a map.
+        // idp-provisioner omits bootfs-mounted/rootfs-mounted because IDP does
+        // no host-side mounting, and omits bootstrap because the bootstrap
+        // phase is keyed on PROVISIONING_STYLE rather than on IDP.
         const std::map<std::string, std::vector<std::string>> PROVISIONER_STAGES = {
             {"sb-provisioner", {"bootstrap", "provision-started", "bootfs-mounted", "rootfs-mounted", "post-flash"}},
             {"fde-provisioner", {"bootstrap", "provision-started", "bootfs-mounted", "rootfs-mounted", "post-flash"}},
-            {"naked-provisioner", {"bootstrap", "provision-started", "bootfs-mounted", "rootfs-mounted", "post-flash"}}
+            {"naked-provisioner", {"bootstrap", "provision-started", "bootfs-mounted", "rootfs-mounted", "post-flash"}},
+            {"idp-provisioner", {"provision-started", "post-flash"}}
         };
 
         // Description of each stage for display in the UI
@@ -375,7 +379,21 @@ namespace provisioner {
                         defaultContent += "echo \"Adding entry to hosts file for $1 during $2 stage\"\n\n";
                         defaultContent += "echo \"10.0.0.100 custom-host\" >> ${ROOTFS_MOUNT}/etc/hosts\n\n";
                         defaultContent += "# Exit with success\nexit 0\n";
-                        
+
+                    } else if (stage == "provision-started") {
+                        defaultContent += "# This script runs at the start of provisioning, before image preparation.\n";
+                        defaultContent += "# Typical use: signal programming rigs (LEDs, buzzers) that the device is being flashed.\n";
+                        defaultContent += "# Arguments:\n";
+                        defaultContent += "# $1 - Fastboot device specifier\n";
+                        defaultContent += "# $2 - Target device serial number\n";
+                        defaultContent += "# $3 - Device storage type (e.g., mmcblk0 or nvme0n1)\n\n";
+                        defaultContent += "FASTBOOT_DEVICE_SPECIFIER=\"$1\"\n";
+                        defaultContent += "TARGET_DEVICE_SERIAL=\"$2\"\n";
+                        defaultContent += "STORAGE_TYPE=\"$3\"\n\n";
+                        defaultContent += "echo \"Provisioning started for ${TARGET_DEVICE_SERIAL}\"\n\n";
+                        defaultContent += "# Example: turn on a rig 'in progress' LED via fastboot\n";
+                        defaultContent += "# fastboot -s \"${FASTBOOT_DEVICE_SPECIFIER}\" oem led PWR 1\n\n";
+                        defaultContent += "# Exit with success\nexit 0\n";
                     }
                     
                     // Find copy sources from other provisioners with the same stage

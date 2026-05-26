@@ -32,6 +32,7 @@ log() {
 }
 
 read_config
+compute_image_summary
 
 TMP_DIR=""
 CLEANUP_DONE=0
@@ -84,8 +85,8 @@ check_pidevice_storage_type() {
         "nvme")
             echo "nvme0n1"
             ;;
-        ?)
-            die "Unexpected storage device type. Wanted sd, nvme or emmc, got $1"
+        *)
+            die "Unexpected storage device type. Wanted sd, nvme or emmc, got '$1'"
             ;;
     esac
 }
@@ -133,11 +134,14 @@ timeout_fatal() {
 }
 
 cleanup() {
+    # Capture the exit status that triggered the trap BEFORE any other
+    # command runs, otherwise $? is clobbered by the guard/assignment below
+    # and a genuine failure is reported as success.
+    return_value=$?
+
     # Guard against multiple invocations (signal + EXIT trap)
     [ "$CLEANUP_DONE" -eq 1 ] && return
     CLEANUP_DONE=1
-
-    return_value=$?
 
     # Disable errexit so cleanup runs to completion even if umount/sync fail
     set +e
@@ -265,6 +269,11 @@ if customisation_script_is_runnable "naked-provisioner" "bootfs-mounted" || \
     mount -t ext4 "${ROOT_DEV}" "${TMP_DIR}"/rpi-rootfs-img-mount ${DEBUG}
 
     announce_stop "OS Image Mounting"
+
+    # Naked mode leaves the customer's image as-is; warn rather than modify
+    # if lock_device_private_key=1 is missing, because rpi-verity-verifier
+    # (if installed in the image) will abort at boot with KEY_NOT_LOCKED.
+    ensure_lock_device_private_key "${TMP_DIR}/rpi-boot-img-mount/config.txt" warn
 
     # Run customisation script for bootfs-mounted stage
     run_customisation_script "naked-provisioner" "bootfs-mounted" "${TMP_DIR}/rpi-boot-img-mount" "${TMP_DIR}/rpi-rootfs-img-mount"

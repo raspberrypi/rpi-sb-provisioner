@@ -7,15 +7,21 @@
 #include <fstream>
 #include <sstream>
 #include <systemd/sd-bus.h>
+#include <systemd/sd-device.h>
+#include <systemd/sd-event.h>
 #include <filesystem>
 #include <unordered_map>
 #include <set>
 #include <thread>
 #include <mutex>
+#include <condition_variable>
 #include <atomic>
 #include <chrono>
 #include <algorithm>
 #include <cctype>
+#include <random>
+#include <cstdio>
+#include <sys/stat.h>
 #include "utils.h"
 #include "include/audit.h"
 
@@ -104,6 +110,12 @@ namespace provisioner {
         int portCount{0};        // number of ports if hub (from maxchild)
         bool isPlaceholder{false};
         int speed{0};            // USB speed in Mbps (e.g., 480 for USB2, 5000 for USB3)
+        // Two-digit hex of bits 4..11 of the OTP USER_BOARDREV (e.g. "17"
+        // for Pi 5, "18" for CM5).  Captured by the bootstrap script via
+        // `rpiboot -j` and persisted across the EEPROM-update reboot in
+        // state.db so the visualiser can keep flagging Pi 5 boards while
+        // the device is unplugged waiting for the user to reconnect.
+        std::string boardType;
     };
 
     // Tracker state
@@ -113,6 +125,25 @@ namespace provisioner {
         std::mutex topologyMutex;
         // Map id -> node
         std::unordered_map<std::string, UsbNode> currentTopology;
+
+        // Event-driven scan trigger: USB uevents (sd_device_monitor) and
+        // POSTs to /internal/state-changed from the provisioning scripts push
+        // scanRequested=true and notify scanCv, collapsing the worker's wait.
+        // A 10s wait_for backstop covers anything that slips past both event
+        // sources.
+        std::mutex scanMu;
+        std::condition_variable scanCv;
+        bool scanRequested{false};
+        std::thread eventSourceThread;
+        sd_event *eventSourceLoop{nullptr};
+
+        void requestScan() {
+            {
+                std::lock_guard<std::mutex> lk(scanMu);
+                scanRequested = true;
+            }
+            scanCv.notify_all();
+        }
         // App start time in milliseconds since epoch; used to ignore stale DB rows
         std::atomic<long long> appStartMs{0};
         
@@ -778,8 +809,14 @@ namespace provisioner {
 
         void enrichWithProvisioningState(std::unordered_map<std::string, UsbNode> &nodes) {
             // Build latest record per endpoint (descending ts ensures first seen is newest)
-            struct DbRecord { std::string serial, state, image, ip; };
+            struct DbRecord { std::string serial, state, image, ip, boardType; };
             std::unordered_map<std::string, DbRecord> latestByEndpoint;
+            // board_type is written once per device (during bootstrap) but
+            // subsequent record_state calls after that point also carry the
+            // sticky value.  Track the latest non-empty value seen per serial
+            // so the badge survives the device's own reboot — which is when
+            // the operator most needs the "please re-plug" hint.
+            std::unordered_map<std::string, std::string> boardTypeBySerial;
             struct MfgRecord { std::string boardname, processor, osImageFilename; };
             std::unordered_map<std::string, MfgRecord> latestMfgBySerial;
 
@@ -788,7 +825,8 @@ namespace provisioner {
             if (rc) {
                 return;
             }
-            const char* sql = "SELECT serial, endpoint, state, image, ip_address FROM devices WHERE ts >= ? ORDER BY ts DESC";
+            sqlite3_busy_timeout(db, 5000);
+            const char* sql = "SELECT serial, endpoint, state, image, ip_address, board_type FROM devices WHERE ts >= ? ORDER BY ts DESC";
             sqlite3_stmt* stmt;
             rc = sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr);
             if (rc != SQLITE_OK) {
@@ -803,15 +841,26 @@ namespace provisioner {
                 const unsigned char* state = sqlite3_column_text(stmt, 2);
                 const unsigned char* image = sqlite3_column_text(stmt, 3);
                 const unsigned char* ip = sqlite3_column_text(stmt, 4);
+                const unsigned char* boardType = sqlite3_column_text(stmt, 5);
                 if (!endpoint) continue;
                 std::string endpointStr = reinterpret_cast<const char*>(endpoint);
+                std::string boardTypeStr = boardType ? reinterpret_cast<const char*>(boardType) : std::string{};
+                std::string serialStr = serial ? reinterpret_cast<const char*>(serial) : std::string{};
                 if (latestByEndpoint.find(endpointStr) == latestByEndpoint.end()) {
                     latestByEndpoint.emplace(endpointStr, DbRecord{
-                        serial ? reinterpret_cast<const char*>(serial) : std::string{},
+                        serialStr,
                         state ? reinterpret_cast<const char*>(state) : std::string{},
                         image ? reinterpret_cast<const char*>(image) : std::string{},
-                        ip ? reinterpret_cast<const char*>(ip) : std::string{}
+                        ip ? reinterpret_cast<const char*>(ip) : std::string{},
+                        boardTypeStr
                     });
+                }
+                if (!boardTypeStr.empty() && !serialStr.empty()) {
+                    auto it = boardTypeBySerial.find(serialStr);
+                    if (it == boardTypeBySerial.end()) {
+                        // First (= latest) non-empty board_type for this serial wins.
+                        boardTypeBySerial.emplace(serialStr, boardTypeStr);
+                    }
                 }
             }
             sqlite3_finalize(stmt);
@@ -822,6 +871,7 @@ namespace provisioner {
                 sqlite3* mdb = nullptr;
                 int rc2 = sqlite3_open("/srv/rpi-sb-provisioner/manufacturing.db", &mdb);
                 if (rc2 == SQLITE_OK) {
+                    sqlite3_busy_timeout(mdb, 5000);
                     const char* msql = "SELECT serial, boardname, processor, os_image_filename FROM devices ORDER BY provision_ts DESC";
                     sqlite3_stmt* mstmt = nullptr;
                     rc2 = sqlite3_prepare_v2(mdb, msql, -1, &mstmt, nullptr);
@@ -854,14 +904,39 @@ namespace provisioner {
                 auto it = nodes.find(endpoint);
                 if (it == nodes.end()) continue; // endpoint not present in current topology
                 UsbNode &n = it->second;
-                if (n.isPlaceholder) continue; // not connected
                 if (n.isHub) continue; // never apply provisioning state to hubs
+                if (n.isPlaceholder) {
+                    // Empty port: don't apply runtime fields (image/ip
+                    // describe a device that isn't here), but DO surface
+                    // the latest board_type and state for this endpoint so
+                    // the UI can keep the "please re-plug" badge on a Pi 5
+                    // that has just powered off after its EEPROM-update
+                    // reboot — exactly the moment the operator needs to
+                    // see it.  State is needed downstream to gate the
+                    // badge emission to the actual transition window.
+                    if (n.boardType.empty() && !rec.boardType.empty()) {
+                        n.boardType = rec.boardType;
+                    }
+                    if (n.state.empty() && !rec.state.empty()) {
+                        n.state = rec.state;
+                    }
+                    continue;
+                }
                 n.state = rec.state;
                 // Do not clobber existing non-empty image (used for model inference) with empty DB values
                 if (!rec.image.empty()) {
                     n.image = rec.image;
                 }
                 n.ip = rec.ip;
+                // Latest non-empty board_type per serial wins; fall back to
+                // the per-endpoint latest if the serial-keyed map missed.
+                if (!n.serial.empty()) {
+                    auto bit = boardTypeBySerial.find(n.serial);
+                    if (bit != boardTypeBySerial.end()) n.boardType = bit->second;
+                }
+                if (n.boardType.empty() && !rec.boardType.empty()) {
+                    n.boardType = rec.boardType;
+                }
                 // If we also have a manufacturing record for this device by serial, use it to annotate image/model
                 if (!n.serial.empty()) {
                     auto mit = latestMfgBySerial.find(n.serial);
@@ -899,6 +974,11 @@ namespace provisioner {
                         n.image = rec.image;
                     }
                     n.ip = rec.ip;
+                    auto bit = boardTypeBySerial.find(n.serial);
+                    if (bit != boardTypeBySerial.end()) n.boardType = bit->second;
+                    if (n.boardType.empty() && !rec.boardType.empty()) {
+                        n.boardType = rec.boardType;
+                    }
                     auto mit = latestMfgBySerial.find(n.serial);
                     if (mit != latestMfgBySerial.end()) {
                         const auto &mr = mit->second;
@@ -907,6 +987,21 @@ namespace provisioner {
                         if (n.image.empty() && !mr.osImageFilename.empty()) n.image = mr.osImageFilename;
                     }
                 }
+            }
+
+            // Final pass for board_type only: when the device has just
+            // re-appeared after the EEPROM-update reboot it may not yet have
+            // a fresh state.db row, but its serial still matches a row from
+            // an earlier bootstrap phase carrying board_type.  Apply the
+            // sticky type so the "please re-plug" badge keeps showing through
+            // the transition rather than blinking off and on.
+            for (auto &p : nodes) {
+                UsbNode &n = p.second;
+                if (n.isPlaceholder || n.isHub) continue;
+                if (!n.boardType.empty()) continue;
+                if (n.serial.empty()) continue;
+                auto bit = boardTypeBySerial.find(n.serial);
+                if (bit != boardTypeBySerial.end()) n.boardType = bit->second;
             }
         }
 
@@ -983,6 +1078,30 @@ namespace provisioner {
                 if (n.speed > 0) j["speed"] = n.speed;
                 int gen = inferModelGeneration(n);
                 if (gen > 0) j["modelGen"] = gen;
+                if (!n.boardType.empty()) j["boardType"] = n.boardType;
+                // Pi 5 (board type 0x17) requires the user to physically
+                // unplug and reconnect the USB-C cable after the bootloader
+                // EEPROM update -- the power button means there's no other
+                // way to bring it back into RPIBOOT mode.  CM5/Pi 500/etc.
+                // either share a jumper-style flow or aren't covered here.
+                //
+                // Gate the badge on the actual transition window: between
+                // bootstrap-firmware-updated (EEPROM just written, device
+                // about to disappear) and the next phase taking over
+                // (anything past fastboot-initialisation-started — once
+                // BOOTSTRAP-FINISHED or TRIAGE-STARTED lands the replug
+                // has happened, and the badge would be stale noise).
+                // Without this gate the boardTypeBySerial sticky-lookup
+                // re-asserts the badge on every fresh BOOTSTRAP-STARTED
+                // for a previously-seen Pi 5 — banner shows before the
+                // EEPROM has even been touched, and lingers into triage.
+                if (n.boardType == "17") {
+                    const std::string &s = n.state;
+                    if (s == "bootstrap-firmware-updated" ||
+                        s == "bootstrap-fastboot-initialisation-started") {
+                        j["needsReplug"] = true;
+                    }
+                }
                 arr.append(j);
             }
             root["nodes"] = arr;
@@ -1058,9 +1177,10 @@ namespace provisioner {
             while (topologyRunning) {
                 // Skip real USB scanning when test mode is enabled
                 if (testModeEnabled) {
-                    for (int i=0; i<10 && topologyRunning; ++i) {
-                        std::this_thread::sleep_for(std::chrono::milliseconds(300));
-                    }
+                    std::unique_lock<std::mutex> lk(scanMu);
+                    scanCv.wait_for(lk, std::chrono::seconds(10),
+                        [] { return scanRequested || !topologyRunning.load(); });
+                    scanRequested = false;
                     continue;
                 }
                 
@@ -1103,11 +1223,65 @@ namespace provisioner {
                     DevicesWebSocketController::broadcast(msg);
                 }
 
-                for (int i=0; i<10 && topologyRunning; ++i) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(300));
-                }
+                std::unique_lock<std::mutex> lk(scanMu);
+                scanCv.wait_for(lk, std::chrono::seconds(10),
+                    [] { return scanRequested || !topologyRunning.load(); });
+                scanRequested = false;
             }
             LOG_INFO << "Topology worker stopped";
+        }
+
+        // Callback for USB hotplug events from sd_device_monitor: any add/remove/
+        // change on the "usb" subsystem wakes the topology worker for an
+        // immediate scan. We don't inspect the device — the scanner is the
+        // source of truth and will pick up whatever changed.
+        int onUsbDeviceEvent(sd_device_monitor *, sd_device *, void *) {
+            requestScan();
+            return 0;
+        }
+
+        // Hosts sd_device_monitor (USB hotplug) in a single sd_event loop.
+        // State.db changes used to be observed via inotify on the state
+        // directory, but the provisioning scripts now POST to
+        // /internal/state-changed after each row write, so the watch is
+        // gone — the self-trigger loop with our own SQLite reads goes
+        // with it. Shutdown is driven from ~Devices() via sd_event_exit(),
+        // which is thread-safe.
+        void eventSourceWorker() {
+            LOG_INFO << "Event source worker started";
+
+            sd_event *event = nullptr;
+            if (sd_event_new(&event) < 0) {
+                LOG_ERROR << "sd_event_new failed; falling back to timer-only scanning";
+                return;
+            }
+            eventSourceLoop = event;
+
+            sd_device_monitor *monitor = nullptr;
+            if (sd_device_monitor_new(&monitor) < 0) {
+                LOG_ERROR << "sd_device_monitor_new failed";
+                sd_event_unref(event);
+                eventSourceLoop = nullptr;
+                return;
+            }
+            if (sd_device_monitor_filter_add_match_subsystem_devtype(monitor, "usb", nullptr) < 0) {
+                LOG_WARN << "sd_device_monitor subsystem filter failed; will receive all uevents";
+            }
+            if (sd_device_monitor_attach_event(monitor, event) < 0 ||
+                sd_device_monitor_start(monitor, onUsbDeviceEvent, nullptr) < 0) {
+                LOG_ERROR << "sd_device_monitor_start failed";
+                sd_device_monitor_unref(monitor);
+                sd_event_unref(event);
+                eventSourceLoop = nullptr;
+                return;
+            }
+
+            sd_event_loop(event);
+
+            sd_device_monitor_unref(monitor);
+            sd_event_unref(event);
+            eventSourceLoop = nullptr;
+            LOG_INFO << "Event source worker stopped";
         }
     }
     
@@ -1129,19 +1303,101 @@ namespace provisioner {
             throw std::runtime_error("Failed to connect to system bus: " + std::string(strerror(-ret)));
         }
         systemd_bus = std::unique_ptr<sd_bus, decltype(&sd_bus_unref)>(bus, sd_bus_unref);
-        // Start topology watcher
+        // Start topology watcher and event-driven scan triggers
         if (!topologyRunning) {
             topologyRunning = true;
             topologyThread = std::thread(topologyWorker);
+            eventSourceThread = std::thread(eventSourceWorker);
         }
     }
 
     Devices::~Devices() {
-        // Stop topology watcher
+        // Stop topology watcher and event sources. Order: flip the flag,
+        // wake the topology worker via the cv, tell sd_event to exit, then
+        // join both threads.
         if (topologyRunning) {
             topologyRunning = false;
+            scanCv.notify_all();
+            if (eventSourceLoop) sd_event_exit(eventSourceLoop, 0);
             if (topologyThread.joinable()) topologyThread.join();
+            if (eventSourceThread.joinable()) eventSourceThread.join();
         }
+    }
+
+    // Resolves a URL identifier (which may be a real device serial or a USB
+    // endpoint path used before the device reported its serial) to the real
+    // device serial recorded in state.db. Returns an empty string when no
+    // matching device exists or the device has not yet reported a serial.
+    // Special flags are keyed by real serial only — bootstrap.sh looks them
+    // up via TARGET_DEVICE_SERIAL — so this resolution is required to keep
+    // flag writes and reads aligned with what the bootstrap script honours.
+    static std::string resolveDeviceSerial(const std::string &identifier)
+    {
+        if (identifier.empty()) return {};
+
+        sqlite3* db = nullptr;
+        if (sqlite3_open("/srv/rpi-sb-provisioner/state.db", &db) != SQLITE_OK) {
+            if (db) sqlite3_close(db);
+            return {};
+        }
+        sqlite3_busy_timeout(db, 5000);
+
+        std::string resolved;
+        for (const char* sql : {
+                "SELECT serial FROM devices WHERE serial = ? ORDER BY ts DESC LIMIT 1",
+                "SELECT serial FROM devices WHERE endpoint = ? ORDER BY ts DESC LIMIT 1"}) {
+            sqlite3_stmt* stmt = nullptr;
+            if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+                if (stmt) sqlite3_finalize(stmt);
+                continue;
+            }
+            sqlite3_bind_text(stmt, 1, identifier.c_str(), -1, SQLITE_STATIC);
+            if (sqlite3_step(stmt) == SQLITE_ROW) {
+                const unsigned char* s = sqlite3_column_text(stmt, 0);
+                if (s && *s) {
+                    resolved = reinterpret_cast<const char*>(s);
+                    sqlite3_finalize(stmt);
+                    break;
+                }
+            }
+            sqlite3_finalize(stmt);
+        }
+
+        sqlite3_close(db);
+        return resolved;
+    }
+
+    // Probe for an active special-flag file, honouring the short-vs-full
+    // serial representation that rpi-sb-bootstrap.sh's resolve_special_flag_path
+    // accepts: when `serial` is a 16-hex-char DUID we also probe the
+    // lowercased 8-char suffix, which is the truncated serial form recorded
+    // pre-triage. Keep this in lockstep with the shell helper so the UI
+    // reflects exactly what the bootstrap script will honour.
+    // Returns the matching path, or empty if no flag file is present.
+    static std::string findSpecialFlagFile(const std::string &flagId, const std::string &serial)
+    {
+        if (serial.empty()) return {};
+        const std::string dir = "/etc/rpi-sb-provisioner/special-" + flagId + "/";
+
+        std::string sanitised = provisioner::utils::sanitize_path_component(serial);
+        if (!sanitised.empty()) {
+            std::string p = dir + sanitised;
+            if (std::filesystem::is_regular_file(p)) return p;
+        }
+
+        if (serial.size() == 16 &&
+            std::all_of(serial.begin(), serial.end(),
+                        [](unsigned char c) { return std::isxdigit(c) != 0; })) {
+            std::string suffix = serial.substr(8);
+            std::transform(suffix.begin(), suffix.end(), suffix.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            std::string sanitisedSuffix = provisioner::utils::sanitize_path_component(suffix);
+            if (!sanitisedSuffix.empty()) {
+                std::string p = dir + sanitisedSuffix;
+                if (std::filesystem::is_regular_file(p)) return p;
+            }
+        }
+        return {};
     }
 
     void Devices::registerHandlers(drogon::HttpAppFramework &app)
@@ -1182,6 +1438,7 @@ namespace provisioner {
                     return;
                 }
             }
+            sqlite3_busy_timeout(db, 5000);
 
             std::vector<std::string> serials;
             sqlite3_stmt* stmt;
@@ -1308,6 +1565,7 @@ namespace provisioner {
                 callback(resp);
                 return;
             }
+            sqlite3_busy_timeout(db, 5000);
 
             // Try matching by serial first, then fall back to matching by
             // USB endpoint path.  This allows the detail page to be reached
@@ -1395,6 +1653,7 @@ namespace provisioner {
                 sqlite3* mdb = nullptr;
                 int mrc = sqlite3_open("/srv/rpi-sb-provisioner/manufacturing.db", &mdb);
                 if (mrc == SQLITE_OK) {
+                    sqlite3_busy_timeout(mdb, 5000);
                     sqlite3_stmt* mstmt = nullptr;
                     const char* msql = "SELECT os_image_filename FROM devices WHERE serial = ? ORDER BY provision_ts DESC LIMIT 1";
                     mrc = sqlite3_prepare_v2(mdb, msql, -1, &mstmt, nullptr);
@@ -1453,6 +1712,7 @@ namespace provisioner {
                     sqlite3* histDb;
                     int histRc = sqlite3_open("/srv/rpi-sb-provisioner/state.db", &histDb);
                     if (histRc == SQLITE_OK) {
+                        sqlite3_busy_timeout(histDb, 5000);
                         sqlite3_stmt* histStmt;
                         const char* histSql = matchedByEndpoint
                             ? "SELECT state, ts FROM devices WHERE endpoint = ? ORDER BY ts DESC LIMIT 10"
@@ -1475,8 +1735,10 @@ namespace provisioner {
                     }
                 }
 
-                // Read special flag status for this device
-                std::string sanitizedSerial = provisioner::utils::sanitize_path_component(device.serial);
+                // Read special flag status for this device. Bootstrap.sh
+                // accepts a flag file keyed on either the full DUID or its
+                // lowercased 8-char truncation, so findSpecialFlagFile probes
+                // both forms.
                 std::vector<std::map<std::string, std::string>> flagsList;
                 struct FlagDef {
                     std::string id;
@@ -1491,13 +1753,15 @@ namespace provisioner {
                      "Re-provisions an already-provisioned device by re-signing bootcode from original firmware. Only works on Pi 5 family.", "Pi 5 only (BCM2712)"},
                 };
                 for (const auto &fd : flagDefs) {
-                    std::string filePath = "/etc/rpi-sb-provisioner/special-" + fd.id + "/" + sanitizedSerial;
                     std::map<std::string, std::string> flagMap;
                     flagMap["id"] = fd.id;
                     flagMap["label"] = fd.label;
                     flagMap["description"] = fd.description;
                     flagMap["constraint"] = fd.constraint;
-                    if (std::filesystem::exists(filePath)) {
+                    flagMap["active"] = "false";
+                    flagMap["mode"] = "off";
+                    std::string filePath = findSpecialFlagFile(fd.id, device.serial);
+                    if (!filePath.empty()) {
                         flagMap["active"] = "true";
                         std::ifstream ff(filePath);
                         std::string content;
@@ -1507,9 +1771,6 @@ namespace provisioner {
                                 content.pop_back();
                         }
                         flagMap["mode"] = (content == "once") ? "once" : "persistent";
-                    } else {
-                        flagMap["active"] = "false";
-                        flagMap["mode"] = "off";
                     }
                     flagsList.push_back(flagMap);
                 }
@@ -1898,42 +2159,42 @@ namespace provisioner {
                 return;
             }
 
-            std::string sanitizedSerial = provisioner::utils::sanitize_path_component(serialno);
+            // The URL identifier may be a USB endpoint path for devices that
+            // haven't reported their serial yet. Resolve to the real serial,
+            // then probe both the full and truncated forms via
+            // findSpecialFlagFile so the response matches what bootstrap.sh
+            // will honour at flag-evaluation time.
+            std::string realSerial = resolveDeviceSerial(serialno);
 
             Json::Value root;
             Json::Value flagsArray(Json::arrayValue);
 
             for (const auto &fi : knownFlags) {
-                std::string dirPath = "/etc/rpi-sb-provisioner/special-" + fi.id;
-                std::string filePath = dirPath + "/" + sanitizedSerial;
-
                 Json::Value flag;
                 flag["id"] = fi.id;
                 flag["label"] = fi.label;
                 flag["description"] = fi.description;
                 if (!fi.constraint.empty()) flag["constraint"] = fi.constraint;
+                flag["active"] = false;
+                flag["mode"] = "off";
 
-                if (std::filesystem::exists(filePath)) {
+                std::string filePath = findSpecialFlagFile(fi.id, realSerial);
+                if (!filePath.empty()) {
                     flag["active"] = true;
-                    // Read file content to determine mode
                     std::ifstream f(filePath);
                     std::string content;
                     if (f.is_open()) {
                         std::getline(f, content);
-                        // Trim whitespace
                         while (!content.empty() && (content.back() == '\n' || content.back() == '\r' || content.back() == ' '))
                             content.pop_back();
                     }
                     flag["mode"] = (content == "once") ? "once" : "persistent";
-                } else {
-                    flag["active"] = false;
-                    flag["mode"] = "off";
                 }
 
                 flagsArray.append(flag);
             }
 
-            root["serial"] = serialno;
+            root["serial"] = realSerial.empty() ? serialno : realSerial;
             root["flags"] = flagsArray;
 
             Json::FastWriter writer;
@@ -2000,7 +2261,23 @@ namespace provisioner {
                 return;
             }
 
-            std::string sanitizedSerial = provisioner::utils::sanitize_path_component(serialno);
+            // Flags are honoured by bootstrap.sh keyed on the real device
+            // serial. If the request came in via a USB endpoint URL (used
+            // before the device has reported its serial), resolve it so the
+            // file we write is one the bootstrap script will actually read.
+            std::string realSerial = resolveDeviceSerial(serialno);
+            if (realSerial.empty()) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Device has not reported a serial yet; flag cannot be set until it does. "
+                    "Wait for the device to progress past the initial bootloader stage and retry.",
+                    drogon::k409Conflict, "Serial Not Available", "SERIAL_NOT_RESOLVED",
+                    "Requested identifier: " + serialno);
+                callback(resp);
+                return;
+            }
+
+            std::string sanitizedSerial = provisioner::utils::sanitize_path_component(realSerial);
             std::string dirPath = "/etc/rpi-sb-provisioner/special-" + flagId;
             std::string filePath = dirPath + "/" + sanitizedSerial;
 
@@ -2010,8 +2287,8 @@ namespace provisioner {
                     try {
                         std::filesystem::remove(filePath);
                         AuditLog::logFileSystemAccess("DELETE_FLAG", filePath, true, "",
-                            "Special flag removed: " + flagId + " for device " + serialno);
-                        LOG_INFO << "Removed special flag: " << flagId << " for device " << serialno;
+                            "Special flag removed: " + flagId + " for device " + realSerial);
+                        LOG_INFO << "Removed special flag: " << flagId << " for device " << realSerial;
                     } catch (const std::exception &e) {
                         LOG_ERROR << "Failed to remove flag file: " << e.what();
                         auto resp = provisioner::utils::createErrorResponse(
@@ -2050,16 +2327,17 @@ namespace provisioner {
                 f.close();
 
                 AuditLog::logFileSystemAccess("SET_FLAG", filePath, true, "",
-                    "Special flag set: " + flagId + " (" + mode + ") for device " + serialno);
-                LOG_INFO << "Set special flag: " << flagId << " (" << mode << ") for device " << serialno;
+                    "Special flag set: " + flagId + " (" + mode + ") for device " + realSerial);
+                LOG_INFO << "Set special flag: " << flagId << " (" << mode << ") for device " << realSerial;
             }
 
-            // Return the updated flag status
+            // Return the updated flag status. Report the real serial so the
+            // client can reconcile against /devices/{serial}.
             Json::Value result;
             result["success"] = true;
             result["flag"] = flagId;
             result["mode"] = mode;
-            result["serial"] = serialno;
+            result["serial"] = realSerial;
 
             Json::FastWriter writer;
             resp->setStatusCode(k200OK);
@@ -2111,8 +2389,101 @@ namespace provisioner {
             resp->setBody(writer.write(result));
             callback(resp);
         }); // devices/_test handler
+
+        // Localhost-only notification endpoints. The bash provisioning
+        // scripts POST here after writing rows that the topology worker
+        // cares about, in place of the inotify watch we used to keep on
+        // /srv/rpi-sb-provisioner. Inverting the dependency removes the
+        // self-trigger loop the inotify watch had with our own SQLite reads.
+        // Both endpoints share the same effect (kick the worker for a
+        // rescan); the split is for semantic clarity at the call site and
+        // in access logs. No body is required — the worker re-reads both
+        // DBs on the next scan, which requestScan() wakes immediately.
+        //
+        // Access control is two layers:
+        //   1. Transport-level loopback check via getPeerAddr().isLoopbackIp().
+        //      We must NOT use AuditLog::getClientIP here -- that one honours
+        //      X-Forwarded-For, which is attacker-controlled on a direct
+        //      connection and would let any reachable client spoof loopback.
+        //   2. Shared-secret token in /run/rpi-sb-provisioner/internal.token.
+        //      The file is mode 0600, root-owned; only callers in the same
+        //      security domain as the provisioning scripts can read it. This
+        //      closes the nginx-reverse-proxy hole (peer IP would be 127.0.0.1
+        //      even for external clients) and any local-non-root caller.
+        // Token: generated once per service start; lives in tmpfs, so a
+        // fresh value comes up on every boot.
+        const std::string internalToken = [] {
+            std::string hex;
+            hex.reserve(64);
+            std::random_device rd;
+            for (int i = 0; i < 32; ++i) {
+                const unsigned byte = rd() & 0xff;
+                static const char *digits = "0123456789abcdef";
+                hex.push_back(digits[byte >> 4]);
+                hex.push_back(digits[byte & 0x0f]);
+            }
+            const std::string tokenPath = "/run/rpi-sb-provisioner/internal.token";
+            std::filesystem::create_directories("/run/rpi-sb-provisioner");
+            const std::string tmpPath = tokenPath + ".tmp";
+            {
+                std::ofstream f(tmpPath, std::ios::trunc | std::ios::binary);
+                if (f) f << hex;
+            }
+            // Mode 0600 before rename so a reader never sees a too-permissive file.
+            (void)::chmod(tmpPath.c_str(), 0600);
+            (void)::rename(tmpPath.c_str(), tokenPath.c_str());
+            return hex;
+        }();
+
+        // Constant-time string compare (avoid timing-channel leak on the
+        // token). std::memcmp is famously *not* constant time on most libcs.
+        auto tokensEqual = [](const std::string &a, const std::string &b) {
+            if (a.size() != b.size()) return false;
+            unsigned char acc = 0;
+            for (size_t i = 0; i < a.size(); ++i) {
+                acc |= static_cast<unsigned char>(a[i]) ^ static_cast<unsigned char>(b[i]);
+            }
+            return acc == 0;
+        };
+
+        auto internalNotify = [internalToken, tokensEqual](
+                const HttpRequestPtr &req,
+                std::function<void(const HttpResponsePtr &)> &&callback) {
+            auto resp = HttpResponse::newHttpResponse();
+            // Layer 1: transport-level loopback. Reject before we even
+            // look at headers so spoofed X-Forwarded-For cannot influence
+            // the decision. Trantor's isLoopbackIp() refuses v4-mapped IPv6
+            // forms (::ffff:127.0.0.1) that show up on dual-stack listeners,
+            // so compare the stringified peer address explicitly.
+            const std::string peerIp = req->getPeerAddr().toIp();
+            const bool isLoopback = (peerIp == "127.0.0.1" || peerIp == "::1" ||
+                                     peerIp == "::ffff:127.0.0.1");
+            if (!isLoopback) {
+                resp->setStatusCode(k404NotFound);
+                resp->setBody("debug: non-loopback peer=" + peerIp);
+                callback(resp);
+                return;
+            }
+            // Layer 2: shared-secret token from the root-only file.
+            const std::string presented = req->getHeader("X-Internal-Token");
+            if (presented.empty() || !tokensEqual(presented, internalToken)) {
+                resp->setStatusCode(k404NotFound);
+                resp->setBody("debug: token mismatch presented_len=" +
+                              std::to_string(presented.size()) +
+                              " expected_len=" + std::to_string(internalToken.size()));
+                callback(resp);
+                return;
+            }
+            requestScan();
+            resp->setStatusCode(k204NoContent);
+            callback(resp);
+        };
+        // Paired with record_state() in host-support/state-recording.
+        app.registerHandler("/internal/state-changed", internalNotify, {Post});
+        // Paired with the manufacturing.db INSERT in host-support/manufacturing-data.
+        app.registerHandler("/internal/manufacturing-recorded", internalNotify, {Post});
     }
 
-    
+
 } // namespace provisioner
 

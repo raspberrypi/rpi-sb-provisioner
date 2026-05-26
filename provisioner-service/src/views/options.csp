@@ -1270,18 +1270,18 @@
                     <span class="section-title-icon">&#9729;</span>
                     Cloud Services
                 </h2>
-                <p class="section-description">Register provisioned devices with Raspberry Pi Connect. Requires an organisation API key from the Connect management portal.</p>
+                <p class="section-description">Register provisioned devices with Raspberry Pi Connect for Organisations. Requires a management API access token from the Settings tab of your Connect organisation.</p>
             </div>
 
             <!-- Connect API Key -->
             <div class="field-group">
-                <label class="field-label" for="RPI_CONNECT_API_KEY">Connect API Key <span class="optional-badge">Optional</span></label>
+                <label class="field-label" for="RPI_CONNECT_API_KEY">Connect Management API Access Token <span class="optional-badge">Optional</span></label>
                 <div class="pin-input-wrapper">
                     <input type="password" class="field-input" id="RPI_CONNECT_API_KEY" name="RPI_CONNECT_API_KEY"
                            value="<%c++ $$ << connectApiKey; %>"
-                           placeholder="Organisation API key from Raspberry Pi Connect"
+                           placeholder="rporg_..."
                            onblur="validateAndSaveField('RPI_CONNECT_API_KEY')">
-                    <button type="button" class="pin-toggle-visibility" onclick="toggleConnectKeyVisibility()" aria-label="Toggle API key visibility">&#128065;</button>
+                    <button type="button" class="pin-toggle-visibility" onclick="toggleConnectKeyVisibility()" aria-label="Toggle access token visibility">&#128065;</button>
                 </div>
                 <div id="feedback-RPI_CONNECT_API_KEY" class="field-feedback"></div>
 
@@ -1302,7 +1302,7 @@
 
                 <div class="inline-help">
                     <span class="inline-help-icon">&#9432;</span>
-                    <span>Optional prefix for the device description sent to Connect. The board type and serial number are always appended.</span>
+                    <span>Optional prefix for the device identity description sent to Connect. The board type and serial number are always appended.</span>
                 </div>
             </div>
         </div>

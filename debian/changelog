@@ -1,4 +1,9 @@
-rpi-sb-provisioner (2.3.0) unstable; urgency=medium
+rpi-sb-provisioner (2.3.0~pre1) unstable; urgency=medium
+
+  * Pre-release:
+    - First preview of the 2.3.0 line. Combines the IDP, Connect and
+      rpifwcrypto work from the 2.3.0 changelog draft with the
+      post-April stabilisation and re-plug guidance work below.
 
   * IDP (Image Description Provisioning) Support:
     - Add support for consuming IDP-style artefacts from rpi-image-gen,
@@ -66,6 +71,14 @@ rpi-sb-provisioner (2.3.0) unstable; urgency=medium
     - Add rpi-idp-provisioner.sh to /usr/bin and
       rpi-idp-provisioner@.service to /usr/lib/systemd/system in
       debian/install
+    - Create /var/lock/rpi-sb-provisioner in postinst so with_lock()
+      works on fresh installs; LOCK_BASE was previously assumed to
+      exist but never created by the package
+    - Remove redundant per-call board_type migration probe from
+      record_state() in host-support/state-recording: postinst
+      already performs a more thorough state.db schema migration on
+      upgrade, so the runtime probe added two SQLite invocations to
+      every device state transition for no benefit
 
   * Raspberry Pi Connect Device Identity Registration:
     - Automatically register provisioned devices with the Raspberry Pi
@@ -96,7 +109,137 @@ rpi-sb-provisioner (2.3.0) unstable; urgency=medium
       measurements) and Raspberry Pi Connect device identity
       registration; the private key never leaves the SoC
 
- -- Tom Dewey <tom.dewey@raspberrypi.com>  Fri, 17 Apr 2026 12:00:00 +0100
+  * Provisioner Exit Status Fix:
+    - Fix cleanup() trap handler in rpi-sb-provisioner.sh,
+      rpi-fde-provisioner.sh, rpi-naked-provisioner.sh,
+      rpi-idp-provisioner.sh and rpi-sb-bootstrap.sh swallowing the
+      real exit status: the re-entry guard and CLEANUP_DONE=1
+      assignment clobbered $? before it was captured, so any failure
+      caught by the trap (set -e, die, SIGTERM) was reported as
+      success -- the systemd unit showed "Deactivated successfully"
+      and the WebUI saw a clean run despite aborted provisioning
+    - Capture $? as the first statement of cleanup() so the original
+      exit status propagates through to systemd and the manufacturing
+      database
+
+  * IDP Refinements:
+    - Sign boot slots for secure-boot IDP provisioning, and drop a
+      boot_ramdisk config.txt next to the signed boot.img so the
+      device picks up the signed bootchain on first boot
+    - Ensure the device unique firmware crypto key is OTP-locked at
+      the end of provisioning, establishing an immutable hardware
+      identity for subsequent boots
+    - Expand the encryption flag matcher so all LUKS2 cipher variants
+      are recognised as encrypted IDP layouts (fixes LUKS2 cipher
+      field handling)
+    - Fall back to the configured storage type when the IDP JSON does
+      not name one, instead of refusing to provision
+    - Catch all non-supported storage types up-front with a clear
+      error rather than proceeding to a broken flash
+    - Add missing timeout_nonfatal wrappers in rpi-idp-provisioner.sh
+    - Default timeout_fatal to 30s in the IDP provisioner
+    - Wire provision-started hook arguments through rpi-sb-common.sh
+      and move the IDP provision-started hook to the correct
+      lifecycle point
+    - Add IDP provisioner customisation hook editors to the WebUI
+    - Allow IDP service log viewing in the WebUI
+    - Fix incorrect zero2w platform name mapping in the IDP
+      provisioner, image-handling paths, and documentation
+
+  * Re-plug Guidance:
+    - Record the discovered board type per device so re-plug guidance
+      can be tailored to the family
+    - Add Raspberry Pi 5 re-plug banners to the WebUI, prompting
+      operators to physically re-plug devices that cannot enter
+      RPIBOOT automatically
+    - Improve device and detail-view liveness so the WebUI reflects
+      in-flight provisioning state without manual refresh
+    - Capture provisioning intent vs observed state for fields that
+      cannot yet be confirmed over fastboot (jtag_locked,
+      eeprom_write_protected); add a devkey_revoked column observed
+      via 'getvar secure-devkey'; clarify signed_boot_enabled as
+      derived from pubkey_programmed in the manufacturing API
+
+  * Fastboot Data Path & Gadget Updates:
+    - Use TCP for the data path when fastbootd advertises support,
+      improving throughput over USB on capable hardware
+    - Refresh the bundled fastboot gadget against upstream
+      rpi-fastbootd, through b1e51bd4, e8c13a5 and finally
+      f3ce930249ab0d657ddaf5d3ba4a076320894c78
+
+  * Workdir Cache Invalidation:
+    - Invalidate cached signed artefacts in $RPI_SB_WORKDIR when the
+      selected firmware or signing keys change, so stale boot.img
+      files are never re-flashed
+    - Wipe all cached provisioning artefacts under $RPI_SB_WORKDIR on
+      package upgrade
+
+  * Triage:
+    - Trust idempotent 'oem fwcrypto init' and drop the pre-check
+      that round-tripped over fastboot before initialisation
+
+  * Configuration Plumbing:
+    - Introduce shared resolvers for special configuration flags,
+      consumed by both provisioner-service and rpi-sb-bootstrap.sh,
+      so flag interpretation is consistent across host components
+
+  * Database Contention:
+    - Use SQL busy timeouts in provisioner-service to handle SQLite
+      contention gracefully under high device throughput
+
+  * Provisioner Service State Change Notifications:
+    - Drop the inotify watch provisioner-service used to keep on
+      /srv/rpi-sb-provisioner/state.db and -wal; the watch self-
+      triggered against the service's own SQLite reads and pinned a
+      core at 100% during steady-state operation
+    - Introduce a localhost-only HTTP API on provisioner-service for
+      the bash provisioning scripts to push state-change and
+      manufacturing-row notifications: POST /internal/state-changed
+      (paired with record_state in host-support/state-recording) and
+      POST /internal/manufacturing-recorded (paired with the
+      manufacturing.db INSERT in host-support/manufacturing-data);
+      both kick the topology worker for an immediate rescan
+    - Gate the endpoints with two access layers: a transport-level
+      loopback check on the real peer address (X-Forwarded-For is
+      ignored so a reverse proxy cannot spoof 127.0.0.1), and a
+      per-boot shared-secret token written by the service to
+      /run/rpi-sb-provisioner/internal.token at mode 0600. Token
+      comparison is constant-time
+    - Calls from the provisioning scripts are fire-and-forget with
+      short curl timeouts; a missing token file or unreachable
+      service does not fail provisioning, and the worker's existing
+      10s wait_for backstop still covers anything that slips past
+
+  * Common Filesystem Handling:
+    - Force FAT32 when formatting the signed boot slot vfat, and
+      propagate mkfs failures so a bad slot is not silently flashed
+
+  * UI & Image Browser Polish:
+    - Use image summaries for both IDP artefacts and traditional
+      GOLD_MASTERs in the image list
+    - Move firmware selection into the device block in the image
+      browser
+    - Refactor options handling for IDP preference, and offer
+      differential security options for IDP and naked provisioning
+    - Allow the IDP storage selection to be overridden from the UI
+    - Fix the OS image browser bounding box
+    - Fix 1440-minute image deletion timing
+    - Use a .sha256 sidecar for OS image SHA256 recording in
+      manufacturing-data
+    - Update Connect terminology in provisioner scripts to match the
+      product naming
+    - Fix Connect public key handling in manufacturing-data
+    - Fix CM5 Lite board identifier in manufacturing-data output and
+      UI rendering
+    - Correct default boot order comments in the shipped defaults
+
+  * Packaging:
+    - Add missing zlib1g-dev and libzstd-dev build dependencies
+    - Update rpi-eeprom and rpiboot runtime dependencies
+    - Create the lockfile directory in postinst on install
+    - Fix a missing comma in debian/rpi-sb-provisioner.udev
+
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Thu, 21 May 2026 16:30:00 +0100
 
 rpi-sb-provisioner (2.2.0) unstable; urgency=medium
 

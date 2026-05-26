@@ -122,7 +122,8 @@ namespace provisioner {
                 callback(resp);
                 return;
             }
-            
+            sqlite3_busy_timeout(db, 5000);
+
             // Prepare SQL with optional pagination
             std::string sql = "SELECT * FROM devices ORDER BY provision_ts DESC";
             if (limit > 0) {

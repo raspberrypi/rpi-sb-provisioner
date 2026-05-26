@@ -103,8 +103,47 @@ cleanup_orphans() {
         -mmin +"$((MAX_TEMP_DIR_AGE_HOURS * 60))" \
         -exec rm -rf {} + 2>/dev/null || true
 
-    find "$LOG_BASE" -type d -empty -delete 2>/dev/null || true
+    # -mmin +5: skip directories younger than 5 minutes.  Without this gate
+    # a concurrent bootstrap@.service that fails fast (e.g. lock contention)
+    # racing through cleanup_orphans will reap the empty metadata/ directory
+    # of an in-progress sibling bootstrap *between* its mkdir and rpiboot's
+    # OTP write -- causing rpiboot's fopen for <serial>.json to ENOENT and
+    # the board_type to never reach state.db.
+    find "$LOG_BASE" -type d -empty -mmin +5 -delete 2>/dev/null || true
     find "$LOCK_BASE" -type f -mtime +1 -delete 2>/dev/null || true
+}
+
+# Resolve the on-disk path for a special flag, accounting for the fact that a
+# device's serial representation changes across phases. Pre-triage we typically
+# only have the truncated 32-bit ROM serial (8 hex chars, lowercase) or a USB
+# path; post-triage we have the full 64-bit DUID (16 hex chars), whose lower
+# 32 bits equal the short serial. A flag toggled in one phase must still be
+# honoured by the other, so when TARGET_DEVICE_SERIAL is a 16-hex-char DUID we
+# also probe the lowercased 8-char suffix.
+#
+# Arguments:
+#   $1 - Special flag directory (e.g. /etc/rpi-sb-provisioner/special-skip-eeprom)
+#
+# Output (stdout): full path of the matching flag file, or empty if none.
+# Exit:   0 if a file was found, 1 otherwise. Safe under `set -e` via `|| true`.
+resolve_special_flag_path() {
+    _flag_dir="$1"
+    _primary="${_flag_dir}/${TARGET_DEVICE_SERIAL}"
+    if [ -f "${_primary}" ]; then
+        printf '%s\n' "${_primary}"
+        return 0
+    fi
+    case "${TARGET_DEVICE_SERIAL}" in
+        [0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F])
+            _short=$(printf '%s' "${TARGET_DEVICE_SERIAL}" | tr 'A-F' 'a-f' | cut -c9-16)
+            _fallback="${_flag_dir}/${_short}"
+            if [ -f "${_fallback}" ]; then
+                printf '%s\n' "${_fallback}"
+                return 0
+            fi
+            ;;
+    esac
+    return 1
 }
 
 announce_start() {
@@ -144,25 +183,41 @@ read_config() {
 # Takes a fastboot device specifier (USB serial or network address) and:
 # 1. Verifies fastboot connectivity
 # 2. Gets the device serial number
-# 3. Tests both IPv4 and IPv6 connectivity, preferring IPv6 if available
-# 4. Determines the USB path for the device
+# 3. Discovers whether the daemon advertises a data-plane-only TCP path
+# 4. Tests both IPv4 and IPv6 connectivity, preferring IPv6 if available
+# 5. Determines the USB path for the device
 #
 # Arguments:
-#   $1 - Fastboot device specifier (required)
+#   $1 - Fastboot device specifier (required, USB serial)
 #
 # Sets the following global variables:
-#   FASTBOOT_DEVICE_SPECIFIER - Final fastboot connection string (USB/IPv4/IPv6)
-#   TARGET_DEVICE_SERIAL - Device serial number
-#   TARGET_USB_PATH - USB device path
+#   FASTBOOT_DEVICE_SPECIFIER       - Control-plane specifier (USB serial,
+#                                     unless the daemon is in legacy TCP-full
+#                                     mode and a TCP route is reachable, in
+#                                     which case it is promoted to tcp:<addr>)
+#   FASTBOOT_TCP_FLASH_SPECIFIER    - Set to tcp:<addr> when the daemon
+#                                     advertises tcp-data-plane-only=yes and a
+#                                     TCP route is reachable; empty otherwise.
+#                                     Callers should use this for `flash` and
+#                                     fall back to FASTBOOT_DEVICE_SPECIFIER.
+#   TARGET_DEVICE_SERIAL            - Device serial number
+#   TARGET_USB_PATH                 - USB device path
 #
 # Exits with error if:
 #   - Cannot establish fastboot connection
 #   - Cannot determine USB path
 setup_fastboot_and_id_vars() {
     FASTBOOT_DEVICE_SPECIFIER="$1"
+    FASTBOOT_TCP_FLASH_SPECIFIER=""
+    export FASTBOOT_TCP_FLASH_SPECIFIER
 
     timeout_fatal fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar version
     TARGET_DEVICE_SERIAL="$(get_variable serialno)"
+
+    # Returns "yes" if the device-side fastbootd is running in -i usb+tcp
+    # split mode. Empty/missing/"no" means legacy behaviour (TCP, when
+    # reachable, carries the full command stream).
+    TCP_DATA_PLANE_ONLY="$(get_variable tcp-data-plane-only)"
 
     announce_start "Testing Fastboot IP connectivity"
     USE_IPV4=
@@ -176,13 +231,33 @@ setup_fastboot_and_id_vars() {
     USE_IPV4=$?
     set -e
 
-    # Favour using IPv6 if available, and ethernet regardless to get 1024-byte chunks in Fastboot without USB3
+    # Pick the best reachable TCP specifier (IPv6 preferred).
     if [ "${USE_IPV6}" -eq 0 ]; then
-    FASTBOOT_DEVICE_SPECIFIER="tcp:${IPV6_ADDRESS}"
+        TCP_SPEC="tcp:${IPV6_ADDRESS}"
     elif [ "${USE_IPV4}" -eq 0 ]; then
-    FASTBOOT_DEVICE_SPECIFIER="tcp:${IPV4_ADDRESS}"
+        TCP_SPEC="tcp:${IPV4_ADDRESS}"
     else
-    FASTBOOT_DEVICE_SPECIFIER="${TARGET_DEVICE_SERIAL}"
+        TCP_SPEC=""
+    fi
+
+    if [ "${TCP_DATA_PLANE_ONLY}" = "yes" ]; then
+        # Split mode: keep control plane on USB and route flash over TCP if
+        # we have a route. Falling back to USB-only flashing is fine — the
+        # daemon's USB FastbootDevice carries the full command set.
+        FASTBOOT_DEVICE_SPECIFIER="${TARGET_DEVICE_SERIAL}"
+        FASTBOOT_TCP_FLASH_SPECIFIER="${TCP_SPEC}"
+        if [ -n "${FASTBOOT_TCP_FLASH_SPECIFIER}" ]; then
+            log "Split-mode daemon: control over USB ${FASTBOOT_DEVICE_SPECIFIER}, flash over ${FASTBOOT_TCP_FLASH_SPECIFIER}"
+        else
+            log "Split-mode daemon advertised but no TCP route reachable; flash will fall back to USB"
+        fi
+    else
+        # Legacy daemon: promote everything to TCP when reachable.
+        if [ -n "${TCP_SPEC}" ]; then
+            FASTBOOT_DEVICE_SPECIFIER="${TCP_SPEC}"
+        else
+            FASTBOOT_DEVICE_SPECIFIER="${TARGET_DEVICE_SERIAL}"
+        fi
     fi
 
     # Set TARGET_USB_PATH based on TARGET_DEVICE_SERIAL
@@ -234,6 +309,13 @@ run_customisation_script() {
         if [ "${STAGE_NAME}" = "post-flash" ]; then
             # For post-flash stage, pass device info that can be used with fastboot
             "${SCRIPT_PATH}" "${FASTBOOT_DEVICE_SPECIFIER}" "${TARGET_DEVICE_SERIAL}" "${RPI_DEVICE_STORAGE_TYPE}"
+        elif [ "${STAGE_NAME}" = "provision-started" ]; then
+            # For provision-started stage, forward (fastboot specifier, serial,
+            # storage type) so hooks can signal programming rigs (e.g. LED).
+            FASTBOOT_SPEC_ARG="$3"
+            TARGET_SERIAL_ARG="$4"
+            STORAGE_TYPE_ARG="$5"
+            "${SCRIPT_PATH}" "${FASTBOOT_SPEC_ARG}" "${TARGET_SERIAL_ARG}" "${STORAGE_TYPE_ARG}"
         elif [ "${STAGE_NAME}" = "bootstrap" ]; then
             # For bootstrap stage, pass device detection info
             TARGET_DEVICE_SERIAL_ARG="$3"
@@ -623,5 +705,187 @@ copy_kernel_modules_with_deps() {
         "${_dst_basedir}"
 
     log "Kernel modules copied successfully"
+    return 0
+}
+
+# Ensure `lock_device_private_key=1` is present in the given config.txt
+# (which must live inside the signed boot.img the firmware authenticates).
+# Firmware reads this key before any userspace runs and sets the OTP
+# ECDSA key-slot to LOCKED, which blocks the raw-key export API for the
+# rest of the boot session. Required by the rpi-verity-verifier boot-time
+# runtime check.
+#
+# Modes:
+#   enforce  — append the line under [all] if missing; no-op if present.
+#   warn     — log a warning if missing; do not modify.
+#
+# Parameters:
+#   $1 - path to config.txt (inside the boot.img mount)
+#   $2 - mode: "enforce" or "warn" (default: "enforce")
+ensure_lock_device_private_key() {
+    _cfg="$1"
+    _mode="${2:-enforce}"
+
+    if [ ! -f "${_cfg}" ]; then
+        log "ensure_lock_device_private_key: ${_cfg} not found; skipping"
+        return 1
+    fi
+
+    # Match `lock_device_private_key=1` anywhere in the file (case-sensitive,
+    # allow trailing whitespace/comments). Lines like "lock_device_private_key=0"
+    # or any other value are NOT considered present — we want exactly =1.
+    if grep -Eq '^[[:space:]]*lock_device_private_key[[:space:]]*=[[:space:]]*1([[:space:]]|#|$)' "${_cfg}"; then
+        log "lock_device_private_key=1 already present in ${_cfg}"
+        return 0
+    fi
+
+    if [ "${_mode}" = "warn" ]; then
+        log "WARNING: lock_device_private_key=1 is MISSING from ${_cfg}."
+        log "  The rpi-verity-verifier will abort at boot with KEY_NOT_LOCKED."
+        log "  Add the line under [all] in your image's config.txt."
+        return 1
+    fi
+
+    # Defensive: refuse to enforce if a conflicting value is already present.
+    if grep -Eq '^[[:space:]]*lock_device_private_key[[:space:]]*=[[:space:]]*[^1][[:space:]]*' "${_cfg}"; then
+        log "ERROR: ${_cfg} contains a conflicting lock_device_private_key setting."
+        log "  Refusing to overwrite; correct the image's config.txt manually."
+        return 1
+    fi
+
+    log "Appending lock_device_private_key=1 to ${_cfg} (under [all])"
+    # Ensure there's an [all] section; if not, add one at the end.
+    if ! grep -Eq '^[[:space:]]*\[all\][[:space:]]*$' "${_cfg}"; then
+        printf '\n[all]\n' >> "${_cfg}"
+    fi
+    printf 'lock_device_private_key=1\n' >> "${_cfg}"
+    return 0
+}
+
+# =============================================================================
+# Signed boot.img preparation for IDP slot boot partitions
+# =============================================================================
+# IDP artefacts ship raw VFAT images for boot slots (containing firmware files,
+# kernel, dtbs, config.txt, cmdline.txt). A signed-boot Pi 5 EEPROM rejects
+# those and only loads a signed boot.img + boot.sig pair from the boot slot.
+#
+# This helper takes a source sparse VFAT, bundles its contents into a single
+# boot.img via rpi-make-boot-image, signs it with the configured customer key,
+# and emits a new sparse VFAT (sized to match the source) containing only
+# {boot.img, boot.sig} suitable for direct flashing in place of the original.
+#
+# Caches output by content hash of source + key fingerprint so that, for an
+# unchanged artefact and key, repeated runs reuse the prior signed copy.
+#
+# Arguments:
+#   $1 - path to source sparse VFAT (e.g. ${IDP_DIR}/boot.sparse)
+#   $2 - path where the signed sparse should land (caller-owned)
+#
+# Requires (caller responsibility): init_signing_context already invoked,
+# RPI_DEVICE_FAMILY set, simg2img/img2simg/mkfs.fat/rpi-make-boot-image
+# available on PATH.
+prepare_signed_boot_simg() {
+    _src_sparse="$1"
+    _out_sparse="$2"
+
+    if ! signing_available; then
+        log "ERROR: prepare_signed_boot_simg requires a configured signing key"
+        return 1
+    fi
+
+    if [ ! -f "${_src_sparse}" ]; then
+        log "ERROR: source sparse not found: ${_src_sparse}"
+        return 1
+    fi
+
+    if [ -f "${_out_sparse}" ]; then
+        return 0
+    fi
+
+    # POSIX errexit is suspended inside a function called via "if !", which is
+    # how callers invoke us. Check every critical step explicitly so a failure
+    # cannot be silently turned into a 0-byte sparse cache entry.
+    _fail() {
+        log "ERROR: prepare_signed_boot_simg: $1"
+        rm -rf "${_work}" 2>/dev/null
+        return 1
+    }
+
+    _work=$(make_temp_dir "rpi-sb-bootimg.XXX") || return 1
+    _src_img="${_work}/source.vfat"
+    _src_mnt="${_work}/src-mnt"
+    _boot_img="${_work}/boot.img"
+    _boot_sig="${_work}/boot.sig"
+    _out_vfat="${_work}/output.vfat"
+    _out_mnt="${_work}/out-mnt"
+    mkdir -p "${_src_mnt}" "${_out_mnt}" || _fail "mkdir mountpoints" || return 1
+
+    # Inflate the IDP sparse so we can mount and walk its files.
+    simg2img "${_src_sparse}" "${_src_img}" || _fail "simg2img source" || return 1
+
+    # Mount read-only; rpi-make-boot-image only reads.
+    mount -o loop,ro -t vfat "${_src_img}" "${_src_mnt}" \
+        || _fail "mount source vfat" || return 1
+
+    # Bundle every file in the boot VFAT (firmware, kernel, dtbs, cmdline.txt,
+    # config.txt) into a single FIT-style boot.img the EEPROM will accept.
+    rpi-make-boot-image -b "pi${RPI_DEVICE_FAMILY}" -a 64 \
+        -d "${_src_mnt}" -o "${_boot_img}" \
+        || { umount "${_src_mnt}" 2>/dev/null; _fail "rpi-make-boot-image"; return 1; }
+
+    # Sidecar signature in the same format rpi-sb-provisioner.sh produces.
+    sha256sum "${_boot_img}" | awk '{print $1}' > "${_boot_sig}" \
+        || { umount "${_src_mnt}" 2>/dev/null; _fail "sha256sum boot.img"; return 1; }
+    printf 'rsa2048: ' >> "${_boot_sig}"
+    # shellcheck disable=SC2046
+    "${OPENSSL}" dgst -sign $(get_openssl_sign_args) -sha256 "${_boot_img}" \
+        | xxd -c 4096 -p >> "${_boot_sig}" \
+        || { umount "${_src_mnt}" 2>/dev/null; _fail "sign boot.img"; return 1; }
+
+    umount "${_src_mnt}" || _fail "umount source vfat" || return 1
+
+    # Build a fresh VFAT sized to the original partition so the on-device
+    # filesystem fits the existing slot exactly. -s 1 (one sector per cluster)
+    # is required for compatibility with how rpi-make-boot-image lays out the
+    # inner FAT, but at boot-slot sizes (typ. 128MB) that cluster count exceeds
+    # FAT16's 65525-cluster ceiling, so we must force FAT32 explicitly. Without
+    # -F 32 mkfs.fat fails with "Not enough or too many clusters" and -- with
+    # errexit suspended -- the function would otherwise continue and write a
+    # 40-byte stub sparse to the cache, leaving the device with a partition
+    # the EEPROM finds boot.img in but cannot actually read.
+    _src_size_bytes=$(stat -c%s "${_src_img}") \
+        || _fail "stat source size" || return 1
+    truncate -s "${_src_size_bytes}" "${_out_vfat}" \
+        || _fail "truncate output vfat" || return 1
+    mkfs.fat -s 1 -F 32 -n "BOOT" "${_out_vfat}" >/dev/null \
+        || _fail "mkfs.fat -s 1 -F 32 (size=${_src_size_bytes})" || return 1
+
+    mount -o loop -t vfat "${_out_vfat}" "${_out_mnt}" \
+        || _fail "mount output vfat" || return 1
+    cp "${_boot_img}" "${_out_mnt}/boot.img" \
+        || { umount "${_out_mnt}" 2>/dev/null; _fail "cp boot.img"; return 1; }
+    cp "${_boot_sig}" "${_out_mnt}/boot.sig" \
+        || { umount "${_out_mnt}" 2>/dev/null; _fail "cp boot.sig"; return 1; }
+    # The Pi 5 EEPROM only chainloads boot.img when config.txt in the
+    # boot slot has boot_ramdisk=1. Without it the bootloader looks for
+    # the legacy start4.elf/kernel_2712.img layout, which we replaced.
+    # Mirrors get_fastboot_config_file() in the per-script callers.
+    if [ -f /etc/rpi-sb-provisioner/boot_ramdisk_config.txt ]; then
+        cp /etc/rpi-sb-provisioner/boot_ramdisk_config.txt "${_out_mnt}/config.txt"
+    elif [ -f /var/lib/rpi-sb-provisioner/boot_ramdisk_config.txt ]; then
+        cp /var/lib/rpi-sb-provisioner/boot_ramdisk_config.txt "${_out_mnt}/config.txt"
+    else
+        printf 'boot_ramdisk=1\n' > "${_out_mnt}/config.txt"
+    fi
+    sync
+    umount "${_out_mnt}" || _fail "umount output vfat" || return 1
+
+    # Atomic rename so a partial write never appears as a valid cache hit.
+    img2simg -s "${_out_vfat}" "${_out_sparse}.tmp" \
+        || _fail "img2simg output" || return 1
+    mv "${_out_sparse}.tmp" "${_out_sparse}" \
+        || _fail "mv output into cache" || return 1
+
+    rm -rf "${_work}"
     return 0
 }

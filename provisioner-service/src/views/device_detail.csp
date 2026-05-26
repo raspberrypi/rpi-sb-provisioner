@@ -318,6 +318,14 @@
             border: 1px solid #c3e6cb;
             color: #155724;
         }
+        .detail-banner.banner-replug {
+            display: block;
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            color: #856404;
+            animation: replugBannerPulse 1.6s ease-in-out infinite;
+        }
+        @keyframes replugBannerPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(255, 193, 7, 0.5); } 50% { box-shadow: 0 0 0 6px rgba(255, 193, 7, 0); } }
 
         @media (max-width: 600px) {
             .info-row {
@@ -566,6 +574,13 @@
         var isUnloading = false;
         var disappearTimer = null;
         var logFetchPending = false;
+        // Mirrors device.needsReplug from the most recent topology tick.
+        // The server now gates this on the bootstrap state being in the
+        // exact transition window (and emits it on placeholder ports too),
+        // so we no longer need a sticky client-side latch — the latch
+        // previously kept the banner showing into TRIAGE-STARTED because
+        // "TRIAGE-STARTED" contains no "FINISHED" substring.
+        var needsReplug = false;
 
         function setWsStatus(status) {
             wsDot.classList.remove('connected', 'reconnecting');
@@ -611,7 +626,7 @@
             if (logFetchPending) return;
             logFetchPending = true;
             var id = deviceSerial || initialPort;
-            fetch('/devices/' + encodeURIComponent(id))
+            fetch('/devices/' + encodeURIComponent(id), { headers: { 'Accept': 'text/html' } })
                 .then(function(r) { return r.text(); })
                 .then(function(html) {
                     logFetchPending = false;
@@ -625,6 +640,11 @@
                         if (newContent && oldContent && newContent.textContent !== oldContent.textContent) {
                             oldContent.textContent = newContent.textContent;
                         }
+                    }
+                    var newHistory = doc.querySelector('.state-history-section');
+                    var oldHistory = document.querySelector('.state-history-section');
+                    if (newHistory && oldHistory && newHistory.innerHTML !== oldHistory.innerHTML) {
+                        oldHistory.innerHTML = newHistory.innerHTML;
                     }
                     try { console.log('detail: logs refreshed'); } catch(e) {}
                 })
@@ -640,7 +660,12 @@
 
             if (device) {
                 if (disappearTimer) { clearTimeout(disappearTimer); disappearTimer = null; }
-                hideBanner();
+                needsReplug = !!device.needsReplug;
+                if (needsReplug) {
+                    showBanner('replug', 'Raspberry Pi 5: unplug and re-insert the USB-C cable after the bootloader update to continue provisioning.');
+                } else {
+                    hideBanner();
+                }
 
                 updateField('info-state', device.state || '');
                 updateField('info-ip', device.ip || '');
@@ -667,7 +692,9 @@
                 });
                 if (isGone && !disappearTimer) {
                     var transitional = isTransitional(lastKnownState);
-                    if (transitional) {
+                    if (needsReplug) {
+                        showBanner('replug', 'Raspberry Pi 5: unplug and re-insert the USB-C cable to continue provisioning.');
+                    } else if (transitional) {
                         showBanner('rebooting', 'Device is rebooting between provisioning phases\u2026');
                     }
                     disappearTimer = setTimeout(function() {

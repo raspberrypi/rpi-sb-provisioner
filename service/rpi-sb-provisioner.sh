@@ -20,6 +20,7 @@ export PROVISIONER_STARTED="SB-PROVISIONER-STARTED"
 . "$(dirname "$0")/rpi-sb-common.sh"
 
 read_config
+compute_image_summary
 
 # Initialize signing context (validates key config, derives public key if needed)
 if ! init_signing_context; then
@@ -239,19 +240,22 @@ check_pidevice_storage_type() {
         "nvme")
             echo "nvme0n1"
             ;;
-        ?)
-            die "Unexpected storage device type. Wanted sd, nvme or emmc, got $1"
+        *)
+            die "Unexpected storage device type. Wanted sd, nvme or emmc, got '$1'"
             ;;
     esac
 }
 
 
 cleanup() {
+    # Capture the exit status that triggered the trap BEFORE any other
+    # command runs, otherwise $? is clobbered by the guard/assignment below
+    # and a genuine failure is reported as success.
+    returnvalue=$?
+
     # Guard against multiple invocations (signal + EXIT trap)
     [ "$CLEANUP_DONE" -eq 1 ] && return
     CLEANUP_DONE=1
-
-    returnvalue=$?
 
     # Disable errexit so cleanup runs to completion even if umount/sync fail
     set +e
@@ -458,6 +462,12 @@ prepare_pre_boot_auth_images() {
         sed --in-place 's%^\(auto_initramfs=\S*\)%#\1%' "${TMP_DIR}"/rpi-boot-img-mount/config.txt
 
         echo 'initramfs initramfs8' >> "${TMP_DIR}"/rpi-boot-img-mount/config.txt
+
+        # lock_device_private_key=1 causes firmware to set the OTP ECDSA
+        # key-slot to LOCKED before userspace runs, which is a precondition
+        # for the rpi-verity-verifier boot-time check. Safe to apply in all
+        # images — signing is offered via the rpi-fw-crypto API
+        ensure_lock_device_private_key "${TMP_DIR}/rpi-boot-img-mount/config.txt" enforce
 
         announce_stop "config.txt modification"
 

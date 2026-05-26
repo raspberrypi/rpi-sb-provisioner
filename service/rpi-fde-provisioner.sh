@@ -20,6 +20,7 @@ export PROVISIONER_STARTED="FDE-PROVISIONER-STARTED"
 . "$(dirname "$0")/rpi-sb-common.sh"
 
 read_config
+compute_image_summary
 
 : "${RPI_DEVICE_STORAGE_CIPHER:=aes-xts-plain64}"
 
@@ -215,19 +216,22 @@ check_pidevice_storage_type() {
         "nvme")
             echo "nvme0n1"
             ;;
-        ?)
-            die "Unexpected storage device type. Wanted sd, nvme or emmc, got $1"
+        *)
+            die "Unexpected storage device type. Wanted sd, nvme or emmc, got '$1'"
             ;;
     esac
 }
 
 
 cleanup() {
+    # Capture the exit status that triggered the trap BEFORE any other
+    # command runs, otherwise $? is clobbered by the guard/assignment below
+    # and a genuine failure is reported as success.
+    returnvalue=$?
+
     # Guard against multiple invocations (signal + EXIT trap)
     [ "$CLEANUP_DONE" -eq 1 ] && return
     CLEANUP_DONE=1
-
-    returnvalue=$?
 
     # Disable errexit so cleanup runs to completion even if umount/sync fail
     set +e
@@ -540,6 +544,9 @@ prepare_pre_boot_auth_images_as_bootimg() {
         sed --in-place 's%^\(auto_initramfs=\S*\)%#\1%' "${TMP_DIR}"/rpi-boot-img-mount/config.txt
 
         echo 'initramfs initramfs8' >> "${TMP_DIR}"/rpi-boot-img-mount/config.txt
+
+        # See rpi-sb-common.sh; required by rpi-verity-verifier.
+        ensure_lock_device_private_key "${TMP_DIR}/rpi-boot-img-mount/config.txt" enforce
 
         announce_stop "config.txt modification"
 

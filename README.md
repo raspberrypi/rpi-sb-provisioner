@@ -1,0 +1,709 @@
+*Automated provisioning of secure boot and encryption for Raspberry Pi devices*
+
+> **What is "provisioning"?**
+>
+> Provisioning means preparing a device for use. Think of it like setting up a new mobile phone:
+>
+> - Installing the operating system
+>
+> - Configuring security settings
+>
+> - Making sure everything is ready to work
+>
+> This tool does all of that automatically for Raspberry Pi devices.
+
+# What Problem Does This Solve?
+
+Imagine you need to prepare 100 Raspberry Pi devices for your business.
+
+Each device needs:
+
+- A secure boot system (so only your software can run on it)
+
+- Encrypted storage (so your data is protected)
+
+- Your custom operating system installed
+
+- Security keys programmed correctly
+
+Without this tool, preparing each device manually is time-consuming and error-prone. Each command must be executed precisely. A single mistake requires restarting the entire process.
+
+**This tool automates the entire provisioning workflow.** Connect a device, and the tool handles all configuration steps automatically. Typical provisioning time is approximately 3 minutes per device (for a 2.6GB OS image).
+
+# Who Should Use This Tool?
+
+This tool is designed for:
+
+- **Businesses** building products with Raspberry Pi devices
+
+- **Manufacturers** producing devices at scale
+
+- **System integrators** deploying secure systems
+
+- **Anyone** who needs to prepare multiple Raspberry Pi devices with security features
+
+This tool does not require security expertise to operate. Knowledge of encryption algorithms or boot chain implementation is not necessary. The tool handles cryptographic operations and security configuration automatically.
+
+# What You Get
+
+When you use this tool, each device you prepare will have:
+
+## 1. Secure Boot Protection
+
+Your device will only execute software that has been cryptographically signed with your private key. This prevents unauthorized software from running on the device. The secure boot chain verifies each component before execution, from bootloader through to operating system.
+
+## 2. Encrypted Storage
+
+All data on the device storage is encrypted using full-disk encryption. If the storage media is removed or stolen, the data remains protected. Each device uses a unique encryption key tied to the device hardware, preventing storage from being read on other systems.
+
+## 3. Your Operating System
+
+The tool automatically deploys your custom Raspberry Pi operating system to each device. You create a single master image, and the tool replicates it to all provisioned devices with appropriate security modifications.
+
+## 4. Manufacturing Records
+
+The tool can maintain a manufacturing database recording details about each provisioned device. This includes serial numbers, MAC addresses, provisioning timestamps, and security configuration. This data supports inventory tracking, warranty management, and customer support operations.
+
+## 5. Consistent Configuration
+
+Every device receives identical configuration, eliminating human error and configuration drift. This ensures consistent behavior across your device fleet and simplifies technical support operations.
+
+# Three Levels of Security
+
+This tool offers three modes of operation. Choose the one that fits your needs:
+
+| Mode            | What It Does                                                        | When To Use It                                            |
+|-----------------|---------------------------------------------------------------------|-----------------------------------------------------------|
+| **secure-boot** | Full security: secure boot + encrypted storage + device-unique keys | Production devices that need maximum security             |
+| **fde-only**    | Encrypted storage + device-unique keys (no secure boot)             | When you need encryption but not secure boot restrictions |
+| **naked**       | Just installs your operating system (no encryption, no secure boot) | Development devices or when security is not required      |
+
+**NOTE**: This tool is under active development. Please report issues at <https://github.com/raspberrypi/rpi-sb-provisioner>
+
+# Supported Devices
+
+This tool can prepare these Raspberry Pi devices:
+
+- Raspberry Pi 5
+
+- Raspberry Pi 4
+
+- Raspberry Pi Compute Module 5
+
+- Raspberry Pi Compute Module 4
+
+- Raspberry Pi Zero 2 W
+
+For specific connection instructions for each device type, see the [Device Connection Guide](#device-connection-guide) below.
+
+# What You Need
+
+## The Provisioning Computer
+
+This is the computer that runs the provisioning tool. You need:
+
+- **One Raspberry Pi 5** (or another 64-bit Raspberry Pi device)
+
+- **Power supply:** Official Raspberry Pi 27W USB C power supply
+
+- **Operating system:** Raspberry Pi OS Bookworm or newer
+
+- **Storage:** At least 32GB free space (for temporary files)
+
+This computer stays on your desk. You connect devices to it for provisioning.
+
+## Cables and Accessories
+
+What cables you need depends on which devices you want to prepare:
+
+| Device You Want To Prepare | What You Need |
+| --- | --- |
+| **Raspberry Pi 5** | USB A to USB C cable |
+| **Raspberry Pi 4** | USB A to USB C cable |
+| **Raspberry Pi Compute Module 4** | • USB A to microUSB B cable<br>• Compute Module 4 IO Board<br>• One jumper wire |
+| **Raspberry Pi Compute Module 5** | • USB A to USB C cable<br>• Compute Module 5 IO Board<br>• One jumper wire |
+| **Raspberry Pi Zero 2 W** | • USB A to microUSB B cable |
+
+## Connecting the Hardware
+
+For **Compute Module 4 or 5** devices:
+
+Connect your provisioning Raspberry Pi to the Compute Module IO Board as shown in this image:
+
+![rpi connection cm4io](docs/images/rpi-connection-cm4io.png)
+*A correctly connected provisioning system*
+
+> **Important**
+>
+> **Do not connect other USB devices** to the Compute Module IO board during provisioning. The provisioning Raspberry Pi can only supply 900mA of power to the connected device.
+
+For other device types, see the [Device Connection Guide](#device-connection-guide) below.
+
+# Getting Started
+
+## Step 1: Install the Software
+
+First, update your provisioning Raspberry Pi to the latest software:
+
+    sudo apt update && sudo apt full-upgrade -y
+
+Then install this tool:
+
+    sudo apt install -y rpi-sb-provisioner
+
+## Step 2: Open the Web Interface
+
+This tool has a simple web interface for configuration. Open it in your browser:
+
+    xdg-open http://localhost:3142
+
+You will see a web page with several tabs. Click the **Options** tab to configure your provisioning settings.
+
+## Step 3: Configure Options
+
+Click the **Options** tab.
+
+You need to set these options:
+
+- **Security mode:** Choose `secure-boot`, `fde-only`, or `naked` (see [Three Levels of Security](#three-levels-of-security) above)
+
+- **Device family:** Which Raspberry Pi devices are you preparing? (4, 5, 2W)
+
+- **Storage type:** Are your devices using SD cards, eMMC, or NVMe? Choose one: `sd`, `emmc`, or `nvme`
+
+- **Signing key:** For secure boot mode, you need a signing key (the web interface will guide you through creating one)
+
+- **OS Image:** Upload a "master" operating system image. This is the operating system that will be installed on all your devices. The image must be created with `pi-gen` (see <https://github.com/RPi-Distro/pi-gen>) and must be **uncompressed** (not a `.zip` or `.gz` file)
+
+- **Device firmware:** Select the firmware version to use for your devices
+
+The web interface includes help text for each option. Read it carefully.
+
+For complete details about all configuration options, see the [Configuration Reference](docs/config_vars.md).
+
+## Step 4: Start Provisioning
+
+Configuration is now complete.
+
+The system is ready to provision devices. See the next section for connection instructions.
+
+# How To Prepare Devices
+
+## Overview
+
+Once configured, the provisioning process is:
+
+1.  **Connect the device** to your provisioning computer
+
+2.  **Monitor progress** (all operations are automatic)
+
+3.  **Disconnect the device** when both LEDs turn off
+
+4.  The device is ready for deployment
+
+Typical provisioning time is approximately 3 minutes per device (for a 2.6GB OS image). Progress can be monitored through the web interface.
+
+## Connecting Your Device
+
+The way you connect devices depends on the device type.
+
+### For Compute Module 4 or Compute Module 5
+
+1.  Place the Compute Module into the IO Board
+
+2.  Use the jumper wire to connect the two `disable eMMC Boot` pins (see image below)
+
+3.  Connect the IO Board to your provisioning computer with the USB cable
+
+4.  The provisioning process starts automatically
+
+![rpi cm4io detail](docs/images/rpi-cm4io-detail.png)
+*Use a jumper wire to connect the 'disable eMMC Boot' pins*
+
+### For Raspberry Pi 5
+
+Raspberry Pi 5 requires a special button-press procedure:
+
+1.  **Hold down the power button** on the Raspberry Pi 5
+
+2.  **While holding the button**, plug in the USB C cable to your provisioning computer
+
+3.  **Keep holding** the button until the device is recognized
+
+4.  The provisioning process starts automatically
+
+For detailed instructions, see: [Raspberry Pi 5 Connection Guide](docs/device-guidance/pi5.md)
+
+### For Raspberry Pi 4
+
+See the detailed guide: [Raspberry Pi 4 Connection Guide](docs/device-guidance/pi4.md)
+
+### For Raspberry Pi Zero 2 W
+
+See the detailed guide: [Raspberry Pi Zero 2 W Connection Guide](docs/device-guidance/zero2.md)
+
+## What Happens During Provisioning
+
+The tool works in three automatic phases:
+
+**Phase 1: Bootstrap**
+
+- Device connection is recognized
+
+- For secure boot mode: Signing key hash is programmed into device OTP memory (permanent operation)
+
+- Device firmware is updated to the specified version
+
+- Temporary Linux environment is loaded onto the device
+
+**Phase 2: Triage**
+
+- Selected security mode is determined from configuration
+
+- Appropriate provisioning service is started
+
+**Phase 3: Provisioning**
+
+Operations performed depend on the selected security mode:
+
+- **secure-boot mode:**
+
+  - Creates a unique encryption key for this device
+
+  - Formats the storage device
+
+  - Creates an encrypted container
+
+  - Installs your operating system into the encrypted container
+
+  - Installs signed boot firmware
+
+- **fde-only mode:**
+
+  - Creates a unique encryption key for this device
+
+  - Formats the storage device
+
+  - Creates an encrypted container
+
+  - Installs your operating system into the encrypted container
+
+  - Installs boot firmware (not signed)
+
+- **naked mode:**
+
+  - Formats the storage device
+
+  - Installs your operating system directly
+
+## When Is The Device Ready?
+
+Provisioning is complete when **both the power LED and activity LED are off**.
+
+If an Ethernet cable is connected, network activity may still be visible. This is expected behavior.
+
+When both LEDs are off, you may:
+
+- Disconnect the device from power
+
+- Remove the device
+
+- Deploy the device in your product
+
+No further provisioning steps are required.
+
+## Monitoring Progress
+
+You can watch devices being provisioned in real time:
+
+**Using the Web Interface:**
+
+1.  Open <http://localhost:3142> in your browser
+
+2.  Click the **Devices** tab to see a live visual representation of provisioning progress for all connected devices
+
+3.  Alternatively, click the **Services** tab to see all active provisioning operations
+
+4.  Click on any device to see detailed logs
+
+**Using the Command Line:**
+
+To see all active operations:
+
+    systemctl list-units rpi-sb-provisioner*
+
+To see detailed logs for a specific device:
+
+    tail -f /var/log/rpi-sb-provisioner/<serial>/provisioner.log
+
+Replace `<serial>` with your device serial number.
+
+## Important Security Note
+
+> **Warning**
+>
+> By default, this tool does **not** block JTAG debugging access. JTAG is a hardware debugging interface.
+>
+> If you want to block JTAG access for maximum security, you must enable the `RPI_DEVICE_LOCK_JTAG` option in your configuration.
+>
+> See the [Configuration Reference](docs/config_vars.md#rpi_device_lock_jtag) for details.
+>
+> **Note:** If you block JTAG, Raspberry Pi engineers cannot help debug hardware issues if you need support.
+
+# Troubleshooting
+
+## When Things Go Wrong
+
+If a device fails to provision correctly, follow these steps:
+
+### Step 1: Check The Logs
+
+**Easiest method - Web Interface:**
+
+1.  Open <http://localhost:3142> in your browser
+
+2.  Click the **Services** tab
+
+3.  Find your device in the list
+
+4.  Click on it to see detailed logs
+
+5.  Look for error messages (they usually explain the problem)
+
+**Alternative - Command line:**
+
+Replace `<serial>` with your device serial number:
+
+    tail -f /var/log/rpi-sb-provisioner/<serial>/provisioner.log
+
+For more detailed logs:
+
+    journalctl -xeu rpi-sb-provisioner@<serial> -f
+
+### Step 2: Clear The Cache
+
+Sometimes old files cause problems. Clear the cache:
+
+**Web Interface:**
+
+1.  Go to the **Options** page
+
+2.  Find the OS image in the **OS Image & Firmware** section
+
+3.  Click **Clear Cached Files**
+
+**Command line:**
+
+    sudo rm -rf /var/lock/rpi-sb-provisioner/<serial>
+
+Replace `<serial>` with your device serial number.
+
+### Step 3: Try Again
+
+Disconnect the device, then connect it again to restart provisioning.
+
+## Common Problems
+
+### Problem: Device Not Detected
+
+**Symptoms:** You connect the device, but nothing happens.
+
+**Solutions:**
+
+- Check your USB cable (try a different cable)
+
+- Check you are using the correct connection method for your device type
+
+- For Raspberry Pi 5: Make sure you held the power button **before** connecting the cable
+
+- For Compute Modules: Check the jumper wire is connecting the correct pins
+
+- Try a different USB port on your provisioning computer
+
+### Problem: Provisioning Stops or Hangs
+
+**Symptoms:** The device starts provisioning but never finishes.
+
+**Solutions:**
+
+- Check the logs (see Step 1 above)
+
+- Clear the cache (see Step 2 above)
+
+- Check you have enough free disk space (need at least 32GB)
+
+- Try again with a different device to see if the problem is device-specific
+
+### Problem: "Already Signed" Error
+
+**Symptoms:** Error message says the device is already signed or secured.
+
+**Explanation:** This device was already programmed with a signing key. This is permanent.
+
+**Solutions:**
+
+- If you want to use the **same** signing key: Tell the tool to skip the signing step:
+
+      sudo touch /etc/rpi-sb-provisioner/special-skip-eeprom/<serial>
+
+- If you want to **completely re-provision** the device with the same key:
+
+      sudo touch /etc/rpi-sb-provisioner/special-reprovision-device/<serial>
+
+Replace `<serial>` with your device serial number.
+
+### Problem: Need To Test Without Full Provisioning
+
+**Symptoms:** You want devices to enter fastboot mode but not complete full provisioning.
+
+**Solution:**
+
+Temporarily disable the provisioning step (until next reboot):
+
+    sudo systemctl mask --runtime rpi-sb-triage@.service
+
+Now devices will be bootstrapped into fastboot mode only.
+
+To re-enable full provisioning, reboot your provisioning computer.
+
+## Working With The Manufacturing Database
+
+If you enabled the manufacturing database, you can track all the devices you have prepared.
+
+The database stores information about each device:
+
+- Serial number
+
+- Board type and revision
+
+- MAC address (Ethernet)
+
+- Provisioning date and time
+
+- Which OS image was installed
+
+- Security settings
+
+### Viewing The Database
+
+**Web Interface (Easiest):**
+
+1.  Open <http://localhost:3142>
+
+2.  Go to the **Manufacturing Database** section
+
+3.  You can see all devices and their information
+
+4.  Click **Export as CSV** to download a spreadsheet file
+
+**Command Line:**
+
+To export all data to a CSV file:
+
+    sqlite3 ${RPI_SB_PROVISIONER_MANUFACTURING_DB} -cmd ".headers on" -cmd ".mode csv" -cmd ".output devices.csv" "SELECT * FROM rpi_sb_provisioner;"
+
+### Finding Secured Devices
+
+To get a list of only devices that have secure boot enabled:
+
+    sqlite3 ${RPI_SB_PROVISIONER_MANUFACTURING_DB} -cmd ".headers on" -cmd ".mode csv" -cmd ".output secured_devices.csv" "SELECT serial FROM rpi_sb_provisioner WHERE secure = 1;"
+
+These devices will only run software signed with your signing key.
+
+## Advanced: Customizing Device Configuration
+
+### Changing Boot Configuration
+
+If you need to customize the Raspberry Pi boot configuration (`config.txt`):
+
+1.  Edit the `config.txt` file in your master OS image
+
+2.  Re-upload the image through the web interface
+
+3.  New devices will use your custom configuration
+
+The tool automatically includes your `config.txt` settings during provisioning.
+
+### Checking For Special Device Flags
+
+If you have set special flags for specific devices (like skip-eeprom or reprovision), you can find them:
+
+    find /etc/rpi-sb-provisioner -name <serial>
+
+Replace `<serial>` with your device serial number.
+
+# Advanced Topics
+
+## HTTP API for Integration
+
+The provisioning system provides a comprehensive HTTP API for integration with other systems and automation workflows.
+
+The API supports:
+
+- **Device monitoring:** Real-time status of connected devices during provisioning
+
+- **Manufacturing database access:** Query and export provisioned device records
+
+- **Service monitoring:** View provisioning service status and logs
+
+- **Configuration management:** Programmatic configuration updates
+
+- **Image management:** Upload, verify, and manage OS images
+
+- **Customisation scripts:** Create and manage provisioning hooks
+
+- **WebSocket support:** Real-time updates for devices and long-running operations
+
+- **Audit logging:** Security and compliance tracking
+
+**API Documentation:** See [Complete API Reference](docs/api_endpoints.md)
+
+The API documentation includes:
+
+- Detailed endpoint descriptions with request/response examples
+
+- Authentication and security requirements
+
+- WebSocket protocol specifications
+
+- Error handling and status codes
+
+- Integration examples and use cases
+
+Common integration scenarios:
+
+- Building custom monitoring dashboards
+
+- Automating device provisioning workflows
+
+- Integration with manufacturing execution systems (MES)
+
+- Quality assurance and compliance reporting
+
+- Custom mobile or desktop applications
+
+The web interface at <http://localhost:3142> is built using this API, demonstrating practical usage patterns.
+
+## Scaling to Mass Production
+
+For organizations planning to provision large quantities of devices, comprehensive scaling guidance is available.
+
+The scaling guide covers:
+
+- **Performance planning:** Expected throughput and capacity calculations
+
+- **Infrastructure requirements:** Hardware, network, and workspace configuration
+
+- **Workflow optimization:** Pipelined vs. batch provisioning strategies
+
+- **Operator efficiency:** Optimal device-to-operator ratios
+
+- **Deployment sizing:** Small, medium, and large-scale operation planning
+
+**Scaling Guide:** See [Mass Provisioning Scaling Guide](docs/mass-provisioning-guidance/scaling.md)
+
+The guide includes tested performance data:
+
+- Provisioning time: ~2.5 minutes per device (2.6GB image)
+
+- Operator capacity: Up to 7 devices per operator (pipelined)
+
+- Throughput: ~150 devices per 8-hour shift (single operator, optimized)
+
+Key considerations for production deployment:
+
+- Use pipelined provisioning for maximum efficiency
+
+- Plan for device preparation time (unboxing, cable connection)
+
+- Invest in quality USB infrastructure (official Raspberry Pi powered USB hubs)
+
+- Use NVMe storage on provisioning server for best performance
+
+- Implement quality controls and audit procedures
+
+- Consider API integration with manufacturing execution systems
+
+# Getting Help
+
+## Something Not Working?
+
+1.  **Check the troubleshooting section above** - it covers the most common problems
+
+2.  **Check the logs** - they usually tell you what went wrong
+
+3.  **Review your configuration** - make sure all settings are correct
+
+## Need More Information?
+
+This README provides the essential information to get started. For more detailed information:
+
+- **System architecture:** See [Architecture Documentation](docs/architecture.md) (understand how the system works)
+
+- **Configuration options:** See [Configuration Reference](docs/config_vars.md)
+
+- **Device-specific guides:** See the `docs/device-guidance/` folder
+
+- **HTTP API documentation:** See [API Documentation](docs/api_endpoints.md) (for integration and automation)
+
+- **Mass production scaling:** See [Scaling Guide](docs/mass-provisioning-guidance/scaling.md) (for high-volume operations)
+
+## Report Problems
+
+This tool is under active development. If you find a problem:
+
+- Report issues at: <https://github.com/raspberrypi/rpi-sb-provisioner>
+
+- Include your device type, error messages, and log files
+
+# Summary
+
+This tool makes it simple to prepare secure Raspberry Pi devices at scale.
+
+**What you learned:**
+
+- Why you need this tool (automated, secure device provisioning)
+
+- What you get (secure boot, encryption, consistent configuration)
+
+- How to set it up (install, configure, provision)
+
+- How to solve common problems (troubleshooting)
+
+**Remember the key points:**
+
+- Configuration is done once through the web interface
+
+- Provisioning is automatic - just connect devices
+
+- The web interface shows progress and logs
+
+- Both LEDs off means the device is ready
+
+This documentation provides all necessary information to begin provisioning secure Raspberry Pi devices for production deployment.
+
+# Quick Reference Card
+
+| Task | What To Do |
+| --- | --- |
+| **Install tool** | `sudo apt install rpi-sb-provisioner` |
+| **Configure** | Open <http://localhost:3142> → Options tab |
+| **Monitor devices** | Open <http://localhost:3142> → Services tab |
+| **View logs** | Web interface → Services → Click device **OR**<br>`tail -f /var/log/rpi-sb-provisioner/<serial>/provisioner.log` |
+| **Export database** | Web interface → Manufacturing Database → Export CSV |
+| **Clear cache** | Web interface → Options → Clear Cached Files |
+| **Device ready?** | Both LEDs off = Ready |
+| **Get help** | Check [Troubleshooting](#troubleshooting) section above |
+| **API access** | See [API Documentation](docs/api_endpoints.md) for HTTP API |
+| **System architecture** | See [Architecture](docs/architecture.md) to understand how it works |
+
+## Connection Quick Reference
+
+| Device Type | Connection Method |
+| --- | --- |
+| **Compute Module 4/5** | Jumper wire on `disable eMMC Boot` pins → Connect USB |
+| **Raspberry Pi 5** | Hold power button → Connect USB → Release<br>**Then:** Wait for status → Reconnect same way |
+| **Raspberry Pi 4** | **One-time:** Configure GPIO 8 with recovery.bin<br>**Each time:** Connect GPIO 8 to GND → Connect USB |
+| **Raspberry Pi Zero 2 W** | Insert empty SD card → Connect USB to "USB" port<br>**Note:** No secure-boot support (use fde-only or naked) |
+
+For detailed instructions, see the device-specific guides in the [Device Connection Guide](#device-connection-guide) section.

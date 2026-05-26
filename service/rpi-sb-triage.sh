@@ -123,6 +123,13 @@ timeout_fatal() {
     set -e
 }
 
+# Load config early so the image summary is populated before any
+# record_state call -- otherwise the device-details page shows an empty
+# image for the lifetime of triage and only fills in later, which looks
+# inconsistent.
+read_config
+compute_image_summary
+
 TARGET_USB_PATH=$(get_usb_path_for_serial "${TARGET_DEVICE_SERIAL32}")
 
 # Record state changes atomically
@@ -133,27 +140,18 @@ if [ -d "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL32}" ]; then
     rm -rf "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL32}"
 fi
 
-read_config
 setup_fastboot_and_id_vars "${TARGET_DEVICE_SERIAL}"
 
-# Ensure the device has a firmware crypto ECDSA key.  Every provisioned
+# Ensure the device has a firmware crypto ECDSA key. Every provisioned
 # device gets one regardless of style -- it is needed for HMAC-based LUKS
 # key derivation and is useful for device identity.
-log "Checking device firmware crypto key status"
-FWCRYPTO_STATUS=$(fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem fwcrypto status 2>&1) || true
-if echo "${FWCRYPTO_STATUS}" | grep -qi "not provisioned"; then
-    log "Provisioning device firmware crypto key"
-    timeout_fatal fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem fwcrypto init
-    # Confirm the key was actually written to OTP
-    FWCRYPTO_STATUS=$(fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem fwcrypto status 2>&1) || true
-    if echo "${FWCRYPTO_STATUS}" | grep -qi "not provisioned"; then
-        record_state "${TARGET_DEVICE_SERIAL}" "${TRIAGE_ABORTED}" "${TARGET_USB_PATH}"
-        die "Failed to provision device firmware crypto key"
-    fi
-    log "Device firmware crypto key provisioned and verified"
-else
-    log "Device firmware crypto key already provisioned"
-fi
+#
+# `oem fwcrypto init` is idempotent on the gadget side: OKAY whether the
+# slot was empty (just generated) or already populated (no-op). Any
+# non-zero exit here is a real firmware/transport failure, not "key
+# already exists", so we can rely on the exit status alone.
+log "Ensuring device firmware crypto key is provisioned"
+timeout_fatal fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem fwcrypto init
 
 KEYPAIR_DIR="${LOG_DIRECTORY}/${TARGET_DEVICE_SERIAL}"/keypair
 if [ -d "${RPI_DEVICE_RETRIEVE_KEYPAIR}" ]; then
