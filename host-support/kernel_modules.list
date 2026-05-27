@@ -1,35 +1,29 @@
 # Kernel modules required for initramfs during secure boot provisioning
 #
-# This file lists kernel module names (without .ko extension) that should be
-# included in the initramfs. Dependencies are automatically resolved using
-# modinfo, so you only need to list the top-level modules you require.
+# Prefer kernel crypto API aliases (e.g. crypto-xts(aes)) over concrete
+# module names. Aliases are resolved by libkmod via modules.alias and survive
+# the upstream renames that happen across kernel releases — e.g.
+# chacha-neon/chacha_generic in 6.12 vs the chacha consolidation in 6.18.
+# Concrete names like aes-arm64 only need listing when no alias points at
+# them; rpi-modcopy pulls in dependencies automatically.
 #
 # Lines starting with # are comments and are ignored.
 # Empty lines are ignored.
 #
 # To override this list, copy it to /etc/rpi-sb-provisioner/kernel_modules.list
 
-# Device mapper modules (required for encrypted root filesystem)
-dm-mod
+# Device mapper + userspace crypto socket (stable module names)
 dm-crypt
-
-# Crypto API modules (kernel crypto interface)
-af_alg
 algif_skcipher
 
-# AES encryption modules
-libaes
-aes_generic
-aes-arm64
+# AES-XTS (default cipher). The alias resolves to xts + the best AES impl
+# the kernel has — aes-arm64 on the Pi 5, aes_generic as fallback —
+# without us needing to spell either out.
+crypto-xts(aes)
 
-# Poly1305 authentication modules (used by Adiantum)
-libpoly1305
-nhpoly1305
-
-# Adiantum cipher (fast encryption for ARM devices without AES-NI)
-adiantum
-
-# ChaCha cipher modules (used by Adiantum)
-libchacha
-chacha-neon
-chacha_generic
+# Adiantum (alternative cipher for devices without AES acceleration).
+# Each alias pulls in its own dependencies: adiantum needs nhpoly1305 and
+# a chacha variant, both of which have been renamed across kernel versions.
+crypto-adiantum
+crypto-nhpoly1305
+crypto-xchacha12
