@@ -32,7 +32,20 @@ rpi-sb-provisioner (2.3.0~pre2) unstable; urgency=medium
       signed-eeprom, eeprom-device, eeprom-size, eeprom-sha256,
       eeprom-jedec, eeprom-unique-id and eeprom-spi-speed getvars.
 
- -- Tom Dewey <tom.dewey@raspberrypi.com>  Wed, 27 May 2026 11:08:09 +0100
+  * Dependency refresh:
+    - debian/control: require rpi-eeprom (>= 28.23-1) to pick up the
+      rpiboot/recovery image that honours set_reboot_order in the
+      recovery config.txt.
+
+  * Bootstrap: eliminate re-plug requirement on Pi 5 (and Pi 4):
+    - service/rpi-sb-bootstrap.sh: insert set_reboot_order=0x3 ahead
+      of recovery_reboot=1 in both the secure-boot keywriting recovery
+      config and the non-secure EEPROM-update recovery config, so the
+      device reboots straight back into RPIBOOT mode ready for the
+      fastboot bootstrap phase instead of requiring a manual USB
+      re-plug.
+
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Wed, 27 May 2026 14:57:26 +0100
 
 rpi-sb-provisioner (2.3.0~pre1) unstable; urgency=medium
 
