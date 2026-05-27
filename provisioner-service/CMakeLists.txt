@@ -51,7 +51,7 @@ set(valijson_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(valijson_INSTALL_HEADERS OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(valijson
   GIT_REPOSITORY https://github.com/tristanpenman/valijson.git
-  GIT_TAG        v1.0.3
+  GIT_TAG        v1.1.0
   EXCLUDE_FROM_ALL
 )
 FetchContent_MakeAvailable(valijson)
@@ -70,7 +70,7 @@ set(CMAKE_SKIP_INSTALL_ALL_DEPENDENCY ON CACHE BOOL "Skip installation of all de
 
 FetchContent_Declare(drogon
  GIT_REPOSITORY https://github.com/drogonframework/drogon.git
- GIT_TAG        v1.9.11
+ GIT_TAG        v1.9.13
  EXCLUDE_FROM_ALL  # Prevents installation in packages
 )
 
@@ -144,7 +144,7 @@ set(CURL_DISABLE_NTLM ON CACHE BOOL "Set to ON to disable NTLM support." FORCE)
 
 FetchContent_Declare(curl
  GIT_REPOSITORY https://github.com/curl/curl.git
- GIT_TAG        curl-8_19_0
+ GIT_TAG        curl-8_20_0
  PATCH_COMMAND patch -p1 < ${CMAKE_SOURCE_DIR}/cmake/curl/http-no-auth.patch
  UPDATE_DISCONNECTED 1
  EXCLUDE_FROM_ALL  # Prevents installation in packages

@@ -648,6 +648,9 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
 
                 # This directive informs the bootloader to write the public key into OTP
                 echo "program_pubkey=1" > "${SECURE_BOOTLOADER_DIRECTORY}/config.txt"
+                # Force the post-recovery reboot back into RPIBOOT so the next
+                # phase (fastboot bootstrap) can attach over USB.
+                echo "set_reboot_order=0x3" >> "${SECURE_BOOTLOADER_DIRECTORY}/config.txt"
                 # This directive tells the bootloader to reboot once it's written the OTP
                 echo "recovery_reboot=1" >> "${SECURE_BOOTLOADER_DIRECTORY}/config.txt"
 
@@ -807,8 +810,11 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                         log "Using existing EEPROM signature: ${DESTINATION_EEPROM_SIGNATURE}"
                     fi
                     
-                    # Simple recovery config to update EEPROM and reboot
-                    echo "recovery_reboot=1" > "${NON_SECURE_BOOTLOADER_DIRECTORY}/config.txt"
+                    # Simple recovery config to update EEPROM and reboot.
+                    # Force the post-recovery reboot back into RPIBOOT so the
+                    # next phase (fastboot bootstrap) can attach over USB.
+                    echo "set_reboot_order=0x3" > "${NON_SECURE_BOOTLOADER_DIRECTORY}/config.txt"
+                    echo "recovery_reboot=1" >> "${NON_SECURE_BOOTLOADER_DIRECTORY}/config.txt"
                     
                     log "Updating EEPROM to latest version"
                     [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal rpiboot -j "${METADATA_DIR}" -d "${NON_SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
