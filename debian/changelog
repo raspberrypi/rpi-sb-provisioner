@@ -1,3 +1,39 @@
+rpi-sb-provisioner (2.3.0~pre2) unstable; urgency=medium
+
+  * cryptroot_initramfs regression fix (#299):
+    - Refresh the bundled cryptroot_initramfs from pi-gen-micro. The
+      Trixie-rebuilt image (systemd 257) refused systemctl switch-root
+      from non-initrd mode, leaving devices provisioned successfully
+      but stuck at the initramfs login prompt instead of pivoting into
+      the unlocked rootfs.
+    - The new image is marked as an initrd (/etc/initrd-release) and
+      the cryptroot service has been rewired into the standard systemd
+      initrd flow: Before=initrd-root-fs.target with the pivot
+      delegated to systemd's stock initrd-switch-root.service, instead
+      of the bespoke multi-user.target + manual switch-root from
+      v2.1.3.
+    - getty is masked in the cryptroot image: the "localhost login:"
+      symptom cannot recur, and emergency.target still gets a console
+      via sulogin if cryptroot.service fails.
+
+  * Kernel module list durability (also #299):
+    - host-support/kernel_modules.list: switch from concrete crypto
+      module names (chacha-neon, chacha_generic, aes-arm64, ...) to
+      kernel crypto API aliases (crypto-xts(aes), crypto-adiantum,
+      crypto-nhpoly1305, crypto-xchacha12). Aliases are resolved by
+      libkmod via modules.alias and survive the upstream module
+      renames between 6.12 and 6.18, fixing the secondary
+      provisioning-time failure also reported in #299.
+
+  * Bundled rpi-fastbootd refresh:
+    - Refresh the fastboot gadget image to pick up rpi-fastbootd
+      be8a8ce ("vars: Add eeprom manipulation, data fetch"), which
+      adds oem eeprom-update / eeprom-verify / eeprom-read plus
+      signed-eeprom, eeprom-device, eeprom-size, eeprom-sha256,
+      eeprom-jedec, eeprom-unique-id and eeprom-spi-speed getvars.
+
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Wed, 27 May 2026 11:08:09 +0100
+
 rpi-sb-provisioner (2.3.0~pre1) unstable; urgency=medium
 
   * Pre-release:
