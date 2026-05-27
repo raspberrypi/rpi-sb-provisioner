@@ -154,7 +154,7 @@
         let allData = [];
         let currentPage = 1;
         let pageSize = 50;
-        const COLUMN_COUNT = 24;
+        const COLUMN_COUNT = 31;
         
         function totalPages() {
             return Math.max(1, Math.ceil(allData.length / pageSize));
@@ -193,6 +193,13 @@
                             <th scope="col">OS Image SHA256</th>
                             <th scope="col">Connect Reg.</th>
                             <th scope="col">Connect Identity ID</th>
+                            <th scope="col">EEPROM Device</th>
+                            <th scope="col">EEPROM Size</th>
+                            <th scope="col">EEPROM SHA256</th>
+                            <th scope="col">EEPROM JEDEC</th>
+                            <th scope="col">EEPROM Unique ID</th>
+                            <th scope="col">SPI Speed (Hz)</th>
+                            <th scope="col">Bootloader Build TS</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -226,6 +233,13 @@
                             <td style="font-family: monospace;">${escapeHtml(device.os_image_sha256)}</td>
                             <td class="security-field">${formatSecurityField(device.connect_registered)}</td>
                             <td>${escapeHtml(device.connect_device_id)}</td>
+                            <td>${escapeHtml(device.eeprom_device)}</td>
+                            <td>${escapeHtml(device.eeprom_size)}</td>
+                            <td style="font-family: monospace;">${escapeHtml(device.eeprom_sha256)}</td>
+                            <td style="font-family: monospace;">${escapeHtml(device.eeprom_jedec)}</td>
+                            <td style="font-family: monospace;">${escapeHtml(device.eeprom_unique_id)}</td>
+                            <td>${escapeHtml(device.eeprom_spi_speed)}</td>
+                            <td>${escapeHtml(device.bootloader_build_timestamp)}</td>
                         </tr>
                     `;
                 });
@@ -386,7 +400,9 @@
                 'Processor','Memory','Manufacturer','Secure','JTAG Lock (req.)',
                 'EEPROM WP (req.)','Pubkey Prog.','Devkey Revoked','Signed Boot',
                 'OS Image Filename','OS Image SHA256',
-                'Connect Reg.','Connect Device ID'
+                'Connect Reg.','Connect Device ID',
+                'EEPROM Device','EEPROM Size','EEPROM SHA256','EEPROM JEDEC',
+                'EEPROM Unique ID','SPI Speed (Hz)','Bootloader Build TS'
             ];
 
             const rows = [headers.map(csvEscape).join(',')];
@@ -404,7 +420,11 @@
                     csvEscape(securityLabel(d.signed_boot_enabled)),
                     csvEscape(d.os_image_filename), csvEscape(d.os_image_sha256),
                     csvEscape(securityLabel(d.connect_registered)),
-                    csvEscape(d.connect_device_id)
+                    csvEscape(d.connect_device_id),
+                    csvEscape(d.eeprom_device), csvEscape(d.eeprom_size),
+                    csvEscape(d.eeprom_sha256), csvEscape(d.eeprom_jedec),
+                    csvEscape(d.eeprom_unique_id), csvEscape(d.eeprom_spi_speed),
+                    csvEscape(d.bootloader_build_timestamp)
                 ].join(','));
             });
             
