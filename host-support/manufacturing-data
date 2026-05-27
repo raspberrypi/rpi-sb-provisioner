@@ -267,6 +267,13 @@ metadata_gather() {
                     os_image_sha256  char(64)           DEFAULT NULL,
                     connect_registered integer          DEFAULT NULL,
                     connect_device_id varchar(255)      DEFAULT NULL,
+                    eeprom_device   varchar(64)         DEFAULT NULL,
+                    eeprom_size     integer             DEFAULT NULL,
+                    eeprom_sha256   char(64)            DEFAULT NULL,
+                    eeprom_jedec    char(6)             DEFAULT NULL,
+                    eeprom_unique_id varchar(32)        DEFAULT NULL,
+                    eeprom_spi_speed integer            DEFAULT NULL,
+                    bootloader_build_timestamp integer  DEFAULT NULL,
                     provision_ts    timestamp           default current_timestamp"
 
         # Check if the table exists
@@ -324,6 +331,47 @@ metadata_gather() {
         elif [ "${SECURE}" = "1" ]; then
             EEPROM_WP_VALUE="0"
         fi
+
+        # Bootloader SPI flash identity + state, captured from fastbootd's
+        # in-process libflashrom + /dev/spidev queries. Each getvar reports
+        # "not available" on older firmware or non-applicable platforms;
+        # normalise to empty so the column ends up NULL rather than the
+        # literal string.
+        eeprom_value() {
+            v=$(metadata_get "$1")
+            case "${v}" in
+                ""|"not available") echo "" ;;
+                *) echo "${v}" ;;
+            esac
+        }
+        EEPROM_DEVICE=$(eeprom_value "eeprom-device")
+        EEPROM_SIZE=$(eeprom_value "eeprom-size")
+        EEPROM_SHA256=$(eeprom_value "eeprom-sha256")
+        EEPROM_JEDEC=$(eeprom_value "eeprom-jedec")
+        EEPROM_UNIQUE_ID=$(eeprom_value "eeprom-unique-id")
+        EEPROM_SPI_SPEED=$(eeprom_value "eeprom-spi-speed")
+        BOOTLOADER_BUILD_TS=$(eeprom_value "bootloader-build-timestamp")
+
+        # Integer columns: convert empty to literal NULL so the SQL is valid.
+        sql_int() { if [ -z "$1" ]; then echo "NULL"; else echo "$1"; fi; }
+        # String columns: render as a quoted SQL literal, or the bare token
+        # NULL when the value is absent. Single-quotes inside the value are
+        # SQL-escaped by doubling. This preserves the distinction between
+        # "not measured" (NULL) and "measured as empty" ('').
+        sql_str() {
+            if [ -z "$1" ]; then
+                echo "NULL"
+            else
+                printf "'%s'" "$(printf '%s' "$1" | sed "s/'/''/g")"
+            fi
+        }
+        EEPROM_SIZE_SQL=$(sql_int "${EEPROM_SIZE}")
+        EEPROM_SPI_SPEED_SQL=$(sql_int "${EEPROM_SPI_SPEED}")
+        BOOTLOADER_BUILD_TS_SQL=$(sql_int "${BOOTLOADER_BUILD_TS}")
+        EEPROM_DEVICE_SQL=$(sql_str "${EEPROM_DEVICE}")
+        EEPROM_SHA256_SQL=$(sql_str "${EEPROM_SHA256}")
+        EEPROM_JEDEC_SQL=$(sql_str "${EEPROM_JEDEC}")
+        EEPROM_UNIQUE_ID_SQL=$(sql_str "${EEPROM_UNIQUE_ID}")
 
 	        # OS image identifier: use the same one-line summary that
 	        # state.db carries during provisioning so the device-details
@@ -389,7 +437,14 @@ metadata_gather() {
                     os_image_filename,          \
                     os_image_sha256,            \
                     connect_registered,         \
-                    connect_device_id           \
+                    connect_device_id,          \
+                    eeprom_device,              \
+                    eeprom_size,                \
+                    eeprom_sha256,              \
+                    eeprom_jedec,               \
+                    eeprom_unique_id,           \
+                    eeprom_spi_speed,           \
+                    bootloader_build_timestamp  \
                 ) VALUES (                      \
                     '${BOARD_STR}',               \
                     '${TARGET_DEVICE_SERIAL}',    \
@@ -412,7 +467,14 @@ metadata_gather() {
                     '${OS_IMAGE_FILENAME}',       \
                     '${OS_IMAGE_SHA256}',         \
                     ${CONNECT_REGISTERED_VALUE},  \
-                    '${CONNECT_DEVICE_ID_VALUE}'  \
+                    '${CONNECT_DEVICE_ID_VALUE}', \
+                    ${EEPROM_DEVICE_SQL},         \
+                    ${EEPROM_SIZE_SQL},           \
+                    ${EEPROM_SHA256_SQL},         \
+                    ${EEPROM_JEDEC_SQL},          \
+                    ${EEPROM_UNIQUE_ID_SQL},      \
+                    ${EEPROM_SPI_SPEED_SQL},      \
+                    ${BOOTLOADER_BUILD_TS_SQL}    \
         );" > /dev/null 2>&1
 
         # Nudge the UI service to re-read after a manufacturing.db row write.
