@@ -327,32 +327,21 @@ if [ "${PROVISIONING_STYLE}" = "secure-boot" ]; then
     # from one transform.
     PUBKEY_HASH=$(sha256sum "${CUSTOMER_PUBLIC_KEY_FILE}" | awk '{print $1}')
 
-    # Find every pmap partition with role=boot and dereference its image name
-    # to the source simg filename.  jq returns nothing if no matches; treat
-    # that as a hard error in secure-boot mode (no boot.img to load = brick).
-    BOOT_IMAGE_NAMES=$(jq -r '
-        [ .layout.provisionmap[]?
-          | .. | objects
-          | select(.static? and .static.role? == "boot")
-          | .image ] | unique | .[]
+    # Find every partitionimages entry flagged bootable and collect its source
+    # simg filename. rpi-image-gen sets bootable="true" (string, not bool) on
+    # the slot VFAT(s); it's the structurally correct discriminator because it
+    # sits on the same object whose .simage we need, and the bootloader never
+    # looks inside encrypted groups so we don't have to walk the provisionmap
+    # to skip them. A/B images legitimately list the same simage twice
+    # (boot_a and boot_b both point at boot.vfat.sparse), so we dedupe.
+    UNIQUE_SOURCE_SIMGS=$(jq -r '
+        [ .layout.partitionimages | to_entries[]
+          | select(.value.bootable == "true")
+          | .value.simage // empty ] | unique | .[]
     ' < "${IDP_JSON}")
 
-    if [ -z "${BOOT_IMAGE_NAMES}" ]; then
-        die "secure-boot configured but no partitions with static.role=\"boot\" in ${IDP_JSON}"
-    fi
-
-    # Each slot's pmap "image" key resolves to a partitionimages entry; that
-    # entry's "simage" is the source sparse filename inside IDP_DIR.  Multiple
-    # slots typically share the same source (boot_a and boot_b both reference
-    # boot.sparse), so we dedupe and transform each unique source once.
-    UNIQUE_SOURCE_SIMGS=$(
-        for img_name in ${BOOT_IMAGE_NAMES}; do
-            jq -r --arg n "${img_name}" '.layout.partitionimages[$n].simage // empty' < "${IDP_JSON}"
-        done | sort -u
-    )
-
     if [ -z "${UNIQUE_SOURCE_SIMGS}" ]; then
-        die "could not resolve simage filenames for boot partitions"
+        die "secure-boot configured but no bootable partitions in ${IDP_JSON}"
     fi
 
     for src_simg in ${UNIQUE_SOURCE_SIMGS}; do
