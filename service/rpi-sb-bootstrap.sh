@@ -362,6 +362,15 @@ identifyBootloaderConfig() {
     fi
 }
 
+# Detects whether an EEPROM image carries an AB-capable layout by checking
+# for the "bootsys" filename marker at offset 0x10008. Mirrors the helper of
+# the same name in usbboot's tools/update-pieeprom.sh.
+isABCapableImage() {
+    image="$1"
+    filename=$(dd if="${image}" bs=1 skip=$((0x10008)) count=8 status=none | strings)
+    [ "${filename}" = "bootsys" ]
+}
+
 # This function is adapted from the functions in the usbboot repo.
 # It handles both signed (secure-boot) and unsigned (naked) EEPROM updates
 # Uses the global signing context (must call init_signing_context first)
@@ -404,9 +413,19 @@ update_eeprom() {
                 rpi-eeprom-config -x "${src_image}"
                 # shellcheck disable=SC2046
                 rpi-sign-bootcode --debug -c 2712 -i bootcode.bin -o bootcode.bin.signed $(get_sign_bootcode_key_args) -v 0 -n 16
-                rpi-eeprom-config \
-                    --out "${dst_image}.intermediate" --bootcode "${customer_signed_bootcode_binary_workdir}/bootcode.bin.signed" \
-                    "${src_image}" || die "Failed to update signed bootcode in the EEPROM image"
+                if isABCapableImage "${src_image}"; then
+                    # shellcheck disable=SC2046
+                    rpi-sign-bootcode --debug -c 2712 -i bootsys -o bootsys.signed $(get_sign_bootcode_key_args) -v 0 -n 16
+                    rpi-eeprom-config \
+                        --out "${dst_image}.intermediate" \
+                        --bootcode "${customer_signed_bootcode_binary_workdir}/bootcode.bin.signed" \
+                        --bootsys "${customer_signed_bootcode_binary_workdir}/bootsys.signed" \
+                        "${src_image}" || die "Failed to update signed bootcode/bootsys in the AB EEPROM image"
+                else
+                    rpi-eeprom-config \
+                        --out "${dst_image}.intermediate" --bootcode "${customer_signed_bootcode_binary_workdir}/bootcode.bin.signed" \
+                        "${src_image}" || die "Failed to update signed bootcode in the EEPROM image"
+                fi
                 cd - > /dev/null || return
                 rm -rf "${customer_signed_bootcode_binary_workdir}"
                 ;;
@@ -442,7 +461,7 @@ EOF
 }
 
 FIRMWARE_ROOT="/lib/firmware/raspberrypi/bootloader"
-FIRMWARE_RELEASE_STATUS="default"
+FIRMWARE_RELEASE_STATUS="latest"
 
 # Taken from rpi-eeprom-update
 BOOTLOADER_UPDATE_IMAGE=""
