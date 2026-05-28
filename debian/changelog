@@ -1,3 +1,17 @@
+rpi-sb-provisioner (2.3.0~pre3) unstable; urgency=medium
+
+  * Bootstrap: AB-capable EEPROM image support:
+    - service/rpi-sb-bootstrap.sh: detect AB-capable 2712 EEPROM
+      images by probing for the "bootsys" filename marker at offset
+      0x10008 (new isABCapableImage() helper), and when present,
+      sign the extracted bootsys blob with rpi-sign-bootcode in
+      addition to bootcode.bin, passing --bootsys alongside
+      --bootcode to rpi-eeprom-config. Mirrors usbboot PR
+      raspberrypi/usbboot#363; non-AB images take the unchanged
+      single-bootcode path.
+
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Thu, 28 May 2026 17:08:49 +0100
+
 rpi-sb-provisioner (2.3.0~pre2) unstable; urgency=medium
 
   * cryptroot_initramfs regression fix (#299):
