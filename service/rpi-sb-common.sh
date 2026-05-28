@@ -56,7 +56,12 @@ with_lock() {
     lock_file="$1"
     timeout="${2:-10}"
     shift 2
-    
+
+    # /var/lock is a symlink to /run/lock (tmpfs) on Debian, so LOCK_BASE
+    # (created in postinst) is wiped on reboot. Recreate the parent dir
+    # before touch so with_lock survives a power cycle without reinstall.
+    mkdir -p "$(dirname "$lock_file")"
+
     # Create lock file if it doesn't exist
     touch "$lock_file"
     

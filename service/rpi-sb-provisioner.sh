@@ -451,9 +451,19 @@ prepare_pre_boot_auth_images() {
         announce_stop "Initramfs modification"
 
         announce_start "cmdline.txt modification"
-        sed --in-place 's%\b\(root=\)\S*%\1/dev/ram0%' "${TMP_DIR}"/rpi-boot-img-mount/cmdline.txt
+        # root=off: the updated cryptroot_initramfs marks itself as an
+        # initrd (/etc/initrd-release present), so systemd-fstab-generator
+        # would otherwise generate a sysroot.mount from root= and pull it
+        # into initrd-root-fs.target — conflicting with cryptroot.service,
+        # which mounts /dev/mapper/cryptroot at /sysroot itself. "off" is
+        # the documented value that suppresses that auto-generation; the
+        # kernel ignores root= when an initramfs supplies /init.
+        sed --in-place 's%\b\(root=\)\S*%\1off%' "${TMP_DIR}"/rpi-boot-img-mount/cmdline.txt
         sed --in-place 's%\binit=\S*%%' "${TMP_DIR}"/rpi-boot-img-mount/cmdline.txt
         sed --in-place 's%\brootfstype=\S*%%' "${TMP_DIR}"/rpi-boot-img-mount/cmdline.txt
+        # rootwait keeps systemd waiting on a root device that will never
+        # appear (root=off has no backing block device); drop it too.
+        sed --in-place 's%\brootwait\b%%' "${TMP_DIR}"/rpi-boot-img-mount/cmdline.txt
         # TODO: Consider deleting quiet
         sed --in-place 's%\bquiet\b%%' "${TMP_DIR}"/rpi-boot-img-mount/cmdline.txt
         announce_stop "cmdline.txt modification"
