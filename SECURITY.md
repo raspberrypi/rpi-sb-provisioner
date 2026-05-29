@@ -6,7 +6,9 @@ Only listed versions receive active support, and $HEAD may be changed at any tim
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 2.3.0~pre1 | ✅ |
+| 2.3.0~pre3 | ✅ |
+| 2.3.0~pre2 | ❌ |
+| 2.3.0~pre1 | ❌ |
 | 2.2.0   | ✅ |
 | 2.0.5   | ✅ |
 | 2.0.4   | ✅ |
@@ -14,7 +16,7 @@ Only listed versions receive active support, and $HEAD may be changed at any tim
 | 2.0.2   | ✅ |
 | 2.0.1   | ✅ |
 | 2.0.0   | ✅ |
-| pre-2.0.0 |  |
+| pre-2.0.0 | ❌ |
 
 ## Reporting a Vulnerability
 
