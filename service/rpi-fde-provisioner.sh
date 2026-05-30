@@ -444,9 +444,15 @@ prepare_pre_boot_auth_images_as_filesystems() {
         announce_stop "Cryptroot synthesis"
 
         announce_start "cmdline.txt modification"
-        sed --in-place 's%\b\(root=\)\S*%\1/dev/ram0%' "${TMP_DIR}"/rpi-cryptroot-bootfs-img-mount/cmdline.txt
+        # Strip root=, init=, rootfstype=, rootwait: cryptroot.service in
+        # the initramfs mounts /sysroot itself. Leaving root= set causes
+        # systemd-fstab-generator to synthesise a sysroot.mount that
+        # races and fails, cascading to emergency.target via
+        # OnFailure on initrd-root-fs.target.
+        sed --in-place 's%\broot=\S*%%' "${TMP_DIR}"/rpi-cryptroot-bootfs-img-mount/cmdline.txt
         sed --in-place 's%\binit=\S*%%' "${TMP_DIR}"/rpi-cryptroot-bootfs-img-mount/cmdline.txt
         sed --in-place 's%\brootfstype=\S*%%' "${TMP_DIR}"/rpi-cryptroot-bootfs-img-mount/cmdline.txt
+        sed --in-place 's%\brootwait\b%%' "${TMP_DIR}"/rpi-cryptroot-bootfs-img-mount/cmdline.txt
         # TODO: Consider deleting quiet
         sed --in-place 's%\bquiet\b%%' "${TMP_DIR}"/rpi-cryptroot-bootfs-img-mount/cmdline.txt
         announce_stop "cmdline.txt modification"
@@ -533,9 +539,15 @@ prepare_pre_boot_auth_images_as_bootimg() {
         announce_stop "Initramfs modification"
 
         announce_start "cmdline.txt modification"
-        sed --in-place 's%\b\(root=\)\S*%\1/dev/ram0%' "${TMP_DIR}"/rpi-boot-img-mount/cmdline.txt
+        # Strip root=, init=, rootfstype=, rootwait: cryptroot.service in
+        # the initramfs mounts /sysroot itself. Leaving root= set causes
+        # systemd-fstab-generator to synthesise a sysroot.mount that
+        # races and fails, cascading to emergency.target via
+        # OnFailure on initrd-root-fs.target.
+        sed --in-place 's%\broot=\S*%%' "${TMP_DIR}"/rpi-boot-img-mount/cmdline.txt
         sed --in-place 's%\binit=\S*%%' "${TMP_DIR}"/rpi-boot-img-mount/cmdline.txt
         sed --in-place 's%\brootfstype=\S*%%' "${TMP_DIR}"/rpi-boot-img-mount/cmdline.txt
+        sed --in-place 's%\brootwait\b%%' "${TMP_DIR}"/rpi-boot-img-mount/cmdline.txt
         # TODO: Consider deleting quiet
         sed --in-place 's%\bquiet\b%%' "${TMP_DIR}"/rpi-boot-img-mount/cmdline.txt
         announce_stop "cmdline.txt modification"
