@@ -1,3 +1,27 @@
+rpi-sb-provisioner (2.3.0~pre4) unstable; urgency=medium
+
+  * WebUI: remove Raspberry Pi 5 re-plug notification:
+    - Obviated by set_reboot_order=0x3 (2.3.0~pre2), which reboots the
+      device straight back into RPIBOOT mode for the fastboot bootstrap
+      phase, so the operator no longer has to manually unplug and
+      re-insert the USB-C cable after the EEPROM-update reboot.
+    - provisioner-service/src/devices.cpp: drop the needsReplug signal
+      and the sticky boardTypeBySerial plumbing (per-serial latch,
+      placeholder state/board_type carry, final board_type pass) that
+      existed solely to keep the badge alive across that reboot.
+    - Remove the Re-plug badge from the topology and tile views and the
+      re-plug banner from the device-details page (devices.csp,
+      tile_view.csp, device_detail.csp).
+    - board_type detection in rpi-sb-bootstrap.sh and the state.db
+      board_type column are retained as generic device metadata (still
+      surfaced as boardType in the topology JSON).
+    - docs: rewrite the Pi 5 connection guide for the single-connection
+      flow (drop the manual unplug/reconnect "Step 2"), and update the
+      stale "unlike Pi 5" reconnection contrasts in the Pi 4 guide and
+      README quick reference.
+
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Mon, 01 Jun 2026 12:02:11 +0100
+
 rpi-sb-provisioner (2.3.0~pre3) unstable; urgency=medium
 
   * Bootstrap: AB-capable EEPROM image support:
