@@ -645,12 +645,42 @@ find_kernel_version() {
     
     # Find the first kernel version directory
     _version=$(find "${_base}/${_modules_dir}" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null | head -1)
-    
+
     if [ -n "${_version}" ]; then
         echo "${_version}"
         return 0
     fi
-    
+
+    return 1
+}
+
+# Find ALL kernel version directories in a rootfs modules directory
+# Checks both /lib/modules and /usr/lib/modules
+#
+# A single Raspberry Pi OS image ships modules for more than one kernel
+# flavour (e.g. ...-v8 for Pi 3/4 and ...-2712 for Pi 5/CM5). The firmware
+# picks which kernel to load at boot based on the board, so we cannot know in
+# advance which one a given target will run. The pre-boot-auth initramfs must
+# therefore carry modules for every flavour the image provides; modprobe then
+# selects the matching set at runtime via uname -r.
+#
+# Arguments:
+#   $1 - Root filesystem base directory
+#
+# Returns:
+#   Prints each kernel version string on its own line
+#   Returns 1 if no kernel version found
+find_all_kernel_versions() {
+    _base="$1"
+    _modules_dir=$(find_modules_dir "${_base}") || return 1
+
+    _versions=$(find "${_base}/${_modules_dir}" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null)
+
+    if [ -n "${_versions}" ]; then
+        echo "${_versions}"
+        return 0
+    fi
+
     return 1
 }
 
@@ -702,12 +732,19 @@ copy_kernel_modules_with_deps() {
 
     log "Copying kernel modules using rpi-modcopy for ${_kernel_version}..."
 
-    rpi-modcopy \
+    # Check rpi-modcopy explicitly rather than leaning on set -e: callers
+    # invoke this function in an `if` (best-effort per flavour), which disables
+    # set -e for the call, so a swallowed failure would otherwise fall through
+    # to the success return below.
+    if ! rpi-modcopy \
         --kernel-version="${_kernel_version}" \
         --module-dir="${_modules_rel_dir}" \
         --module-file="${_modules_list}" \
         "${_src_basedir}" \
-        "${_dst_basedir}"
+        "${_dst_basedir}"; then
+        log "ERROR: rpi-modcopy failed for ${_kernel_version}"
+        return 1
+    fi
 
     log "Kernel modules copied successfully"
     return 0
