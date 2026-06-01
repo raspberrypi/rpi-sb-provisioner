@@ -19,8 +19,6 @@
         .badge { display: inline-block; font-weight: 700; font-size: 14px; line-height: 1; padding: 2px 6px; border-radius: 10px; margin-left: 6px; }
         .badge-gen { color: #fff; background: #d32f2f; }
         .badge-empty { color: #fff; background: #9e9e9e; }
-        .badge-replug { color: #1a1a1a; background: #ffd54f; font-size: 12px; animation: replugPulse 1.6s ease-in-out infinite; }
-        @keyframes replugPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(255, 213, 79, 0.7); } 50% { box-shadow: 0 0 0 6px rgba(255, 213, 79, 0); } }
         /* Tabs and relational (mind map) view styling */
         .view-tabs { margin: 12px 0 8px; display: flex; gap: 8px; }
         .view-tab { border: 1px solid #9ec9ff; background: #eef6ff; color: #0b3d91; padding: 6px 10px; border-radius: 14px; font-weight: 600; cursor: pointer; }
@@ -122,7 +120,6 @@
                 badge.textContent = b.text;
                 title.appendChild(badge);
             }
-            applyReplugBadge(title, node);
             const meta = document.createElement('div');
             meta.className = 'meta';
             meta.textContent = metaFor(node);
@@ -135,24 +132,6 @@
             return el;
         }
 
-        // Add or remove the "Re-plug" badge on a node title element based on
-        // node.needsReplug.  Idempotent so the live update path can call it on
-        // every tick without rebuilding the DOM.
-        function applyReplugBadge(titleEl, node) {
-            let existing = titleEl.querySelector('.badge-replug');
-            if (node && node.needsReplug) {
-                if (!existing) {
-                    const b = document.createElement('span');
-                    b.className = 'badge badge-replug';
-                    b.textContent = 'Re-plug';
-                    b.title = 'Raspberry Pi 5 needs the USB-C cable removed and re-inserted after the bootloader update';
-                    titleEl.appendChild(b);
-                }
-            } else if (existing) {
-                existing.remove();
-            }
-        }
-    
         // --- Topology normalization helpers (UI-only) ---
         function parseBusAndChain(id) {
             // Returns { bus: '1', chain: '1.2.3' } or null
@@ -1107,18 +1086,16 @@
                     elementsById.set(id, el);
                     childrenEl.appendChild(el);
                 } else {
-                    // Minimal updates: only change when text differs
+                    // Minimal updates: only change when text differs.
+                    // textContent assignment wipes child <span> badges, so
+                    // mutate the leading text node only when the label changed.
                     const title = el.querySelector('.title');
                     const newTitle = labelFor(n);
-                    // textContent assignment wipes child <span> badges, so
-                    // first-child only when label changed, then re-attach the
-                    // replug badge from the live node state.
                     if (title.firstChild && title.firstChild.nodeType === 3) {
                         if (title.firstChild.nodeValue !== newTitle) title.firstChild.nodeValue = newTitle;
                     } else {
                         title.insertBefore(document.createTextNode(newTitle), title.firstChild || null);
                     }
-                    applyReplugBadge(title, n);
                     const meta = el.querySelector('.meta');
                     const newMeta = metaFor(n);
                     if (meta.textContent !== newMeta) meta.textContent = newMeta;

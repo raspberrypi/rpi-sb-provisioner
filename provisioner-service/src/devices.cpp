@@ -112,9 +112,7 @@ namespace provisioner {
         int speed{0};            // USB speed in Mbps (e.g., 480 for USB2, 5000 for USB3)
         // Two-digit hex of bits 4..11 of the OTP USER_BOARDREV (e.g. "17"
         // for Pi 5, "18" for CM5).  Captured by the bootstrap script via
-        // `rpiboot -j` and persisted across the EEPROM-update reboot in
-        // state.db so the visualiser can keep flagging Pi 5 boards while
-        // the device is unplugged waiting for the user to reconnect.
+        // `rpiboot -j` and persisted in state.db as generic device metadata.
         std::string boardType;
     };
 
@@ -811,12 +809,6 @@ namespace provisioner {
             // Build latest record per endpoint (descending ts ensures first seen is newest)
             struct DbRecord { std::string serial, state, image, ip, boardType; };
             std::unordered_map<std::string, DbRecord> latestByEndpoint;
-            // board_type is written once per device (during bootstrap) but
-            // subsequent record_state calls after that point also carry the
-            // sticky value.  Track the latest non-empty value seen per serial
-            // so the badge survives the device's own reboot — which is when
-            // the operator most needs the "please re-plug" hint.
-            std::unordered_map<std::string, std::string> boardTypeBySerial;
             struct MfgRecord { std::string boardname, processor, osImageFilename; };
             std::unordered_map<std::string, MfgRecord> latestMfgBySerial;
 
@@ -859,13 +851,6 @@ namespace provisioner {
                         ip ? reinterpret_cast<const char*>(ip) : std::string{},
                         boardTypeStr
                     });
-                }
-                if (!boardTypeStr.empty() && !serialStr.empty()) {
-                    auto it = boardTypeBySerial.find(serialStr);
-                    if (it == boardTypeBySerial.end()) {
-                        // First (= latest) non-empty board_type for this serial wins.
-                        boardTypeBySerial.emplace(serialStr, boardTypeStr);
-                    }
                 }
             }
             sqlite3_finalize(stmt);
@@ -910,36 +895,14 @@ namespace provisioner {
                 if (it == nodes.end()) continue; // endpoint not present in current topology
                 UsbNode &n = it->second;
                 if (n.isHub) continue; // never apply provisioning state to hubs
-                if (n.isPlaceholder) {
-                    // Empty port: don't apply runtime fields (image/ip
-                    // describe a device that isn't here), but DO surface
-                    // the latest board_type and state for this endpoint so
-                    // the UI can keep the "please re-plug" badge on a Pi 5
-                    // that has just powered off after its EEPROM-update
-                    // reboot — exactly the moment the operator needs to
-                    // see it.  State is needed downstream to gate the
-                    // badge emission to the actual transition window.
-                    if (n.boardType.empty() && !rec.boardType.empty()) {
-                        n.boardType = rec.boardType;
-                    }
-                    if (n.state.empty() && !rec.state.empty()) {
-                        n.state = rec.state;
-                    }
-                    continue;
-                }
+                if (n.isPlaceholder) continue; // empty port: runtime fields describe a device that isn't here
                 n.state = rec.state;
                 // Do not clobber existing non-empty image (used for model inference) with empty DB values
                 if (!rec.image.empty()) {
                     n.image = rec.image;
                 }
                 n.ip = rec.ip;
-                // Latest non-empty board_type per serial wins; fall back to
-                // the per-endpoint latest if the serial-keyed map missed.
-                if (!n.serial.empty()) {
-                    auto bit = boardTypeBySerial.find(n.serial);
-                    if (bit != boardTypeBySerial.end()) n.boardType = bit->second;
-                }
-                if (n.boardType.empty() && !rec.boardType.empty()) {
+                if (!rec.boardType.empty()) {
                     n.boardType = rec.boardType;
                 }
                 // If we also have a manufacturing record for this device by serial, use it to annotate image/model
@@ -979,9 +942,7 @@ namespace provisioner {
                         n.image = rec.image;
                     }
                     n.ip = rec.ip;
-                    auto bit = boardTypeBySerial.find(n.serial);
-                    if (bit != boardTypeBySerial.end()) n.boardType = bit->second;
-                    if (n.boardType.empty() && !rec.boardType.empty()) {
+                    if (!rec.boardType.empty()) {
                         n.boardType = rec.boardType;
                     }
                     auto mit = latestMfgBySerial.find(n.serial);
@@ -992,21 +953,6 @@ namespace provisioner {
                         if (n.image.empty() && !mr.osImageFilename.empty()) n.image = mr.osImageFilename;
                     }
                 }
-            }
-
-            // Final pass for board_type only: when the device has just
-            // re-appeared after the EEPROM-update reboot it may not yet have
-            // a fresh state.db row, but its serial still matches a row from
-            // an earlier bootstrap phase carrying board_type.  Apply the
-            // sticky type so the "please re-plug" badge keeps showing through
-            // the transition rather than blinking off and on.
-            for (auto &p : nodes) {
-                UsbNode &n = p.second;
-                if (n.isPlaceholder || n.isHub) continue;
-                if (!n.boardType.empty()) continue;
-                if (n.serial.empty()) continue;
-                auto bit = boardTypeBySerial.find(n.serial);
-                if (bit != boardTypeBySerial.end()) n.boardType = bit->second;
             }
         }
 
@@ -1084,29 +1030,6 @@ namespace provisioner {
                 int gen = inferModelGeneration(n);
                 if (gen > 0) j["modelGen"] = gen;
                 if (!n.boardType.empty()) j["boardType"] = n.boardType;
-                // Pi 5 (board type 0x17) requires the user to physically
-                // unplug and reconnect the USB-C cable after the bootloader
-                // EEPROM update -- the power button means there's no other
-                // way to bring it back into RPIBOOT mode.  CM5/Pi 500/etc.
-                // either share a jumper-style flow or aren't covered here.
-                //
-                // Gate the badge on the actual transition window: between
-                // bootstrap-firmware-updated (EEPROM just written, device
-                // about to disappear) and the next phase taking over
-                // (anything past fastboot-initialisation-started — once
-                // BOOTSTRAP-FINISHED or TRIAGE-STARTED lands the replug
-                // has happened, and the badge would be stale noise).
-                // Without this gate the boardTypeBySerial sticky-lookup
-                // re-asserts the badge on every fresh BOOTSTRAP-STARTED
-                // for a previously-seen Pi 5 — banner shows before the
-                // EEPROM has even been touched, and lingers into triage.
-                if (n.boardType == "17") {
-                    const std::string &s = n.state;
-                    if (s == "bootstrap-firmware-updated" ||
-                        s == "bootstrap-fastboot-initialisation-started") {
-                        j["needsReplug"] = true;
-                    }
-                }
                 arr.append(j);
             }
             root["nodes"] = arr;

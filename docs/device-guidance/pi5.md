@@ -4,7 +4,7 @@
 
 Raspberry Pi 5 has a built-in power button. Unlike Raspberry Pi 4, no GPIO configuration is required.
 
-The connection process requires holding the power button at specific times during the procedure.
+The connection process requires holding the power button while you plug in the cable.
 
 # What You Need
 
@@ -14,9 +14,10 @@ The connection process requires holding the power button at specific times durin
 
 # The Connection Process
 
-Raspberry Pi 5 requires a **two-step** connection process:
+Raspberry Pi 5 requires a **single** connection. The device handles the
+reboot between provisioning phases by itself.
 
-## Step 1: Initial Connection
+## Connect the device
 
 1.  **Hold down the power button** on the Raspberry Pi 5
 
@@ -28,27 +29,16 @@ Raspberry Pi 5 requires a **two-step** connection process:
 
 4.  **Release the button**
 
-The device will start the bootstrap phase.
+The device will start the bootstrap phase and then continue through the
+remaining provisioning phases automatically. After the bootloader/EEPROM
+update it reboots straight back into RPIBOOT mode on its own, so **you do
+not need to unplug, reconnect, or touch the power button again** — just
+leave it connected.
 
-## Step 2: Re-Connection
-
-After a few moments, you need to reconnect the device:
-
-1.  **Watch the status** in the web interface (<http://localhost:3142>)
-
-    Wait until you see the status: `bootstrap-fastboot-initialisation-started`
-
-2.  **Unplug the USB C cable** from the Raspberry Pi 5
-
-3.  **Hold down the power button** on the Raspberry Pi 5
-
-4.  **While holding the button**, plug the USB C cable back into the Raspberry Pi 5
-
-5.  **Keep holding the power button** until the device is recognized again
-
-6.  **Release the button**
-
-The device will now continue through the provisioning phases automatically.
+> Earlier releases required a manual unplug-and-reconnect at the
+> `bootstrap-fastboot-initialisation-started` stage. This is no longer
+> needed: rpi-sb-provisioner now writes `set_reboot_order=0x3` into the
+> recovery config so the device returns to RPIBOOT mode by itself.
 
 ## When Is Provisioning Complete?
 
@@ -64,11 +54,10 @@ Watch the LEDs on the Raspberry Pi 5:
 
 | Point                             | Explanation                                                                     |
 |-----------------------------------|---------------------------------------------------------------------------------|
-| **Two connections required**      | You must connect, disconnect, and reconnect the device during provisioning.     |
+| **Single connection**             | Connect once and leave the device plugged in; it reboots itself between phases. |
 | **Hold button before cable**      | Always hold the power button BEFORE plugging in the cable.                      |
-| **Watch for reconnection status** | Wait for `bootstrap-fastboot-initialisation-started` before unplugging.         |
 | **Good cables matter**            | Use a high-quality USB A to USB C cable. Poor cables cause connection problems. |
-| **Monitor in web interface**      | The web interface at <http://localhost:3142> shows you when to reconnect.       |
+| **Monitor in web interface**      | The web interface at <http://localhost:3142> shows provisioning progress.       |
 
 # Troubleshooting Raspberry Pi 5
 
@@ -88,31 +77,21 @@ Watch the LEDs on the Raspberry Pi 5:
 
 - **Keep holding:** Hold the button until you see the device is recognized
 
-## Problem: Device Not Responding After Re-Connection
+## Problem: Device Stalls Partway Through Provisioning
 
-**Symptoms:** After the re-connection step, the device does not continue provisioning.
+**Symptoms:** Provisioning starts but does not progress past the bootstrap or fastboot phase.
 
 **Solutions:**
 
-- **Check the status first:** Make sure you saw `bootstrap-fastboot-initialisation-started` before unplugging
+- **Leave it connected:** The device reboots itself between phases — do not unplug it while provisioning is in progress.
 
-- **Hold button during reconnect:** You must hold the power button during the re-connection too
+- **Check the logs:** Look at the web interface or logs for error messages.
 
-- **Check the logs:** Look at the web interface or logs for error messages
+- **Check your firmware:** This automatic-reboot flow requires a recent
+  `rpi-eeprom`. If the device does not return on its own, update the host
+  packages and try again.
 
-- **Start over:** Try the complete process again from Step 1
-
-## Problem: Not Sure When To Reconnect
-
-**Symptoms:** You are not sure when to unplug and reconnect the device.
-
-**Solution:**
-
-- **Use the web interface:** Open <http://localhost:3142> and go to the Services tab
-
-- **Watch for the status:** Wait until you see `bootstrap-fastboot-initialisation-started`
-
-- **Then reconnect:** When you see this status, follow the reconnection steps
+- **Start over:** Try the complete process again from the start.
 
 # Summary
 
@@ -120,21 +99,17 @@ Watch the LEDs on the Raspberry Pi 5:
 
 1.  Hold power button → Plug in cable → Release button
 
-2.  Wait for `bootstrap-fastboot-initialisation-started` status
+2.  Leave the device connected
 
-3.  Unplug cable
+3.  Wait for both LEDs to turn off
 
-4.  Hold power button → Plug in cable → Release button
-
-5.  Wait for both LEDs to turn off
-
-6.  Provisioning complete
+4.  Provisioning complete
 
 **Remember:**
 
 - Always hold button before connecting cable
 
-- Watch web interface for reconnection timing
+- Connect once and leave it plugged in
 
 - Use good quality cables
 

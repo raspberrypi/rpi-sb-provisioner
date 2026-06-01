@@ -133,10 +133,8 @@ mkdir -p "${EARLY_LOG_DIRECTORY}"
 
 # rpiboot writes <serial>.json into this directory as it collects OTP
 # metadata from the device.  We parse USER_BOARDREV out of it after the
-# first rpiboot call to identify whether this is a Raspberry Pi 5 -- which
-# is the trigger for the "please re-plug after EEPROM update" annotation
-# in the visualisers (Pi 5's power button means the user has to manually
-# unplug and reconnect after the bootloader reboot).
+# first rpiboot call to record the board type (e.g. Pi 5, CM5) as generic
+# device metadata surfaced in the visualisers and state.db.
 METADATA_DIR="${EARLY_LOG_DIRECTORY}/metadata"
 mkdir -p "${METADATA_DIR}"
 

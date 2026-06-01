@@ -117,7 +117,7 @@ After GPIO 8 configuration is complete, the device can be provisioned.
 
 4.  Provisioning will begin automatically
 
-**Note:** Unlike Raspberry Pi 5, no disconnection and reconnection is required. The device will complete all provisioning phases while the jumper remains in place.
+**Note:** No disconnection and reconnection is required. The device will complete all provisioning phases while the jumper remains in place.
 
 ## Determining Completion
 
@@ -138,7 +138,7 @@ Monitor the device LEDs during provisioning:
 | **One-time setup**          | The GPIO configuration only needs to be done once per device. It is permanent.                 |
 | **GPIO 8 recommended**      | Use GPIO 8 for consistency. Other GPIO pins can work but GPIO 8 is the standard.               |
 | **Keep jumper connected**   | Do not remove the jumper wire during provisioning. Leave it connected until both LEDs are off. |
-| **No re-connection needed** | Unlike Raspberry Pi 5, you do not need to unplug and re-plug the device during provisioning.   |
+| **No re-connection needed** | You do not need to unplug and re-plug the device during provisioning.                          |
 | **Good cables matter**      | Use a high-quality USB cable. Poor cables cause connection problems.                           |
 
 # Troubleshooting Raspberry Pi 4
@@ -219,7 +219,7 @@ You can also extract and inspect the full EEPROM:
 
 **Remember:**
 
-- No disconnection/reconnection needed (unlike Pi 5)
+- No disconnection/reconnection needed
 
 - Use good quality USB cables
 

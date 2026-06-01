@@ -584,7 +584,7 @@ This tool is under active development. If you find a problem:
 | Device Type | Connection Method |
 | --- | --- |
 | **Compute Module 4/5** | Jumper wire on `disable eMMC Boot` pins → Connect USB |
-| **Raspberry Pi 5** | Hold power button → Connect USB → Release<br>**Then:** Wait for status → Reconnect same way |
+| **Raspberry Pi 5** | Hold power button → Connect USB → Release |
 | **Raspberry Pi 4** | **One-time:** Configure GPIO 8 with recovery.bin<br>**Each time:** Connect GPIO 8 to GND → Connect USB |
 | **Raspberry Pi Zero 2 W** | Insert empty SD card → Connect USB to "USB" port<br>**Note:** No secure-boot support (use fde-only or naked) |
 
