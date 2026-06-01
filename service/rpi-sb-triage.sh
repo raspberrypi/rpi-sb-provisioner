@@ -173,27 +173,34 @@ get_variable public-key > "${KEYPAIR_DIR}/${TARGET_DEVICE_SERIAL}.pub"
 # systemd unit to trigger.  All units are parameterised with the device serial.
 echo "${TRIAGE_STARTED}" >> "${LOG_DIRECTORY}"/triage.log
 
+# Select the target unit first, but DON'T start it yet.  `systemctl start` is
+# synchronous: it blocks until the provisioner unit is active, by which point
+# the provisioner has already written PROVISIONER-STARTED.  If we recorded
+# TRIAGE-FINISHED after the start, it would land in the same (second-resolution)
+# timestamp as PROVISIONER-STARTED but sort after it -- the state race seen in
+# the UI.  Triage's job is done once it has selected the provisioner, so record
+# TRIAGE-FINISHED first and hand off last.
 if [ -d "${GOLD_MASTER_OS_FILE}" ]; then
     # GOLD_MASTER_OS_FILE is a directory -- this is an IDP artefact.
     # Route to the IDP provisioner regardless of PROVISIONING_STYLE,
     # since the IDP provisioner handles the image format natively.
     # (Secure boot is handled by the bootstrap phase, not the provisioner.)
     log "GOLD_MASTER_OS_FILE is a directory; selecting IDP Provisioner"
-    systemctl start rpi-idp-provisioner@"${TARGET_DEVICE_SERIAL}".service
+    TARGET_PROVISIONER_UNIT="rpi-idp-provisioner@${TARGET_DEVICE_SERIAL}.service"
 else
     # Traditional .img file -- use the PROVISIONING_STYLE switch as before
     case ${PROVISIONING_STYLE} in
         "secure-boot")
             log "Selecting Secure Boot Provisioner"
-            systemctl start rpi-sb-provisioner@"${TARGET_DEVICE_SERIAL}".service
+            TARGET_PROVISIONER_UNIT="rpi-sb-provisioner@${TARGET_DEVICE_SERIAL}.service"
         ;;
         "fde-only")
             log "Selecting Full-Disk Encryption Provisioner"
-            systemctl start rpi-fde-provisioner@"${TARGET_DEVICE_SERIAL}".service
+            TARGET_PROVISIONER_UNIT="rpi-fde-provisioner@${TARGET_DEVICE_SERIAL}.service"
         ;;
         "naked")
             log "Selecting Naked Provisioner"
-            systemctl start rpi-naked-provisioner@"${TARGET_DEVICE_SERIAL}".service
+            TARGET_PROVISIONER_UNIT="rpi-naked-provisioner@${TARGET_DEVICE_SERIAL}.service"
         ;;
         *)
             log "Fatal: Unknown provisioning style: ${PROVISIONING_STYLE}"
@@ -201,5 +208,11 @@ else
         ;;
     esac
 fi
+
+# Mark triage finished before dispatching, so the state sequence reads
+# TRIAGE-STARTED -> TRIAGE-FINISHED -> PROVISIONER-STARTED in causal order.
 log "${TRIAGE_FINISHED}" >> "${LOG_DIRECTORY}"/triage.log
 record_state "${TARGET_DEVICE_SERIAL}" "${TRIAGE_FINISHED}" "${TARGET_USB_PATH}"
+
+# Hand off to the selected provisioner.
+systemctl start "${TARGET_PROVISIONER_UNIT}"

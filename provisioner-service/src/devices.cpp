@@ -826,7 +826,12 @@ namespace provisioner {
                 return;
             }
             sqlite3_busy_timeout(db, 5000);
-            const char* sql = "SELECT serial, endpoint, state, image, ip_address, board_type FROM devices WHERE ts >= ? ORDER BY ts DESC";
+            // id (monotonic rowid) breaks ts ties: CURRENT_TIMESTAMP is
+            // second-resolution, so the rapid triage->provisioner handoff
+            // writes several rows in one second. Ordering on ts alone leaves
+            // their order to the query planner, which can mis-pick the latest
+            // state per endpoint. id reflects true insertion order.
+            const char* sql = "SELECT serial, endpoint, state, image, ip_address, board_type FROM devices WHERE ts >= ? ORDER BY ts DESC, id DESC";
             sqlite3_stmt* stmt;
             rc = sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr);
             if (rc != SQLITE_OK) {
@@ -1344,8 +1349,8 @@ namespace provisioner {
 
         std::string resolved;
         for (const char* sql : {
-                "SELECT serial FROM devices WHERE serial = ? ORDER BY ts DESC LIMIT 1",
-                "SELECT serial FROM devices WHERE endpoint = ? ORDER BY ts DESC LIMIT 1"}) {
+                "SELECT serial FROM devices WHERE serial = ? ORDER BY ts DESC, id DESC LIMIT 1",
+                "SELECT serial FROM devices WHERE endpoint = ? ORDER BY ts DESC, id DESC LIMIT 1"}) {
             sqlite3_stmt* stmt = nullptr;
             if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
                 if (stmt) sqlite3_finalize(stmt);
@@ -1442,7 +1447,7 @@ namespace provisioner {
 
             std::vector<std::string> serials;
             sqlite3_stmt* stmt;
-            const char* sql = "SELECT serial, endpoint, state, image, ip_address FROM devices ORDER BY ts DESC";
+            const char* sql = "SELECT serial, endpoint, state, image, ip_address FROM devices ORDER BY ts DESC, id DESC";
             LOG_INFO << "Executing SQL: " << sql;
             rc = sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr);
 
@@ -1573,7 +1578,7 @@ namespace provisioner {
             // (e.g. Zero 2 W in RPIBOOT, or early bootstrap phase).
             bool matchedByEndpoint = false;
             sqlite3_stmt* stmt;
-            const char* sql = "SELECT serial, endpoint, state, image, ip_address FROM devices WHERE serial = ? ORDER BY ts DESC LIMIT 1";
+            const char* sql = "SELECT serial, endpoint, state, image, ip_address FROM devices WHERE serial = ? ORDER BY ts DESC, id DESC LIMIT 1";
             rc = sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr);
 
             if (rc != SQLITE_OK) {
@@ -1595,7 +1600,7 @@ namespace provisioner {
             if (sqlite3_step(stmt) != SQLITE_ROW) {
                 sqlite3_finalize(stmt);
                 LOG_INFO << "Device lookup: no serial match for '" << serialno << "', trying endpoint fallback";
-                const char* endpointSql = "SELECT serial, endpoint, state, image, ip_address FROM devices WHERE endpoint = ? ORDER BY ts DESC LIMIT 1";
+                const char* endpointSql = "SELECT serial, endpoint, state, image, ip_address FROM devices WHERE endpoint = ? ORDER BY ts DESC, id DESC LIMIT 1";
                 rc = sqlite3_prepare_v2(db, endpointSql, -1, &stmt, nullptr);
                 if (rc != SQLITE_OK) {
                     sqlite3_close(db);
@@ -1715,8 +1720,8 @@ namespace provisioner {
                         sqlite3_busy_timeout(histDb, 5000);
                         sqlite3_stmt* histStmt;
                         const char* histSql = matchedByEndpoint
-                            ? "SELECT state, ts FROM devices WHERE endpoint = ? ORDER BY ts DESC LIMIT 10"
-                            : "SELECT state, ts FROM devices WHERE serial = ? ORDER BY ts DESC LIMIT 10";
+                            ? "SELECT state, ts FROM devices WHERE endpoint = ? ORDER BY ts DESC, id DESC LIMIT 10"
+                            : "SELECT state, ts FROM devices WHERE serial = ? ORDER BY ts DESC, id DESC LIMIT 10";
                         histRc = sqlite3_prepare_v2(histDb, histSql, -1, &histStmt, nullptr);
                         if (histRc == SQLITE_OK) {
                             const std::string &histKey = matchedByEndpoint ? device.port : device.serial;
