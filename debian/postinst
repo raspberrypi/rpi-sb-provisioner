@@ -145,12 +145,9 @@ MFG_DB_SCHEMA="id              integer primary key,
     os_image_sha256  char(64)           DEFAULT NULL,
     connect_registered integer          DEFAULT NULL,
     connect_device_id varchar(255)      DEFAULT NULL,
-    eeprom_device   varchar(64)         DEFAULT NULL,
     eeprom_size     integer             DEFAULT NULL,
-    eeprom_sha256   char(64)            DEFAULT NULL,
     eeprom_jedec    char(6)             DEFAULT NULL,
     eeprom_unique_id varchar(32)        DEFAULT NULL,
-    eeprom_spi_speed integer            DEFAULT NULL,
     bootloader_build_timestamp integer  DEFAULT NULL,
     provision_ts    timestamp           default current_timestamp"
 
@@ -164,35 +161,47 @@ if [ "$MFG_TABLE_EXISTS" -eq 0 ]; then
     # Table doesn't exist, create it
     sqlite3 "$MFG_DB_PATH" "CREATE TABLE devices($MFG_DB_SCHEMA);" > /dev/null 2>&1
 else
-    # Table exists, check if migration is needed
-    # Get current schema
-    CURRENT_COLUMNS=$(sqlite3 "$MFG_DB_PATH" "PRAGMA table_info(devices);" | awk -F'|' '{print $2}' | tr '\n' ',')
-    
-    # Check if any expected columns are missing
-    for COL in id boardname serial eth_mac wifi_mac bt_mac mmc_size mmc_cid rpi_duid board_revision processor memory manufacturer secure jtag_locked eeprom_write_protected pubkey_programmed devkey_revoked signed_boot_enabled os_image_filename os_image_sha256 connect_registered connect_device_id eeprom_device eeprom_size eeprom_sha256 eeprom_jedec eeprom_unique_id eeprom_spi_speed bootloader_build_timestamp provision_ts; do
-        if ! echo "$CURRENT_COLUMNS" | grep -q "$COL"; then
-            echo "Migration needed: column $COL is missing from manufacturing.db devices table"
-            
-            # Create a new table with correct schema
-            sqlite3 "$MFG_DB_PATH" <<EOF
-            CREATE TABLE devices_new($MFG_DB_SCHEMA);
-            
-            -- Copy data from old table to new table
-            INSERT INTO devices_new($(echo "$CURRENT_COLUMNS" | sed 's/,$//'))
-            SELECT $(echo "$CURRENT_COLUMNS" | sed 's/,$//') 
-            FROM devices;
-            
-            -- Drop old table
-            DROP TABLE devices;
-            
-            -- Rename new table to original name
-            ALTER TABLE devices_new RENAME TO devices;
+    # Table exists, check if migration is needed. The expected column set,
+    # in schema order. Keep this in sync with MFG_DB_SCHEMA above.
+    EXPECTED_COLS="id boardname serial eth_mac wifi_mac bt_mac mmc_size mmc_cid rpi_duid board_revision processor memory manufacturer secure jtag_locked eeprom_write_protected pubkey_programmed devkey_revoked signed_boot_enabled os_image_filename os_image_sha256 connect_registered connect_device_id eeprom_size eeprom_jedec eeprom_unique_id bootloader_build_timestamp provision_ts"
+
+    # Current columns, one per line.
+    CURRENT_COLUMNS=$(sqlite3 "$MFG_DB_PATH" "PRAGMA table_info(devices);" | awk -F'|' '{print $2}')
+
+    # Migration is needed whenever the on-disk column set differs from the
+    # expected set in either direction -- a missing column (added in this
+    # release) or an extra column (dropped in this release).
+    CURRENT_SORTED=$(printf '%s\n' $CURRENT_COLUMNS | sort)
+    EXPECTED_SORTED=$(printf '%s\n' $EXPECTED_COLS | sort)
+
+    if [ "$CURRENT_SORTED" != "$EXPECTED_SORTED" ]; then
+        echo "Migration needed: manufacturing.db devices schema differs from expected"
+
+        # Carry over only the columns present in BOTH the old and new schema.
+        # Added columns are left at their DEFAULT; dropped columns (and their
+        # data) are discarded.
+        COMMON_COLS=""
+        for COL in $EXPECTED_COLS; do
+            if printf '%s\n' "$CURRENT_COLUMNS" | grep -qx "$COL"; then
+                COMMON_COLS="${COMMON_COLS:+$COMMON_COLS,}$COL"
+            fi
+        done
+
+        sqlite3 "$MFG_DB_PATH" <<EOF
+        CREATE TABLE devices_new($MFG_DB_SCHEMA);
+
+        -- Copy the intersection of old and new columns.
+        INSERT INTO devices_new($COMMON_COLS)
+        SELECT $COMMON_COLS
+        FROM devices;
+
+        -- Replace the old table with the migrated one.
+        DROP TABLE devices;
+        ALTER TABLE devices_new RENAME TO devices;
 EOF
-            
-            echo "Migration completed successfully for manufacturing.db"
-            break
-        fi
-    done
+
+        echo "Migration completed successfully for manufacturing.db"
+    fi
 fi
 
 #DEBHELPER#
