@@ -347,11 +347,25 @@ augment_initramfs() {
     rm -rf "${initramfs_dir}usr/lib/modules"
     mkdir -p "${initramfs_dir}usr/lib/modules"
 
-    # Insert required kernel modules with automatic dependency resolution
-    # Find kernel version from the rootfs modules directory (checks both lib/modules and usr/lib/modules)
-    _kernel_version=$(find_kernel_version "${rootfs_mount}")
-    if [ -n "${_kernel_version}" ]; then
-        copy_kernel_modules_with_deps "${rootfs_mount}" "${initramfs_dir}" "${_kernel_version}"
+    # Insert required kernel modules with automatic dependency resolution.
+    # The image may ship more than one kernel flavour (e.g. ...-v8 and
+    # ...-2712); the firmware decides which one this board boots, so we copy
+    # modules for every flavour and let modprobe pick the matching set via
+    # uname -r at boot.
+    _kernel_versions=$(find_all_kernel_versions "${rootfs_mount}")
+    if [ -n "${_kernel_versions}" ]; then
+        _modules_copied=0
+        for _kernel_version in ${_kernel_versions}; do
+            log "Copying kernel modules for ${_kernel_version}"
+            if copy_kernel_modules_with_deps "${rootfs_mount}" "${initramfs_dir}" "${_kernel_version}"; then
+                _modules_copied=$((_modules_copied + 1))
+            else
+                log "WARNING: Failed to copy kernel modules for ${_kernel_version}; continuing with remaining flavours"
+            fi
+        done
+        if [ "${_modules_copied}" -eq 0 ]; then
+            die "ERROR: Failed to copy kernel modules for any flavour (${_kernel_versions}); pre-boot-auth initramfs would have no modules"
+        fi
     else
         log "WARNING: Could not determine kernel version from rootfs, skipping module copy"
     fi
