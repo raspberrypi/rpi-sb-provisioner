@@ -1462,7 +1462,94 @@ namespace provisioner {
             Json::Value jsonResponse;
             jsonResponse["configured"] = utils::isPkcs11PinConfigured();
             // SECURITY: Never return the actual PIN value
-            
+
+            auto resp = HttpResponse::newHttpResponse();
+            resp->setStatusCode(k200OK);
+            resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+            resp->setBody(Json::FastWriter().write(jsonResponse));
+            callback(resp);
+        });
+
+        // PKCS#11 provider readiness endpoint (GET) - reports whether the
+        // pkcs11-provider is installed/loadable. Touches no token, needs no PIN.
+        app.registerHandler(OPTIONS_PATH + "/pkcs11-status", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
+            LOG_INFO << "Options::pkcs11-status";
+
+            AuditLog::logHandlerAccess(req, "/options/pkcs11-status");
+
+            Json::Value jsonResponse;
+            jsonResponse["providerAvailable"] = utils::isPkcs11ProviderAvailable();
+
+            auto resp = HttpResponse::newHttpResponse();
+            resp->setStatusCode(k200OK);
+            resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+            resp->setBody(Json::FastWriter().write(jsonResponse));
+            callback(resp);
+        });
+
+        // PKCS#11 discovery endpoint (POST) - enumerates the key objects visible
+        // across tokens so the UI can offer a picker instead of a hand-typed URI.
+        app.registerHandler(OPTIONS_PATH + "/pkcs11-discover", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
+            LOG_INFO << "Options::pkcs11-discover";
+
+            AuditLog::logHandlerAccess(req, "/options/pkcs11-discover");
+
+            // SECURITY: Restrict to POST method only (may carry a PIN)
+            if (req->getMethod() != HttpMethod::Post) {
+                LOG_WARN << "SECURITY: Rejected non-POST request to /options/pkcs11-discover from " << AuditLog::getClientIP(req);
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "This endpoint only accepts POST requests",
+                    drogon::k405MethodNotAllowed,
+                    "Method Not Allowed",
+                    "METHOD_NOT_ALLOWED"
+                );
+                callback(resp);
+                return;
+            }
+
+            // SECURITY: Validate CSRF token for browser requests
+            if (!req->getHeader("X-CSRF-Token").empty()) {
+                if (!utils::validateCsrfToken(req)) {
+                    LOG_WARN << "SECURITY: CSRF validation failed for /options/pkcs11-discover from " << AuditLog::getClientIP(req);
+                    auto resp = provisioner::utils::createErrorResponse(
+                        req,
+                        "Invalid or expired security token. Please refresh the page and try again.",
+                        drogon::k403Forbidden,
+                        "Security Error",
+                        "CSRF_VALIDATION_FAILED"
+                    );
+                    callback(resp);
+                    return;
+                }
+            }
+
+            // Optional PIN (some tokens require login to list private objects).
+            // Body is optional; absence just means "use the stored PIN if any".
+            std::string pin;
+            auto jsonBody = req->getJsonObject();
+            if (jsonBody && jsonBody->isMember("pin")) {
+                pin = (*jsonBody)["pin"].asString();
+            }
+
+            auto discovery = utils::discoverPkcs11(pin);
+
+            Json::Value jsonResponse;
+            jsonResponse["providerAvailable"] = discovery.providerAvailable;
+            if (!discovery.errorMessage.empty()) {
+                jsonResponse["errorMessage"] = discovery.errorMessage;
+            }
+            Json::Value objects(Json::arrayValue);
+            for (const auto& obj : discovery.objects) {
+                Json::Value o;
+                o["uri"] = obj.uri;
+                o["label"] = obj.label;
+                o["token"] = obj.token;
+                o["type"] = obj.type;
+                objects.append(o);
+            }
+            jsonResponse["objects"] = objects;
+
             auto resp = HttpResponse::newHttpResponse();
             resp->setStatusCode(k200OK);
             resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
