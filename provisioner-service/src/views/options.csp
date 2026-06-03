@@ -601,7 +601,78 @@
         .pin-remove-btn:hover {
             background: #c82333;
         }
-        
+
+        /* PKCS#11 provider readiness + key discovery */
+        .pkcs11-provider-status {
+            font-size: 0.85rem;
+            margin-bottom: 15px;
+            padding: 8px 12px;
+            border-radius: 6px;
+            background: #f5f5f5;
+        }
+
+        .pkcs11-provider-status.loading {
+            color: #6c757d;
+            font-style: italic;
+        }
+
+        .pkcs11-provider-status.ready {
+            color: #28a745;
+            background: #eaf7ee;
+        }
+
+        .pkcs11-provider-status.ready::before {
+            content: "\\2713 ";
+        }
+
+        .pkcs11-provider-status.unavailable {
+            color: #856404;
+            background: #fff8e6;
+        }
+
+        .pkcs11-detect-btn {
+            margin-bottom: 10px;
+            padding: 8px 16px;
+            border: 1px solid #007bff;
+            background: #fff;
+            color: #007bff;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 500;
+            transition: background 0.2s, color 0.2s;
+        }
+
+        .pkcs11-detect-btn:hover {
+            background: #007bff;
+            color: #fff;
+        }
+
+        .pkcs11-detect-btn:disabled {
+            border-color: #6c757d;
+            color: #6c757d;
+            cursor: not-allowed;
+        }
+
+        .pkcs11-detect-status {
+            font-size: 0.85rem;
+            margin-bottom: 10px;
+            color: #6c757d;
+        }
+
+        .pkcs11-detect-status.error {
+            color: #dc3545;
+        }
+
+        .pkcs11-input-group select {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            font-size: 0.95rem;
+            background: #fff;
+        }
+
         /* ===== Inline Help & Warnings ===== */
         .inline-help {
             display: flex;
@@ -1149,10 +1220,22 @@
 
                     <div class="key-panel <%c++ if(!keyPkcs11.empty()) $$ << "active"; %>" data-panel="pkcs11">
                         <div class="pkcs11-builder">
+                            <div id="pkcs11-provider-status" class="pkcs11-provider-status loading">Checking for PKCS#11 provider...</div>
+
                             <div class="pkcs11-input-group">
                                 <label for="pkcs11-alias">Keypair Alias</label>
                                 <input type="text" id="pkcs11-alias" placeholder="e.g., my-signing-key" oninput="updatePkcs11Preview()" onblur="savePkcs11Value()">
                                 <div id="feedback-CUSTOMER_KEY_PKCS11_NAME" class="field-feedback"></div>
+                            </div>
+
+                            <!-- HSM key discovery: enumerate keys via the provider so the alias need not be typed by hand -->
+                            <div class="pkcs11-discover" id="pkcs11-discover" style="display: none;">
+                                <button type="button" class="pkcs11-detect-btn" id="pkcs11-detect-btn" onclick="detectPkcs11Keys()">Detect keys on HSM</button>
+                                <div id="pkcs11-detect-status" class="pkcs11-detect-status"></div>
+                                <div class="pkcs11-input-group" id="pkcs11-object-group" style="display: none;">
+                                    <label for="pkcs11-object-select">Discovered keys</label>
+                                    <select id="pkcs11-object-select" onchange="usePkcs11DiscoveredKey()"></select>
+                                </div>
                             </div>
 
                             <div class="pkcs11-preview" id="pkcs11-preview">
@@ -1465,12 +1548,14 @@
             statusSpan.textContent = keyInfo.statusMessage || 'Unknown status';
             metricsDiv.appendChild(statusSpan);
             
-            // Fingerprint (truncated) if available
+            // Secure-boot key hash (the value programmed into device OTP),
+            // truncated for display. Matches the hash burned into the device so
+            // it can be compared directly against OTP.
             if (keyInfo.fingerprint) {
                 const fpSpan = document.createElement('span');
                 fpSpan.className = 'key-fingerprint';
-                fpSpan.title = 'SHA256: ' + keyInfo.fingerprint;
-                fpSpan.textContent = 'SHA256: ' + keyInfo.fingerprint.substring(0, 16) + '...';
+                fpSpan.title = 'Secure-boot key hash (OTP): ' + keyInfo.fingerprint;
+                fpSpan.textContent = 'Key hash: ' + keyInfo.fingerprint.substring(0, 16) + '...';
                 metricsDiv.appendChild(fpSpan);
             }
             
@@ -1768,8 +1853,132 @@
             }
         }
         
+        // ===== PKCS#11 Provider Readiness + Key Discovery =====
+
+        // Check whether the pkcs11-provider is installed/loadable and reflect it
+        // in the status banner. Reveals the "Detect keys" control only when ready.
+        async function checkPkcs11ProviderStatus() {
+            const statusDiv = document.getElementById('pkcs11-provider-status');
+            const discoverDiv = document.getElementById('pkcs11-discover');
+            if (!statusDiv) return;
+
+            try {
+                const response = await fetch('/options/pkcs11-status');
+                if (response.ok) {
+                    const result = await response.json();
+                    if (result.providerAvailable) {
+                        statusDiv.className = 'pkcs11-provider-status ready';
+                        statusDiv.textContent = 'PKCS#11 provider detected';
+                        if (discoverDiv) discoverDiv.style.display = 'block';
+                        return;
+                    }
+                }
+                // Provider missing: guide the user to the setup step.
+                statusDiv.className = 'pkcs11-provider-status unavailable';
+                statusDiv.textContent = 'PKCS#11 provider not available. Install the pkcs11-provider package and register your HSM module with p11-kit (a .module file in /usr/share/p11-kit/modules/).';
+                if (discoverDiv) discoverDiv.style.display = 'none';
+            } catch (error) {
+                console.error('PKCS11 provider status error:', error);
+                statusDiv.className = 'pkcs11-provider-status unavailable';
+                statusDiv.textContent = 'Could not determine PKCS#11 provider status.';
+            }
+        }
+
+        // Enumerate the keys visible on connected tokens and populate the picker.
+        async function detectPkcs11Keys() {
+            const btn = document.getElementById('pkcs11-detect-btn');
+            const statusDiv = document.getElementById('pkcs11-detect-status');
+            const group = document.getElementById('pkcs11-object-group');
+            const select = document.getElementById('pkcs11-object-select');
+            if (!btn || !statusDiv || !group || !select) return;
+
+            // A PIN may be needed to list private objects on some tokens.
+            const pinInput = document.getElementById('pkcs11-pin');
+            const pin = pinInput ? pinInput.value : '';
+
+            btn.disabled = true;
+            statusDiv.className = 'pkcs11-detect-status';
+            statusDiv.textContent = 'Scanning for keys...';
+
+            try {
+                const body = {};
+                if (pin) body.pin = pin;
+                const response = await fetch('/options/pkcs11-discover', addCsrfHeader({
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                }));
+
+                if (!response.ok) {
+                    statusDiv.className = 'pkcs11-detect-status error';
+                    statusDiv.textContent = 'Discovery failed. Please try again.';
+                    return;
+                }
+
+                const result = await response.json();
+                const objects = result.objects || [];
+
+                if (objects.length === 0) {
+                    group.style.display = 'none';
+                    statusDiv.className = 'pkcs11-detect-status' + (result.errorMessage ? ' error' : '');
+                    statusDiv.textContent = result.errorMessage
+                        || 'No keys found. Check the token is connected and the PIN (if required) is entered.';
+                    return;
+                }
+
+                // Populate the picker. The option value is the full URI; the label
+                // shows the human-friendly object name, token, and key type.
+                select.innerHTML = '<option value="">Select a key...</option>';
+                objects.forEach(obj => {
+                    const option = document.createElement('option');
+                    option.value = obj.uri;
+                    let text = obj.label || obj.uri;
+                    if (obj.token) text += ' (' + obj.token + ')';
+                    if (obj.type) text += ' — ' + obj.type;
+                    option.textContent = text;
+                    select.appendChild(option);
+                });
+
+                group.style.display = 'block';
+                statusDiv.className = 'pkcs11-detect-status';
+                statusDiv.textContent = 'Found ' + objects.length + ' key' + (objects.length === 1 ? '' : 's') + '.';
+            } catch (error) {
+                console.error('PKCS11 discovery error:', error);
+                statusDiv.className = 'pkcs11-detect-status error';
+                statusDiv.textContent = 'Network error during discovery.';
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        // Apply the key chosen from the discovery picker: use its full URI
+        // verbatim (it may carry token=/id= attributes the simple builder omits),
+        // reflect the object label in the alias box, then save and validate.
+        async function usePkcs11DiscoveredKey() {
+            const select = document.getElementById('pkcs11-object-select');
+            const uri = select ? select.value : '';
+            if (!uri) return;
+
+            const hiddenInput = document.getElementById('CUSTOMER_KEY_PKCS11_NAME');
+            const aliasInput = document.getElementById('pkcs11-alias');
+            const uriElement = document.getElementById('pkcs11-uri');
+
+            // Derive the object alias from the URI for the alias box display.
+            const match = uri.match(/object=([^;?]+)/);
+            if (aliasInput && match) {
+                aliasInput.value = decodeURIComponent(match[1]);
+            }
+            hiddenInput.value = uri;
+            if (uriElement) uriElement.textContent = uri;
+
+            await savePkcs11Value();
+        }
+
         // Initialize PKCS11 alias from existing value
         (async function initPkcs11() {
+            // Check provider readiness up front so the user sees it before trying.
+            await checkPkcs11ProviderStatus();
+
             const existingValue = document.getElementById('CUSTOMER_KEY_PKCS11_NAME').value;
             if (existingValue) {
                 const match = existingValue.match(/object=([^;]+)/);
@@ -1777,7 +1986,7 @@
                     document.getElementById('pkcs11-alias').value = match[1];
                     updatePkcs11Preview();
                 }
-                
+
                 // Validate existing PKCS#11 key and show metrics
                 const metricsContainer = document.getElementById('pkcs11-key-metrics-container');
                 const metricsDiv = document.getElementById('pkcs11-key-metrics');
@@ -1787,7 +1996,7 @@
                     await validatePkcs11Key(existingValue);
                 }
             }
-            
+
             // Check PIN status on load
             await checkPkcs11PinStatus();
         })();

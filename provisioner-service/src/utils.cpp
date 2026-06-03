@@ -4,144 +4,24 @@
 #include <algorithm>
 #include <regex>
 #include <functional>
-#include <cstdio>
 #include <cstring>
-#include <cstdlib>
-#include <sys/wait.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <unistd.h>
+#include <cctype>
 #include <drogon/drogon.h>
 #include "include/audit.h"
+#include <openssl/pem.h>
+#include <openssl/evp.h>
+#include <openssl/sha.h>
+#include <openssl/bn.h>
+#include <openssl/core_names.h>
+#include <openssl/store.h>
+#include <openssl/ui.h>
+#include <openssl/provider.h>
+#include <openssl/crypto.h>
+#include <openssl/err.h>
 
 namespace provisioner {
     namespace utils {
         
-        // Private directory for temporary PIN files (more secure than /tmp)
-        // This directory should be created with mode 0700 at service startup
-        constexpr const char* PIN_TEMP_DIR = "/run/rpi-sb-provisioner";
-        
-        // RAII wrapper for secure temporary PIN files
-        // Guarantees cleanup even on exceptions, and securely overwrites before deletion
-        class SecureTempPinFile {
-        public:
-            SecureTempPinFile() = default;
-            
-            ~SecureTempPinFile() {
-                cleanup();
-            }
-            
-            // Non-copyable
-            SecureTempPinFile(const SecureTempPinFile&) = delete;
-            SecureTempPinFile& operator=(const SecureTempPinFile&) = delete;
-            
-            // Movable
-            SecureTempPinFile(SecureTempPinFile&& other) noexcept : path_(std::move(other.path_)) {
-                other.path_.clear();
-            }
-            
-            SecureTempPinFile& operator=(SecureTempPinFile&& other) noexcept {
-                if (this != &other) {
-                    cleanup();
-                    path_ = std::move(other.path_);
-                    other.path_.clear();
-                }
-                return *this;
-            }
-            
-            // Create a secure temporary file and write the PIN to it
-            // Returns true on success, false on failure
-            bool create(const std::string& pin) {
-                cleanup();  // Clean up any existing file
-                
-                // Ensure the private directory exists with secure permissions
-                ensurePrivateDirectory();
-                
-                // Use mkstemp for atomic secure file creation
-                // mkstemp creates with mode 0600 by default
-                std::string templatePath = std::string(PIN_TEMP_DIR) + "/pin-XXXXXX";
-                std::vector<char> pathBuf(templatePath.begin(), templatePath.end());
-                pathBuf.push_back('\0');
-                
-                // Set umask to ensure restrictive permissions
-                mode_t oldUmask = umask(0077);
-                int fd = mkstemp(pathBuf.data());
-                umask(oldUmask);
-                
-                if (fd < 0) {
-                    // Fall back to /tmp if private directory fails
-                    templatePath = "/tmp/rpi-pin-XXXXXX";
-                    pathBuf.assign(templatePath.begin(), templatePath.end());
-                    pathBuf.push_back('\0');
-                    
-                    oldUmask = umask(0077);
-                    fd = mkstemp(pathBuf.data());
-                    umask(oldUmask);
-                    
-                    if (fd < 0) {
-                        LOG_ERROR << "Failed to create secure temp file for PIN";
-                        return false;
-                    }
-                }
-                
-                path_ = pathBuf.data();
-                
-                // Tighten permissions to read-only (0400)
-                if (fchmod(fd, S_IRUSR) < 0) {
-                    LOG_WARN << "Failed to set temp PIN file to read-only";
-                }
-                
-                // Write the PIN
-                ssize_t written = write(fd, pin.c_str(), pin.length());
-                close(fd);
-                
-                if (written != static_cast<ssize_t>(pin.length())) {
-                    LOG_ERROR << "Failed to write PIN to temp file";
-                    cleanup();
-                    return false;
-                }
-                
-                return true;
-            }
-            
-            const std::string& path() const { return path_; }
-            bool valid() const { return !path_.empty(); }
-            
-        private:
-            std::string path_;
-            
-            void cleanup() {
-                if (path_.empty()) return;
-                
-                // Securely overwrite the file contents before deletion
-                int fd = open(path_.c_str(), O_WRONLY);
-                if (fd >= 0) {
-                    // Overwrite with zeros
-                    char zeros[256];
-                    std::memset(zeros, 0, sizeof(zeros));
-                    write(fd, zeros, sizeof(zeros));
-                    fsync(fd);
-                    close(fd);
-                }
-                
-                // Delete the file
-                std::filesystem::remove(path_);
-                path_.clear();
-            }
-            
-            static void ensurePrivateDirectory() {
-                if (!std::filesystem::exists(PIN_TEMP_DIR)) {
-                    try {
-                        std::filesystem::create_directories(PIN_TEMP_DIR);
-                        // Set directory permissions to 0700 (owner only)
-                        chmod(PIN_TEMP_DIR, S_IRWXU);
-                    } catch (const std::filesystem::filesystem_error& e) {
-                        LOG_WARN << "Could not create private PIN directory: " << e.what();
-                        // Will fall back to /tmp
-                    }
-                }
-            }
-        };
         
         constexpr const char* FIRMWARE_BASE_PATH = "/lib/firmware/raspberrypi/bootloader-";
         
@@ -254,71 +134,241 @@ namespace provisioner {
         // ===== Key Parsing Implementation =====
         
         namespace {
-            // Helper to run a command and capture output
-            std::pair<int, std::string> runCommand(const std::string& cmd) {
-                std::string output;
-                FILE* pipe = popen(cmd.c_str(), "r");
-                if (!pipe) {
-                    return {-1, "Failed to run command"};
+            // Read the stored PKCS#11 PIN so it can be handed to the provider
+            // in-process via the passphrase callback, rather than written into
+            // a pin-source= file referenced on a command line. Returns empty if
+            // no PIN is configured or it cannot be read.
+            std::string readStoredPkcs11Pin() {
+                if (!std::filesystem::exists(PKCS11_PIN_FILE)) {
+                    return {};
                 }
-                
-                char buffer[256];
-                while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-                    output += buffer;
+                std::ifstream pinFile(PKCS11_PIN_FILE, std::ios::binary);
+                if (!pinFile.is_open()) {
+                    return {};
                 }
-                
-                int exitCode = pclose(pipe);
-                return {WEXITSTATUS(exitCode), output};
+                std::string pin((std::istreambuf_iterator<char>(pinFile)),
+                                std::istreambuf_iterator<char>());
+                // The PIN is stored without a trailing newline, but strip any
+                // stray trailing whitespace defensively.
+                while (!pin.empty() && (pin.back() == '\n' || pin.back() == '\r')) {
+                    pin.pop_back();
+                }
+                return pin;
             }
-            
-            // Parse OpenSSL text output for key info
-            KeyInfo parseOpenSSLOutput(const std::string& output, bool isPkcs11 = false) {
-                KeyInfo info;
-                info.success = true;
-                info.isPrivateKey = true;  // We're always checking private keys
-                
-                // Check for RSA key
-                if (output.find("RSA Private-Key") != std::string::npos || 
-                    output.find("Private-Key:") != std::string::npos) {
-                    info.algorithm = "RSA";
-                    
-                    // Extract key size - look for patterns like "(2048 bit)" or "(2048 bit, 2 primes)"
-                    std::regex sizeRegex(R"(\((\d+)\s*bit)");
-                    std::smatch match;
-                    if (std::regex_search(output, match, sizeRegex)) {
-                        info.keySize = std::stoi(match[1].str());
-                    }
-                } else if (output.find("EC Private-Key") != std::string::npos) {
-                    info.algorithm = "EC";
-                    
-                    // Extract curve size
-                    std::regex sizeRegex(R"(\((\d+)\s*bit)");
-                    std::smatch match;
-                    if (std::regex_search(output, match, sizeRegex)) {
-                        info.keySize = std::stoi(match[1].str());
-                    }
-                } else if (output.find("DSA Private-Key") != std::string::npos) {
-                    info.algorithm = "DSA";
-                    
-                    std::regex sizeRegex(R"(\((\d+)\s*bit)");
-                    std::smatch match;
-                    if (std::regex_search(output, match, sizeRegex)) {
-                        info.keySize = std::stoi(match[1].str());
-                    }
-                } else {
-                    info.algorithm = "Unknown";
-                    info.keySize = 0;
+
+            // pem_password_cb that copies a PIN held in *u into OpenSSL's buffer.
+            // Wrapped into a UI_METHOD via UI_UTIL_wrap_read_pem_callback so it
+            // satisfies OSSL_STORE's passphrase prompts (and thus the
+            // pkcs11-provider's C_Login) without any terminal interaction.
+            int pinPasswordCallback(char* buf, int size, int /*rwflag*/, void* u) {
+                const auto* pin = static_cast<const std::string*>(u);
+                if (!pin || pin->empty() || size <= 0) {
+                    return 0;
                 }
-                
-                // Determine fitness for purpose (Pi secure boot requires RSA-2048)
+                int len = static_cast<int>(std::min(pin->size(), static_cast<size_t>(size)));
+                std::memcpy(buf, pin->data(), static_cast<size_t>(len));
+                return len;
+            }
+
+            // Drain the OpenSSL error queue into a single string. Used only to
+            // CLASSIFY failures into a user-facing category; the raw text is
+            // never logged, as it can leak HSM/token detail.
+            std::string drainOpenSslErrors() {
+                std::string out;
+                unsigned long err;
+                char buf[256];
+                while ((err = ERR_get_error()) != 0) {
+                    ERR_error_string_n(err, buf, sizeof(buf));
+                    if (!out.empty()) {
+                        out += "; ";
+                    }
+                    out += buf;
+                }
+                return out;
+            }
+
+            // RAII holder for a private library context with the default and
+            // pkcs11 providers loaded. Keeps the pkcs11-provider confined to the
+            // operation that needs it and off the process-wide default context
+            // (libcurl TLS, the PEM key path), and removes any dependency on the
+            // provider being activated in the system openssl.cnf.
+            struct Pkcs11Context {
+                OSSL_LIB_CTX* libctx = nullptr;
+                OSSL_PROVIDER* defProv = nullptr;
+                OSSL_PROVIDER* p11Prov = nullptr;
+
+                Pkcs11Context() = default;
+                Pkcs11Context(const Pkcs11Context&) = delete;
+                Pkcs11Context& operator=(const Pkcs11Context&) = delete;
+
+                // Returns true once the pkcs11 provider is loaded and ready.
+                bool load() {
+                    libctx = OSSL_LIB_CTX_new();
+                    if (!libctx) {
+                        return false;
+                    }
+                    defProv = OSSL_PROVIDER_load(libctx, "default");
+                    p11Prov = OSSL_PROVIDER_load(libctx, "pkcs11");
+                    return p11Prov != nullptr;
+                }
+
+                ~Pkcs11Context() {
+                    // Providers must be unloaded before the context is freed;
+                    // any EVP_PKEY obtained from the context must already be
+                    // freed by the caller before this runs.
+                    if (p11Prov) {
+                        OSSL_PROVIDER_unload(p11Prov);
+                    }
+                    if (defProv) {
+                        OSSL_PROVIDER_unload(defProv);
+                    }
+                    if (libctx) {
+                        OSSL_LIB_CTX_free(libctx);
+                    }
+                }
+            };
+
+            // Percent-decode a PKCS#11 URI component for display (e.g. a token
+            // label "My%20Token" -> "My Token"). Leaves malformed escapes as-is.
+            std::string pctDecode(const std::string& s) {
+                std::string out;
+                out.reserve(s.size());
+                auto hexVal = [](char c) {
+                    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                    return c <= '9' ? c - '0' : c - 'a' + 10;
+                };
+                for (size_t i = 0; i < s.size(); ++i) {
+                    if (s[i] == '%' && i + 2 < s.size() &&
+                        std::isxdigit(static_cast<unsigned char>(s[i + 1])) &&
+                        std::isxdigit(static_cast<unsigned char>(s[i + 2]))) {
+                        out.push_back(static_cast<char>(hexVal(s[i + 1]) * 16 + hexVal(s[i + 2])));
+                        i += 2;
+                    } else {
+                        out.push_back(s[i]);
+                    }
+                }
+                return out;
+            }
+
+            // Extract a single attribute (e.g. "object", "token", "type") from
+            // the path part of a pkcs11: URI, percent-decoded. Returns empty if
+            // the attribute is absent.
+            std::string pkcs11UriAttr(const std::string& uri, const std::string& key) {
+                std::string path = uri;
+                auto q = path.find('?');               // drop any query component
+                if (q != std::string::npos) {
+                    path = path.substr(0, q);
+                }
+                const std::string scheme = "pkcs11:";
+                if (path.rfind(scheme, 0) == 0) {
+                    path = path.substr(scheme.size());
+                }
+                size_t start = 0;
+                while (start <= path.size()) {
+                    size_t semi = path.find(';', start);
+                    std::string attr = path.substr(start,
+                        semi == std::string::npos ? std::string::npos : semi - start);
+                    auto eq = attr.find('=');
+                    if (eq != std::string::npos && attr.substr(0, eq) == key) {
+                        return pctDecode(attr.substr(eq + 1));
+                    }
+                    if (semi == std::string::npos) {
+                        break;
+                    }
+                    start = semi + 1;
+                }
+                return {};
+            }
+
+            // Parse a discovered pkcs11: URI into the fields the UI needs.
+            Pkcs11Object parsePkcs11ObjectUri(const std::string& uri) {
+                Pkcs11Object obj;
+                obj.uri = uri;
+                obj.label = pkcs11UriAttr(uri, "object");
+                obj.token = pkcs11UriAttr(uri, "token");
+                obj.type = pkcs11UriAttr(uri, "type");
+                return obj;
+            }
+
+            // Compute the Raspberry Pi secure-boot key hash for an RSA key.
+            //
+            // This is the value the bootloader programs into device OTP and uses
+            // to authenticate the signed boot image, NOT a generic SHA256 of the
+            // PEM/DER encoding. It must match the calculation in usbboot's
+            // rpi-sign-bootcode (append_public_key):
+            //
+            //     SHA256( n.to_bytes(256, 'little') || e.to_bytes(8, 'little') )
+            //
+            // where n is the 2048-bit modulus and e the public exponent. The
+            // fixed 256/8 byte widths mean this is only defined for RSA-2048
+            // keys (the only key type valid for Pi secure boot); an empty
+            // string is returned for anything else. The modulus and exponent
+            // are public components, so a private-key EVP_PKEY works here too.
+            std::string computeSecureBootKeyHash(EVP_PKEY* pkey) {
+                std::string result;
+                if (!pkey) {
+                    return result;
+                }
+
+                if (EVP_PKEY_base_id(pkey) == EVP_PKEY_RSA &&
+                    EVP_PKEY_bits(pkey) == 2048) {
+                    BIGNUM* n = nullptr;
+                    BIGNUM* e = nullptr;
+                    if (EVP_PKEY_get_bn_param(pkey, OSSL_PKEY_PARAM_RSA_N, &n) == 1 &&
+                        EVP_PKEY_get_bn_param(pkey, OSSL_PKEY_PARAM_RSA_E, &e) == 1) {
+                        // 256 bytes of little-endian modulus followed by 8 bytes
+                        // of little-endian exponent, matching the bootloader.
+                        unsigned char buf[256 + 8];
+                        if (BN_bn2lebinpad(n, buf, 256) == 256 &&
+                            BN_bn2lebinpad(e, buf + 256, 8) == 8) {
+                            unsigned char digest[SHA256_DIGEST_LENGTH];
+                            SHA256(buf, sizeof(buf), digest);
+
+                            static const char hex[] = "0123456789abcdef";
+                            result.reserve(SHA256_DIGEST_LENGTH * 2);
+                            for (unsigned char byte : digest) {
+                                result.push_back(hex[byte >> 4]);
+                                result.push_back(hex[byte & 0x0f]);
+                            }
+                        }
+                    }
+                    BN_free(n);
+                    BN_free(e);
+                }
+
+                return result;
+            }
+
+            // Convenience overload: parse a PEM-encoded public key and hash it.
+            // Used by the PKCS#11 path, which still obtains the public key as PEM.
+            std::string computeSecureBootKeyHash(const std::string& publicKeyPem) {
+                BIO* bio = BIO_new_mem_buf(publicKeyPem.data(),
+                                           static_cast<int>(publicKeyPem.size()));
+                if (!bio) {
+                    return {};
+                }
+                EVP_PKEY* pkey = PEM_read_bio_PUBKEY(bio, nullptr, nullptr, nullptr);
+                BIO_free(bio);
+
+                std::string result = computeSecureBootKeyHash(pkey);
+                EVP_PKEY_free(pkey);
+                return result;
+            }
+
+            // Determine fitness for purpose from an already-populated algorithm
+            // and keySize (Pi secure boot requires RSA-2048). Shared by the
+            // PEM (library) and PKCS#11 (text) parsing paths so the policy
+            // lives in one place.
+            void setFitnessForPurpose(KeyInfo& info) {
                 if (info.algorithm == "RSA" && info.keySize == 2048) {
                     info.isFitForPurpose = true;
                     info.statusLevel = "valid";
                     info.statusMessage = "Valid for secure boot";
                 } else if (info.algorithm == "RSA" && info.keySize > 0) {
                     info.isFitForPurpose = false;
-                    info.statusLevel = "warning";
-                    info.statusMessage = "RSA-2048 recommended for Pi secure boot";
+                    info.statusLevel = "error";
+                    info.statusMessage = "Pi secure boot requires RSA-2048 (key is RSA-" +
+                                         std::to_string(info.keySize) + ")";
                 } else if (info.algorithm != "RSA") {
                     info.isFitForPurpose = false;
                     info.statusLevel = "error";
@@ -328,7 +378,35 @@ namespace provisioner {
                     info.statusLevel = "error";
                     info.statusMessage = "Could not determine key type";
                 }
-                
+            }
+
+            // Populate a KeyInfo directly from a parsed EVP_PKEY, using the
+            // linked OpenSSL library rather than scraping `openssl ... -text`
+            // output. The key type and size come back as values, so there is
+            // no human-readable format to regex against.
+            KeyInfo describeKey(EVP_PKEY* pkey) {
+                KeyInfo info;
+                info.success = true;
+                info.isPrivateKey = true;  // We're always checking private keys
+
+                switch (EVP_PKEY_base_id(pkey)) {
+                    case EVP_PKEY_RSA:
+                    case EVP_PKEY_RSA_PSS:
+                        info.algorithm = "RSA";
+                        break;
+                    case EVP_PKEY_EC:
+                        info.algorithm = "EC";
+                        break;
+                    case EVP_PKEY_DSA:
+                        info.algorithm = "DSA";
+                        break;
+                    default:
+                        info.algorithm = "Unknown";
+                        break;
+                }
+                info.keySize = EVP_PKEY_bits(pkey);
+
+                setFitnessForPurpose(info);
                 return info;
             }
         }
@@ -345,71 +423,56 @@ namespace provisioner {
                 return info;
             }
             
-            // Use OpenSSL to parse the key and get info
-            // Try RSA first
-            std::string cmd = "openssl rsa -in \"" + path + "\" -text -noout 2>&1";
-            auto [exitCode, output] = runCommand(cmd);
-            
-            if (exitCode == 0) {
-                info = parseOpenSSLOutput(output);
-                
-                // Get fingerprint of public key
-                std::string fpCmd = "openssl rsa -in \"" + path + "\" -pubout 2>/dev/null | openssl sha256 -r 2>/dev/null";
-                auto [fpExit, fpOutput] = runCommand(fpCmd);
-                if (fpExit == 0 && !fpOutput.empty()) {
-                    // Output format: "abc123... *stdin"
-                    size_t spacePos = fpOutput.find(' ');
-                    if (spacePos != std::string::npos) {
-                        info.fingerprint = fpOutput.substr(0, spacePos);
-                    } else {
-                        // Trim newline
-                        info.fingerprint = fpOutput;
-                        while (!info.fingerprint.empty() && 
-                               (info.fingerprint.back() == '\n' || info.fingerprint.back() == '\r')) {
-                            info.fingerprint.pop_back();
-                        }
-                    }
-                }
-                
-                LOG_INFO << "Parsed PEM key: " << info.algorithm << "-" << info.keySize 
-                         << " (" << info.statusLevel << ")";
+            // Parse the key with the linked OpenSSL library instead of shelling
+            // out to the `openssl` CLI. PEM_read_bio_PrivateKey handles RSA, EC
+            // and any other PEM private key in one call (traditional or PKCS#8),
+            // replacing the previous rsa/ec/pkey CLI fallback chain.
+            BIO* bio = BIO_new_file(path.c_str(), "r");
+            if (!bio) {
+                info.success = false;
+                info.errorMessage = "Failed to open key file";
+                info.statusLevel = "error";
+                info.statusMessage = "Invalid key format";
+                LOG_WARN << "Failed to open key file: " << path;
                 return info;
             }
-            
-            // Try EC key
-            cmd = "openssl ec -in \"" + path + "\" -text -noout 2>&1";
-            std::tie(exitCode, output) = runCommand(cmd);
-            
-            if (exitCode == 0) {
-                info = parseOpenSSLOutput(output);
-                LOG_INFO << "Parsed EC key: " << info.algorithm << "-" << info.keySize 
-                         << " (" << info.statusLevel << ")";
+
+            // Never block on a passphrase prompt: this runs in a daemon with no
+            // controlling terminal, and the previous CLI calls supplied no
+            // passphrase either. A callback returning 0 makes an encrypted key
+            // fail to parse rather than hang waiting on /dev/tty.
+            auto noPrompt = [](char*, int, int, void*) -> int { return 0; };
+            EVP_PKEY* pkey = PEM_read_bio_PrivateKey(bio, nullptr, noPrompt, nullptr);
+            BIO_free(bio);
+
+            if (!pkey) {
+                info.success = false;
+                info.errorMessage = "Failed to parse key file";
+                info.statusLevel = "error";
+                info.statusMessage = "Invalid key format";
+                LOG_WARN << "Failed to parse key file: " << path;
                 return info;
             }
-            
-            // Try generic pkey
-            cmd = "openssl pkey -in \"" + path + "\" -text -noout 2>&1";
-            std::tie(exitCode, output) = runCommand(cmd);
-            
-            if (exitCode == 0) {
-                info = parseOpenSSLOutput(output);
-                LOG_INFO << "Parsed key: " << info.algorithm << "-" << info.keySize 
-                         << " (" << info.statusLevel << ")";
-                return info;
-            }
-            
-            // Failed to parse
-            info.success = false;
-            info.errorMessage = "Failed to parse key file: " + output;
-            info.statusLevel = "error";
-            info.statusMessage = "Invalid key format";
-            LOG_WARN << "Failed to parse key file: " << path << " - " << output;
+
+            info = describeKey(pkey);
+
+            // Compute the secure-boot key hash (the value programmed into device
+            // OTP) so the UI shows a hash directly comparable to the device. The
+            // modulus and exponent are public components of the private key, so
+            // no separate public-key derivation is needed. See
+            // computeSecureBootKeyHash() for the exact calculation.
+            info.fingerprint = computeSecureBootKeyHash(pkey);
+
+            EVP_PKEY_free(pkey);
+
+            LOG_INFO << "Parsed key: " << info.algorithm << "-" << info.keySize
+                     << " (" << info.statusLevel << ")";
             return info;
         }
         
         KeyInfo parsePkcs11Key(const std::string& uri, const std::string& pin) {
             KeyInfo info;
-            
+
             // Validate URI format
             if (uri.find("pkcs11:") != 0) {
                 info.success = false;
@@ -418,121 +481,238 @@ namespace provisioner {
                 info.statusMessage = "Invalid URI format";
                 return info;
             }
-            
-            // RAII wrapper ensures temp PIN files are always cleaned up securely,
-            // even if an exception is thrown
-            SecureTempPinFile tempPinFile;
-            SecureTempPinFile tempPinFileFp;  // For fingerprint command
-            
-            // Build the effective URI with PIN handling
-            std::string effectiveUri = uri;
-            
-            // If a PIN is provided directly (for validation), create a secure temporary file
-            if (!pin.empty()) {
-                if (!tempPinFile.create(pin)) {
-                    info.success = false;
-                    info.errorMessage = "Failed to create secure temp file for PIN";
-                    info.statusLevel = "error";
-                    info.statusMessage = "Internal error";
-                    return info;
-                }
-                
-                // Append pin-source to URI (use ? if no query params, & if there are)
-                if (effectiveUri.find('?') != std::string::npos) {
-                    effectiveUri += "&pin-source=" + tempPinFile.path();
-                } else {
-                    effectiveUri += "?pin-source=" + tempPinFile.path();
-                }
-            } else if (isPkcs11PinConfigured()) {
-                // Use stored PIN file
-                effectiveUri = buildPkcs11UriWithPinSource(uri);
+
+            // Load the pkcs11-provider (plus the default provider, for hashing
+            // and RSA parameter access) into a PRIVATE library context, and
+            // query the key through OSSL_STORE. This replaces the deprecated
+            // `openssl rsa -engine pkcs11` ENGINE path. Using a private context
+            // confines the provider to this operation: the process-wide default
+            // context (libcurl TLS, the PEM key path) is left untouched, and we
+            // do not depend on the provider being activated in the system
+            // openssl.cnf -- matching the explicit `-provider pkcs11 -provider
+            // default` flags used by the signing scripts.
+            OSSL_LIB_CTX* libctx = OSSL_LIB_CTX_new();
+            if (!libctx) {
+                info.success = false;
+                info.errorMessage = "Failed to create OpenSSL context";
+                info.statusLevel = "error";
+                info.statusMessage = "Internal error";
+                return info;
             }
-            
-            // Use OpenSSL with PKCS#11 engine to query the key
-            // Note: This requires the HSM to be connected and accessible
-            std::string cmd = "openssl rsa -engine pkcs11 -inform engine -in \"" + effectiveUri + "\" -text -noout 2>&1";
-            auto [exitCode, output] = runCommand(cmd);
-            
-            // Note: tempPinFile is cleaned up automatically by RAII destructor
-            
-            if (exitCode == 0) {
-                info = parseOpenSSLOutput(output, true);
-                
-                // Get fingerprint of public key from PKCS#11
-                std::string fpUri = uri;
-                if (!pin.empty()) {
-                    // Create a new secure temp file for fingerprint command
-                    if (tempPinFileFp.create(pin)) {
-                        if (fpUri.find('?') != std::string::npos) {
-                            fpUri += "&pin-source=" + tempPinFileFp.path();
-                        } else {
-                            fpUri += "?pin-source=" + tempPinFileFp.path();
-                        }
-                    }
-                } else if (isPkcs11PinConfigured()) {
-                    fpUri = buildPkcs11UriWithPinSource(uri);
+            OSSL_PROVIDER* defProv = OSSL_PROVIDER_load(libctx, "default");
+            OSSL_PROVIDER* p11Prov = OSSL_PROVIDER_load(libctx, "pkcs11");
+            if (!p11Prov) {
+                if (defProv) {
+                    OSSL_PROVIDER_unload(defProv);
                 }
-                
-                std::string fpCmd = "openssl rsa -engine pkcs11 -inform engine -in \"" + fpUri + 
-                                   "\" -pubout 2>/dev/null | openssl sha256 -r 2>/dev/null";
-                auto [fpExit, fpOutput] = runCommand(fpCmd);
-                
-                // Note: tempPinFileFp is cleaned up automatically by RAII destructor
-                
-                if (fpExit == 0 && !fpOutput.empty()) {
-                    size_t spacePos = fpOutput.find(' ');
-                    if (spacePos != std::string::npos) {
-                        info.fingerprint = fpOutput.substr(0, spacePos);
-                    } else {
-                        info.fingerprint = fpOutput;
-                        while (!info.fingerprint.empty() && 
-                               (info.fingerprint.back() == '\n' || info.fingerprint.back() == '\r')) {
-                            info.fingerprint.pop_back();
-                        }
-                    }
+                OSSL_LIB_CTX_free(libctx);
+                info.success = false;
+                info.errorMessage = "PKCS#11 provider not available";
+                info.statusLevel = "error";
+                info.statusMessage = "PKCS#11 provider not installed";
+                LOG_WARN << "Failed to parse PKCS#11 key: " << info.statusMessage;
+                return info;
+            }
+
+            // Resolve the PIN: an explicitly supplied PIN (validation flow) wins,
+            // otherwise fall back to the stored PIN if one is configured. It is
+            // handed to the provider in-process via the passphrase callback,
+            // never written to a pin-source= file referenced on a command line.
+            std::string effectivePin = !pin.empty() ? pin : readStoredPkcs11Pin();
+
+            UI_METHOD* uiMethod = UI_UTIL_wrap_read_pem_callback(pinPasswordCallback, 0);
+            if (!uiMethod) {
+                OSSL_PROVIDER_unload(p11Prov);
+                if (defProv) {
+                    OSSL_PROVIDER_unload(defProv);
                 }
-                
-                LOG_INFO << "Parsed PKCS#11 key: " << info.algorithm << "-" << info.keySize 
+                OSSL_LIB_CTX_free(libctx);
+                info.success = false;
+                info.errorMessage = "Failed to set up PIN handling";
+                info.statusLevel = "error";
+                info.statusMessage = "Internal error";
+                return info;
+            }
+
+            // Clear stale errors so the failure classifier below only sees
+            // errors produced by this call.
+            ERR_clear_error();
+
+            EVP_PKEY* pkey = nullptr;
+            OSSL_STORE_CTX* ctx = OSSL_STORE_open_ex(uri.c_str(), libctx, nullptr,
+                                                     uiMethod, &effectivePin,
+                                                     nullptr, nullptr, nullptr);
+            if (ctx) {
+                // We only care about a key object; biasing the store avoids
+                // pulling in certificates or other associated objects.
+                OSSL_STORE_expect(ctx, OSSL_STORE_INFO_PKEY);
+                while (pkey == nullptr && OSSL_STORE_eof(ctx) != 1) {
+                    OSSL_STORE_INFO* storeInfo = OSSL_STORE_load(ctx);
+                    if (!storeInfo) {
+                        // NULL means either an error or a skippable item. Break on
+                        // an unrecoverable error so we never spin; otherwise keep
+                        // going until EOF.
+                        if (OSSL_STORE_error(ctx) == 1) {
+                            break;
+                        }
+                        continue;
+                    }
+                    switch (OSSL_STORE_INFO_get_type(storeInfo)) {
+                        case OSSL_STORE_INFO_PKEY:
+                            pkey = OSSL_STORE_INFO_get1_PKEY(storeInfo);
+                            break;
+                        case OSSL_STORE_INFO_PUBKEY:
+                            pkey = OSSL_STORE_INFO_get1_PUBKEY(storeInfo);
+                            break;
+                        default:
+                            break;
+                    }
+                    OSSL_STORE_INFO_free(storeInfo);
+                }
+                OSSL_STORE_close(ctx);
+            }
+
+            // Extract everything we need while the providers are still loaded
+            // (the key is bound to the private library context).
+            bool parsed = false;
+            if (pkey) {
+                info = describeKey(pkey);
+
+                // The RSA modulus and exponent are public components, so the
+                // secure-boot key hash (the OTP value) can be computed directly
+                // from the key handle without a separate public-key export.
+                info.fingerprint = computeSecureBootKeyHash(pkey);
+                EVP_PKEY_free(pkey);
+                parsed = true;
+            }
+
+            // Capture failure detail from the error queue before tearing down
+            // the OpenSSL state. SECURITY: the raw error text can carry HSM/token
+            // detail, so it is only inspected here and never logged.
+            std::string errText = parsed ? std::string() : drainOpenSslErrors();
+
+            UI_destroy_method(uiMethod);
+            OSSL_PROVIDER_unload(p11Prov);
+            if (defProv) {
+                OSSL_PROVIDER_unload(defProv);
+            }
+            OSSL_LIB_CTX_free(libctx);
+
+            if (parsed) {
+                LOG_INFO << "Parsed PKCS#11 key: " << info.algorithm << "-" << info.keySize
                          << " (" << info.statusLevel << ")";
                 return info;
             }
-            
-            // Check for common PKCS#11 errors
-            // SECURITY: Do not log raw OpenSSL output - it may contain sensitive HSM information
-            if (output.find("engine") != std::string::npos && output.find("not found") != std::string::npos) {
-                info.success = false;
-                info.errorMessage = "PKCS#11 engine not available";
-                info.statusLevel = "error";
-                info.statusMessage = "PKCS#11 engine not installed";
-            } else if (output.find("login") != std::string::npos || output.find("PIN") != std::string::npos ||
-                       output.find("pin") != std::string::npos || output.find("authenticate") != std::string::npos) {
-                info.success = false;
+
+            // Classify the failure into a user-facing category.
+            auto contains = [&errText](const char* needle) {
+                return errText.find(needle) != std::string::npos;
+            };
+
+            info.success = false;
+            info.statusLevel = "error";
+            if (contains("PIN") || contains("pin") || contains("login") ||
+                contains("authenticat") || contains("CKR_PIN")) {
                 info.errorMessage = "PIN incorrect or not provided";
-                info.statusLevel = "error";
                 info.statusMessage = "Invalid PIN";
-            } else if (output.find("token") != std::string::npos || output.find("slot") != std::string::npos) {
-                info.success = false;
+            } else if (contains("token") || contains("slot") || contains("CKR_TOKEN") ||
+                       contains("CKR_SLOT") || contains("CKR_DEVICE")) {
                 info.errorMessage = "Cannot access HSM - check connection";
-                info.statusLevel = "error";
                 info.statusMessage = "Cannot access HSM";
-            } else if (output.find("object") != std::string::npos || output.find("key") != std::string::npos) {
-                info.success = false;
+            } else if (contains("object") || contains("not found") || contains("CKR_OBJECT")) {
                 info.errorMessage = "Key not found on HSM";
-                info.statusLevel = "error";
                 info.statusMessage = "Key not found on HSM";
             } else {
-                info.success = false;
                 info.errorMessage = "Failed to access PKCS#11 key";
-                info.statusLevel = "error";
                 info.statusMessage = "Cannot access HSM - check connection";
             }
-            
-            // SECURITY: Only log the error type, not the raw OpenSSL output which may contain
-            // sensitive information about the HSM configuration or authentication state
+
             LOG_WARN << "Failed to parse PKCS#11 key: " << info.statusMessage;
             return info;
         }
-        
+
+        bool isPkcs11ProviderAvailable() {
+            // Loading the provider into a throwaway private context is a cheap,
+            // side-effect-free probe: it touches no token, so it never needs a
+            // PIN, and leaves the process-wide default context untouched.
+            Pkcs11Context octx;
+            return octx.load();
+        }
+
+        Pkcs11Discovery discoverPkcs11(const std::string& pin) {
+            Pkcs11Discovery result;
+
+            Pkcs11Context octx;
+            if (!octx.load()) {
+                result.providerAvailable = false;
+                result.errorMessage = "PKCS#11 provider not installed";
+                return result;
+            }
+            result.providerAvailable = true;
+
+            // Some tokens require a login before private objects are listed, so
+            // supply the PIN (explicit or stored) the same way validation does.
+            std::string effectivePin = !pin.empty() ? pin : readStoredPkcs11Pin();
+            UI_METHOD* uiMethod = UI_UTIL_wrap_read_pem_callback(pinPasswordCallback, 0);
+            if (!uiMethod) {
+                result.errorMessage = "Internal error";
+                return result;
+            }
+
+            ERR_clear_error();
+
+            // Listing the bare "pkcs11:" store yields OSSL_STORE_INFO_NAME
+            // entries, each a fully-qualified URI for one object (the same
+            // listing `openssl storeutl pkcs11:` produces).
+            OSSL_STORE_CTX* sctx = OSSL_STORE_open_ex("pkcs11:", octx.libctx, nullptr,
+                                                      uiMethod, &effectivePin,
+                                                      nullptr, nullptr, nullptr);
+            if (sctx) {
+                while (OSSL_STORE_eof(sctx) != 1) {
+                    OSSL_STORE_INFO* info = OSSL_STORE_load(sctx);
+                    if (!info) {
+                        if (OSSL_STORE_error(sctx) == 1) {
+                            break;
+                        }
+                        continue;
+                    }
+                    if (OSSL_STORE_INFO_get_type(info) == OSSL_STORE_INFO_NAME) {
+                        const char* name = OSSL_STORE_INFO_get0_NAME(info);
+                        if (name) {
+                            result.objects.push_back(parsePkcs11ObjectUri(name));
+                        }
+                    }
+                    OSSL_STORE_INFO_free(info);
+                }
+                OSSL_STORE_close(sctx);
+            }
+
+            UI_destroy_method(uiMethod);
+
+            // If nothing surfaced, classify any error so the UI can guide the
+            // user. SECURITY: the raw error text may carry HSM detail and is
+            // never logged.
+            if (result.objects.empty()) {
+                std::string errText = drainOpenSslErrors();
+                auto contains = [&errText](const char* needle) {
+                    return errText.find(needle) != std::string::npos;
+                };
+                if (contains("PIN") || contains("pin") || contains("login") ||
+                    contains("authenticat") || contains("CKR_PIN")) {
+                    result.errorMessage = "A PIN is required to list keys on this token";
+                } else if (contains("token") || contains("slot") ||
+                           contains("CKR_TOKEN") || contains("CKR_SLOT") ||
+                           contains("CKR_DEVICE")) {
+                    result.errorMessage = "Cannot access HSM - check connection";
+                }
+                // Otherwise leave errorMessage empty: provider is present but
+                // no keys were found (a normal, non-error state).
+            }
+
+            LOG_INFO << "PKCS#11 discovery found " << result.objects.size() << " object(s)";
+            return result;
+        }
+
         // ===== PKCS#11 PIN Management Implementation =====
         
         bool isPkcs11PinConfigured() {
@@ -604,20 +784,6 @@ namespace provisioner {
             } catch (const std::filesystem::filesystem_error& e) {
                 LOG_ERROR << "Failed to remove PIN file: " << e.what();
                 return false;
-            }
-        }
-        
-        std::string buildPkcs11UriWithPinSource(const std::string& baseUri) {
-            if (!isPkcs11PinConfigured()) {
-                return baseUri;
-            }
-            
-            // Append pin-source to URI
-            // Use ? if no query params exist, & if there are already query params
-            if (baseUri.find('?') != std::string::npos) {
-                return baseUri + "&pin-source=" + PKCS11_PIN_FILE;
-            } else {
-                return baseUri + "?pin-source=" + PKCS11_PIN_FILE;
             }
         }
         

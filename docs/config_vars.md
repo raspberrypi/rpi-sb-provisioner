@@ -38,6 +38,26 @@ The value should take the format:
 >
 > The PKCS11 provider, and it’s associated HSM, should be considered key material and should be protected while at rest and in use according to your threat model.
 
+### Making your HSM available
+
+No OpenSSL configuration is required. `rpi-sb-provisioner` activates the OpenSSL `pkcs11-provider` automatically, and the provider discovers tokens through [p11-kit](https://p11-glue.github.io/p11-glue/). To make your HSM visible, register its PKCS#11 module with p11-kit by dropping a one-line module file into `/usr/share/p11-kit/modules/` (for example `myhsm.module`):
+
+    module: /usr/lib/aarch64-linux-gnu/libmyhsm-pkcs11.so
+
+Replace the path with your vendor's PKCS#11 driver library. That is the only system configuration step — the provisioner needs no changes to `openssl.cnf`.
+
+To confirm the token is discoverable, and to find the object alias for the `CUSTOMER_KEY_PKCS11_NAME` URI above, use `p11tool` (provided by the `gnutls-bin` dependency):
+
+    # List the tokens p11-kit can see
+    p11tool --list-tokens
+
+    # List the keys on your token (use a token URI from the command above)
+    p11tool --login --list-all 'pkcs11:token=<your-token-label>'
+
+> **Note**
+>
+> If the token requires a PIN, the signing operations read it from the URI — append a `pin-value=<PIN>` (or `pin-source=<file>`) attribute to `CUSTOMER_KEY_PKCS11_NAME`. The web UI can additionally take a PIN when validating a key. Treat any stored PIN as key material and protect it accordingly.
+
 ## GOLD_MASTER_OS_FILE
 
 **Mandatory**

@@ -458,9 +458,12 @@ init_signing_context() {
         SIGNING_MODE="pkcs11"
         log "Signing mode: PKCS#11 (${CUSTOMER_KEY_PKCS11_NAME})"
         
-        # Verify PKCS#11 key is accessible and derive public key
+        # Verify PKCS#11 key is accessible and derive public key.
+        # Uses the pkcs11-provider (OSSL_STORE resolves the pkcs11: URI) instead
+        # of the deprecated ENGINE API; openssl pkey is the provider-friendly
+        # equivalent of the legacy openssl rsa.
         CUSTOMER_PUBLIC_KEY_FILE="$(mktemp)"
-        if ! "${OPENSSL}" rsa -engine pkcs11 -inform engine \
+        if ! "${OPENSSL}" pkey -provider pkcs11 -provider default \
             -in "${CUSTOMER_KEY_PKCS11_NAME}" -pubout > "${CUSTOMER_PUBLIC_KEY_FILE}" 2>/dev/null; then
             rm -f "${CUSTOMER_PUBLIC_KEY_FILE}"
             CUSTOMER_PUBLIC_KEY_FILE=""
@@ -512,7 +515,9 @@ signing_available() {
 get_openssl_sign_args() {
     case "${SIGNING_MODE}" in
         pkcs11)
-            echo "${CUSTOMER_KEY_PKCS11_NAME} -engine pkcs11 -keyform engine"
+            # pkcs11-provider resolves the pkcs11: URI via OSSL_STORE; the
+            # deprecated -engine/-keyform engine flags are no longer needed.
+            echo "${CUSTOMER_KEY_PKCS11_NAME} -provider pkcs11 -provider default"
             ;;
         pem)
             echo "${CUSTOMER_KEY_FILE_PEM} -keyform PEM"
@@ -576,7 +581,7 @@ get_signing_directives() {
     if [ "${SIGNING_MODE}" = "" ]; then
         # Signing context not initialized - use legacy behavior
         if [ -n "${CUSTOMER_KEY_PKCS11_NAME}" ]; then
-            echo "${CUSTOMER_KEY_PKCS11_NAME} -engine pkcs11 -keyform engine"
+            echo "${CUSTOMER_KEY_PKCS11_NAME} -provider pkcs11 -provider default"
         elif [ -n "${CUSTOMER_KEY_FILE_PEM}" ]; then
             if [ -f "${CUSTOMER_KEY_FILE_PEM}" ]; then
                 echo "${CUSTOMER_KEY_FILE_PEM} -keyform PEM"

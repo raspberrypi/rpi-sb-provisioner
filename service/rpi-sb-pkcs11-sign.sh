@@ -52,14 +52,16 @@ if [ -z "${CUSTOMER_KEY_PKCS11_NAME}" ]; then
     exit 1
 fi
 
-# Sign using OpenSSL PKCS#11 engine
+# Sign using the OpenSSL PKCS#11 provider (pkcs11-provider).
+# The ENGINE API (-engine pkcs11 -keyform engine) is deprecated in OpenSSL 3.x;
+# the provider resolves the pkcs11: URI passed to -sign via OSSL_STORE. The PIN
+# is taken from the URI (pin-value=/pin-source=), exactly as with the engine.
 # Output format: hex-encoded signature with no line breaks
 OPENSSL="${OPENSSL:-openssl}"
 
 if ! "${OPENSSL}" dgst -sha256 \
+    -provider pkcs11 -provider default \
     -sign "${CUSTOMER_KEY_PKCS11_NAME}" \
-    -engine pkcs11 \
-    -keyform engine \
     "${INPUT_FILE}" | xxd -p -c 256; then
     echo "Error: Signing failed" >&2
     exit 1

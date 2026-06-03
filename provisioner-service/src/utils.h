@@ -86,7 +86,7 @@ namespace provisioner {
             std::string algorithm;      // "RSA", "EC", "DSA", etc.
             int keySize;                // Key size in bits (e.g., 2048, 4096)
             bool isPrivateKey;          // Whether this is a private key
-            std::string fingerprint;    // SHA256 fingerprint of the public key
+            std::string fingerprint;    // Secure-boot key hash (the value programmed into device OTP); empty for non-RSA-2048 keys
             bool isFitForPurpose;       // Whether key meets Pi secure boot requirements (RSA-2048)
             std::string statusMessage;  // Human-readable status message
             std::string statusLevel;    // "valid", "warning", or "error"
@@ -113,7 +113,48 @@ namespace provisioner {
          * @return KeyInfo struct with key metadata
          */
         KeyInfo parsePkcs11Key(const std::string& uri, const std::string& pin = "");
-        
+
+        /**
+         * A key object discovered on a PKCS#11 token.
+         */
+        struct Pkcs11Object {
+            std::string uri;    // Full pkcs11: URI for this object
+            std::string label;  // Object label (CKA_LABEL) if available
+            std::string token;  // Token label the object lives on, if available
+            std::string type;   // "private", "public", or "" if unknown
+        };
+
+        /**
+         * Result of enumerating the PKCS#11 tokens/objects visible to the
+         * pkcs11-provider (via p11-kit). Used to help users pick a key without
+         * hand-crafting a URI.
+         */
+        struct Pkcs11Discovery {
+            bool providerAvailable;             // pkcs11-provider could be loaded
+            std::string errorMessage;           // Populated when discovery failed
+            std::vector<Pkcs11Object> objects;  // Discovered key objects
+
+            Pkcs11Discovery() : providerAvailable(false) {}
+        };
+
+        /**
+         * Check whether the OpenSSL pkcs11-provider is installed and loadable.
+         * Does not touch any token, so it never needs a PIN.
+         *
+         * @return true if the provider module loads
+         */
+        bool isPkcs11ProviderAvailable();
+
+        /**
+         * Enumerate the key objects visible across all PKCS#11 tokens, by
+         * listing the bare "pkcs11:" store through the provider. Best-effort:
+         * some tokens require a login (PIN) before private objects are listed.
+         *
+         * @param pin Optional PIN (if empty, uses the stored PIN file)
+         * @return discovery result with provider status and any objects found
+         */
+        Pkcs11Discovery discoverPkcs11(const std::string& pin = "");
+
         // ===== PKCS#11 PIN Management =====
         
         /**
@@ -143,15 +184,7 @@ namespace provisioner {
          * @return true if successful or file didn't exist, false on error
          */
         bool removePkcs11Pin();
-        
-        /**
-         * Build a PKCS#11 URI with pin-source if PIN is configured
-         * 
-         * @param baseUri The base PKCS#11 URI without PIN
-         * @return URI with pin-source appended if PIN is configured
-         */
-        std::string buildPkcs11UriWithPinSource(const std::string& baseUri);
-        
+
         /**
          * Scan the firmware directory for available firmware versions
          * 
