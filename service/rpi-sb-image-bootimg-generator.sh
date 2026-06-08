@@ -213,8 +213,7 @@ announce_start "boot.img signing"
 BOOT_SIG="${TMP_DIR}/boot.sig"
 sha256sum "${BOOT_IMG}" | awk '{print $1}' > "${BOOT_SIG}"
 printf 'rsa2048: ' >> "${BOOT_SIG}"
-# shellcheck disable=SC2046
-${OPENSSL} dgst -sign $(get_openssl_sign_args) -sha256 "${BOOT_IMG}" | xxd -c 4096 -p >> "${BOOT_SIG}"
+sign_image_hex "${BOOT_IMG}" >> "${BOOT_SIG}"
 
 log "Created boot.sig: ${BOOT_SIG}"
 announce_stop "boot.img signing"

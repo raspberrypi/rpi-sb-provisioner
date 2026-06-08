@@ -124,8 +124,28 @@ nav.rpi-navbar {
     <div class="warning-content">
         <div class="warning-title">Security Warning: Public Network Binding Detected</div>
         <div class="warning-text">
-            This provisioner is bound to <strong><%c++ $$ << g_listenerAddress; %></strong> and may be accessible from external networks. 
+            This provisioner is bound to <strong><%c++ $$ << g_listenerAddress; %></strong> and may be accessible from external networks.
             This service is intended for local use only. Consider binding to 127.0.0.1 or implementing authentication.
+        </div>
+    </div>
+</div>
+<%c++ } %>
+
+<!-- Encryption-at-rest Migration Banner -->
+<!-- Reuses the same security-warning-banner component and server-side
+     conditional pattern as the public-binding warning above. The condition is
+     evaluated fresh on every render (cheap header reads), so the banner clears
+     itself once the user has migrated. The consent controls live on the
+     signing-key section of the Options page (#key-config-group). -->
+<%c++ bool rpiHasUnwrappedSecretsAtRest(); %>
+<%c++ if(rpiHasUnwrappedSecretsAtRest()) { %>
+<div class="security-warning-banner" role="alert">
+    <span class="warning-icon" aria-hidden="true">⚠️</span>
+    <div class="warning-content">
+        <div class="warning-title">Secrets Stored Unencrypted at Rest</div>
+        <div class="warning-text">
+            One or more secrets on this server (the HSM PIN and/or the signing key) are stored unencrypted.
+            <a href="/options/get#key-config-group">Review and encrypt them &rarr;</a>
         </div>
     </div>
 </div>

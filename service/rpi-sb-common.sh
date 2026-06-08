@@ -431,6 +431,7 @@ unmount_image() {
 SIGNING_MODE=""
 CUSTOMER_PUBLIC_KEY_FILE=""
 PKCS11_WRAPPER_SCRIPT="/usr/bin/rpi-sb-pkcs11-sign.sh"
+PEM_WRAPPER_SCRIPT="/usr/bin/rpi-sb-pem-sign.sh"
 
 # Initialize the signing context
 # Must be called after read_config() and before any signing operations
@@ -474,24 +475,44 @@ init_signing_context() {
         log "PKCS#11 key validated and public key derived"
         
     elif [ -n "${CUSTOMER_KEY_FILE_PEM}" ]; then
-        SIGNING_MODE="pem"
         log "Signing mode: PEM file (${CUSTOMER_KEY_FILE_PEM})"
-        
+
         if [ ! -f "${CUSTOMER_KEY_FILE_PEM}" ]; then
             log "ERROR: PEM key file not found: ${CUSTOMER_KEY_FILE_PEM}"
             return 1
         fi
-        
-        # Derive public key
-        CUSTOMER_PUBLIC_KEY_FILE="$(mktemp)"
-        if ! "${OPENSSL}" rsa -in "${CUSTOMER_KEY_FILE_PEM}" -pubout > "${CUSTOMER_PUBLIC_KEY_FILE}" 2>/dev/null; then
-            rm -f "${CUSTOMER_PUBLIC_KEY_FILE}"
-            CUSTOMER_PUBLIC_KEY_FILE=""
-            log "ERROR: Failed to derive public key from: ${CUSTOMER_KEY_FILE_PEM}"
-            return 1
+
+        # A PEM key may be stored device-wrapped at rest (magic "RPISBW1" in
+        # the first bytes). A wrapped key is never unwrapped here: signing goes
+        # through rpi-sb-keyhelper so the plaintext key stays inside that
+        # process. A legacy plaintext key keeps the original openssl path.
+        if [ "$(head -c 7 "${CUSTOMER_KEY_FILE_PEM}" 2>/dev/null)" = "RPISBW1" ]; then
+            SIGNING_MODE="pem-wrapped"
+            # Derive the (non-secret) public key via the helper, which unwraps
+            # in-memory. Reuses the existing CUSTOMER_PUBLIC_KEY_FILE lifecycle.
+            CUSTOMER_PUBLIC_KEY_FILE="$(mktemp)"
+            if ! rpi-sb-keyhelper pubkey --key "${CUSTOMER_KEY_FILE_PEM}" \
+                    > "${CUSTOMER_PUBLIC_KEY_FILE}" 2>/dev/null; then
+                rm -f "${CUSTOMER_PUBLIC_KEY_FILE}"
+                CUSTOMER_PUBLIC_KEY_FILE=""
+                log "ERROR: Failed to derive public key from wrapped PEM key"
+                log "Check this is the board the key was wrapped on, and that the key is not corrupt."
+                return 1
+            fi
+            log "Wrapped PEM key validated and public key derived"
+        else
+            SIGNING_MODE="pem"
+            # Derive public key
+            CUSTOMER_PUBLIC_KEY_FILE="$(mktemp)"
+            if ! "${OPENSSL}" rsa -in "${CUSTOMER_KEY_FILE_PEM}" -pubout > "${CUSTOMER_PUBLIC_KEY_FILE}" 2>/dev/null; then
+                rm -f "${CUSTOMER_PUBLIC_KEY_FILE}"
+                CUSTOMER_PUBLIC_KEY_FILE=""
+                log "ERROR: Failed to derive public key from: ${CUSTOMER_KEY_FILE_PEM}"
+                return 1
+            fi
+            log "PEM key validated and public key derived"
         fi
-        log "PEM key validated and public key derived"
-        
+
     else
         SIGNING_MODE="none"
         log "Signing mode: none (no signing key configured)"
@@ -504,7 +525,7 @@ init_signing_context() {
 # Check if signing is available
 # Returns 0 if a signing key is configured, 1 otherwise
 signing_available() {
-    [ "${SIGNING_MODE}" = "pem" ] || [ "${SIGNING_MODE}" = "pkcs11" ]
+    [ "${SIGNING_MODE}" = "pem" ] || [ "${SIGNING_MODE}" = "pem-wrapped" ] || [ "${SIGNING_MODE}" = "pkcs11" ]
 }
 
 # Get arguments for OpenSSL dgst -sign operations
@@ -523,10 +544,30 @@ get_openssl_sign_args() {
             echo "${CUSTOMER_KEY_FILE_PEM} -keyform PEM"
             ;;
         *)
+            # NB: pem-wrapped has no openssl directive form (the key is never on
+            # disk). Such callers must use sign_image_hex(), not this function.
             log "ERROR: No signing key configured (get_openssl_sign_args)"
             return 1
             ;;
     esac
+}
+
+# Sign a file and emit the signature as lowercase hex on stdout (newline
+# terminated), honouring the active SIGNING_MODE. This is the single place that
+# knows how to sign for every mode: a device-wrapped PEM key is signed inside
+# rpi-sb-keyhelper (the plaintext key never touches disk or this shell), while
+# every other mode uses `openssl dgst` with the directives from
+# get_openssl_sign_args. Use this for the common "append rsa2048 hex to a .sig
+# sidecar" pattern instead of calling openssl dgst directly.
+sign_image_hex() {
+    _sign_src="$1"
+    if [ "${SIGNING_MODE}" = "pem-wrapped" ]; then
+        "${PEM_WRAPPER_SCRIPT}" "${_sign_src}" || return 1
+        echo
+    else
+        # shellcheck disable=SC2046
+        "${OPENSSL}" dgst -sign $(get_openssl_sign_args) -sha256 "${_sign_src}" | xxd -c 4096 -p
+    fi
 }
 
 # Get arguments for rpi-eeprom-digest signing operations
@@ -538,6 +579,10 @@ get_eeprom_digest_sign_args() {
     case "${SIGNING_MODE}" in
         pkcs11)
             echo "-H ${PKCS11_WRAPPER_SCRIPT}"
+            ;;
+        pem-wrapped)
+            # Wrapped key: sign via the helper so the key is never on disk.
+            echo "-H ${PEM_WRAPPER_SCRIPT}"
             ;;
         pem)
             echo "-k ${CUSTOMER_KEY_FILE_PEM}"
@@ -563,6 +608,15 @@ get_sign_bootcode_key_args() {
                 return 1
             fi
             echo "-H ${PKCS11_WRAPPER_SCRIPT} -p ${CUSTOMER_PUBLIC_KEY_FILE}"
+            ;;
+        pem-wrapped)
+            # Wrapped key: sign via the helper (HSM-style), supplying the
+            # derived public key just like the PKCS#11 path.
+            if [ -z "${CUSTOMER_PUBLIC_KEY_FILE}" ]; then
+                log "ERROR: Public key not available for rpi-sign-bootcode"
+                return 1
+            fi
+            echo "-H ${PEM_WRAPPER_SCRIPT} -p ${CUSTOMER_PUBLIC_KEY_FILE}"
             ;;
         pem)
             echo "-k ${CUSTOMER_KEY_FILE_PEM}"
@@ -884,9 +938,7 @@ prepare_signed_boot_simg() {
     sha256sum "${_boot_img}" | awk '{print $1}' > "${_boot_sig}" \
         || { umount "${_src_mnt}" 2>/dev/null; _fail "sha256sum boot.img"; return 1; }
     printf 'rsa2048: ' >> "${_boot_sig}"
-    # shellcheck disable=SC2046
-    "${OPENSSL}" dgst -sign $(get_openssl_sign_args) -sha256 "${_boot_img}" \
-        | xxd -c 4096 -p >> "${_boot_sig}" \
+    sign_image_hex "${_boot_img}" >> "${_boot_sig}" \
         || { umount "${_src_mnt}" 2>/dev/null; _fail "sign boot.img"; return 1; }
 
     umount "${_src_mnt}" || _fail "umount source vfat" || return 1

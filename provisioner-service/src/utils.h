@@ -180,10 +180,39 @@ namespace provisioner {
         
         /**
          * Remove the PKCS#11 PIN file
-         * 
+         *
          * @return true if successful or file didn't exist, false on error
          */
         bool removePkcs11Pin();
+
+        /**
+         * Check whether the file at path is stored device-wrapped (encrypted at
+         * rest) rather than as legacy plaintext. Cheap header check.
+         *
+         * @param path Path to the secret file
+         * @return true if the file begins with the device-wrap magic
+         */
+        bool isFileDeviceWrapped(const std::string& path);
+
+        /**
+         * Wrap an existing plaintext secret file in place with the device-bound
+         * key, if it is not already wrapped. Used to migrate pre-existing
+         * plaintext secrets (PIN, PEM key) ON EXPLICIT USER CONSENT - never
+         * call this automatically. The result is written at 0400.
+         *
+         * @param path Path to the secret file to wrap in place
+         * @return true if the file is wrapped on return (including the
+         *         already-wrapped no-op case), false on failure
+         */
+        bool wrapFileInPlace(const std::string& path);
+
+        /**
+         * True if any configured secret (the PKCS#11 PIN or the customer PEM
+         * key) is currently stored as legacy plaintext rather than wrapped at
+         * rest. Evaluated fresh (cheap header reads) so it reflects the live
+         * state after a migration. Drives the site-wide migration banner.
+         */
+        bool hasUnwrappedSecretsAtRest();
 
         /**
          * Scan the firmware directory for available firmware versions
