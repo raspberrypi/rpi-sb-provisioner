@@ -246,6 +246,10 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(systemd REQUIRED libsystemd)
 find_package(OpenSSL REQUIRED)
 
+# Raspberry Pi firmware crypto service library (librpifwcrypto-dev). Used to
+# derive the device-bound key-wrapping key from the on-SoC OTP key.
+find_library(RPIFWCRYPTO_LIBRARY NAMES rpifwcrypto REQUIRED)
+
 # Define the views directory and output directory for compiled templates
 set(VIEWS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/views)
 set(CSP_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/views_output)
@@ -296,6 +300,7 @@ target_sources(rpi-provisioner-ui
     src/scantool.cpp
     src/audit.cpp
     src/utils.cpp
+    src/keywrap.cpp
     src/schema_validator.cpp
     ${VIEW_SOURCES}
 )
@@ -319,14 +324,30 @@ target_link_libraries(rpi-provisioner-ui
     libcurl
     OpenSSL::SSL
     OpenSSL::Crypto
+    ${RPIFWCRYPTO_LIBRARY}
     ${LibArchive_LIBRARIES}
     ${ZSTD_LIBRARIES}
     ${LIBLZMA_LIBRARIES}
 )
 
+# Standalone signing helper for device-wrapped customer keys. Kept free of
+# drogon so it stays small and has no web-server surface; it is the only thing
+# that ever unwraps a customer key, and it does so in its own process memory.
+add_executable(rpi-sb-keyhelper
+    src/keyhelper.cpp
+    src/keywrap.cpp
+)
+
+target_link_libraries(rpi-sb-keyhelper
+    PRIVATE
+    OpenSSL::SSL
+    OpenSSL::Crypto
+    ${RPIFWCRYPTO_LIBRARY}
+)
+
 # Install directives
 # Only install our executable and service file, not any of the FetchContent dependencies
-install(TARGETS rpi-provisioner-ui
+install(TARGETS rpi-provisioner-ui rpi-sb-keyhelper
     RUNTIME DESTINATION /usr/bin
 )
 

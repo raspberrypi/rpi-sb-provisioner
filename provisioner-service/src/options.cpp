@@ -11,6 +11,8 @@
 #include "utils.h"
 #include "include/audit.h"
 #include "include/schema_validator.h"
+#include "keywrap.h"
+#include <openssl/crypto.h>
 
 namespace provisioner {
     namespace {
@@ -1230,6 +1232,52 @@ namespace provisioner {
                 return;
             }
 
+            // Parse the key for UI metadata while it is still plaintext on disk.
+            auto keyInfo = utils::parseKeyFile(destPath);
+
+            // Wrap the private key at rest with the device-bound key, mirroring
+            // the PIN. From here the on-disk file holds only AES-256-GCM
+            // ciphertext; signing later unwraps it in-memory via the standalone
+            // rpi-sb-keyhelper, never re-exposing the key to the shell or disk.
+            // On this Pi-only deployment wrapping must succeed - if it cannot,
+            // reject the upload rather than leave a plaintext private key.
+            if (keyInfo.success) {
+                std::ifstream kin(destPath, std::ios::binary);
+                std::string raw((std::istreambuf_iterator<char>(kin)),
+                                std::istreambuf_iterator<char>());
+                kin.close();
+
+                if (!raw.empty() && !provisioner::keywrap::isWrapped(raw)) {
+                    std::string wrapped;
+                    if (provisioner::keywrap::wrap(raw, wrapped)) {
+                        std::ofstream kout(destPath, std::ios::binary | std::ios::trunc);
+                        kout.write(wrapped.data(), static_cast<std::streamsize>(wrapped.size()));
+                        kout.close();
+                        std::filesystem::permissions(destPath,
+                            std::filesystem::perms::owner_read,
+                            std::filesystem::perm_options::replace);
+                        if (!raw.empty()) OPENSSL_cleanse(&raw[0], raw.size());
+                        AuditLog::logFileSystemAccess("WRAP_KEY", destPath, true);
+                        LOG_INFO << "Customer PEM key wrapped at rest";
+                    } else {
+                        if (!raw.empty()) OPENSSL_cleanse(&raw[0], raw.size());
+                        std::filesystem::remove(destPath);
+                        LOG_ERROR << "Failed to device-wrap uploaded key; rejecting upload";
+                        AuditLog::logFileSystemAccess("WRAP_KEY", destPath, false, "",
+                                                      "device wrap failed");
+                        auto resp = provisioner::utils::createErrorResponse(
+                            req,
+                            "Failed to secure the uploaded key (device wrap unavailable)",
+                            drogon::k500InternalServerError,
+                            "Storage Error",
+                            "WRAP_ERROR"
+                        );
+                        callback(resp);
+                        return;
+                    }
+                }
+            }
+
             // Update the config with the new key path
             std::map<std::string, std::string> existing_options = utils::getAllConfigValues();
             existing_options["CUSTOMER_KEY_FILE_PEM"] = destPath;
@@ -1273,10 +1321,8 @@ namespace provisioner {
                 }
             }
 
-            // Parse the key to extract metadata
-            auto keyInfo = utils::parseKeyFile(destPath);
-            
-            // Return success with the path and key metadata
+            // Return success with the path and key metadata (parsed above,
+            // before the key was wrapped at rest).
             Json::Value jsonResponse;
             jsonResponse["success"] = true;
             jsonResponse["path"] = destPath;
@@ -1465,6 +1511,107 @@ namespace provisioner {
 
             auto resp = HttpResponse::newHttpResponse();
             resp->setStatusCode(k200OK);
+            resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+            resp->setBody(Json::FastWriter().write(jsonResponse));
+            callback(resp);
+        });
+
+        // Encryption-at-rest status endpoint (GET) - reports, per secret,
+        // whether it is configured and whether it is device-wrapped at rest.
+        // Drives the site-wide migration banner and the per-secret controls.
+        // Never returns any secret value.
+        app.registerHandler(OPTIONS_PATH + "/encryption-status", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
+            LOG_INFO << "Options::encryption-status";
+
+            AuditLog::logHandlerAccess(req, "/options/encryption-status");
+
+            Json::Value jsonResponse;
+
+            bool pinConfigured = utils::isPkcs11PinConfigured();
+            bool pinWrapped = pinConfigured ? utils::isFileDeviceWrapped(utils::PKCS11_PIN_FILE) : true;
+            jsonResponse["pin"]["configured"] = pinConfigured;
+            jsonResponse["pin"]["wrapped"] = pinWrapped;
+
+            auto keyPathOpt = utils::getConfigValue("CUSTOMER_KEY_FILE_PEM");
+            std::string keyPath = keyPathOpt ? *keyPathOpt : "";
+            bool keyConfigured = !keyPath.empty() && std::filesystem::exists(keyPath);
+            bool keyWrapped = keyConfigured ? utils::isFileDeviceWrapped(keyPath) : true;
+            jsonResponse["key"]["configured"] = keyConfigured;
+            jsonResponse["key"]["wrapped"] = keyWrapped;
+
+            jsonResponse["anyUnwrapped"] =
+                (pinConfigured && !pinWrapped) || (keyConfigured && !keyWrapped);
+
+            auto resp = HttpResponse::newHttpResponse();
+            resp->setStatusCode(k200OK);
+            resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+            resp->setBody(Json::FastWriter().write(jsonResponse));
+            callback(resp);
+        });
+
+        // Secret migration endpoint (POST) - wraps a previously-plaintext secret
+        // in place at rest, ONLY on explicit user consent from the UI. Body:
+        // { "target": "pin" | "key" | "all" }. Idempotent: already-wrapped
+        // secrets are a no-op success.
+        app.registerHandler(OPTIONS_PATH + "/migrate-secrets", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
+            LOG_INFO << "Options::migrate-secrets";
+
+            AuditLog::logHandlerAccess(req, "/options/migrate-secrets");
+
+            // SECURITY: Restrict to POST method only
+            if (req->getMethod() != HttpMethod::Post) {
+                LOG_WARN << "SECURITY: Rejected non-POST request to /options/migrate-secrets from " << AuditLog::getClientIP(req);
+                auto resp = provisioner::utils::createErrorResponse(
+                    req, "This endpoint only accepts POST requests",
+                    drogon::k405MethodNotAllowed, "Method Not Allowed", "METHOD_NOT_ALLOWED");
+                callback(resp);
+                return;
+            }
+
+            // SECURITY: Validate CSRF token for browser requests
+            if (!req->getHeader("X-CSRF-Token").empty()) {
+                if (!utils::validateCsrfToken(req)) {
+                    LOG_WARN << "SECURITY: CSRF validation failed for /options/migrate-secrets from " << AuditLog::getClientIP(req);
+                    auto resp = provisioner::utils::createErrorResponse(
+                        req, "Invalid or expired security token. Please refresh the page and try again.",
+                        drogon::k403Forbidden, "Security Error", "CSRF_VALIDATION_FAILED");
+                    callback(resp);
+                    return;
+                }
+            }
+
+            auto jsonBody = req->getJsonObject();
+            std::string target = (jsonBody && jsonBody->isMember("target"))
+                                 ? (*jsonBody)["target"].asString() : "all";
+            bool doPin = (target == "pin" || target == "all");
+            bool doKey = (target == "key" || target == "all");
+
+            Json::Value jsonResponse;
+            bool ok = true;
+
+            if (doPin && utils::isPkcs11PinConfigured()) {
+                bool r = utils::wrapFileInPlace(utils::PKCS11_PIN_FILE);
+                jsonResponse["pin"]["migrated"] = r;
+                ok = ok && r;
+            }
+            if (doKey) {
+                auto keyPathOpt = utils::getConfigValue("CUSTOMER_KEY_FILE_PEM");
+                std::string keyPath = keyPathOpt ? *keyPathOpt : "";
+                if (!keyPath.empty() && std::filesystem::exists(keyPath)) {
+                    bool r = utils::wrapFileInPlace(keyPath);
+                    jsonResponse["key"]["migrated"] = r;
+                    ok = ok && r;
+                }
+            }
+
+            jsonResponse["success"] = ok;
+            if (!ok) {
+                jsonResponse["error"] = "One or more secrets could not be wrapped. "
+                                        "Check that this is the device the secret belongs to.";
+            }
+
+            auto resp = HttpResponse::newHttpResponse();
+            resp->setStatusCode(ok ? k200OK : drogon::k500InternalServerError);
             resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
             resp->setBody(Json::FastWriter().write(jsonResponse));
             callback(resp);

@@ -745,8 +745,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
             cp "$(get_fastboot_gadget)" "${RPI_SB_WORKDIR}"/boot.img
             sha256sum "${RPI_SB_WORKDIR}"/boot.img | awk '{print $1}' > "${RPI_SB_WORKDIR}"/boot.sig
             printf 'rsa2048: ' >> "${RPI_SB_WORKDIR}"/boot.sig
-            # shellcheck disable=SC2046
-            ${OPENSSL} dgst -sign $(get_signing_directives) -sha256 "${RPI_SB_WORKDIR}"/boot.img | xxd -c 4096 -p >> "${RPI_SB_WORKDIR}"/boot.sig
+            sign_image_hex "${RPI_SB_WORKDIR}"/boot.img >> "${RPI_SB_WORKDIR}"/boot.sig
             announce_stop "Signing fastboot image"
         fi
 

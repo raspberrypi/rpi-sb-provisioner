@@ -1175,6 +1175,51 @@
                 <div id="feedback-RPI_DEVICE_STORAGE_CIPHER" class="field-feedback"></div>
             </div>
 
+            <!-- inline encryption-at-rest status styling. Deliberately mirrors
+                 the ".current-file-display" (Key file configured) block above so
+                 the two read as peers: same padding, icon size, title weight and
+                 sub-text size, just with status colours. -->
+            <style>
+            .enc-status-inline:empty { display: none; }
+            .enc-status-box {
+                margin-top: 10px;
+                padding: 12px;
+                border-radius: 6px;
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }
+            .enc-status-box.enc-warn { background: #fff3cd; border: 1px solid #ffeeba; }
+            .enc-status-box.enc-ok   { background: #e9ecef; }
+            .enc-status-icon { font-size: 1.5rem; flex-shrink: 0; line-height: 1; }
+            .enc-warn .enc-status-icon { color: #e0a800; }
+            .enc-ok   .enc-status-icon { color: #28a745; }
+            .enc-status-info { flex: 1; }
+            .enc-status-title { font-weight: 500; color: #333; }
+            .enc-status-note { font-size: 0.8rem; color: #666; margin-top: 4px; }
+            .enc-migrate-btn {
+                flex-shrink: 0;
+                padding: 6px 14px;
+                font-size: 0.85rem;
+                border: none;
+                border-radius: 4px;
+                background: #007bff;
+                color: #fff;
+                cursor: pointer;
+            }
+            .enc-migrate-btn:hover { background: #0069d9; }
+            .enc-migrate-btn:disabled { opacity: 0.6; cursor: default; }
+            .enc-row-feedback { font-size: 0.8rem; flex-basis: 100%; }
+            .enc-row-feedback.error { color: #b00020; }
+
+            /* De-emphasise the upload dropzone once a key is configured -
+               replacing the key is the exception, not the default action. */
+            .file-upload-zone.has-file { padding: 10px 12px; }
+            .file-upload-zone.has-file .upload-icon { font-size: 1.1rem; margin-bottom: 2px; }
+            .file-upload-zone.has-file .upload-text { font-size: 0.85rem; margin-bottom: 0; }
+            .file-upload-zone.has-file .upload-hint { display: none; }
+            </style>
+
             <!-- Key Configuration (Secure Boot only) -->
             <div class="field-group" id="key-config-group">
                 <label class="field-label">Bootloader Signing Key (RSA 2048-bit)</label>
@@ -1211,6 +1256,9 @@
                         </div>
                         <%c++ } %>
                         <input type="hidden" name="CUSTOMER_KEY_FILE_PEM" id="CUSTOMER_KEY_FILE_PEM" value="<%c++ $$ << keyFilePem; %>">
+
+                        <!-- Encryption-at-rest status for the PEM key, inline with the key selection -->
+                        <div id="enc-status-key" class="enc-status-inline"></div>
 
                         <div class="inline-warning">
                             <span class="inline-warning-icon">&#9888;</span>
@@ -1265,6 +1313,8 @@
                                 <div id="pin-status" class="pin-status">
                                     <span class="pin-status-loading">Checking PIN status...</span>
                                 </div>
+                                <!-- Encryption-at-rest status for the PIN, inline with the PIN entry -->
+                                <div id="enc-status-pin" class="enc-status-inline"></div>
                                 <div id="feedback-pkcs11-pin" class="field-feedback"></div>
                             </div>
                             <button type="button" class="pin-save-btn" id="pin-save-btn" onclick="savePkcs11Pin()">Save PIN &amp; Validate</button>
@@ -1273,7 +1323,7 @@
 
                         <div class="inline-warning">
                             <span class="inline-warning-icon">&#9888;</span>
-                            <span>The HSM PIN is stored securely on this server. Never share it or enter it on untrusted systems.</span>
+                            <span>The HSM PIN is stored encrypted at rest on this server, bound to this device's hardware key. Never share it or enter it on untrusted systems.</span>
                         </div>
 
                         <div class="inline-help">
@@ -1289,7 +1339,7 @@
                 </div>
             </div>
         </div>
-        
+
         <!-- ===== SECTION 4: Storage & Output ===== -->
         <div class="config-section" id="section-storage-output">
             <div class="section-header">
@@ -1999,8 +2049,83 @@
 
             // Check PIN status on load
             await checkPkcs11PinStatus();
+
+            // Render per-secret encryption-at-rest status on load
+            loadEncryptionStatus();
         })();
-        
+
+        // ===== Encryption at Rest =====
+        // Shows each configured secret's at-rest status inline with where the
+        // key/PIN is selected, with an explicit consent button to wrap any that
+        // are still plaintext.
+        async function loadEncryptionStatus() {
+            let s;
+            try {
+                const resp = await fetch('/options/encryption-status', { headers: { 'Accept': 'application/json' } });
+                if (!resp.ok) throw new Error('status ' + resp.status);
+                s = await resp.json();
+            } catch (e) {
+                return; // leave inline status empty on error
+            }
+            renderEncStatus('enc-status-key', s.key, 'key');
+            renderEncStatus('enc-status-pin', s.pin, 'pin');
+        }
+
+        function renderEncStatus(containerId, sec, target) {
+            const el = document.getElementById(containerId);
+            if (!el) return;
+            if (!sec || !sec.configured) { el.innerHTML = ''; return; }
+            if (sec.wrapped) {
+                el.innerHTML =
+                    '<div class="enc-status-box enc-ok">' +
+                      '<span class="enc-status-icon" aria-hidden="true">&#128274;</span>' +
+                      '<div class="enc-status-info">' +
+                        '<div class="enc-status-title">Encrypted at rest</div>' +
+                        '<div class="enc-status-note">Bound to this device’s hardware key.</div>' +
+                      '</div>' +
+                    '</div>';
+                return;
+            }
+            el.innerHTML =
+                '<div class="enc-status-box enc-warn">' +
+                  '<span class="enc-status-icon" aria-hidden="true">&#9888;</span>' +
+                  '<div class="enc-status-info">' +
+                    '<div class="enc-status-title">Stored unencrypted at rest</div>' +
+                    '<div class="enc-status-note">If this server’s disk or backups may have been copied while unencrypted, ' +
+                    'rotate it instead (re-upload the key / set a new PIN, which is stored encrypted automatically) &mdash; ' +
+                    'encrypting in place cannot un-expose an old copy. A wrapped secret is device-bound.</div>' +
+                    '<span class="enc-row-feedback" id="enc-feedback-' + target + '"></span>' +
+                  '</div>' +
+                  '<button type="button" class="enc-migrate-btn" data-target="' + target + '">Encrypt at rest</button>' +
+                '</div>';
+            const btn = el.querySelector('.enc-migrate-btn');
+            if (btn) btn.addEventListener('click', function () { migrateSecret(target, btn); });
+        }
+
+        async function migrateSecret(target, btn) {
+            const fb = document.getElementById('enc-feedback-' + target);
+            if (btn) btn.disabled = true;
+            if (fb) { fb.className = 'enc-row-feedback'; fb.textContent = ' Encrypting…'; }
+            try {
+                const resp = await fetch('/options/migrate-secrets', addCsrfHeader({
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ target: target })
+                }));
+                const data = await resp.json().catch(function () { return {}; });
+                if (resp.ok && data.success) {
+                    // Reload so the per-secret rows and the site-wide banner both refresh.
+                    window.location.reload();
+                } else {
+                    if (fb) { fb.className = 'enc-row-feedback error'; fb.textContent = ' ' + (data.error || 'Encryption failed.'); }
+                    if (btn) btn.disabled = false;
+                }
+            } catch (e) {
+                if (fb) { fb.className = 'enc-row-feedback error'; fb.textContent = ' Encryption failed.'; }
+                if (btn) btn.disabled = false;
+            }
+        }
+
         // ===== PKCS#11 PIN Management =====
         
         // Toggle PIN visibility
@@ -2133,6 +2258,7 @@
                     
                     // Update PIN status
                     await checkPkcs11PinStatus();
+                    loadEncryptionStatus();
                     
                     showSuccess('HSM PIN saved and validated');
                 } else {
@@ -2180,6 +2306,7 @@
                     
                     // Update PIN status
                     await checkPkcs11PinStatus();
+                    loadEncryptionStatus();
                     
                     showSuccess('HSM PIN removed');
                 } else {

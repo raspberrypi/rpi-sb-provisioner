@@ -8,6 +8,7 @@
 #include <cctype>
 #include <drogon/drogon.h>
 #include "include/audit.h"
+#include "keywrap.h"
 #include <openssl/pem.h>
 #include <openssl/evp.h>
 #include <openssl/sha.h>
@@ -146,8 +147,26 @@ namespace provisioner {
                 if (!pinFile.is_open()) {
                     return {};
                 }
-                std::string pin((std::istreambuf_iterator<char>(pinFile)),
+                std::string raw((std::istreambuf_iterator<char>(pinFile)),
                                 std::istreambuf_iterator<char>());
+
+                // PINs are stored device-wrapped at rest (see savePkcs11Pin).
+                // A blob without the wrap magic is a legacy plaintext PIN from
+                // before wrapping existed: read it as-is so the install keeps
+                // working; it is re-wrapped the next time the PIN is saved.
+                std::string pin;
+                if (keywrap::isWrapped(raw)) {
+                    if (!keywrap::unwrap(raw, pin)) {
+                        LOG_ERROR << "Failed to unwrap stored PKCS#11 PIN "
+                                     "(wrong device or corrupt file)";
+                        return {};
+                    }
+                } else {
+                    LOG_WARN << "PKCS#11 PIN is stored unwrapped (legacy); "
+                                "re-save it to wrap at rest";
+                    pin = raw;
+                }
+
                 // The PIN is stored without a trailing newline, but strip any
                 // stray trailing whitespace defensively.
                 while (!pin.empty() && (pin.back() == '\n' || pin.back() == '\r')) {
@@ -423,12 +442,45 @@ namespace provisioner {
                 return info;
             }
             
+            // Read the key file into memory. Customer keys are stored
+            // device-wrapped at rest (see the /upload-key handler); unwrap
+            // transparently so the UI can still describe a stored key. A blob
+            // without the wrap magic is parsed directly (legacy plaintext, or a
+            // key just uploaded and not yet wrapped).
+            std::ifstream keyIn(path, std::ios::binary);
+            if (!keyIn.is_open()) {
+                info.success = false;
+                info.errorMessage = "Failed to open key file";
+                info.statusLevel = "error";
+                info.statusMessage = "Invalid key format";
+                LOG_WARN << "Failed to open key file: " << path;
+                return info;
+            }
+            std::string raw((std::istreambuf_iterator<char>(keyIn)),
+                            std::istreambuf_iterator<char>());
+            keyIn.close();
+
+            std::string pem;
+            if (keywrap::isWrapped(raw)) {
+                if (!keywrap::unwrap(raw, pem)) {
+                    info.success = false;
+                    info.errorMessage = "Failed to unwrap key (wrong device or corrupt file)";
+                    info.statusLevel = "error";
+                    info.statusMessage = "Invalid key format";
+                    LOG_WARN << "Failed to unwrap key file: " << path;
+                    return info;
+                }
+            } else {
+                pem = raw;
+            }
+
             // Parse the key with the linked OpenSSL library instead of shelling
             // out to the `openssl` CLI. PEM_read_bio_PrivateKey handles RSA, EC
             // and any other PEM private key in one call (traditional or PKCS#8),
             // replacing the previous rsa/ec/pkey CLI fallback chain.
-            BIO* bio = BIO_new_file(path.c_str(), "r");
+            BIO* bio = BIO_new_mem_buf(pem.data(), static_cast<int>(pem.size()));
             if (!bio) {
+                if (!pem.empty()) OPENSSL_cleanse(&pem[0], pem.size());
                 info.success = false;
                 info.errorMessage = "Failed to open key file";
                 info.statusLevel = "error";
@@ -444,6 +496,7 @@ namespace provisioner {
             auto noPrompt = [](char*, int, int, void*) -> int { return 0; };
             EVP_PKEY* pkey = PEM_read_bio_PrivateKey(bio, nullptr, noPrompt, nullptr);
             BIO_free(bio);
+            if (!pem.empty()) OPENSSL_cleanse(&pem[0], pem.size());
 
             if (!pkey) {
                 info.success = false;
@@ -743,15 +796,22 @@ namespace provisioner {
                 return false;
             }
             
-            // Write the PIN to the file
-            std::ofstream pinFile(PKCS11_PIN_FILE);
+            // Wrap the PIN with the device-bound key before it touches disk.
+            // On this Pi-only deployment wrapping must succeed; refuse rather
+            // than silently fall back to storing the PIN in plaintext.
+            std::string blob;
+            if (!keywrap::wrap(pin, blob)) {
+                LOG_ERROR << "Failed to device-wrap PKCS#11 PIN; refusing to store it";
+                return false;
+            }
+
+            // Write the wrapped blob (binary).
+            std::ofstream pinFile(PKCS11_PIN_FILE, std::ios::binary);
             if (!pinFile.is_open()) {
                 LOG_ERROR << "Failed to open PIN file for writing: " << PKCS11_PIN_FILE;
                 return false;
             }
-            
-            // Write PIN without newline (as per PKCS#11 URI spec)
-            pinFile << pin;
+            pinFile.write(blob.data(), static_cast<std::streamsize>(blob.size()));
             pinFile.close();
             
             // Set restrictive permissions (owner read-only)
@@ -785,6 +845,82 @@ namespace provisioner {
                 LOG_ERROR << "Failed to remove PIN file: " << e.what();
                 return false;
             }
+        }
+
+        bool isFileDeviceWrapped(const std::string& path) {
+            std::ifstream f(path, std::ios::binary);
+            if (!f.is_open()) {
+                return false;
+            }
+            // Only the magic header is needed to classify the file.
+            char hdr[8] = {0};
+            f.read(hdr, sizeof(hdr));
+            std::string head(hdr, static_cast<size_t>(f.gcount()));
+            return keywrap::isWrapped(head);
+        }
+
+        bool wrapFileInPlace(const std::string& path) {
+            if (!std::filesystem::exists(path)) {
+                return false;
+            }
+
+            std::ifstream in(path, std::ios::binary);
+            if (!in.is_open()) {
+                LOG_ERROR << "Migration: cannot read secret file: " << path;
+                return false;
+            }
+            std::string raw((std::istreambuf_iterator<char>(in)),
+                            std::istreambuf_iterator<char>());
+            in.close();
+
+            if (raw.empty()) {
+                return false;
+            }
+            if (keywrap::isWrapped(raw)) {
+                return true; // already migrated; nothing to do
+            }
+
+            std::string blob;
+            if (!keywrap::wrap(raw, blob)) {
+                if (!raw.empty()) OPENSSL_cleanse(&raw[0], raw.size());
+                LOG_ERROR << "Migration: failed to device-wrap secret: " << path;
+                return false;
+            }
+            if (!raw.empty()) OPENSSL_cleanse(&raw[0], raw.size());
+
+            std::ofstream out(path, std::ios::binary | std::ios::trunc);
+            if (!out.is_open()) {
+                LOG_ERROR << "Migration: cannot write wrapped secret: " << path;
+                return false;
+            }
+            out.write(blob.data(), static_cast<std::streamsize>(blob.size()));
+            out.close();
+
+            try {
+                std::filesystem::permissions(path,
+                    std::filesystem::perms::owner_read,
+                    std::filesystem::perm_options::replace);
+            } catch (const std::filesystem::filesystem_error& e) {
+                LOG_ERROR << "Migration: failed to set permissions on " << path << ": " << e.what();
+                return false;
+            }
+
+            LOG_INFO << "Migration: wrapped secret at rest: " << path;
+            AuditLog::logFileSystemAccess("WRAP_SECRET", path, true);
+            return true;
+        }
+
+        bool hasUnwrappedSecretsAtRest() {
+            if (isPkcs11PinConfigured() && !isFileDeviceWrapped(PKCS11_PIN_FILE)) {
+                return true;
+            }
+            auto keyPathOpt = getConfigValue("CUSTOMER_KEY_FILE_PEM");
+            if (keyPathOpt && !keyPathOpt->empty()
+                && std::filesystem::exists(*keyPathOpt)
+                && !isFileDeviceWrapped(*keyPathOpt)) {
+                return true;
+            }
+            return false;
         }
         
         // ===== CSRF Token Implementation =====
@@ -1052,4 +1188,11 @@ namespace provisioner {
             );
         }
     } // namespace utils
-} // namespace provisioner 
+} // namespace provisioner
+
+// Global free function so the compiled CSP views can forward-declare and call
+// it at block scope (mirroring the `extern bool g_isPublicBinding;` pattern) -
+// a namespaced declaration is not legal inside the view's render function body.
+bool rpiHasUnwrappedSecretsAtRest() {
+    return provisioner::utils::hasUnwrappedSecretsAtRest();
+} 

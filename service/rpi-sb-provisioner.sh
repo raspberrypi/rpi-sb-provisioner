@@ -150,11 +150,11 @@ writeSig() {
    echo "ts: $(date -u +%s)" >> "${OUTPUT}"
 
    if signing_available; then
-      # shellcheck disable=SC2046
-      "${OPENSSL}" dgst -sign $(get_openssl_sign_args) -sha256 -out "${SIG_TMP}" "${IMAGE}"
-      echo "rsa2048: $(xxd -c 4096 -p < "${SIG_TMP}")" >> "${OUTPUT}"
+      # sign_image_hex emits hex directly; command substitution strips its
+      # trailing newline. Covers every mode, including device-wrapped PEM keys.
+      echo "rsa2048: $(sign_image_hex "${IMAGE}")" >> "${OUTPUT}"
    fi
-   rm "${SIG_TMP}"
+   rm -f "${SIG_TMP}"
 }
 
 get_cryptroot() {
@@ -507,8 +507,7 @@ prepare_pre_boot_auth_images() {
         # N.B. rpi-eeprom-digest could be used here but it includes a timestamp that is not required for this use-case
         sha256sum "${TMP_DIR}"/boot.img | awk '{print $1}' > "${TMP_DIR}"/boot.sig
         printf 'rsa2048: ' >> "${TMP_DIR}"/boot.sig
-        # shellcheck disable=SC2046
-        ${OPENSSL} dgst -sign $(get_openssl_sign_args) -sha256 "${TMP_DIR}"/boot.img | xxd -c 4096 -p >> "${TMP_DIR}"/boot.sig
+        sign_image_hex "${TMP_DIR}"/boot.img >> "${TMP_DIR}"/boot.sig
         announce_stop "boot.img signing"
 
         announce_start "Boot Image partition extraction"
