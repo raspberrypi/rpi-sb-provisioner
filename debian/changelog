@@ -1,3 +1,89 @@
+rpi-sb-provisioner (2.3.0) unstable; urgency=medium
+
+  * Final 2.3.0 release:
+    - Roll up the 2.3.0 preview series and the post-2.3.0~pre4
+      stabilisation work into a supported release.
+
+  * IDP (Image Description Provisioning) support:
+    - Add the rpi-idp-provisioner.sh orchestrator and systemd unit for
+      consuming rpi-image-gen IDP artefacts, including pre-flight JSON,
+      storage, image and encryption validation.
+    - Support IDP archive upload, extraction and SHA256 sidecars in the
+      WebUI, with image-first configuration that derives device family,
+      storage type and encryption settings from image metadata.
+    - Sign secure-boot IDP boot slots, preserve the boot_ramdisk config for
+      first boot, support customisation hooks, and expose IDP service logs.
+    - Harden IDP handling around LUKS2 cipher detection, missing storage
+      metadata, unsupported storage types, timeout handling and Zero 2 W
+      platform mapping.
+
+  * Firmware crypto, Connect and key handling:
+    - Provision and OTP-lock the device firmware crypto key for all
+      provisioning styles, using it for cryptroot unlock and Raspberry Pi
+      Connect device identity registration.
+    - Add Raspberry Pi Connect registration options, manufacturing database
+      fields, UI/CSV output and non-fatal registration handling.
+    - Move PKCS#11 key parsing from the deprecated OpenSSL ENGINE path to
+      pkcs11-provider/OSSL_STORE, with in-process PIN handling and provider
+      readiness plus HSM key discovery in the WebUI.
+    - Encrypt stored HSM PINs and uploaded PEM signing keys at rest using an
+      AES-256-GCM wrapper derived from the Raspberry Pi firmware crypto
+      device key.
+    - Add rpi-sb-keyhelper and PEM/PKCS#11 signing wrappers so wrapped keys
+      can be used by the Raspberry Pi signing tools without writing
+      plaintext private keys back to disk.
+
+  * Secure-boot bootstrap and firmware updates:
+    - Add AB-capable 2712 EEPROM image support by detecting and signing both
+      bootcode and bootsys before passing them to rpi-eeprom-config.
+    - Use set_reboot_order=0x3 in recovery configs so devices return to
+      RPIBOOT automatically for the fastboot bootstrap phase, removing the
+      manual Pi 5 re-plug step and the corresponding WebUI guidance.
+    - Refresh bundled fastboot gadgets repeatedly through the EEPROM
+      measurement, A/B bootfiles and monolithic sparse whole-disk image
+      writing updates.
+    - Update rpi-eeprom and rpiboot runtime dependencies to versions that
+      carry the matching recovery images, bootfiles and firmware support.
+
+  * Reliability and provisioning correctness:
+    - Refresh cryptroot_initramfs for the systemd initrd flow, fixing the
+      Trixie/systemd 257 switch-root regression reported in #299.
+    - Use kernel crypto API aliases in kernel_modules.list and copy modules
+      for all applicable kernels, making encrypted images more robust across
+      kernel updates.
+    - Preserve real provisioner exit statuses from cleanup traps so systemd,
+      the WebUI and manufacturing records reflect failures correctly.
+    - Force FAT32 for signed boot-slot filesystems and propagate mkfs
+      failures rather than silently flashing bad slots.
+    - Fix secure-boot images without static.role="boot" partitions and avoid
+      rewriting root= in cmdline.txt.
+    - Invalidate cached signed artefacts when firmware or signing keys
+      change, and wipe the workdir artefact cache on package upgrades.
+
+  * WebUI, manufacturing data and service updates:
+    - Replace the state.db inotify watcher with localhost-only internal
+      notification endpoints protected by a per-boot token, eliminating the
+      steady-state CPU spin while keeping topology updates responsive.
+    - Improve device and detail-view liveness, add responsive tile and detail
+      views, improve manufacturing table pagination/loading/escaping, and
+      consolidate shared styling.
+    - Record additional EEPROM measurements, capture intended vs observed
+      security state, fix CM5 Lite identifiers, and drop extraneous EEPROM
+      fields from manufacturing records.
+    - Add SQL busy timeouts for SQLite contention under high device
+      throughput.
+
+  * Documentation and packaging:
+    - Convert project documentation from AsciiDoc to Markdown and refresh
+      README, API and device guidance for the 2.3.0 workflows.
+    - Add zlib, zstd, librpifwcrypto, pkcs11-provider, p11-kit and gnutls
+      dependencies required by the new archive, key wrapping and HSM paths.
+    - Clean stale FetchContent state during package builds, install the new
+      IDP and signing helper scripts, create the lock directory on install,
+      and fix the udev rules comma.
+
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Wed, 10 Jun 2026 12:28:37 +0100
+
 rpi-sb-provisioner (2.3.0~pre4) unstable; urgency=medium
 
   * WebUI: remove Raspberry Pi 5 re-plug notification:
