@@ -6,7 +6,7 @@ This document describes the configuration variables used in /etc/rpi-sb-provisio
 
 **Mandatory, with a default**
 
-Select the provisioning style you wish to use. Supported values are `secure-boot`, `fde-only` and `naked`. For details on what each provisioning style does, see the [main documentation](../README.xml#using-rpi-sb-provisioner).
+Select the provisioning style you wish to use. Supported values are `secure-boot`, `fde-only` and `naked`. For details on what each provisioning style does, see the [main documentation](../README.md#three-levels-of-security).
 
 If `PROVISIONING_STYLE` is not specified, it defaults to `secure-boot`.
 
@@ -14,17 +14,17 @@ If `PROVISIONING_STYLE` is not specified, it defaults to `secure-boot`.
 
 **Optional, mandatory if CUSTOMER_KEY_PKCS11_NAME is not set**
 
-The fully qualified path to your signing key, encoded in PEM format. This file is expected to contain an RSA 2048-bit Private Key.
+The fully qualified path to your signing key, encoded in PEM format. This file is expected to contain an RSA 2048-bit private key.
 
 > **Warning**
 >
-> This file should be considered key material, and should be protected while at rest and in use according to your threat model.
+> This file should be considered key material. When uploaded through the WebUI it is stored device-wrapped at rest, using a key derived from the provisioning Raspberry Pi firmware crypto device key. The plaintext key is still present in process memory while signing, so protect the provisioner host according to your threat model.
 
 ## CUSTOMER_KEY_PKCS11_NAME
 
 **Optional, mandatory if CUSTOMER_KEY_FILE_PEM is not set**
 
-The keypair alias for a PKCS11 keypair, typically stored on a Hardware Security Module (HSM) and provided through a helper tool. This is expected to act in place of the RSA 2048-bit Private key specified with CUSTOMER_KEY_FILE_PEM, and will be used as the signing device for all future pre-boot authentication images.
+The keypair alias or URI for a PKCS#11 keypair, typically stored on a Hardware Security Module (HSM). This acts in place of the RSA 2048-bit private key specified with `CUSTOMER_KEY_FILE_PEM`, and is used as the signing device for all future pre-boot authentication images.
 
 The value should take the format:
 
@@ -36,7 +36,7 @@ The value should take the format:
 
 > **Warning**
 >
-> The PKCS11 provider, and it’s associated HSM, should be considered key material and should be protected while at rest and in use according to your threat model.
+> The PKCS#11 provider, its associated HSM, and any PIN used to unlock it should be considered key material and protected according to your threat model.
 
 ### Making your HSM available
 
@@ -56,7 +56,7 @@ To confirm the token is discoverable, and to find the object alias for the `CUST
 
 > **Note**
 >
-> If the token requires a PIN, the signing operations read it from the URI — append a `pin-value=<PIN>` (or `pin-source=<file>`) attribute to `CUSTOMER_KEY_PKCS11_NAME`. The web UI can additionally take a PIN when validating a key. Treat any stored PIN as key material and protect it accordingly.
+> If the token requires a PIN, the WebUI can store it for signing operations. Stored PINs are device-wrapped at rest using the provisioning Raspberry Pi firmware crypto device key. You may still append a `pin-value=<PIN>` or `pin-source=<file>` attribute to `CUSTOMER_KEY_PKCS11_NAME` for deployments that manage PIN material outside the provisioner.
 
 ## GOLD_MASTER_OS_FILE
 
@@ -78,7 +78,7 @@ This should be your 'gold master' OS image. This can be either:
 
 > **Note**
 >
-> When selecting an IDP artefact through the WebUI, the device family, storage type, and cipher fields are locked to the values defined in the artefact’s metadata and cannot be overridden.
+> When selecting an IDP artefact through the WebUI, image metadata is used to pre-fill the device family, storage type, and cipher fields. Fields defined by the artefact are treated as the image defaults; the WebUI may still allow supported overrides such as storage type when the artefact and device support them.
 
 ## RPI_DEVICE_STORAGE_TYPE
 
@@ -193,7 +193,7 @@ See the [Raspberry Pi 4 Connection Guide](device-guidance/pi4.md) for more infor
 
 Store manufacturing data in a sqlite3 database. This will include the board serial, board revision, the boot ROM version, the MAC address of the ethernet port, any set hash of the customer signing key, the JTAG lock state, the board attributes and the advanced boot flags. It will also include the OS image filename and its SHA256 used during provisioning.
 
-You must not specify the path of a database stored on a network drive or similar storage, as this mechanism is only safe to use on a single provisioning system. For merging the output with multiple provisioning systems, consider [Processing the manufacturing database](../README.xml#_processing_the_manufacturing_database) in the main documentation.
+You must not specify the path of a database stored on a network drive or similar storage, as this mechanism is only safe to use on a single provisioning system. For merging the output with multiple provisioning systems, consider [Working With The Manufacturing Database](../README.md#working-with-the-manufacturing-database) in the main documentation.
 
 Set to the path of a file to contain a SQLite database stored on local storage. The WebUI will create this file if it does not exist.
 
@@ -202,6 +202,22 @@ Set to the path of a file to contain a SQLite database stored on local storage. 
 > If you are not using the WebUI, you must create this file before execution, for example using `touch`:
 
     $ touch ${RPI_SB_PROVISIONER_MANUFACTURING_DB}
+
+## RPI_CONNECT_API_KEY
+
+**Optional**
+
+Raspberry Pi Connect management API access token. When configured, provisioned devices are registered with Raspberry Pi Connect during provisioning.
+
+Registration uses hardware-backed firmware crypto signing. The signing material remains hardware-held on the device, and Connect registration failures are logged as warnings rather than aborting provisioning.
+
+The token must not contain whitespace. The WebUI stores it in `/etc/rpi-sb-provisioner/config`, so protect provisioner host access accordingly.
+
+## RPI_CONNECT_DESCRIPTION
+
+**Optional**
+
+Description prefix used when registering devices with Raspberry Pi Connect. The provisioner appends device-specific information such as board type and serial number.
 
 ## RPI_DEVICE_RETRIEVE_KEYPAIR
 
@@ -304,6 +320,10 @@ To enable this endpoint (NOT RECOMMENDED):
 Set to a location to cache OS assets between provisioning sessions. Recommended for use in production. For example:
 
     /srv/rpi-sb-provisioner/workdir
+
+The workdir contains signed boot images, signed bootfiles, EEPROM staging assets and other expensive intermediate artefacts. `rpi-sb-provisioner` invalidates cached signed artefacts when the selected firmware or signing keys change, and package upgrades clear cached artefacts under this directory while preserving the directory itself.
+
+Persistent data such as uploaded images, manufacturing databases, state databases, logs and configuration are not stored in the workdir and are not removed by workdir cache invalidation.
 
 # Format of the config file
 

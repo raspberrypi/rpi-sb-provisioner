@@ -41,6 +41,12 @@ The endpoint returns a JSON array where each element represents a provisioned de
     "signed_boot_enabled": "1",
     "os_image_filename": "raspios-2025-04-01.img",
     "os_image_sha256": "4f2d9c5b0e3b1d8a9c1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c",
+    "connect_registered": "1",
+    "connect_device_id": "device-123456",
+    "eeprom_size": 524288,
+    "eeprom_jedec": "ef4018",
+    "eeprom_unique_id": "0123456789abcdef",
+    "bootloader_build_timestamp": 1780326171,
     "provision_ts": "2025-04-28 13:53:28"
   },
   ...
@@ -70,6 +76,14 @@ The endpoint returns a JSON array where each element represents a provisioned de
 | pubkey_programmed      | Customer public key programming status (1=programmed, 0=not programmed, null=unknown). Observed via fastboot `getvar secure-otp`.                                                                                                                       |
 | devkey_revoked         | Development-key revocation status (1=revoked, 0=not revoked, null=unknown). Observed via fastboot `getvar secure-devkey`.                                                                                                                               |
 | signed_boot_enabled    | Signed boot enforcement status (1=enabled, 0=disabled, null=unknown). Derived from `pubkey_programmed` — firmware authenticates boot.img only when the customer pubkey hash is in OTP.                                                                  |
+| os_image_filename      | OS image filename or IDP image summary used during provisioning                                                                                                                                                                                           |
+| os_image_sha256        | SHA256 of the traditional OS image, or the original uploaded IDP archive hash stored in its sidecar file                                                                                                                                                  |
+| connect_registered     | Raspberry Pi Connect registration result (1=registered, 0=not registered or registration failed, null=not attempted). Registration failures are non-fatal.                                                                                                |
+| connect_device_id      | Raspberry Pi Connect device ID returned by the management API, when registration succeeds                                                                                                                                                                 |
+| eeprom_size            | EEPROM size in bytes, when reported by fastboot                                                                                                                                                                                                          |
+| eeprom_jedec           | EEPROM JEDEC identifier, when reported by fastboot                                                                                                                                                                                                       |
+| eeprom_unique_id       | EEPROM unique identifier, when reported by fastboot                                                                                                                                                                                                      |
+| bootloader_build_timestamp | Bootloader build timestamp, when reported by fastboot                                                                                                                                                                                                |
 | provision_ts           | Timestamp of when the device was provisioned                                                                                                                                                                                                            |
 
 **Example Usage:**
@@ -115,4 +129,4 @@ On error, the endpoint returns a JSON object with error details:
 
 - For large datasets, it is recommended to use pagination to improve performance.
 
-- The database path is configured using the [RPI_SB_PROVISIONER_MANUFACTURING_DB](config_vars.xml#rpi_sb_provisioner_manufacturing_db) setting as described in the configuration documentation.
+- The database path is configured using the [RPI_SB_PROVISIONER_MANUFACTURING_DB](../config_vars.md#rpi_sb_provisioner_manufacturing_db) setting as described in the configuration documentation.
