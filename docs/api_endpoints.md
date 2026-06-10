@@ -86,7 +86,7 @@ Monitor provisioning services running on the system, retrieve service logs with 
 
 ## [Images API](api/images.md)
 
-Complete lifecycle management of OS images including upload, download, metadata retrieval, and asynchronous SHA256 hash calculation with real-time progress updates.
+Complete lifecycle management of OS images and IDP artefacts, including upload, download, metadata retrieval, asynchronous SHA256 hash calculation, and IDP descriptor analysis.
 
 **Key Endpoints:**
 
@@ -100,17 +100,37 @@ Complete lifecycle management of OS images including upload, download, metadata 
 
 - `POST /delete-image` - Delete images
 
+- `GET /analyze-image` - Analyze traditional images or IDP artefact directories
+
 **Use Cases:** Image management, integrity verification, automated image deployment
 
 ## [Configuration API](api/configuration.md)
 
-Manage system configuration options, firmware selection for different device families, and working directory management.
+Manage system configuration options, firmware selection for different device families, key/HSM settings, secret wrapping status, and working directory management.
 
 **Key Endpoints:**
 
 - `GET /options/get` - Retrieve all configuration values
 
 - `POST /options/set` - Update configuration
+
+- `POST /options/validate` - Validate a configuration field
+
+- `POST /options/upload-key` - Upload and validate a PEM signing key
+
+- `POST /options/validate-key` - Validate PEM or PKCS#11 signing keys
+
+- `GET /options/pkcs11-status` - Check OpenSSL PKCS#11 provider readiness
+
+- `POST /options/pkcs11-discover` - Discover HSM key objects through p11-kit
+
+- `GET /options/pkcs11-pin-status` - Check whether an HSM PIN is stored
+
+- `POST /options/set-pkcs11-pin` - Store or remove an HSM PIN
+
+- `GET /options/encryption-status` - Report device-wrapped secret status
+
+- `POST /options/migrate-secrets` - Device-wrap previously plaintext stored secrets
 
 - `POST /options/clear-workdir` - Clear working directory contents
 

@@ -206,6 +206,8 @@ Example version progression:
 
 - The signing key must be the same one used during initial provisioning
 
+- PEM signing keys uploaded through the WebUI may be stored device-wrapped at rest. The generator uses the provisioner's signing helpers, so wrapped PEM keys and PKCS#11 keys are both supported without manually decrypting key material.
+
 - Generated files and packages should be handled as sensitive material
 
 - Debian packages contain the source image filename and SHA256 in the changelog for traceability
@@ -230,6 +232,8 @@ CUSTOMER_KEY_FILE_PEM=/path/to/customer-key.pem
 # OR
 CUSTOMER_KEY_PKCS11_NAME='pkcs11:object=<keypair-alias>;type=private'
 ```
+
+`CUSTOMER_KEY_FILE_PEM` may point at a device-wrapped key uploaded through the WebUI. `CUSTOMER_KEY_PKCS11_NAME` is resolved through OpenSSL `pkcs11-provider`; register the HSM module with p11-kit as described in the [Configuration Reference](config_vars.md#making-your-hsm-available).
 
 ## Package Metadata Configuration
 
@@ -368,7 +372,7 @@ journalctl -u rpi-sb-image-bootimg-generator@<image-filename>.service -n 100
 |          |                                                          |
 |----------|----------------------------------------------------------|
 | Cause    | `CUSTOMER_KEY_FILE_PEM` points to a non-existent file    |
-| Solution | Verify the key file path and ensure the file is readable |
+| Solution | Verify the key file path and ensure the file is readable by the provisioner |
 
 # Package Management
 

@@ -60,6 +60,8 @@ All data on the device storage is encrypted using full-disk encryption. If the s
 
 The tool automatically deploys your custom Raspberry Pi operating system to each device. You create a single master image, and the tool replicates it to all provisioned devices with appropriate security modifications.
 
+Traditional uncompressed `.img` files and IDP (Image Description Provisioning) artefacts produced by `rpi-image-gen` are both supported. IDP artefacts carry their partition layout, encryption and storage metadata in the image descriptor, so the WebUI can derive those settings from the selected image.
+
 ## 4. Manufacturing Records
 
 The tool can maintain a manufacturing database recording details about each provisioned device. This includes serial numbers, MAC addresses, provisioning timestamps, and security configuration. This data supports inventory tracking, warranty management, and customer support operations.
@@ -173,7 +175,7 @@ You need to set these options:
 
 - **Signing key:** For secure boot mode, you need a signing key (the web interface will guide you through creating one)
 
-- **OS Image:** Upload a "master" operating system image. This is the operating system that will be installed on all your devices. The image must be created with `pi-gen` (see <https://github.com/RPi-Distro/pi-gen>) and must be **uncompressed** (not a `.zip` or `.gz` file)
+- **OS Image:** Upload a "master" operating system image. For traditional provisioning this is an uncompressed `.img` file, typically created with `pi-gen` (see <https://github.com/RPi-Distro/pi-gen>). You can also upload an IDP artefact archive (`.tar.xz`, `.tar.zst`, `.tar.gz`, `.tgz` or `.zip`) produced by `rpi-image-gen`; the WebUI extracts it and uses its metadata to configure the device family, storage type and encryption settings.
 
 - **Device firmware:** Select the firmware version to use for your devices
 
@@ -260,11 +262,21 @@ The tool works in three automatic phases:
 
 - Selected security mode is determined from configuration
 
+- The device unique secret is provisioned and locked if needed. This hardware-held device identity is used by encrypted-root unlock and Raspberry Pi Connect registration.
+
 - Appropriate provisioning service is started
 
 **Phase 3: Provisioning**
 
 Operations performed depend on the selected security mode:
+
+- **IDP artefact selected:**
+
+  - Reads the image descriptor and sparse image files produced by `rpi-image-gen`
+
+  - Uses the device-side IDP fastboot protocol to create partitions, encryption metadata and flash sparse images
+
+  - For secure-boot IDP images, signs the boot slots and prepares the signed boot chain
 
 - **secure-boot mode:**
 
@@ -394,9 +406,9 @@ Sometimes old files cause problems. Clear the cache:
 
 **Command line:**
 
-    sudo rm -rf /var/lock/rpi-sb-provisioner/<serial>
+    sudo find /srv/rpi-sb-provisioner/workdir -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
 
-Replace `<serial>` with your device serial number.
+If you configured `RPI_SB_WORKDIR` to a different path, use that directory instead. Package upgrades and changes to the selected firmware or signing key also invalidate cached signed artefacts automatically.
 
 ### Step 3: Try Again
 
@@ -483,6 +495,8 @@ The database stores information about each device:
 - Which OS image was installed
 
 - Security settings
+
+- Raspberry Pi Connect registration status and device ID, when Connect registration is configured
 
 ### Viewing The Database
 

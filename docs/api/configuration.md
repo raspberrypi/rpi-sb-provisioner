@@ -16,7 +16,8 @@ The Configuration API provides endpoints for managing system configuration optio
   "RPI_SB_WORKDIR": "/srv/rpi-sb-provisioner/work",
   "RPI_SB_PROVISIONER_MANUFACTURING_DB": "/srv/rpi-sb-provisioner/manufacturing.db",
   "RPI_DEVICE_FAMILY": "5",
-  "RPI_DEVICE_FIRMWARE_FILE": "/lib/firmware/raspberrypi/bootloader-2712/default/pieeprom-2025-01-17.bin"
+  "RPI_DEVICE_FIRMWARE_FILE": "/lib/firmware/raspberrypi/bootloader-2712/default/pieeprom-2025-01-17.bin",
+  "RPI_CONNECT_API_KEY": ""
 }
 ```
 
@@ -64,7 +65,7 @@ HTTP 200 OK with no body on success.
 
 - Automatically creates manufacturing database file if path is set and file doesn’t exist
 
-- Clears working directory contents if `RPI_SB_WORKDIR` is modified
+- Clears working directory contents if `RPI_SB_WORKDIR`, selected firmware, or signing-key settings are modified
 
 # /options/validate
 
@@ -116,7 +117,7 @@ File Path Fields (must exist and be readable):
 
 - `CUSTOMER_KEY_FILE_PEM` - RSA private key file
 
-- `GOLD_MASTER_OS_FILE` - Must have .img extension (mandatory)
+- `GOLD_MASTER_OS_FILE` - Must be a traditional `.img` file or an IDP artefact directory containing exactly one valid JSON image descriptor and its referenced sparse images
 
 - `RPI_DEVICE_BOOTLOADER_CONFIG_FILE` - Bootloader configuration file
 
@@ -140,9 +141,13 @@ Enumerated Values:
 
 - `RPI_DEVICE_STORAGE_CIPHER` - Must be `aes-xts-plain64` or `xchacha12,aes-adiantum-plain64`
 
+- `RPI_DEVICE_RPIBOOT_GPIO` - For Raspberry Pi 4 family secure-boot provisioning, must be one of `2`, `4`, `5`, `6`, `7`, or `8`
+
 Format-Specific:
 
 - `CUSTOMER_KEY_PKCS11_NAME` - Must start with `pkcs11:` and include `object=` and `type=private` parameters
+
+- `RPI_CONNECT_API_KEY` - Must not contain whitespace
 
 **Security Measures:**
 
@@ -171,6 +176,229 @@ Format-Specific:
 - Does not modify configuration - use `/options/set` to save values
 
 - Failed validation attempts for unknown fields are logged as security warnings
+
+# Key And Secret Management
+
+## /options/upload-key
+
+**HTTP Method:** POST
+
+**Description:** Uploads a PEM signing key and updates `CUSTOMER_KEY_FILE_PEM`.
+
+**Request Format:**
+
+Multipart form data containing the PEM key file.
+
+**Response Format:**
+
+``` json
+{
+  "success": true,
+  "path": "/etc/rpi-sb-provisioner/keys/customer-key.pem",
+  "filename": "customer-key.pem",
+  "keyInfo": {
+    "algorithm": "RSA",
+    "keySize": 2048,
+    "isPrivateKey": true,
+    "fingerprint": "sha256:...",
+    "isFitForPurpose": true
+  }
+}
+```
+
+**Notes:**
+
+- Uploaded PEM keys are device-wrapped at rest before the handler returns. If device wrapping fails, the upload is rejected and the plaintext file is removed.
+
+- Uploading a PEM key clears `CUSTOMER_KEY_PKCS11_NAME`
+
+## /options/validate-key
+
+**HTTP Method:** POST
+
+**Description:** Validates either a PEM key file or a PKCS#11 URI and returns key metadata.
+
+**Request Format:**
+
+For a PEM key:
+
+``` json
+{
+  "path": "/etc/rpi-sb-provisioner/keys/customer-key.pem"
+}
+```
+
+For a PKCS#11 key:
+
+``` json
+{
+  "uri": "pkcs11:object=my-signing-key;type=private",
+  "pin": "optional-pin"
+}
+```
+
+**Response Format:**
+
+``` json
+{
+  "keyType": "pkcs11",
+  "keyInfo": {
+    "algorithm": "RSA",
+    "keySize": 2048,
+    "isPrivateKey": true,
+    "fingerprint": "sha256:...",
+    "isFitForPurpose": true,
+    "statusMessage": "Key is suitable for Raspberry Pi secure boot signing",
+    "statusLevel": "success",
+    "valid": true
+  }
+}
+```
+
+## /options/pkcs11-status
+
+**HTTP Method:** GET
+
+**Description:** Reports whether the OpenSSL `pkcs11-provider` is installed and loadable. This does not touch a token and does not require a PIN.
+
+**Response Format:**
+
+``` json
+{
+  "providerAvailable": true
+}
+```
+
+## /options/pkcs11-discover
+
+**HTTP Method:** POST
+
+**Description:** Enumerates key objects visible to `pkcs11-provider` through p11-kit so the WebUI can offer a key picker.
+
+**Request Format:**
+
+``` json
+{
+  "pin": "optional-pin"
+}
+```
+
+The request body is optional. If no PIN is supplied, the service uses the stored PIN if one is configured.
+
+**Response Format:**
+
+``` json
+{
+  "providerAvailable": true,
+  "objects": [
+    {
+      "uri": "pkcs11:token=token-label;object=my-signing-key;type=private",
+      "label": "my-signing-key",
+      "token": "token-label",
+      "type": "private"
+    }
+  ]
+}
+```
+
+If discovery fails, the response may include `errorMessage`.
+
+## /options/pkcs11-pin-status
+
+**HTTP Method:** GET
+
+**Description:** Reports whether an HSM PIN is stored. The PIN value is never returned.
+
+**Response Format:**
+
+``` json
+{
+  "configured": true
+}
+```
+
+## /options/set-pkcs11-pin
+
+**HTTP Method:** POST
+
+**Description:** Stores or removes the HSM PIN used for PKCS#11 signing.
+
+**Request Format:**
+
+``` json
+{
+  "pin": "123456"
+}
+```
+
+An empty `pin` removes the stored PIN.
+
+**Response Format:**
+
+``` json
+{
+  "success": true,
+  "configured": true
+}
+```
+
+**Notes:**
+
+- Stored PINs are device-wrapped at rest when firmware crypto support is available
+
+- The PIN is never returned by the API
+
+## /options/encryption-status
+
+**HTTP Method:** GET
+
+**Description:** Reports whether configured local secrets are present and device-wrapped at rest.
+
+**Response Format:**
+
+``` json
+{
+  "pin": {
+    "configured": true,
+    "wrapped": true
+  },
+  "key": {
+    "configured": true,
+    "wrapped": true
+  },
+  "anyUnwrapped": false
+}
+```
+
+## /options/migrate-secrets
+
+**HTTP Method:** POST
+
+**Description:** Device-wraps previously plaintext stored secrets in place.
+
+**Request Format:**
+
+``` json
+{
+  "target": "all"
+}
+```
+
+`target` may be `pin`, `key`, or `all`. If omitted, `all` is used.
+
+**Response Format:**
+
+``` json
+{
+  "success": true,
+  "pin": {
+    "migrated": true
+  },
+  "key": {
+    "migrated": true
+  }
+}
+```
 
 # /options/clear-workdir
 

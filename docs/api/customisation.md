@@ -245,11 +245,15 @@ Plain text success message: "Script file uploaded successfully"
 
 ``` json
 {
-  "provisioners": ["sb-provisioner", "fde-provisioner", "naked-provisioner"],
+  "provisioners": ["sb-provisioner", "fde-provisioner", "naked-provisioner", "idp-provisioner"],
   "stages": [
     {
       "name": "bootstrap",
       "description": "Executed when a device is detected, before provisioning begins"
+    },
+    {
+      "name": "provision-started",
+      "description": "Executed at the start of provisioning, before image preparation"
     },
     {
       "name": "bootfs-mounted",
@@ -271,6 +275,10 @@ Plain text success message: "Script file uploaded successfully"
 **Notes:**
 
 - This endpoint provides a comprehensive list of all possible customisation points
+
+- `sb-provisioner`, `fde-provisioner`, and `naked-provisioner` support `bootstrap`, `provision-started`, `bootfs-mounted`, `rootfs-mounted`, and `post-flash`
+
+- `idp-provisioner` supports `provision-started` and `post-flash`; IDP provisioning does not expose host-side `bootfs-mounted` or `rootfs-mounted` stages because partition creation and encryption are handled by fastbootd on the device
 
 - The `exists` field indicates whether a script file currently exists for that hook
 

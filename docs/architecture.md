@@ -119,7 +119,7 @@ Provisioning proceeds through three phases, each implemented as a systemd templa
 
 **Key operations:**
 \* Verify device is in fastboot mode
-\* Provision device firmware crypto ECDSA key (`oem fwcrypto init`) if not already present — every provisioned device receives one regardless of provisioning style, as it is used for HMAC-based LUKS key derivation and device identity
+\* Provision the device unique secret (`oem fwcrypto init`) if not already present — every provisioned device receives one regardless of provisioning style, as it is used for HMAC-based LUKS key derivation and device identity
 \* Capture device keypair (private and public keys) to the log directory or a configured retrieval path
 \* Read configuration to determine provisioning route:
 - If `GOLD_MASTER_OS_FILE` points to a directory (IDP artefact), start `rpi-idp-provisioner@.service` regardless of `PROVISIONING_STYLE`
@@ -160,7 +160,7 @@ Four variants implement different security and deployment models:
 
 - Erase device storage via fastboot
 
-- Create device-unique encryption key and store in OTP memory
+- Use the device unique secret to derive the LUKS unlock material
 
 - Partition and format storage
 
@@ -178,7 +178,7 @@ Four variants implement different security and deployment models:
 
 - Erase device storage via fastboot
 
-- Create device-unique encryption key and store in OTP memory
+- Use the device unique secret to derive the LUKS unlock material
 
 - Partition and format storage
 
@@ -303,6 +303,8 @@ A web service provides monitoring, configuration, and API access.
 
 - `/get-images`, `/analyze-image` - OS image management (traditional and IDP artefacts)
 
+- `/internal/state-changed`, `/internal/manufacturing-recorded` - Local-only notifications from provisioning scripts to refresh WebUI state promptly
+
 **WebSocket endpoints:**
 
 - `/ws/devices` - Real-time device topology updates
@@ -323,7 +325,7 @@ A web service provides monitoring, configuration, and API access.
 
 - **Separation of concerns:** Web service only monitors; shell scripts do the work
 
-- **No privilege escalation:** Web service runs as unprivileged user; uses sudo only for specific read operations
+- **Local-only privileged service:** The Web service runs as the system service user and performs configuration, key-storage and database operations directly. Internal notification endpoints are restricted to loopback clients and a per-boot shared token.
 
 - **Standard protocols:** HTTP REST API and WebSockets for integration
 
@@ -348,6 +350,18 @@ Simple key-value file format:
 **Modified by:** Web service or manual editing
 
 **Why:** Simple, transparent, version-controllable, easy to backup
+
+PEM signing keys uploaded through the WebUI and stored HSM PINs are device-wrapped at rest using a key derived from the provisioning Raspberry Pi firmware crypto device key. PKCS#11/HSM keys are referenced by URI and used through OpenSSL `pkcs11-provider`.
+
+### Signing Helpers
+
+Secure-boot signing can use either a PEM key or a PKCS#11 URI:
+
+- `rpi-sb-pem-sign.sh` invokes `rpi-sb-keyhelper`, which unwraps a device-wrapped PEM key in process memory and emits the RSA SHA-256 signature expected by Raspberry Pi signing tools.
+
+- `rpi-sb-pkcs11-sign.sh` invokes OpenSSL with `pkcs11-provider` and `default` providers, resolving the configured `pkcs11:` URI through `OSSL_STORE`.
+
+This keeps persistent PEM key material encrypted at rest and avoids the deprecated OpenSSL ENGINE path for HSM signing.
 
 ### State Tracking (`/var/run/rpi-sb-state/`)
 
@@ -455,9 +469,9 @@ The boot process implements cryptographic verification at each stage:
 
 - **Encrypted storage:** All OS data protected by LUKS2 encryption
 
-- **Device-unique keys:** Each device has unique encryption key stored in OTP memory
+- **Device unique secret:** Each device has hardware-held secret material used to derive its LUKS unlock secret
 
-- **Automatic unlock:** Pre-boot environment retrieves decryption key from OTP memory; no user interaction required
+- **Automatic unlock:** The pre-boot environment uses rpifwcrypto to derive the unlock secret; no user interaction required
 
 - **Minimal pre-boot environment:** Contains only kernel and modules necessary for LUKS unlock and pivot_root
 
@@ -469,9 +483,9 @@ The boot process implements cryptographic verification at each stage:
 
 - **Storage extraction:** Removing storage and reading it on another system yields only encrypted data
 
-- **Key extraction from storage:** Decryption key is stored in device OTP memory, not on storage device
+- **Key extraction from storage:** LUKS unlock material is derived from device hardware state, not stored on the storage device
 
-- **Device cloning:** Decryption keys are unique per device and stored in OTP; cannot clone storage to another device
+- **Device cloning:** Derived unlock material is unique per device, so cloning storage to another device does not make it decryptable
 
 - **Boot chain tampering:** Any modification to EEPROM bootloader or pre-boot environment will fail signature verification
 
@@ -781,7 +795,7 @@ WebSocket API provides real-time updates for dashboards and monitoring tools.
 
 **Critical data to backup:**
 
-- Customer signing keys (`CUSTOMER_KEY_FILE_PEM`)
+- Customer signing keys (`CUSTOMER_KEY_FILE_PEM`). If the key is device-wrapped, it is intentionally bound to the provisioning Raspberry Pi that wrapped it; keep an offline copy or HSM-backed key available according to your recovery plan.
 
 - Configuration file (`/etc/rpi-sb-provisioner/config`)
 
