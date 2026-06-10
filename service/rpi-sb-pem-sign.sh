@@ -8,25 +8,15 @@
 # reaches this shell or the filesystem.
 #
 # Interface (per Raspberry Pi tooling requirements):
-#   Input:  Single argument = path to file containing data to sign
+#   Input:  [-a rsa2048-sha256] <file-to-sign>
 #   Output: PKCS#1 v1.5 RSA SHA-256 signature in hex on stdout
 #   Exit:   0 = success, non-zero = failure
 
 set -e
 
-# Validate argument
-if [ -z "$1" ]; then
-    echo "Error: No input file specified" >&2
-    echo "Usage: $0 <file-to-sign>" >&2
-    exit 1
-fi
-
-INPUT_FILE="$1"
-
-if [ ! -f "${INPUT_FILE}" ]; then
-    echo "Error: Input file does not exist: ${INPUT_FILE}" >&2
-    exit 1
-fi
+WRAPPER_NAME="$0"
+# shellcheck disable=SC1091
+. "$(dirname "$0")/rpi-sb-hsm-wrapper-parse.sh" "$@"
 
 # Read configuration (defaults first, then user overrides)
 DEFAULTS_FILE="/usr/share/rpi-sb-provisioner/defaults/config"

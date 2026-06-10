@@ -562,7 +562,7 @@ get_openssl_sign_args() {
 sign_image_hex() {
     _sign_src="$1"
     if [ "${SIGNING_MODE}" = "pem-wrapped" ]; then
-        "${PEM_WRAPPER_SCRIPT}" "${_sign_src}" || return 1
+        "${PEM_WRAPPER_SCRIPT}" -a rsa2048-sha256 "${_sign_src}" || return 1
         echo
     else
         # shellcheck disable=SC2046
