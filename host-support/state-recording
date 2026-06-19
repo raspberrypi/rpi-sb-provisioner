@@ -199,8 +199,8 @@ get_usb_path_for_serial() {
     # Fallback to using udevadm to find the device if available
     if command -v udevadm >/dev/null 2>&1; then
         for device in /dev/bus/usb/*/*; do
-            serial=$(udevadm info --name="$device" --query=property --property=ID_SERIAL_SHORT --value 2>/dev/null)
-            if [ "$serial" = "${TARGET_DEVICE_SERIAL}" ]; then
+            device_serial=$(udevadm info --name="$device" --query=property --property=ID_SERIAL_SHORT --value 2>/dev/null)
+            if [ "$device_serial" = "$serial" ]; then
                 # Separate assignment from export to avoid masking return values
                 usb_path="$(udevadm info "$device" | grep -oP '^P: \K.*' | grep -oE '[0-9]+-[0-9]+(\.[0-9]+)*$')"
                 echo "$usb_path"
@@ -210,5 +210,32 @@ get_usb_path_for_serial() {
     fi
     
     # If we get here, we didn't find a matching device
+    return 1
+}
+
+# get_device_path_for_serial() - Finds the /dev/bus/usb device path for a serial number
+#
+# Parameters:
+#   $1 (serial) - Device serial number to search for (e.g., "DC:A6:32:12:34:56")
+#
+# Returns:
+#   Outputs the device path (e.g., /dev/bus/usb/001/004) on success.
+#
+# Return codes:
+#   0 - Success, device path was found and output to stdout
+#   1 - Failure, no matching device was found
+get_device_path_for_serial() {
+    serial="$1"
+
+    if command -v udevadm >/dev/null 2>&1; then
+        for device in /dev/bus/usb/*/*; do
+            device_serial=$(udevadm info --name="$device" --query=property --property=ID_SERIAL_SHORT --value 2>/dev/null)
+            if [ "$device_serial" = "$serial" ]; then
+                echo "$device"
+                return 0
+            fi
+        done
+    fi
+
     return 1
 }

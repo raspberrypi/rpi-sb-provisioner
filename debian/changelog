@@ -1,3 +1,49 @@
+rpi-sb-provisioner (2.3.1) unstable; urgency=medium
+
+  * Customisation hooks:
+    - Export TARGET_USB_PATH and TARGET_DEVICE_PATH to provisioning hooks
+      via the environment so programming rigs can drive per-port indicators
+      (issue #273).
+    - Export all manufacturing-database field values to post-flash hooks
+      (BOARDNAME, ETH_MAC, OS_IMAGE_SHA256, etc.) after metadata_gather.
+    - Document per-stage positional arguments and environment variables in
+      WebUI customisation script templates.
+    - Always compute manufacturing metadata during metadata_gather, not only
+      when RPI_SB_PROVISIONER_MANUFACTURING_DB is configured.
+    - Add get_device_path_for_serial() helper and resolve TARGET_DEVICE_PATH
+      during provisioning alongside the existing USB path lookup.
+    - Fix get_usb_path_for_serial() udevadm fallback using the wrong variable.
+
+  * Fastboot gadget update:
+    - Refresh bundled fastboot gadgets to rpi-fastbootd
+      14.0.0~git20260608, picking up on-device EEPROM update, verify and read
+      commands plus SPI flash identity getvars.
+    - Reject EEPROM images whose MFG_VER is below the board's min_boot_ver
+      before write or verify, preventing downgrades on boards that require a
+      newer bootloader baseline.
+
+  * Signing key registry and WebUI:
+    - Add a saved-key registry for multiple PEM and PKCS#11 signing keys with
+      one active key driving provisioning and CUSTOMER_KEY_* config sync.
+    - Redesign the Options page as a tile grid showing per-key status,
+      encrypted-at-rest state, fingerprint and RSA-2048 fit-for-purpose checks.
+    - Migrate legacy single-key PEM/PKCS#11 config entries into the registry
+      on first access.
+
+  * Key validation and at-rest handling fixes:
+    - Fix validate-key and manual key paths outside
+      /etc/rpi-sb-provisioner/keys being rejected despite valid PEM content.
+    - Load the OpenSSL default provider before key parsing and return clearer
+      errors for public keys, certificates, OpenSSH keys and encrypted PEMs.
+    - Fix the Options page continuing to show "Encrypted at rest" after the
+      last saved key is removed, and improve browse-to-upload handling.
+
+  * Manufacturing database:
+    - Record customer_key_fingerprint and customer_key_label from the active
+      registry key at provision time, with postinst schema migration.
+
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Thu, 18 Jun 2026 17:48:20 +0100
+
 rpi-sb-provisioner (2.3.0) unstable; urgency=medium
 
   * Final 2.3.0 release:

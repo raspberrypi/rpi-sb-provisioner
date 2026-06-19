@@ -12,6 +12,7 @@
 #include "include/audit.h"
 #include "include/schema_validator.h"
 #include "keywrap.h"
+#include "keyregistry.h"
 #include <openssl/crypto.h>
 
 namespace provisioner {
@@ -33,6 +34,41 @@ namespace provisioner {
             } catch (const std::exception& e) {
                 LOG_ERROR << "Error removing directory contents: " << e.what();
             }
+        }
+
+        void invalidateWorkdirCache(const std::string& reason) {
+            auto workdirValue = utils::getConfigValue("RPI_SB_WORKDIR");
+            std::string workdir = workdirValue ? *workdirValue : "";
+            if (workdir.empty()) {
+                return;
+            }
+            if (std::filesystem::exists(workdir) && std::filesystem::is_directory(workdir)) {
+                LOG_INFO << "Customer key changed - removing contents of RPI_SB_WORKDIR at " << workdir;
+                AuditLog::logFileSystemAccess("DELETE_CONTENTS", workdir, true, "", reason);
+                removeDirectoryContents(workdir);
+            } else {
+                LOG_WARN << "RPI_SB_WORKDIR path does not exist or is not a directory: " << workdir;
+            }
+        }
+
+        bool validateCsrfForMutation(const HttpRequestPtr& req,
+                                     std::function<void(const HttpResponsePtr&)>& callback) {
+            if (req->getHeader("X-CSRF-Token").empty()) {
+                return true;
+            }
+            if (utils::validateCsrfToken(req)) {
+                return true;
+            }
+            LOG_WARN << "SECURITY: CSRF validation failed from " << AuditLog::getClientIP(req);
+            auto resp = provisioner::utils::createErrorResponse(
+                req,
+                "Invalid or expired security token. Please refresh the page and try again.",
+                drogon::k403Forbidden,
+                "Security Error",
+                "CSRF_VALIDATION_FAILED"
+            );
+            callback(resp);
+            return false;
         }
     }
 
@@ -144,34 +180,7 @@ namespace provisioner {
             }
 
             // SECURITY: Validate and canonicalize file paths to prevent path traversal attacks
-            auto validateAndCanonicalizePath = [](const std::string& path) -> std::optional<std::string> {
-                if (path.empty()) return path;
-                
-                try {
-                    // Convert to absolute path and resolve . and .. components
-                    std::filesystem::path fsPath(path);
-                    std::filesystem::path canonicalPath;
-                    
-                    // Check if path exists - if so, canonicalize it
-                    if (std::filesystem::exists(fsPath)) {
-                        canonicalPath = std::filesystem::canonical(fsPath);
-                    } else {
-                        // For non-existent paths, make absolute and lexically normalize
-                        canonicalPath = std::filesystem::absolute(fsPath).lexically_normal();
-                    }
-                    
-                    // Reject paths containing .. after normalization (path traversal attempt)
-                    std::string pathStr = canonicalPath.string();
-                    if (pathStr.find("..") != std::string::npos) {
-                        return std::nullopt;
-                    }
-                    
-                    return pathStr;
-                } catch (const std::filesystem::filesystem_error&) {
-                    // Invalid path
-                    return std::nullopt;
-                }
-            };
+            auto validateAndCanonicalizePath = utils::canonicalizeConfigPath;
 
             Json::Value jsonResponse;
             jsonResponse["valid"] = true;
@@ -1135,13 +1144,14 @@ namespace provisioner {
                 return;
             }
             
-            // SECURITY: Validate file extension
+            // SECURITY: Validate file extension when present. Extensionless names
+            // (e.g. id_rsa) are accepted if the PEM header check below passes.
             std::string filename = file.getFileName();
             std::filesystem::path filePath(filename);
             std::string ext = filePath.extension().string();
             std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
             
-            if (ext != ".pem" && ext != ".key") {
+            if (!ext.empty() && ext != ".pem" && ext != ".key") {
                 LOG_WARN << "SECURITY: Rejected file with invalid extension: " << ext << " from " << AuditLog::getClientIP(req);
                 auto resp = provisioner::utils::createErrorResponse(
                     req,
@@ -1171,7 +1181,7 @@ namespace provisioner {
             }
 
             // Define the key storage directory
-            std::string keyStorageDir = "/etc/rpi-sb-provisioner/keys";
+            std::string keyStorageDir = utils::CUSTOMER_KEY_STORAGE_DIR;
             
             // Create the directory if it doesn't exist
             try {
@@ -1203,6 +1213,9 @@ namespace provisioner {
             
             if (safeFilename.empty()) {
                 safeFilename = "customer-key.pem";
+            } else if (ext.empty()) {
+                // Extensionless uploads (e.g. id_rsa) are stored with a .pem suffix.
+                safeFilename += ".pem";
             }
 
             std::string destPath = keyStorageDir + "/" + safeFilename;
@@ -1234,6 +1247,23 @@ namespace provisioner {
 
             // Parse the key for UI metadata while it is still plaintext on disk.
             auto keyInfo = utils::parseKeyFile(destPath);
+
+            if (!keyInfo.success) {
+                std::filesystem::remove(destPath);
+                AuditLog::logFileSystemAccess("UPLOAD_KEY", destPath, false, "",
+                                              keyInfo.errorMessage);
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    keyInfo.errorMessage.empty()
+                        ? "Uploaded file is not a valid PEM private key"
+                        : keyInfo.errorMessage,
+                    drogon::k400BadRequest,
+                    "Invalid Key Format",
+                    "INVALID_KEY_FORMAT"
+                );
+                callback(resp);
+                return;
+            }
 
             // Wrap the private key at rest with the device-bound key, mirroring
             // the PIN. From here the on-disk file holds only AES-256-GCM
@@ -1278,48 +1308,30 @@ namespace provisioner {
                 }
             }
 
-            // Update the config with the new key path
-            std::map<std::string, std::string> existing_options = utils::getAllConfigValues();
-            existing_options["CUSTOMER_KEY_FILE_PEM"] = destPath;
-            // Clear PKCS11 setting when uploading a PEM key
-            existing_options["CUSTOMER_KEY_PKCS11_NAME"] = "";
+            const bool keyWrapped = keywrap::isWrapped(
+                [&]() {
+                    std::ifstream kin(destPath, std::ios::binary);
+                    return std::string((std::istreambuf_iterator<char>(kin)),
+                                       std::istreambuf_iterator<char>());
+                }());
 
-            std::ofstream config_write(utils::CONFIG_USER_PATH);
-            if (!config_write.is_open()) {
-                LOG_ERROR << "Failed to open config file for writing: " << utils::CONFIG_USER_PATH;
+            keyregistry::ensureMigratedFromConfig();
+            const auto keyIdOpt = keyregistry::addPemKey(
+                destPath, safeFilename, keyInfo, keyWrapped, true);
+            if (!keyIdOpt) {
+                std::filesystem::remove(destPath);
                 auto resp = provisioner::utils::createErrorResponse(
                     req,
-                    "Failed to update configuration",
+                    "Failed to register uploaded key",
                     drogon::k500InternalServerError,
-                    "Config Error",
-                    "CONFIG_WRITE_ERROR"
+                    "Registry Error",
+                    "REGISTRY_ERROR"
                 );
                 callback(resp);
                 return;
             }
 
-            for (const auto &[k, v] : existing_options) {
-                config_write << k << "=" << v << "\n";
-            }
-            config_write.close();
-
-            // A new customer key means every cached signed/staged artefact
-            // under $RPI_SB_WORKDIR was signed with the *previous* key and is
-            // now unusable for this device. Same invalidation pattern as
-            // /options/set and /options/firmware/set.
-            {
-                auto workdirValue = utils::getConfigValue("RPI_SB_WORKDIR");
-                std::string workdir = workdirValue ? *workdirValue : "";
-                if (!workdir.empty()) {
-                    if (std::filesystem::exists(workdir) && std::filesystem::is_directory(workdir)) {
-                        LOG_INFO << "Customer key changed - removing contents of RPI_SB_WORKDIR at " << workdir;
-                        AuditLog::logFileSystemAccess("DELETE_CONTENTS", workdir, true, "", "customer key uploaded");
-                        removeDirectoryContents(workdir);
-                    } else {
-                        LOG_WARN << "RPI_SB_WORKDIR path does not exist or is not a directory: " << workdir;
-                    }
-                }
-            }
+            invalidateWorkdirCache("customer key uploaded");
 
             // Return success with the path and key metadata (parsed above,
             // before the key was wrapped at rest).
@@ -1327,6 +1339,7 @@ namespace provisioner {
             jsonResponse["success"] = true;
             jsonResponse["path"] = destPath;
             jsonResponse["filename"] = safeFilename;
+            jsonResponse["keyId"] = *keyIdOpt;
             
             // Include key metadata
             jsonResponse["keyInfo"]["algorithm"] = keyInfo.algorithm;
@@ -1341,6 +1354,273 @@ namespace provisioner {
                 jsonResponse["keyInfo"]["errorMessage"] = keyInfo.errorMessage;
             }
             
+            auto resp = HttpResponse::newHttpResponse();
+            resp->setStatusCode(k200OK);
+            resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+            resp->setBody(Json::FastWriter().write(jsonResponse));
+            callback(resp);
+        });
+
+        // Signing key registry (GET) - lists saved PEM and PKCS#11 keys.
+        app.registerHandler(OPTIONS_PATH + "/keys", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
+            LOG_INFO << "Options::keys";
+            AuditLog::logHandlerAccess(req, "/options/keys");
+
+            if (req->getMethod() != HttpMethod::Get) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req, "This endpoint only accepts GET requests",
+                    drogon::k405MethodNotAllowed, "Method Not Allowed", "METHOD_NOT_ALLOWED");
+                callback(resp);
+                return;
+            }
+
+            keyregistry::ensureMigratedFromConfig();
+            keyregistry::RegistrySnapshot snapshot;
+            if (!keyregistry::load(snapshot)) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req, "Failed to load signing key registry",
+                    drogon::k500InternalServerError, "Registry Error", "REGISTRY_LOAD_ERROR");
+                callback(resp);
+                return;
+            }
+
+            auto resp = HttpResponse::newHttpResponse();
+            resp->setStatusCode(k200OK);
+            resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+            resp->setBody(Json::FastWriter().write(keyregistry::snapshotToJson(snapshot)));
+            callback(resp);
+        });
+
+        // Activate a saved signing key (POST).
+        app.registerHandler(OPTIONS_PATH + "/keys/activate", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
+            LOG_INFO << "Options::keys/activate";
+            AuditLog::logHandlerAccess(req, "/options/keys/activate");
+
+            if (req->getMethod() != HttpMethod::Post) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req, "This endpoint only accepts POST requests",
+                    drogon::k405MethodNotAllowed, "Method Not Allowed", "METHOD_NOT_ALLOWED");
+                callback(resp);
+                return;
+            }
+            if (!validateCsrfForMutation(req, callback)) return;
+
+            auto jsonBody = req->getJsonObject();
+            if (!jsonBody || !jsonBody->isMember("id")) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req, "Request must contain 'id'",
+                    drogon::k400BadRequest, "Invalid Request", "MISSING_KEY_ID");
+                callback(resp);
+                return;
+            }
+
+            const std::string id = (*jsonBody)["id"].asString();
+            std::string errorOut;
+            const bool fingerprintChanged = keyregistry::activateKey(id, errorOut);
+            if (!errorOut.empty()) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req, errorOut, drogon::k400BadRequest, "Activation Failed", "KEY_ACTIVATE_FAILED");
+                callback(resp);
+                return;
+            }
+
+            if (fingerprintChanged) {
+                invalidateWorkdirCache("signing key activated");
+            }
+
+            Json::Value jsonResponse;
+            jsonResponse["success"] = true;
+            jsonResponse["activeKeyId"] = id;
+            auto resp = HttpResponse::newHttpResponse();
+            resp->setStatusCode(k200OK);
+            resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+            resp->setBody(Json::FastWriter().write(jsonResponse));
+            callback(resp);
+        });
+
+        // Remove a saved signing key (POST).
+        app.registerHandler(OPTIONS_PATH + "/keys/remove", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
+            LOG_INFO << "Options::keys/remove";
+            AuditLog::logHandlerAccess(req, "/options/keys/remove");
+
+            if (req->getMethod() != HttpMethod::Post) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req, "This endpoint only accepts POST requests",
+                    drogon::k405MethodNotAllowed, "Method Not Allowed", "METHOD_NOT_ALLOWED");
+                callback(resp);
+                return;
+            }
+            if (!validateCsrfForMutation(req, callback)) return;
+
+            auto jsonBody = req->getJsonObject();
+            if (!jsonBody || !jsonBody->isMember("id")) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req, "Request must contain 'id'",
+                    drogon::k400BadRequest, "Invalid Request", "MISSING_KEY_ID");
+                callback(resp);
+                return;
+            }
+
+            std::string errorOut;
+            if (!keyregistry::removeKey((*jsonBody)["id"].asString(), errorOut)) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req, errorOut, drogon::k400BadRequest, "Remove Failed", "KEY_REMOVE_FAILED");
+                callback(resp);
+                return;
+            }
+
+            Json::Value jsonResponse;
+            jsonResponse["success"] = true;
+            auto resp = HttpResponse::newHttpResponse();
+            resp->setStatusCode(k200OK);
+            resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+            resp->setBody(Json::FastWriter().write(jsonResponse));
+            callback(resp);
+        });
+
+        // Register a PKCS#11 key in the saved-key registry (POST).
+        app.registerHandler(OPTIONS_PATH + "/keys/register-pkcs11", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
+            LOG_INFO << "Options::keys/register-pkcs11";
+            AuditLog::logHandlerAccess(req, "/options/keys/register-pkcs11");
+
+            if (req->getMethod() != HttpMethod::Post) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req, "This endpoint only accepts POST requests",
+                    drogon::k405MethodNotAllowed, "Method Not Allowed", "METHOD_NOT_ALLOWED");
+                callback(resp);
+                return;
+            }
+            if (!validateCsrfForMutation(req, callback)) return;
+
+            auto jsonBody = req->getJsonObject();
+            if (!jsonBody || !jsonBody->isMember("uri")) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req, "Request must contain 'uri'",
+                    drogon::k400BadRequest, "Invalid Request", "MISSING_PKCS11_URI");
+                callback(resp);
+                return;
+            }
+
+            const std::string uri = (*jsonBody)["uri"].asString();
+            const bool activate = !jsonBody->isMember("activate") || (*jsonBody)["activate"].asBool();
+            std::string label = jsonBody->isMember("label") ? (*jsonBody)["label"].asString() : "";
+            if (label.empty()) {
+                label = uri;
+            }
+
+            std::string pin;
+            if (jsonBody->isMember("pin")) {
+                pin = (*jsonBody)["pin"].asString();
+            }
+
+            auto keyInfo = utils::parsePkcs11Key(uri, pin);
+            if (!keyInfo.success) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    keyInfo.errorMessage.empty() ? "Invalid PKCS#11 key" : keyInfo.errorMessage,
+                    drogon::k400BadRequest, "Invalid Key", "INVALID_PKCS11_KEY");
+                callback(resp);
+                return;
+            }
+
+            keyregistry::ensureMigratedFromConfig();
+            const auto prevFp = [&]() -> std::optional<std::string> {
+                keyregistry::RegistrySnapshot snap;
+                if (!keyregistry::load(snap)) return std::nullopt;
+                if (auto active = keyregistry::findActive(snap)) return active->fingerprint;
+                return std::nullopt;
+            }();
+
+            const auto keyIdOpt = keyregistry::addPkcs11Key(uri, label, keyInfo, activate);
+            if (!keyIdOpt) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req, "Failed to register PKCS#11 key",
+                    drogon::k500InternalServerError, "Registry Error", "REGISTRY_ERROR");
+                callback(resp);
+                return;
+            }
+
+            if (activate && prevFp && *prevFp != keyInfo.fingerprint) {
+                invalidateWorkdirCache("PKCS#11 key activated");
+            }
+
+            Json::Value jsonResponse;
+            jsonResponse["success"] = true;
+            jsonResponse["keyId"] = *keyIdOpt;
+            jsonResponse["keyInfo"]["algorithm"] = keyInfo.algorithm;
+            jsonResponse["keyInfo"]["keySize"] = keyInfo.keySize;
+            jsonResponse["keyInfo"]["fingerprint"] = keyInfo.fingerprint;
+            jsonResponse["keyInfo"]["isFitForPurpose"] = keyInfo.isFitForPurpose;
+            jsonResponse["keyInfo"]["statusMessage"] = keyInfo.statusMessage;
+            jsonResponse["keyInfo"]["statusLevel"] = keyInfo.statusLevel;
+            jsonResponse["keyInfo"]["valid"] = keyInfo.success;
+
+            auto resp = HttpResponse::newHttpResponse();
+            resp->setStatusCode(k200OK);
+            resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+            resp->setBody(Json::FastWriter().write(jsonResponse));
+            callback(resp);
+        });
+
+        // Device-wrap a saved PEM key at rest (POST).
+        app.registerHandler(OPTIONS_PATH + "/keys/wrap", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
+            LOG_INFO << "Options::keys/wrap";
+            AuditLog::logHandlerAccess(req, "/options/keys/wrap");
+
+            if (req->getMethod() != HttpMethod::Post) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req, "This endpoint only accepts POST requests",
+                    drogon::k405MethodNotAllowed, "Method Not Allowed", "METHOD_NOT_ALLOWED");
+                callback(resp);
+                return;
+            }
+            if (!validateCsrfForMutation(req, callback)) return;
+
+            auto jsonBody = req->getJsonObject();
+            if (!jsonBody || !jsonBody->isMember("id")) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req, "Request must contain 'id'",
+                    drogon::k400BadRequest, "Invalid Request", "MISSING_KEY_ID");
+                callback(resp);
+                return;
+            }
+
+            keyregistry::RegistrySnapshot snap;
+            if (!keyregistry::load(snap)) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req, "Failed to load key registry",
+                    drogon::k500InternalServerError, "Registry Error", "REGISTRY_LOAD_ERROR");
+                callback(resp);
+                return;
+            }
+
+            const std::string id = (*jsonBody)["id"].asString();
+            auto keyOpt = keyregistry::findById(snap, id);
+            if (!keyOpt || keyOpt->type != "pem") {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req, "PEM key not found",
+                    drogon::k404NotFound, "Not Found", "KEY_NOT_FOUND");
+                callback(resp);
+                return;
+            }
+
+            if (!utils::wrapFileInPlace(keyOpt->path)) {
+                Json::Value jsonResponse;
+                jsonResponse["success"] = false;
+                jsonResponse["error"] = "Could not encrypt key at rest on this device.";
+                auto resp = HttpResponse::newHttpResponse();
+                resp->setStatusCode(k500InternalServerError);
+                resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+                resp->setBody(Json::FastWriter().write(jsonResponse));
+                callback(resp);
+                return;
+            }
+
+            std::string refreshErr;
+            keyregistry::refreshKeyMetadata(id, refreshErr);
+
+            Json::Value jsonResponse;
+            jsonResponse["success"] = true;
             auto resp = HttpResponse::newHttpResponse();
             resp->setStatusCode(k200OK);
             resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
@@ -1431,38 +1711,36 @@ namespace provisioner {
             } else if (jsonBody->isMember("path")) {
                 // PEM file validation
                 std::string path = (*jsonBody)["path"].asString();
-                
-                // Security: Validate path is within allowed directory
-                std::string keyStorageDir = "/etc/rpi-sb-provisioner/keys";
-                try {
-                    auto canonicalPath = std::filesystem::canonical(path);
-                    auto canonicalDir = std::filesystem::canonical(keyStorageDir);
-                    
-                    // Check if path is within the keys directory
-                    auto relative = std::filesystem::relative(canonicalPath, canonicalDir);
-                    if (relative.string().find("..") == 0) {
-                        LOG_WARN << "SECURITY: Rejected path outside keys directory: " << path;
-                        auto resp = provisioner::utils::createErrorResponse(
-                            req,
-                            "Invalid key path",
-                            drogon::k400BadRequest,
-                            "Invalid Path",
-                            "INVALID_KEY_PATH"
-                        );
-                        callback(resp);
-                        return;
-                    }
-                } catch (const std::filesystem::filesystem_error& e) {
-                    // Path doesn't exist or can't be canonicalized
-                    keyInfo.success = false;
-                    keyInfo.errorMessage = "Key file not found";
-                    keyInfo.statusLevel = "error";
-                    keyInfo.statusMessage = "Key file not found";
+
+                const auto canonicalPath = utils::canonicalizeConfigPath(path);
+                if (!canonicalPath) {
+                    LOG_WARN << "SECURITY: Rejected invalid key path: " << path;
+                    auto resp = provisioner::utils::createErrorResponse(
+                        req,
+                        "Invalid key path",
+                        drogon::k400BadRequest,
+                        "Invalid Path",
+                        "INVALID_KEY_PATH"
+                    );
+                    callback(resp);
+                    return;
                 }
-                
-                if (keyInfo.errorMessage.empty()) {
-                    keyInfo = utils::parseKeyFile(path);
+
+                if (!utils::isAllowedCustomerKeyPath(*canonicalPath)) {
+                    LOG_WARN << "SECURITY: Rejected key path outside allowed locations: "
+                             << *canonicalPath;
+                    auto resp = provisioner::utils::createErrorResponse(
+                        req,
+                        "Invalid key path",
+                        drogon::k400BadRequest,
+                        "Invalid Path",
+                        "INVALID_KEY_PATH"
+                    );
+                    callback(resp);
+                    return;
                 }
+
+                keyInfo = utils::parseKeyFile(*canonicalPath);
                 keyType = "pem";
                 
             } else {
@@ -1539,8 +1817,7 @@ namespace provisioner {
             jsonResponse["key"]["configured"] = keyConfigured;
             jsonResponse["key"]["wrapped"] = keyWrapped;
 
-            jsonResponse["anyUnwrapped"] =
-                (pinConfigured && !pinWrapped) || (keyConfigured && !keyWrapped);
+            jsonResponse["anyUnwrapped"] = utils::hasUnwrappedSecretsAtRest();
 
             auto resp = HttpResponse::newHttpResponse();
             resp->setStatusCode(k200OK);

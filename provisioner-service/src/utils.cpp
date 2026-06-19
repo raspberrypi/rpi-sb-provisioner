@@ -9,6 +9,7 @@
 #include <drogon/drogon.h>
 #include "include/audit.h"
 #include "keywrap.h"
+#include "keyregistry.h"
 #include <openssl/pem.h>
 #include <openssl/evp.h>
 #include <openssl/sha.h>
@@ -399,6 +400,66 @@ namespace provisioner {
                 }
             }
 
+            bool pemContains(const std::string& pem, const char* marker) {
+                return pem.find(marker) != std::string::npos;
+            }
+
+            bool pemContainsPrivateKeyBlock(const std::string& pem) {
+                return pemContains(pem, "-----BEGIN PRIVATE KEY-----") ||
+                       pemContains(pem, "-----BEGIN RSA PRIVATE KEY-----") ||
+                       pemContains(pem, "-----BEGIN EC PRIVATE KEY-----") ||
+                       pemContains(pem, "-----BEGIN ENCRYPTED PRIVATE KEY-----") ||
+                       pemContains(pem, "-----BEGIN DSA PRIVATE KEY-----");
+            }
+
+            // Return a user-facing explanation for PEM uploads that are valid PEM
+            // but not an unencrypted private signing key.
+            std::optional<std::string> classifyPemKeyContent(const std::string& pem) {
+                if (pemContainsPrivateKeyBlock(pem)) {
+                    if (pemContains(pem, "-----BEGIN ENCRYPTED PRIVATE KEY-----")) {
+                        return "This private key is protected by a passphrase. Remove the passphrase "
+                               "before uploading, for example: openssl rsa -in key.pem -out key.pem";
+                    }
+                    return std::nullopt;
+                }
+                if (pemContains(pem, "-----BEGIN PUBLIC KEY-----") ||
+                    pemContains(pem, "-----BEGIN RSA PUBLIC KEY-----")) {
+                    return "This file contains a public key. Upload your RSA private key "
+                           "instead (a PEM block starting with -----BEGIN PRIVATE KEY----- "
+                           "or -----BEGIN RSA PRIVATE KEY-----). The public key is derived "
+                           "automatically during provisioning.";
+                }
+                if (pemContains(pem, "-----BEGIN CERTIFICATE-----")) {
+                    return "This file appears to be an X.509 certificate, not a private key. "
+                           "Upload your RSA private key PEM file instead.";
+                }
+                if (pemContains(pem, "-----BEGIN OPENSSH PRIVATE KEY-----")) {
+                    return "OpenSSH private key format is not supported. Convert to PEM first, "
+                           "for example: ssh-keygen -p -m PEM -f your-key";
+                }
+                return std::nullopt;
+            }
+
+            KeyInfo keyInfoForPemParseFailure(const std::string& pem,
+                                              const std::string& sslErr) {
+                KeyInfo info;
+                info.success = false;
+                info.statusLevel = "error";
+                info.statusMessage = "Invalid key format";
+
+                if (auto hint = classifyPemKeyContent(pem)) {
+                    info.errorMessage = *hint;
+                    return info;
+                }
+
+                info.errorMessage = sslErr.empty()
+                    ? "Could not parse this file as a PEM private key. Upload an unencrypted "
+                      "RSA private key (-----BEGIN PRIVATE KEY----- or "
+                      "-----BEGIN RSA PRIVATE KEY-----)."
+                    : "Could not parse this file as a PEM private key: " + sslErr;
+                return info;
+            }
+
             // Populate a KeyInfo directly from a parsed EVP_PKEY, using the
             // linked OpenSSL library rather than scraping `openssl ... -text`
             // output. The key type and size come back as values, so there is
@@ -430,6 +491,71 @@ namespace provisioner {
             }
         }
         
+        std::optional<std::string> canonicalizeConfigPath(const std::string& path) {
+            if (path.empty()) {
+                return path;
+            }
+
+            try {
+                std::filesystem::path fsPath(path);
+                std::filesystem::path canonicalPath;
+
+                if (std::filesystem::exists(fsPath)) {
+                    canonicalPath = std::filesystem::canonical(fsPath);
+                } else {
+                    canonicalPath = std::filesystem::absolute(fsPath).lexically_normal();
+                }
+
+                const std::string pathStr = canonicalPath.string();
+                if (pathStr.find("..") != std::string::npos) {
+                    return std::nullopt;
+                }
+
+                return pathStr;
+            } catch (const std::filesystem::filesystem_error&) {
+                return std::nullopt;
+            }
+        }
+
+        namespace {
+
+            bool isPathUnderDirectory(const std::filesystem::path& path,
+                                      const std::filesystem::path& dir) {
+                try {
+                    if (!std::filesystem::exists(dir)) {
+                        return false;
+                    }
+
+                    const auto canonDir = std::filesystem::canonical(dir);
+                    const auto canonPath = std::filesystem::canonical(path);
+                    const auto relative = std::filesystem::relative(canonPath, canonDir);
+                    if (relative.empty()) {
+                        return true;
+                    }
+
+                    const std::string rel = relative.generic_string();
+                    return !(rel == ".." || rel.rfind("../", 0) == 0);
+                } catch (const std::filesystem::filesystem_error&) {
+                    return false;
+                }
+            }
+
+        } // namespace
+
+        bool isAllowedCustomerKeyPath(const std::string& canonicalPath) {
+            if (isPathUnderDirectory(canonicalPath, CUSTOMER_KEY_STORAGE_DIR)) {
+                return true;
+            }
+
+            const auto configured = getConfigValue("CUSTOMER_KEY_FILE_PEM");
+            if (!configured || configured->empty()) {
+                return false;
+            }
+
+            const auto configuredCanonical = canonicalizeConfigPath(*configured);
+            return configuredCanonical && *configuredCanonical == canonicalPath;
+        }
+
         KeyInfo parseKeyFile(const std::string& path) {
             KeyInfo info;
             
@@ -474,12 +600,31 @@ namespace provisioner {
                 pem = raw;
             }
 
+            if (auto hint = classifyPemKeyContent(pem)) {
+                if (!pem.empty()) OPENSSL_cleanse(&pem[0], pem.size());
+                info.success = false;
+                info.errorMessage = *hint;
+                info.statusLevel = "error";
+                info.statusMessage = "Invalid key format";
+                LOG_WARN << "Rejected non-private PEM key: " << path;
+                return info;
+            }
+
             // Parse the key with the linked OpenSSL library instead of shelling
             // out to the `openssl` CLI. PEM_read_bio_PrivateKey handles RSA, EC
             // and any other PEM private key in one call (traditional or PKCS#8),
             // replacing the previous rsa/ec/pkey CLI fallback chain.
+            //
+            // Load the default provider explicitly: some daemon startup paths
+            // (notably libcurl/OpenSSL init) can leave the default context
+            // without RSA decoders even though the openssl CLI still works.
+            OSSL_PROVIDER* defProv = OSSL_PROVIDER_load(nullptr, "default");
+
             BIO* bio = BIO_new_mem_buf(pem.data(), static_cast<int>(pem.size()));
             if (!bio) {
+                if (defProv) {
+                    OSSL_PROVIDER_unload(defProv);
+                }
                 if (!pem.empty()) OPENSSL_cleanse(&pem[0], pem.size());
                 info.success = false;
                 info.errorMessage = "Failed to open key file";
@@ -497,13 +642,24 @@ namespace provisioner {
             EVP_PKEY* pkey = PEM_read_bio_PrivateKey(bio, nullptr, noPrompt, nullptr);
             BIO_free(bio);
             if (!pem.empty()) OPENSSL_cleanse(&pem[0], pem.size());
+            if (defProv) {
+                OSSL_PROVIDER_unload(defProv);
+            }
 
             if (!pkey) {
-                info.success = false;
-                info.errorMessage = "Failed to parse key file";
-                info.statusLevel = "error";
-                info.statusMessage = "Invalid key format";
-                LOG_WARN << "Failed to parse key file: " << path;
+                std::string sslErr;
+                for (unsigned long err = ERR_get_error(); err != 0; err = ERR_get_error()) {
+                    char buf[256];
+                    ERR_error_string_n(err, buf, sizeof(buf));
+                    if (!sslErr.empty()) {
+                        sslErr += "; ";
+                    }
+                    sslErr += buf;
+                }
+
+                info = keyInfoForPemParseFailure(pem, sslErr);
+                LOG_WARN << "Failed to parse key file: " << path
+                         << (info.errorMessage.empty() ? "" : " - " + info.errorMessage);
                 return info;
             }
 
@@ -783,7 +939,7 @@ namespace provisioner {
         
         bool savePkcs11Pin(const std::string& pin) {
             // Create the keys directory if it doesn't exist
-            std::string keyStorageDir = "/etc/rpi-sb-provisioner/keys";
+            std::string keyStorageDir = CUSTOMER_KEY_STORAGE_DIR;
             try {
                 if (!std::filesystem::exists(keyStorageDir)) {
                     std::filesystem::create_directories(keyStorageDir);
@@ -913,6 +1069,17 @@ namespace provisioner {
         bool hasUnwrappedSecretsAtRest() {
             if (isPkcs11PinConfigured() && !isFileDeviceWrapped(PKCS11_PIN_FILE)) {
                 return true;
+            }
+            keyregistry::RegistrySnapshot snap;
+            if (keyregistry::load(snap)) {
+                for (const auto& key : snap.keys) {
+                    if (key.type == "pem" && !key.path.empty()
+                        && std::filesystem::exists(key.path)
+                        && !isFileDeviceWrapped(key.path)) {
+                        return true;
+                    }
+                }
+                return false;
             }
             auto keyPathOpt = getConfigValue("CUSTOMER_KEY_FILE_PEM");
             if (keyPathOpt && !keyPathOpt->empty()

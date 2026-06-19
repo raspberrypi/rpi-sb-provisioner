@@ -301,6 +301,7 @@ target_sources(rpi-provisioner-ui
     src/audit.cpp
     src/utils.cpp
     src/keywrap.cpp
+    src/keyregistry.cpp
     src/schema_validator.cpp
     ${VIEW_SOURCES}
 )

@@ -149,6 +149,8 @@ MFG_DB_SCHEMA="id              integer primary key,
     eeprom_jedec    char(6)             DEFAULT NULL,
     eeprom_unique_id varchar(32)        DEFAULT NULL,
     bootloader_build_timestamp integer  DEFAULT NULL,
+    customer_key_fingerprint char(64)   DEFAULT NULL,
+    customer_key_label varchar(255)     DEFAULT NULL,
     provision_ts    timestamp           default current_timestamp"
 
 # Ensure WAL journal mode
@@ -163,7 +165,7 @@ if [ "$MFG_TABLE_EXISTS" -eq 0 ]; then
 else
     # Table exists, check if migration is needed. The expected column set,
     # in schema order. Keep this in sync with MFG_DB_SCHEMA above.
-    EXPECTED_COLS="id boardname serial eth_mac wifi_mac bt_mac mmc_size mmc_cid rpi_duid board_revision processor memory manufacturer secure jtag_locked eeprom_write_protected pubkey_programmed devkey_revoked signed_boot_enabled os_image_filename os_image_sha256 connect_registered connect_device_id eeprom_size eeprom_jedec eeprom_unique_id bootloader_build_timestamp provision_ts"
+    EXPECTED_COLS="id boardname serial eth_mac wifi_mac bt_mac mmc_size mmc_cid rpi_duid board_revision processor memory manufacturer secure jtag_locked eeprom_write_protected pubkey_programmed devkey_revoked signed_boot_enabled os_image_filename os_image_sha256 connect_registered connect_device_id eeprom_size eeprom_jedec eeprom_unique_id bootloader_build_timestamp customer_key_fingerprint customer_key_label provision_ts"
 
     # Current columns, one per line.
     CURRENT_COLUMNS=$(sqlite3 "$MFG_DB_PATH" "PRAGMA table_info(devices);" | awk -F'|' '{print $2}')
