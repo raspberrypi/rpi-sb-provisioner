@@ -63,6 +63,7 @@ namespace provisioner {
         // Package defaults are read first, then user config overrides
         constexpr const char* CONFIG_DEFAULTS_PATH = "/usr/share/rpi-sb-provisioner/defaults/config";
         constexpr const char* CONFIG_USER_PATH = "/etc/rpi-sb-provisioner/config";
+        constexpr const char* CUSTOMER_KEY_STORAGE_DIR = "/etc/rpi-sb-provisioner/keys";
         
         // ===== Firmware Information =====
         
@@ -96,6 +97,18 @@ namespace provisioner {
             KeyInfo() : keySize(0), isPrivateKey(false), isFitForPurpose(false), success(false) {}
         };
         
+        /**
+         * Canonicalize a config file path, rejecting traversal attempts.
+         * Returns the absolute, normalized path when valid.
+         */
+        std::optional<std::string> canonicalizeConfigPath(const std::string& path);
+
+        /**
+         * True when a canonical PEM key path may be validated: either under the
+         * provisioner key storage directory or the configured CUSTOMER_KEY_FILE_PEM.
+         */
+        bool isAllowedCustomerKeyPath(const std::string& canonicalPath);
+
         /**
          * Parse a PEM key file and extract metadata
          * 

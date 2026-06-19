@@ -61,6 +61,127 @@ namespace provisioner {
             return sources;
         }
 
+        const std::string HOOK_ENV_DEVICE_IDENTITY =
+            "# Environment (device identity):\n"
+            "#   TARGET_USB_PATH             USB topology path (e.g., 1-1.2)\n"
+            "#   TARGET_DEVICE_PATH          USB device node (e.g., /dev/bus/usb/001/004)\n"
+            "#   TARGET_DEVICE_SERIAL        Device serial number\n"
+            "#   TARGET_DEVICE_FAMILY        USB model ID / SoC family (bootstrap only)\n"
+            "#   FASTBOOT_DEVICE_SPECIFIER     Active fastboot route (provisioning hooks)\n"
+            "#   RPI_DEVICE_STORAGE_TYPE     Storage block device (e.g., mmcblk0)\n";
+
+        const std::string HOOK_ENV_MANUFACTURING =
+            "# Environment (manufacturing record; post-flash only, mirrors devices table):\n"
+            "#   BOARDNAME                   Board type (e.g., 5, CM5)\n"
+            "#   SERIAL                      Device serial (same as TARGET_DEVICE_SERIAL)\n"
+            "#   ETH_MAC, WIFI_MAC, BT_MAC   Interface MAC addresses\n"
+            "#   MMC_SIZE, MMC_CID           eMMC size (bytes) and card ID\n"
+            "#   RPI_DUID                    Raspberry Pi device unique ID\n"
+            "#   BOARD_REVISION              Board revision code\n"
+            "#   PROCESSOR, MEMORY, MANUFACTURER  Human-readable hardware details\n"
+            "#   SECURE                      Secure-boot identity provisioned (1/0)\n"
+            "#   JTAG_LOCKED                 JTAG-lock intent (1/0; empty if unknown)\n"
+            "#   EEPROM_WRITE_PROTECTED      EEPROM WP intent (1/0; empty if unknown)\n"
+            "#   PUBKEY_PROGRAMMED           Customer pubkey in OTP (1/0; empty if unknown)\n"
+            "#   DEVKEY_REVOKED              Dev-key revocation (1/0; empty if unknown)\n"
+            "#   SIGNED_BOOT_ENABLED         Signed boot enforcement (1/0; empty if unknown)\n"
+            "#   OS_IMAGE_FILENAME           Provisioned image summary string\n"
+            "#   OS_IMAGE_SHA256             Image or IDP archive SHA256\n"
+            "#   CONNECT_REGISTERED          Pi Connect registration (1/0; empty if N/A)\n"
+            "#   CONNECT_DEVICE_ID           Pi Connect device identity ID\n"
+            "#   EEPROM_SIZE, EEPROM_JEDEC, EEPROM_UNIQUE_ID  Bootloader SPI flash identity\n"
+            "#   BOOTLOADER_BUILD_TIMESTAMP  Bootloader image build time (Unix epoch)\n"
+            "#   CUSTOMER_KEY_FINGERPRINT    Active signing key SHA256 fingerprint\n"
+            "#   CUSTOMER_KEY_LABEL          Active signing key label\n";
+
+        std::string buildDefaultScriptTemplate(const std::string& provisioner, const std::string& stage) {
+            std::string content = "#!/bin/sh\n\n";
+
+            if (stage == "bootstrap") {
+                content += "# This script runs when a device is detected, before provisioning begins\n";
+                content += "# Arguments:\n";
+                content += "#   $1  Target device serial number\n";
+                content += "#   $2  Target device family (e.g., 2712, 2711, 2710)\n";
+                content += "#   $3  Target USB path (e.g., 1-1.2)\n";
+                content += "#   $4  Target device path (e.g., /dev/bus/usb/001/004)\n";
+                content += "#\n";
+                content += HOOK_ENV_DEVICE_IDENTITY;
+                content += "#\n";
+                content += "# At bootstrap FASTBOOT_DEVICE_SPECIFIER and RPI_DEVICE_STORAGE_TYPE are empty.\n\n";
+                content += "TARGET_DEVICE_SERIAL=\"$1\"\n";
+                content += "TARGET_DEVICE_FAMILY=\"$2\"\n";
+                content += "TARGET_USB_PATH=\"$3\"\n";
+                content += "TARGET_DEVICE_PATH=\"$4\"\n\n";
+                content += "echo \"Running bootstrap customisation for device ${TARGET_DEVICE_SERIAL}\"\n";
+                content += "echo \"Device family: ${TARGET_DEVICE_FAMILY}, USB path: ${TARGET_USB_PATH}\"\n\n";
+                content += "# Example: turn on a per-port rig LED using the exported USB path\n";
+                content += "# case \"${TARGET_USB_PATH}\" in 1-1.1) gpioset gpiochip0 17=1 ;; esac\n\n";
+                content += "exit 0\n";
+            } else if (stage == "provision-started") {
+                content += "# This script runs at the start of provisioning, before image preparation.\n";
+                content += "# Typical use: signal programming rigs (LEDs, buzzers) that flashing has started.\n";
+                content += "# Arguments:\n";
+                content += "#   $1  Fastboot device specifier\n";
+                content += "#   $2  Target device serial number\n";
+                content += "#   $3  Device storage type (e.g., mmcblk0 or nvme0n1)\n";
+                content += "#\n";
+                content += HOOK_ENV_DEVICE_IDENTITY;
+                content += "#\n";
+                content += "# Manufacturing metadata is not available yet at this stage.\n\n";
+                content += "FASTBOOT_DEVICE_SPECIFIER=\"$1\"\n";
+                content += "TARGET_DEVICE_SERIAL=\"$2\"\n";
+                content += "STORAGE_TYPE=\"$3\"\n\n";
+                content += "echo \"Provisioning started for ${TARGET_DEVICE_SERIAL} on ${TARGET_USB_PATH}\"\n\n";
+                content += "# Example: turn on a rig 'in progress' LED via fastboot\n";
+                content += "# fastboot -s \"${FASTBOOT_DEVICE_SPECIFIER}\" oem led PWR 1\n\n";
+                content += "exit 0\n";
+            } else if (stage == "bootfs-mounted" || stage == "rootfs-mounted") {
+                content += "# This script runs at the " + stage + " stage for " + provisioner + ".\n";
+                content += "# Arguments:\n";
+                content += "#   $1  Path to mounted boot partition image\n";
+                content += "#   $2  Path to mounted rootfs partition image\n";
+                content += "#\n";
+                content += HOOK_ENV_DEVICE_IDENTITY;
+                content += "#\n";
+                content += "# Manufacturing metadata is not available until after flashing (post-flash).\n\n";
+                content += "BOOT_MOUNT=\"$1\"\n";
+                content += "ROOTFS_MOUNT=\"$2\"\n\n";
+                content += "echo \"Running " + stage + " customisation for ${TARGET_DEVICE_SERIAL}\"\n";
+                content += "echo \"Boot mount: ${BOOT_MOUNT}, rootfs mount: ${ROOTFS_MOUNT}\"\n\n";
+                if (stage == "bootfs-mounted") {
+                    content += "# Example: modify boot configuration\n";
+                    content += "# echo \"dtparam=watchdog=off\" >> \"${BOOT_MOUNT}/config.txt\"\n\n";
+                } else {
+                    content += "# Example: modify rootfs files\n";
+                    content += "# echo \"10.0.0.100 custom-host\" >> \"${ROOTFS_MOUNT}/etc/hosts\"\n\n";
+                }
+                content += "exit 0\n";
+            } else if (stage == "post-flash") {
+                content += "# This script runs after images have been flashed to the device.\n";
+                content += "# Arguments:\n";
+                content += "#   $1  Fastboot device specifier\n";
+                content += "#   $2  Target device serial number\n";
+                content += "#   $3  Device storage type (e.g., mmcblk0 or nvme0n1)\n";
+                content += "#\n";
+                content += HOOK_ENV_DEVICE_IDENTITY;
+                content += "#\n";
+                content += HOOK_ENV_MANUFACTURING;
+                content += "#\n";
+                content += "# Optional integer fields are exported as empty strings when unknown (SQL NULL).\n\n";
+                content += "FASTBOOT_DEVICE_SPECIFIER=\"$1\"\n";
+                content += "TARGET_DEVICE_SERIAL=\"$2\"\n";
+                content += "STORAGE_TYPE=\"$3\"\n\n";
+                content += "echo \"Post-flash: ${BOARDNAME} ${SERIAL} on USB ${TARGET_USB_PATH}\"\n\n";
+                content += "# Example: turn off a per-port rig LED\n";
+                content += "# case \"${TARGET_USB_PATH}\" in 1-1.1) gpioset gpiochip0 17=0 ;; esac\n\n";
+                content += "# Example: run a fastboot command\n";
+                content += "# fastboot -s \"${FASTBOOT_DEVICE_SPECIFIER}\" getvar version\n\n";
+                content += "exit 0\n";
+            }
+
+            return content;
+        }
+
         // Helper function to get script metadata
         Json::Value getScriptMetadata(const std::string& filepath, bool includeContent = false) {
             namespace fs = std::filesystem;
@@ -168,6 +289,11 @@ namespace provisioner {
          * 1. Fastboot device specifier (for use with fastboot commands)
          * 2. Target device serial number
          * 3. Device storage type (e.g., "mmcblk0" or "nvme0n1")
+         *
+         * All hooks also receive device-identity environment variables
+         * (TARGET_USB_PATH, TARGET_DEVICE_SERIAL, FASTBOOT_DEVICE_SPECIFIER,
+         * etc.). Post-flash hooks additionally receive manufacturing-database
+         * fields (BOARDNAME, ETH_MAC, OS_IMAGE_SHA256, ...) after metadata_gather.
          * 
          * @param app Reference to the Drogon HTTP application framework instance
          */
@@ -319,82 +445,7 @@ namespace provisioner {
                 }
                 
                 if (isKnownHook) {
-                    // Create a new script with default content
-                    std::string defaultContent = "#!/bin/sh\n\n";
-                    
-                    if (stage == "bootstrap") {
-                        defaultContent += "# This script runs when a device is detected, before provisioning begins\n";
-                        defaultContent += "# Arguments:\n";
-                        defaultContent += "# $1 - Target device serial number\n";
-                        defaultContent += "# $2 - Target device family (e.g., 2712, 2711, 2710)\n";
-                        defaultContent += "# $3 - Target USB path (e.g., 1-1.2)\n";
-                        defaultContent += "# $4 - Target device path (e.g., /dev/bus/usb/001/004)\n\n";
-                        defaultContent += "TARGET_DEVICE_SERIAL=\"$1\"\n";
-                        defaultContent += "TARGET_DEVICE_FAMILY=\"$2\"\n";
-                        defaultContent += "TARGET_USB_PATH=\"$3\"\n";
-                        defaultContent += "TARGET_DEVICE_PATH=\"$4\"\n\n";
-                        defaultContent += "echo \"Running bootstrap customisation for device ${TARGET_DEVICE_SERIAL}\"\n";
-                        defaultContent += "echo \"Device family: ${TARGET_DEVICE_FAMILY}\"\n";
-                        defaultContent += "echo \"USB path: ${TARGET_USB_PATH}\"\n\n";
-                        defaultContent += "# Example: Log device detection\n";
-                        defaultContent += "# logger \"Device ${TARGET_DEVICE_SERIAL} detected for provisioning\"\n\n";
-                        defaultContent += "# Exit with success\nexit 0\n";
-                    } else if (stage == "post-flash") {
-                        defaultContent += "# This script runs after images have been flashed to the device\n";
-                        defaultContent += "# Arguments:\n";
-                        defaultContent += "# $1 - Fastboot device specifier\n";
-                        defaultContent += "# $2 - Target device serial number\n";
-                        defaultContent += "# $3 - Device storage type (e.g., mmcblk0 or nvme0n1)\n\n";
-                        defaultContent += "FASTBOOT_DEVICE_SPECIFIER=\"$1\"\n";
-                        defaultContent += "TARGET_DEVICE_SERIAL=\"$2\"\n";
-                        defaultContent += "STORAGE_TYPE=\"$3\"\n\n";
-                        defaultContent += "echo \"Running post-flash customisation for ${TARGET_DEVICE_SERIAL}\"\n\n";
-                        defaultContent += "# Example: Run a fastboot command\n";
-                        defaultContent += "# fastboot -s \"${FASTBOOT_DEVICE_SPECIFIER}\" getvar version\n\n";     
-                        defaultContent += "# Exit with success\nexit 0\n";
-                    } else if (stage == "bootfs-mounted") {
-                        defaultContent += "# This script runs when " + stage + " for " + provisioner + "\n";
-                        defaultContent += "# Arguments:\n";
-                        defaultContent += "# $1 - Path to mounted boot image\n";
-                        defaultContent += "# $2 - Path to mounted rootfs image\n\n";
-                        defaultContent += "BOOT_MOUNT=\"$1\"\n";
-                        defaultContent += "ROOTFS_MOUNT=\"$2\"\n\n";
-                        defaultContent += "echo \"Running " + stage + " customisation\"\n";
-                        defaultContent += "echo \"Boot mount: ${BOOT_MOUNT}\"\n";
-                        defaultContent += "echo \"Rootfs mount: ${ROOTFS_MOUNT}\"\n\n";
-                        defaultContent += "# Example: Modify boot configuration\n";
-                        defaultContent += "# echo \"dtparam=watchdog=off\" >> \"${BOOT_MOUNT}/config.txt\"\n\n";
-                        defaultContent += "# Exit with success\nexit 0\n";
-                    } else if (stage == "rootfs-mounted") {
-                        defaultContent += "# This script runs when " + stage + " for " + provisioner + "\n";
-                        defaultContent += "# Arguments:\n";
-                        defaultContent += "# $1 - Path to mounted boot image\n";
-                        defaultContent += "# $2 - Path to mounted rootfs image\n\n";
-                        defaultContent += "BOOT_MOUNT=\"$1\"\n";
-                        defaultContent += "ROOTFS_MOUNT=\"$2\"\n\n";
-                        defaultContent += "echo \"Running " + stage + " customisation\"\n";
-                        defaultContent += "echo \"Boot mount: ${BOOT_MOUNT}\"\n";
-                        defaultContent += "echo \"Rootfs mount: ${ROOTFS_MOUNT}\"\n\n";
-                        defaultContent += "# Example: Modify boot configuration\n";
-                        defaultContent += "echo \"Adding entry to hosts file for $1 during $2 stage\"\n\n";
-                        defaultContent += "echo \"10.0.0.100 custom-host\" >> ${ROOTFS_MOUNT}/etc/hosts\n\n";
-                        defaultContent += "# Exit with success\nexit 0\n";
-
-                    } else if (stage == "provision-started") {
-                        defaultContent += "# This script runs at the start of provisioning, before image preparation.\n";
-                        defaultContent += "# Typical use: signal programming rigs (LEDs, buzzers) that the device is being flashed.\n";
-                        defaultContent += "# Arguments:\n";
-                        defaultContent += "# $1 - Fastboot device specifier\n";
-                        defaultContent += "# $2 - Target device serial number\n";
-                        defaultContent += "# $3 - Device storage type (e.g., mmcblk0 or nvme0n1)\n\n";
-                        defaultContent += "FASTBOOT_DEVICE_SPECIFIER=\"$1\"\n";
-                        defaultContent += "TARGET_DEVICE_SERIAL=\"$2\"\n";
-                        defaultContent += "STORAGE_TYPE=\"$3\"\n\n";
-                        defaultContent += "echo \"Provisioning started for ${TARGET_DEVICE_SERIAL}\"\n\n";
-                        defaultContent += "# Example: turn on a rig 'in progress' LED via fastboot\n";
-                        defaultContent += "# fastboot -s \"${FASTBOOT_DEVICE_SPECIFIER}\" oem led PWR 1\n\n";
-                        defaultContent += "# Exit with success\nexit 0\n";
-                    }
+                    std::string defaultContent = buildDefaultScriptTemplate(provisioner, stage);
                     
                     // Find copy sources from other provisioners with the same stage
                     Json::Value copySources = getCopySources(provisioner, stage);
@@ -1200,66 +1251,7 @@ namespace provisioner {
             }
             
             // Create a new script with default content
-            std::string defaultContent = "#!/bin/sh\n\n";
-            
-            if (stage == "post-flash") {
-                defaultContent += "# This script runs after images have been flashed to the device\n";
-                defaultContent += "# Arguments:\n";
-                defaultContent += "# $1 - Fastboot device specifier\n";
-                defaultContent += "# $2 - Target device serial number\n";
-                defaultContent += "# $3 - Device storage type (e.g., mmcblk0 or nvme0n1)\n\n";
-                defaultContent += "FASTBOOT_DEVICE_SPECIFIER=\"$1\"\n";
-                defaultContent += "TARGET_DEVICE_SERIAL=\"$2\"\n";
-                defaultContent += "STORAGE_TYPE=\"$3\"\n\n";
-                defaultContent += "echo \"Running post-flash customisation for ${TARGET_DEVICE_SERIAL}\"\n\n";
-                defaultContent += "# Example: Run a fastboot command\n";
-                defaultContent += "# fastboot -s \"${FASTBOOT_DEVICE_SPECIFIER}\" getvar version\n\n";     
-                defaultContent += "# Exit with success\nexit 0\n";
-            } else if (stage == "bootstrap") {
-                defaultContent += "# This script runs when a device is detected, before provisioning begins\n";
-                defaultContent += "# Arguments:\n";
-                defaultContent += "# $1 - Target device serial number\n";
-                defaultContent += "# $2 - Target device family (e.g., 2712, 2711, 2710)\n";
-                defaultContent += "# $3 - Target USB path (e.g., 1-1.2)\n";
-                defaultContent += "# $4 - Target device path (e.g., /dev/bus/usb/001/004)\n\n";
-                defaultContent += "TARGET_DEVICE_SERIAL=\"$1\"\n";
-                defaultContent += "TARGET_DEVICE_FAMILY=\"$2\"\n";
-                defaultContent += "TARGET_USB_PATH=\"$3\"\n";
-                defaultContent += "TARGET_DEVICE_PATH=\"$4\"\n\n";
-                defaultContent += "echo \"Running bootstrap customisation for device ${TARGET_DEVICE_SERIAL}\"\n";
-                defaultContent += "echo \"Device family: ${TARGET_DEVICE_FAMILY}\"\n";
-                defaultContent += "echo \"USB path: ${TARGET_USB_PATH}\"\n\n";
-                defaultContent += "# Example: Log device detection\n";
-                defaultContent += "# logger \"Device ${TARGET_DEVICE_SERIAL} detected for provisioning\"\n\n";
-                defaultContent += "# Exit with success\nexit 0\n";
-            } else if (stage == "bootfs-mounted") {
-                defaultContent += "# This script runs when " + stage + " for " + provisioner + "\n";
-                defaultContent += "# Arguments:\n";
-                defaultContent += "# $1 - Path to mounted boot image\n";
-                defaultContent += "# $2 - Path to mounted rootfs image\n\n";
-                defaultContent += "BOOT_MOUNT=\"$1\"\n";
-                defaultContent += "ROOTFS_MOUNT=\"$2\"\n\n";
-                defaultContent += "echo \"Running " + stage + " customisation\"\n";
-                defaultContent += "echo \"Boot mount: ${BOOT_MOUNT}\"\n";
-                defaultContent += "echo \"Rootfs mount: ${ROOTFS_MOUNT}\"\n\n";
-                defaultContent += "# Example: Modify boot configuration\n";
-                defaultContent += "# echo \"dtparam=watchdog=off\" >> \"${BOOT_MOUNT}/config.txt\"\n\n";
-                defaultContent += "# Exit with success\nexit 0\n";
-            } else if (stage == "rootfs-mounted") {
-                defaultContent += "# This script runs when " + stage + " for " + provisioner + "\n";
-                defaultContent += "# Arguments:\n";
-                defaultContent += "# $1 - Path to mounted boot image\n";
-                defaultContent += "# $2 - Path to mounted rootfs image\n\n";
-                defaultContent += "BOOT_MOUNT=\"$1\"\n";
-                defaultContent += "ROOTFS_MOUNT=\"$2\"\n\n";
-                defaultContent += "echo \"Running " + stage + " customisation\"\n";
-                defaultContent += "echo \"Boot mount: ${BOOT_MOUNT}\"\n";
-                defaultContent += "echo \"Rootfs mount: ${ROOTFS_MOUNT}\"\n\n";
-                defaultContent += "# Example: Modify rootfs files\n";
-                defaultContent += "echo \"Adding entry to hosts file\"\n\n";
-                defaultContent += "echo \"10.0.0.100 custom-host\" >> ${ROOTFS_MOUNT}/etc/hosts\n\n";
-                defaultContent += "# Exit with success\nexit 0\n";
-            }
+            std::string defaultContent = buildDefaultScriptTemplate(provisioner, stage);
             
             // Find copy sources from other provisioners with the same stage
             Json::Value copySources = getCopySources(provisioner, stage);
