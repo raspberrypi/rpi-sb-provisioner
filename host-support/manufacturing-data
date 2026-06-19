@@ -234,6 +234,80 @@ metadata_gather() {
     esac
     
     echo "Board is: ${BOARD_STR}, with revision number ${REVISION}. Has Processor ${PROCESSOR_STR} with Memory ${MEMORY_STR}. Was manufactured by ${MANUFACTURER_STR}"
+
+    # Collect all fields that would be written to the manufacturing database.
+    # Always computed so post-flash customisation hooks can read them from the
+    # environment even when RPI_SB_PROVISIONER_MANUFACTURING_DB is unset.
+    signed_flag_value() {
+        case "$(printf "%s" "$1" | tr '[:upper:]' '[:lower:]')" in
+            present)            echo "1" ;;
+            "not present")      echo "0" ;;
+            *)                  echo "NULL" ;;
+        esac
+    }
+
+    PUBKEY_PROGRAMMED_VALUE=$(signed_flag_value "$(metadata_get "secure-otp")")
+    DEVKEY_REVOKED_VALUE=$(signed_flag_value "$(metadata_get "secure-devkey")")
+    SIGNED_BOOT_VALUE="${PUBKEY_PROGRAMMED_VALUE}"
+
+    JTAG_LOCKED_VALUE="NULL"
+    if [ -n "${RPI_DEVICE_LOCK_JTAG}" ]; then
+        JTAG_LOCKED_VALUE="1"
+    elif [ "${SECURE}" = "1" ]; then
+        JTAG_LOCKED_VALUE="0"
+    fi
+
+    EEPROM_WP_VALUE="NULL"
+    if [ -n "${RPI_DEVICE_EEPROM_WP_SET}" ]; then
+        EEPROM_WP_VALUE="1"
+    elif [ "${SECURE}" = "1" ]; then
+        EEPROM_WP_VALUE="0"
+    fi
+
+    eeprom_value() {
+        v=$(metadata_get "$1")
+        case "${v}" in
+            ""|"not available") echo "" ;;
+            *) echo "${v}" ;;
+        esac
+    }
+    EEPROM_SIZE=$(eeprom_value "eeprom-size")
+    EEPROM_JEDEC=$(eeprom_value "eeprom-jedec")
+    EEPROM_UNIQUE_ID=$(eeprom_value "eeprom-unique-id")
+    BOOTLOADER_BUILD_TS=$(eeprom_value "bootloader-build-timestamp")
+
+    OS_IMAGE_FILENAME="${IMAGE_SUMMARY:-}"
+    OS_IMAGE_SHA256=""
+    if [ -n "${GOLD_MASTER_OS_FILE}" ] && [ -f "${GOLD_MASTER_OS_FILE}" ]; then
+        if [ -f "${GOLD_MASTER_OS_FILE}.sha256" ]; then
+            OS_IMAGE_SHA256="$(head -n1 "${GOLD_MASTER_OS_FILE}.sha256" | awk '{print $1}')"
+        fi
+        if [ -z "${OS_IMAGE_SHA256}" ] && command -v sha256sum >/dev/null 2>&1; then
+            OS_IMAGE_SHA256="$(sha256sum "${GOLD_MASTER_OS_FILE}" | awk '{print $1}')"
+            printf '%s\n' "${OS_IMAGE_SHA256}" > "${GOLD_MASTER_OS_FILE}.sha256" 2>/dev/null || true
+        fi
+    elif [ -n "${GOLD_MASTER_OS_FILE}" ] && [ -d "${GOLD_MASTER_OS_FILE}" ]; then
+        if [ -f "${GOLD_MASTER_OS_FILE}.sha256" ]; then
+            OS_IMAGE_SHA256="$(head -n1 "${GOLD_MASTER_OS_FILE}.sha256" | awk '{print $1}')"
+        fi
+    fi
+
+    CUSTOMER_KEY_FINGERPRINT=""
+    CUSTOMER_KEY_LABEL=""
+    REGISTRY="/etc/rpi-sb-provisioner/keys/registry.json"
+    if [ -f "${REGISTRY}" ] && command -v jq >/dev/null 2>&1; then
+        _active_key_id=$(jq -r '.activeKeyId // empty' "${REGISTRY}")
+        if [ -n "${_active_key_id}" ]; then
+            CUSTOMER_KEY_FINGERPRINT=$(jq -r --arg id "${_active_key_id}" \
+                '.keys[] | select(.id == $id) | .fingerprint // empty' "${REGISTRY}")
+            CUSTOMER_KEY_LABEL=$(jq -r --arg id "${_active_key_id}" \
+                '.keys[] | select(.id == $id) | .label // empty' "${REGISTRY}")
+        fi
+    fi
+
+    set +e
+    connect_register_device
+    set -e
     
     if [ -f "${RPI_SB_PROVISIONER_MANUFACTURING_DB}" ]; then
         announce_start "Manufacturing Database Insertion"
@@ -271,6 +345,8 @@ metadata_gather() {
                     eeprom_jedec    char(6)             DEFAULT NULL,
                     eeprom_unique_id varchar(32)        DEFAULT NULL,
                     bootloader_build_timestamp integer  DEFAULT NULL,
+                    customer_key_fingerprint char(64)   DEFAULT NULL,
+                    customer_key_label varchar(255)     DEFAULT NULL,
                     provision_ts    timestamp           default current_timestamp"
 
         # Check if the table exists
@@ -280,78 +356,8 @@ metadata_gather() {
             # Table doesn't exist, create it
             sqlite3 "${RPI_SB_PROVISIONER_MANUFACTURING_DB}" "CREATE TABLE devices($EXPECTED_SCHEMA);" > /dev/null 2>&1
         fi
-        
-        # Security flags: record observed state from the device, not
-        # provisioning intent. Each flag maps a firmware-published
-        # getvar to 1/0/NULL. "not available" (the device-tree node is
-        # absent on older firmware) and any unexpected value fall
-        # through to NULL.
-        signed_flag_value() {
-            case "$(printf "%s" "$1" | tr '[:upper:]' '[:lower:]')" in
-                present)            echo "1" ;;
-                "not present")      echo "0" ;;
-                *)                  echo "NULL" ;;
-            esac
-        }
 
-        # Customer pubkey hash programmed in OTP (bit 3 of
-        # /proc/device-tree/chosen/bootloader/signed). When present,
-        # firmware authenticates boot.img against this hash.
-        PUBKEY_PROGRAMMED_VALUE=$(signed_flag_value "$(metadata_get "secure-otp")")
-
-        # Development-key revocation bit (bit 2). 'present' means the
-        # in-firmware dev key has been revoked.
-        DEVKEY_REVOKED_VALUE=$(signed_flag_value "$(metadata_get "secure-devkey")")
-
-        # Signed boot enforcement is observable via the customer pubkey
-        # hash being programmed -- firmware will only honour signed
-        # boot.img once that hash is present.
-        SIGNED_BOOT_VALUE="${PUBKEY_PROGRAMMED_VALUE}"
-
-        # JTAG-lock and EEPROM-write-protect are not currently
-        # observable via fastboot -- the provisioner applies them via
-        # signed config.txt directives (program_jtag_lock /
-        # eeprom_write_protect) but cannot read the resulting OTP /
-        # SPI-WP state back. Record provisioning intent so the UI can
-        # surface a "Requested" state; switch these to true observed
-        # reads once rpi-fastbootd grows the corresponding getvars.
-        JTAG_LOCKED_VALUE="NULL"
-        if [ -n "${RPI_DEVICE_LOCK_JTAG}" ]; then
-            JTAG_LOCKED_VALUE="1"
-        elif [ "${SECURE}" = "1" ]; then
-            JTAG_LOCKED_VALUE="0"
-        fi
-
-        EEPROM_WP_VALUE="NULL"
-        if [ -n "${RPI_DEVICE_EEPROM_WP_SET}" ]; then
-            EEPROM_WP_VALUE="1"
-        elif [ "${SECURE}" = "1" ]; then
-            EEPROM_WP_VALUE="0"
-        fi
-
-        # Bootloader SPI flash identity + state, captured from fastbootd's
-        # in-process libflashrom + /dev/spidev queries. Each getvar reports
-        # "not available" on older firmware or non-applicable platforms;
-        # normalise to empty so the column ends up NULL rather than the
-        # literal string.
-        eeprom_value() {
-            v=$(metadata_get "$1")
-            case "${v}" in
-                ""|"not available") echo "" ;;
-                *) echo "${v}" ;;
-            esac
-        }
-        EEPROM_SIZE=$(eeprom_value "eeprom-size")
-        EEPROM_JEDEC=$(eeprom_value "eeprom-jedec")
-        EEPROM_UNIQUE_ID=$(eeprom_value "eeprom-unique-id")
-        BOOTLOADER_BUILD_TS=$(eeprom_value "bootloader-build-timestamp")
-
-        # Integer columns: convert empty to literal NULL so the SQL is valid.
         sql_int() { if [ -z "$1" ]; then echo "NULL"; else echo "$1"; fi; }
-        # String columns: render as a quoted SQL literal, or the bare token
-        # NULL when the value is absent. Single-quotes inside the value are
-        # SQL-escaped by doubling. This preserves the distinction between
-        # "not measured" (NULL) and "measured as empty" ('').
         sql_str() {
             if [ -z "$1" ]; then
                 echo "NULL"
@@ -363,46 +369,9 @@ metadata_gather() {
         BOOTLOADER_BUILD_TS_SQL=$(sql_int "${BOOTLOADER_BUILD_TS}")
         EEPROM_JEDEC_SQL=$(sql_str "${EEPROM_JEDEC}")
         EEPROM_UNIQUE_ID_SQL=$(sql_str "${EEPROM_UNIQUE_ID}")
-
-	        # OS image identifier: use the same one-line summary that
-	        # state.db carries during provisioning so the device-details
-	        # page stays coherent before and after the manufacturing record
-	        # is written.  compute_image_summary is provided by
-	        # state-recording and was called by the calling provisioner
-	        # right after read_config.
-	        OS_IMAGE_FILENAME="${IMAGE_SUMMARY:-}"
-	        OS_IMAGE_SHA256=""
-	        if [ -n "${GOLD_MASTER_OS_FILE}" ] && [ -f "${GOLD_MASTER_OS_FILE}" ]; then
-	            # Prefer sidecar file written by UI backend: <image>.sha256 (first token/line)
-	            if [ -f "${GOLD_MASTER_OS_FILE}.sha256" ]; then
-	                OS_IMAGE_SHA256="$(head -n1 "${GOLD_MASTER_OS_FILE}.sha256" | awk '{print $1}')"
-	            fi
-	            # Fallback to calculating if sidecar missing or empty
-	            if [ -z "${OS_IMAGE_SHA256}" ] && command -v sha256sum >/dev/null 2>&1; then
-	                OS_IMAGE_SHA256="$(sha256sum "${GOLD_MASTER_OS_FILE}" | awk '{print $1}')"
-	                # Best-effort: persist to sidecar for reuse by UI and future runs
-	                printf '%s\n' "${OS_IMAGE_SHA256}" > "${GOLD_MASTER_OS_FILE}.sha256" 2>/dev/null || true
-	            fi
-	        elif [ -n "${GOLD_MASTER_OS_FILE}" ] && [ -d "${GOLD_MASTER_OS_FILE}" ]; then
-	            # IDP artefact directory: read the archive SHA256 from the
-	            # sidecar written by the UI at upload time (<directory>.sha256).
-	            # This is the hash of the original .tar.xz/.tar.zst archive,
-	            # consistent with what the web UI displays.
-	            if [ -f "${GOLD_MASTER_OS_FILE}.sha256" ]; then
-	                OS_IMAGE_SHA256="$(head -n1 "${GOLD_MASTER_OS_FILE}.sha256" | awk '{print $1}')"
-	            fi
-	        fi
-
-        # Register with Raspberry Pi Connect (if API key is configured).
-        # Disable errexit: registration is non-fatal and must never abort
-        # provisioning regardless of network, fastboot, or crypto failures.
-        set +e
-        connect_register_device
-        set -e
-
-        # Escape single quotes so the inline SQL stays well-formed when the
-        # image summary carries spaces/parentheses/slashes (e.g. IDP one-liner).
-        OS_IMAGE_FILENAME=$(printf '%s' "${OS_IMAGE_FILENAME}" | sed "s/'/''/g")
+        CUSTOMER_KEY_FINGERPRINT_SQL=$(sql_str "${CUSTOMER_KEY_FINGERPRINT}")
+        CUSTOMER_KEY_LABEL_SQL=$(sql_str "${CUSTOMER_KEY_LABEL}")
+        OS_IMAGE_FILENAME_SQL=$(printf '%s' "${OS_IMAGE_FILENAME}" | sed "s/'/''/g")
 
         # Insert new device data
         sqlite3 "${RPI_SB_PROVISIONER_MANUFACTURING_DB}" \
@@ -432,7 +401,9 @@ metadata_gather() {
                     eeprom_size,                \
                     eeprom_jedec,               \
                     eeprom_unique_id,           \
-                    bootloader_build_timestamp  \
+                    bootloader_build_timestamp, \
+                    customer_key_fingerprint,   \
+                    customer_key_label          \
                 ) VALUES (                      \
                     '${BOARD_STR}',               \
                     '${TARGET_DEVICE_SERIAL}',    \
@@ -452,14 +423,16 @@ metadata_gather() {
                     ${PUBKEY_PROGRAMMED_VALUE},   \
                     ${DEVKEY_REVOKED_VALUE},      \
                     ${SIGNED_BOOT_VALUE},         \
-                    '${OS_IMAGE_FILENAME}',       \
+                    '${OS_IMAGE_FILENAME_SQL}',       \
                     '${OS_IMAGE_SHA256}',         \
                     ${CONNECT_REGISTERED_VALUE},  \
                     '${CONNECT_DEVICE_ID_VALUE}', \
                     ${EEPROM_SIZE_SQL},           \
                     ${EEPROM_JEDEC_SQL},          \
                     ${EEPROM_UNIQUE_ID_SQL},      \
-                    ${BOOTLOADER_BUILD_TS_SQL}    \
+                    ${BOOTLOADER_BUILD_TS_SQL},  \
+                    ${CUSTOMER_KEY_FINGERPRINT_SQL}, \
+                    ${CUSTOMER_KEY_LABEL_SQL}    \
         );" > /dev/null 2>&1
 
         # Nudge the UI service to re-read after a manufacturing.db row write.
@@ -481,4 +454,45 @@ metadata_gather() {
         announce_stop "Manufacturing Database Insertion"
     fi
     announce_stop "Metadata extraction"
+}
+
+# Export manufacturing-database field values for post-flash customisation hooks.
+# Variable names mirror the devices table column names (uppercase). Optional
+# integer fields that would be SQL NULL are exported as empty strings.
+export_manufacturing_env() {
+    mfg_env_from_sql_value() {
+        case "$1" in
+            NULL) echo "" ;;
+            *) printf '%s' "$1" ;;
+        esac
+    }
+
+    export BOARDNAME="${BOARD_STR:-}"
+    export SERIAL="${TARGET_DEVICE_SERIAL:-}"
+    export ETH_MAC="${ETH_MAC_ADDRESS:-}"
+    export WIFI_MAC="${WIFI_MAC_ADDRESS:-}"
+    export BT_MAC="${BT_MAC_ADDRESS:-}"
+    export MMC_SIZE="${MMC_SIZE:-}"
+    export MMC_CID="${MMC_CID:-}"
+    export RPI_DUID="${RPI_DUID:-}"
+    export BOARD_REVISION="${REVISION:-}"
+    export PROCESSOR="${PROCESSOR_STR:-}"
+    export MEMORY="${MEMORY_STR:-}"
+    export MANUFACTURER="${MANUFACTURER_STR:-}"
+    export SECURE="${SECURE:-}"
+    export JTAG_LOCKED="$(mfg_env_from_sql_value "${JTAG_LOCKED_VALUE}")"
+    export EEPROM_WRITE_PROTECTED="$(mfg_env_from_sql_value "${EEPROM_WP_VALUE}")"
+    export PUBKEY_PROGRAMMED="$(mfg_env_from_sql_value "${PUBKEY_PROGRAMMED_VALUE}")"
+    export DEVKEY_REVOKED="$(mfg_env_from_sql_value "${DEVKEY_REVOKED_VALUE}")"
+    export SIGNED_BOOT_ENABLED="$(mfg_env_from_sql_value "${SIGNED_BOOT_VALUE}")"
+    export OS_IMAGE_FILENAME="${OS_IMAGE_FILENAME:-}"
+    export OS_IMAGE_SHA256="${OS_IMAGE_SHA256:-}"
+    export CONNECT_REGISTERED="$(mfg_env_from_sql_value "${CONNECT_REGISTERED_VALUE}")"
+    export CONNECT_DEVICE_ID="${CONNECT_DEVICE_ID_VALUE:-}"
+    export EEPROM_SIZE="${EEPROM_SIZE:-}"
+    export EEPROM_JEDEC="${EEPROM_JEDEC:-}"
+    export EEPROM_UNIQUE_ID="${EEPROM_UNIQUE_ID:-}"
+    export BOOTLOADER_BUILD_TIMESTAMP="${BOOTLOADER_BUILD_TS:-}"
+    export CUSTOMER_KEY_FINGERPRINT="${CUSTOMER_KEY_FINGERPRINT:-}"
+    export CUSTOMER_KEY_LABEL="${CUSTOMER_KEY_LABEL:-}"
 }

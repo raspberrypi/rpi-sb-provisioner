@@ -206,7 +206,8 @@ read_config() {
 #                                     Callers should use this for `flash` and
 #                                     fall back to FASTBOOT_DEVICE_SPECIFIER.
 #   TARGET_DEVICE_SERIAL            - Device serial number
-#   TARGET_USB_PATH                 - USB device path
+#   TARGET_USB_PATH                 - USB device path (e.g., 1-1.2)
+#   TARGET_DEVICE_PATH              - USB device node (e.g., /dev/bus/usb/001/004)
 #
 # Exits with error if:
 #   - Cannot establish fastboot connection
@@ -265,7 +266,7 @@ setup_fastboot_and_id_vars() {
         fi
     fi
 
-    # Set TARGET_USB_PATH based on TARGET_DEVICE_SERIAL
+    # Set TARGET_USB_PATH and TARGET_DEVICE_PATH based on TARGET_DEVICE_SERIAL
     if [ -n "${TARGET_DEVICE_SERIAL}" ]; then
         # Try to get the USB path for the device
         usb_path=$(get_usb_path_for_serial "${TARGET_DEVICE_SERIAL}")
@@ -277,6 +278,14 @@ setup_fastboot_and_id_vars() {
             log "Warning: Could not find USB path for device ${TARGET_DEVICE_SERIAL}"
 
         fi
+
+        device_path=$(get_device_path_for_serial "${TARGET_DEVICE_SERIAL}" || true)
+        if [ -n "$device_path" ]; then
+            TARGET_DEVICE_PATH="$device_path"
+            log "Found device path ${TARGET_DEVICE_PATH} for device ${TARGET_DEVICE_SERIAL}"
+        else
+            log "Warning: Could not find device path for device ${TARGET_DEVICE_SERIAL}"
+        fi
     fi
 
     # Ensure TARGET_USB_PATH is set
@@ -285,6 +294,19 @@ setup_fastboot_and_id_vars() {
         record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "unknown-usb-path"
         exit 1
     fi
+}
+
+# Export device-identity environment variables for customisation hooks.
+# Positional arguments remain the contract for existing per-stage fields;
+# newly exposed identity fields (USB path, device path on provisioning hooks)
+# are provided via the environment so scripts can share logic across stages.
+export_customisation_env() {
+    export TARGET_USB_PATH="${TARGET_USB_PATH:-}"
+    export TARGET_DEVICE_PATH="${TARGET_DEVICE_PATH:-}"
+    export TARGET_DEVICE_SERIAL="${TARGET_DEVICE_SERIAL:-}"
+    export TARGET_DEVICE_FAMILY="${TARGET_DEVICE_FAMILY:-}"
+    export FASTBOOT_DEVICE_SPECIFIER="${FASTBOOT_DEVICE_SPECIFIER:-}"
+    export RPI_DEVICE_STORAGE_TYPE="${RPI_DEVICE_STORAGE_TYPE:-}"
 }
 
 run_customisation_script() {
@@ -310,13 +332,19 @@ run_customisation_script() {
             *e*) ERROR_EXIT_WAS_SET=1 ;;
         esac
         set +e
+        export_customisation_env
+        if [ "${STAGE_NAME}" = "post-flash" ]; then
+            export_manufacturing_env
+        fi
         # Handle different stages with appropriate parameters
         if [ "${STAGE_NAME}" = "post-flash" ]; then
-            # For post-flash stage, pass device info that can be used with fastboot
+            # For post-flash stage, pass device info that can be used with fastboot.
+            # TARGET_USB_PATH and TARGET_DEVICE_PATH are also exported (issue #273).
             "${SCRIPT_PATH}" "${FASTBOOT_DEVICE_SPECIFIER}" "${TARGET_DEVICE_SERIAL}" "${RPI_DEVICE_STORAGE_TYPE}"
         elif [ "${STAGE_NAME}" = "provision-started" ]; then
             # For provision-started stage, forward (fastboot specifier, serial,
             # storage type) so hooks can signal programming rigs (e.g. LED).
+            # TARGET_USB_PATH and TARGET_DEVICE_PATH are also exported (issue #273).
             FASTBOOT_SPEC_ARG="$3"
             TARGET_SERIAL_ARG="$4"
             STORAGE_TYPE_ARG="$5"
