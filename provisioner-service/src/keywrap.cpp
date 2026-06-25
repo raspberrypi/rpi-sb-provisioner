@@ -34,18 +34,25 @@ namespace {
     // length - assert the firmware contract matches the buffer we hand it.
     static_assert(KEY_LEN == 32, "HMAC-SHA256 / AES-256 key length must be 32");
 
-    // Locate the DEVICE-flagged OTP key id via the firmware crypto library.
+    // Locate a usable OTP key id via the firmware crypto library.
     // Cached across calls: -2 = not yet probed, -1 = none found, >=0 = id.
-    // get_num_otp_keys does not bound the key-id space directly, so probe a
-    // small fixed range and take the first key flagged as the device key.
-    int deviceKeyId() {
+    //
+    // We take the first slot that holds a key (its public key reads back),
+    // regardless of the ARM_CRYPTO_KEY_STATUS_TYPE_DEVICE_PRIVATE_KEY flag:
+    // that flag only marks the factory device-unique key, but any populated
+    // slot serves for HMAC-based wrapping. The provisioner generates a key in
+    // postinst (rpi-fw-crypto genkey) when a host has none, and a generated
+    // key is not DEVICE-flagged. A blank/missing slot fails get_pubkey, so this
+    // probe also distinguishes presence from absence. get_num_otp_keys does not
+    // bound the key-id space directly, so probe a small fixed range.
+    int wrappingKeyId() {
         static int cached = -2;
         if (cached != -2) return cached;
         cached = -1;
         for (uint32_t id = 0; id < 16; ++id) {
-            uint32_t status = 0;
-            if (rpi_fw_crypto_get_key_status(id, &status) != 0) continue;
-            if (status & ARM_CRYPTO_KEY_STATUS_TYPE_DEVICE_PRIVATE_KEY) {
+            uint8_t pub[RPI_FW_CRYPTO_PUBLIC_KEY_MAX_SIZE];
+            size_t pubLen = 0;
+            if (rpi_fw_crypto_get_pubkey(0, id, pub, sizeof(pub), &pubLen) == 0 && pubLen > 0) {
                 cached = static_cast<int>(id);
                 break;
             }
@@ -53,11 +60,11 @@ namespace {
         return cached;
     }
 
-    // wrapping key = HMAC-SHA256(device OTP key, salt), computed inside the
-    // firmware via librpifwcrypto. The OTP key never leaves the firmware; only
-    // the 32-byte HMAC result is returned to us.
+    // wrapping key = HMAC-SHA256(OTP key, salt), computed inside the firmware
+    // via librpifwcrypto. The OTP key never leaves the firmware; only the
+    // 32-byte HMAC result is returned to us.
     bool deriveWrapKey(const unsigned char* salt, size_t saltLen, unsigned char outKey[KEY_LEN]) {
-        int id = deviceKeyId();
+        int id = wrappingKeyId();
         if (id < 0) return false;
         if (saltLen > RPI_FW_CRYPTO_HMAC_MSG_MAX_SIZE) return false;
         return rpi_fw_crypto_hmac_sha256(0, static_cast<uint32_t>(id),
@@ -129,7 +136,7 @@ bool isWrapped(const std::string& blob) {
 }
 
 bool available() {
-    return deviceKeyId() >= 0;
+    return wrappingKeyId() >= 0;
 }
 
 bool wrap(const std::string& plaintext, std::string& wrappedOut) {

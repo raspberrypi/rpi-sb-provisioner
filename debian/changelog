@@ -38,6 +38,16 @@ rpi-sb-provisioner (2.3.1) unstable; urgency=medium
     - Fix the Options page continuing to show "Encrypted at rest" after the
       last saved key is removed, and improve browse-to-upload handling.
 
+  * Firmware-crypto key bootstrap for at-rest wrapping:
+    - Generate a firmware-crypto key on hosts that have none, via
+      rpi-fw-crypto genkey in postinst, so device-bound wrapping of secrets
+      at rest (HSM PINs, uploaded PEM keys) works without a pre-existing
+      factory device key. Skipped when a key already exists or the crypto
+      service is unavailable, and never blocks installation.
+    - Stop requiring the DEVICE-flagged key for wrapping: keywrap now uses
+      any populated OTP key slot, matching the generated (non-DEVICE) key.
+    - Depend on rpifwcrypto for the rpi-fw-crypto tool.
+
   * Manufacturing database:
     - Record customer_key_fingerprint and customer_key_label from the active
       registry key at provision time, with postinst schema migration.

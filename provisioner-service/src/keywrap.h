@@ -24,7 +24,9 @@ namespace provisioner {
         // callers decide how to report failures.
 
         // True if device-bound wrapping is usable on this host: rpi-fw-crypto is
-        // present and a DEVICE-flagged OTP key was found. Result is cached.
+        // present and a populated OTP key slot was found (any slot - not just
+        // the factory DEVICE-flagged key; the provisioner generates one in
+        // postinst when a host has none). Result is cached.
         bool available();
 
         // Wrap plaintext into a versioned blob. Returns false on any failure
