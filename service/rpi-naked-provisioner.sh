@@ -254,6 +254,11 @@ if customisation_script_is_runnable "naked-provisioner" "bootfs-mounted" || \
     BOOT_DEV="${LOOP_DEV}"p1
     ROOT_DEV="${LOOP_DEV}"p2
 
+    NEED_ROOTFS_MOUNT=0
+    if customisation_script_is_runnable "naked-provisioner" "rootfs-mounted"; then
+        NEED_ROOTFS_MOUNT=1
+    fi
+
     # shellcheck disable=SC2086
     mkdir -p "${TMP_DIR}"/rpi-boot-img-mount ${DEBUG}
     # shellcheck disable=SC2086
@@ -265,8 +270,10 @@ if customisation_script_is_runnable "naked-provisioner" "bootfs-mounted" || \
     # And in partition 2, the OS rootfs itself.
     # shellcheck disable=SC2086
     mount -t vfat "${BOOT_DEV}" "${TMP_DIR}"/rpi-boot-img-mount ${DEBUG}
-    # shellcheck disable=SC2086
-    mount -t ext4 "${ROOT_DEV}" "${TMP_DIR}"/rpi-rootfs-img-mount ${DEBUG}
+    if [ "${NEED_ROOTFS_MOUNT}" -eq 1 ]; then
+        # shellcheck disable=SC2086
+        mount -t ext4 "${ROOT_DEV}" "${TMP_DIR}"/rpi-rootfs-img-mount ${DEBUG}
+    fi
 
     announce_stop "OS Image Mounting"
 
@@ -283,7 +290,9 @@ if customisation_script_is_runnable "naked-provisioner" "bootfs-mounted" || \
 
     announce_start "OS Image Unmounting"
     umount "${TMP_DIR}"/rpi-boot-img-mount
-    umount "${TMP_DIR}"/rpi-rootfs-img-mount
+    if [ "${NEED_ROOTFS_MOUNT}" -eq 1 ]; then
+        umount "${TMP_DIR}"/rpi-rootfs-img-mount
+    fi
     sync; sync; sync;
     losetup -d "${LOOP_DEV}"
     announce_stop "OS Image Unmounting"
