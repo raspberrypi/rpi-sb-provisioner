@@ -870,9 +870,9 @@ ensure_lock_device_private_key() {
 
     if [ "${_mode}" = "warn" ]; then
         log "WARNING: lock_device_private_key=1 is MISSING from ${_cfg}."
-        log "  The rpi-verity-verifier will abort at boot with KEY_NOT_LOCKED."
-        log "  Add the line under [all] in your image's config.txt."
-        return 1
+        log "  If rpi-verity-verifier is installed in the image, boot will abort with KEY_NOT_LOCKED."
+        log "  Add the line under [all] in your image's config.txt when using verity verification."
+        return 0
     fi
 
     # Defensive: refuse to enforce if a conflicting value is already present.
