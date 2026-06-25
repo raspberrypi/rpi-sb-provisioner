@@ -300,7 +300,10 @@ announce_stop "Erase Device Storage"
 # Re-check the fastboot devices specifier, as it may take a while for a device to gain IP connectivity
 setup_fastboot_and_id_vars "${FASTBOOT_DEVICE_SPECIFIER}"
 
-fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}" "${FLASH_IMAGE}"
+# Prefer the TCP data-plane specifier when the daemon advertises split
+# mode (-i usb+tcp); fall back to whatever the control plane is using.
+FLASH_SPECIFIER="${FASTBOOT_TCP_FLASH_SPECIFIER:-${FASTBOOT_DEVICE_SPECIFIER}}"
+fastboot -s "${FLASH_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}" "${FLASH_IMAGE}"
 
 # If we customised the image, delete the modified copy immediately after flash.
 # The bootfs-mounted/rootfs-mounted scripts may have injected per-device material
