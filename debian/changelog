@@ -21,6 +21,10 @@ rpi-sb-provisioner (2.3.1) unstable; urgency=medium
     - Reject EEPROM images whose MFG_VER is below the board's min_boot_ver
       before write or verify, preventing downgrades on boards that require a
       newer bootloader baseline.
+    - Rebundle gadgets with libblockdeviceid-based block device ID derivation
+      for LUKS passphrase generation, matching the boot-time cryptroot unlocker
+      so NVMe FDE volumes provisioned by the host unlock correctly on first
+      boot (issue #316).
 
   * Signing key registry and WebUI:
     - Add a saved-key registry for multiple PEM and PKCS#11 signing keys with
@@ -58,7 +62,17 @@ rpi-sb-provisioner (2.3.1) unstable; urgency=medium
       image transfer over Ethernet works again instead of silently falling
       back to USB serial (issue #314).
 
- -- Tom Dewey <tom.dewey@raspberrypi.com>  Thu, 18 Jun 2026 17:48:20 +0100
+  * Triage:
+    - Use best-effort USB path lookup for the initial TRIAGE-STARTED record:
+      query the full device serial, tolerate a miss without aborting under
+      set -e, and let setup_fastboot_and_id_vars recompute the path later.
+
+  * Documentation:
+    - Document IDP artefact handling, key registry and validation endpoints,
+      PEM/PKCS#11 device-wrapping, and Raspberry Pi Connect registration fields
+      across README and API guides.
+
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Thu, 25 Jun 2026 14:37:15 +0100
 
 rpi-sb-provisioner (2.3.0) unstable; urgency=medium
 
