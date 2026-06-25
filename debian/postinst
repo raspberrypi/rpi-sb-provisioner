@@ -206,4 +206,58 @@ EOF
     fi
 fi
 
+# Ensure this host has a firmware-crypto key for device-bound wrapping of
+# secrets at rest (HSM PINs, uploaded PEM signing keys). The wrapping key is
+# derived on-SoC from a key held in OTP and never leaves the firmware; without
+# one the service falls back to storing those secrets unwrapped.
+#
+# We do not require the factory DEVICE-unique key: any populated key slot works.
+# If no slot holds a key we generate one with `rpi-fw-crypto genkey` (the slot
+# number is irrelevant - keywrap probes all slots). This is best-effort and must
+# never abort installation: a build chroot or a firmware without the crypto
+# service simply has no key, and that is fine.
+ensure_fw_crypto_key() {
+    if ! command -v rpi-fw-crypto >/dev/null 2>&1; then
+        echo "rpi-fw-crypto not installed; skipping firmware-crypto key setup"
+        return 0
+    fi
+
+    # Probe the service. A non-zero exit here means it is unreachable (e.g.
+    # building in a chroot, or /dev/vcio_crypto absent) - skip quietly.
+    if ! rpi-fw-crypto get-num-otp-keys >/dev/null 2>&1; then
+        echo "rpi-fw-crypto: firmware crypto service unavailable; skipping key setup"
+        return 0
+    fi
+
+    # The exact slot count format is firmware-dependent; probe a small fixed
+    # range by return code rather than parsing it.
+    num_slots=16
+
+    # A populated slot reads back a public key. Ignore the DEVICE status flag.
+    id=0
+    while [ "$id" -lt "$num_slots" ]; do
+        if rpi-fw-crypto pubkey --key-id "$id" >/dev/null 2>&1; then
+            echo "rpi-fw-crypto: existing key found in slot $id; nothing to do"
+            return 0
+        fi
+        id=$((id + 1))
+    done
+
+    # No key present: generate one. genkey requires a blank, unlocked slot, so
+    # take the first that accepts it.
+    id=0
+    while [ "$id" -lt "$num_slots" ]; do
+        if rpi-fw-crypto genkey --key-id "$id" --alg ec >/dev/null 2>&1; then
+            echo "rpi-fw-crypto: generated device key in slot $id for at-rest secret wrapping"
+            return 0
+        fi
+        id=$((id + 1))
+    done
+
+    echo "rpi-fw-crypto: could not find or create a key; secrets will be stored unwrapped at rest" >&2
+    return 0
+}
+
+ensure_fw_crypto_key || true
+
 #DEBHELPER#
