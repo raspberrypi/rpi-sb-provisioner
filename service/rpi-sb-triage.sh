@@ -130,7 +130,13 @@ timeout_fatal() {
 read_config
 compute_image_summary
 
-TARGET_USB_PATH=$(get_usb_path_for_serial "${TARGET_DEVICE_SERIAL32}")
+# Best-effort USB path purely for the initial TRIAGE-STARTED record;
+# setup_fastboot_and_id_vars recomputes it authoritatively below. Query the
+# full serial (the gadget's USB serial is the full value, not the lower half)
+# and never let a miss abort triage: under `set -e`, a failed command
+# substitution in an assignment exits the script -- which previously killed
+# triage before it could even record TRIAGE-STARTED or write any log.
+TARGET_USB_PATH=$(get_usb_path_for_serial "${TARGET_DEVICE_SERIAL}") || TARGET_USB_PATH=""
 
 # Record state changes atomically
 record_state "${TARGET_DEVICE_SERIAL}" "${TRIAGE_STARTED}" "${TARGET_USB_PATH}"
