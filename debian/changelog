@@ -42,6 +42,12 @@ rpi-sb-provisioner (2.3.1) unstable; urgency=medium
     - Record customer_key_fingerprint and customer_key_label from the active
       registry key at provision time, with postinst schema migration.
 
+  * Naked provisioner:
+    - Flash the OS image over the TCP data-plane specifier when the daemon
+      advertises split mode (-i usb+tcp), matching the IDP provisioner, so
+      image transfer over Ethernet works again instead of silently falling
+      back to USB serial (issue #314).
+
  -- Tom Dewey <tom.dewey@raspberrypi.com>  Thu, 18 Jun 2026 17:48:20 +0100
 
 rpi-sb-provisioner (2.3.0) unstable; urgency=medium
