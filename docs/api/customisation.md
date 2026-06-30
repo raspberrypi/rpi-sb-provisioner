@@ -284,6 +284,46 @@ Plain text success message: "Script file uploaded successfully"
 
 - The `enabled` field indicates whether the script has executable permissions
 
+# Hook Arguments And Environment
+
+Customisation scripts receive stage-specific positional arguments. The WebUI
+script templates document the exact argument order for each hook.
+
+All hooks also receive device-identity environment variables:
+
+| Variable | Description |
+| --- | --- |
+| `TARGET_USB_PATH` | USB topology path (for example `1-1.2`) |
+| `TARGET_DEVICE_PATH` | USB device node (for example `/dev/bus/usb/001/004`) |
+| `TARGET_DEVICE_SERIAL` | Device serial number |
+| `TARGET_DEVICE_FAMILY` | USB model ID / SoC family (`bootstrap` only) |
+| `FASTBOOT_DEVICE_SPECIFIER` | Active fastboot route on provisioning hooks |
+| `RPI_DEVICE_STORAGE_TYPE` | Storage block device (for example `mmcblk0`) |
+
+`post-flash` hooks additionally receive manufacturing metadata as environment
+variables after `metadata_gather`. Names mirror the manufacturing database
+columns in uppercase — for example `BOARDNAME`, `ETH_MAC`, `OS_IMAGE_SHA256`,
+`CUSTOMER_KEY_FINGERPRINT`, and `CUSTOMER_KEY_LABEL`. Integer fields that
+would be SQL `NULL` are exported as empty strings.
+
+## provision-failed
+
+The `provision-failed` hook runs when bootstrap, triage, or provisioning exits
+with an error. Typical uses include driving programming-rig status LEDs or
+buzzers.
+
+| Context | Positional arguments |
+| --- | --- |
+| Bootstrap failure (`sb-`, `fde-`, `naked-provisioner` only) | serial, device family, USB path, device path |
+| Provisioning failure | fastboot specifier, serial, storage type |
+
+`PROVISION_FAILED_CONTEXT` is set to `bootstrap` or `provisioning` for the
+duration of the hook. Manufacturing metadata is not available on failure.
+
+The hook is not invoked for duplicate `bootstrap@` lock contention or for triage
+failure while bootstrap is still in progress (expected USB re-enumeration during
+DUT reboot).
+
 # /customisation/create-script
 
 **HTTP Method:** GET

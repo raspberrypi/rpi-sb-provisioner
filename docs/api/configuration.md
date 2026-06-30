@@ -212,6 +212,146 @@ Multipart form data containing the PEM key file.
 
 - Uploading a PEM key clears `CUSTOMER_KEY_PKCS11_NAME`
 
+- Uploaded keys are added to the saved-key registry. Use `/options/keys/activate`
+  to make a saved key the active provisioning key.
+
+## Signing Key Registry
+
+The Options page and the endpoints below manage a saved-key registry at
+`/etc/rpi-sb-provisioner/keys/registry.json`. One key is active at a time;
+activating a key updates `CUSTOMER_KEY_FILE_PEM` or `CUSTOMER_KEY_PKCS11_NAME`
+in the main config. Legacy single-key config entries are migrated into the
+registry automatically on first access.
+
+## /options/keys
+
+**HTTP Method:** GET
+
+**Description:** Lists saved PEM and PKCS#11 signing keys and reports which key
+is active.
+
+**Response Format:**
+
+``` json
+{
+  "activeKeyId": "a1b2c3d4e5f6",
+  "keys": [
+    {
+      "id": "a1b2c3d4e5f6",
+      "type": "pem",
+      "label": "production-2026",
+      "path": "/etc/rpi-sb-provisioner/keys/production-2026.pem",
+      "fingerprint": "sha256:...",
+      "algorithm": "RSA",
+      "keySize": 2048,
+      "isFitForPurpose": true,
+      "statusMessage": "Key is suitable for Raspberry Pi secure boot signing",
+      "statusLevel": "success",
+      "wrapped": true,
+      "addedAt": "2026-06-30T10:15:00Z"
+    }
+  ]
+}
+```
+
+## /options/keys/activate
+
+**HTTP Method:** POST
+
+**Description:** Makes a saved registry key the active provisioning key.
+
+**Request Format:**
+
+``` json
+{
+  "id": "a1b2c3d4e5f6"
+}
+```
+
+**Response Format:**
+
+``` json
+{
+  "success": true,
+  "activeKeyId": "a1b2c3d4e5f6"
+}
+```
+
+**Notes:**
+
+- Activating a key with a different fingerprint invalidates cached signed
+  artefacts in the workdir.
+
+## /options/keys/remove
+
+**HTTP Method:** POST
+
+**Description:** Removes a saved key from the registry. The active key cannot
+be removed until another key is activated.
+
+**Request Format:**
+
+``` json
+{
+  "id": "a1b2c3d4e5f6"
+}
+```
+
+## /options/keys/register-pkcs11
+
+**HTTP Method:** POST
+
+**Description:** Adds a PKCS#11 key to the saved-key registry.
+
+**Request Format:**
+
+``` json
+{
+  "uri": "pkcs11:object=my-signing-key;type=private",
+  "label": "HSM production key",
+  "pin": "optional-pin",
+  "activate": true
+}
+```
+
+**Response Format:**
+
+``` json
+{
+  "success": true,
+  "keyId": "a1b2c3d4e5f6",
+  "keyInfo": {
+    "algorithm": "RSA",
+    "keySize": 2048,
+    "fingerprint": "sha256:...",
+    "isFitForPurpose": true,
+    "statusMessage": "Key is suitable for Raspberry Pi secure boot signing",
+    "statusLevel": "success",
+    "valid": true
+  }
+}
+```
+
+## /options/keys/wrap
+
+**HTTP Method:** POST
+
+**Description:** Device-wraps a saved PEM key at rest in place.
+
+**Request Format:**
+
+``` json
+{
+  "id": "a1b2c3d4e5f6"
+}
+```
+
+**Notes:**
+
+- Requires firmware-crypto support on the provisioning host.
+
+- Returns an error if the key is already wrapped or wrapping fails.
+
 ## /options/validate-key
 
 **HTTP Method:** POST

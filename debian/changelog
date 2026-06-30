@@ -1,5 +1,8 @@
 rpi-sb-provisioner (2.3.1) unstable; urgency=medium
 
+  * Final 2.3.1 release:
+    - Roll up the 2.3.1 development work into a supported release.
+
   * Customisation hooks:
     - Add provision-failed stage for sb-, fde-, naked-, and idp-provisioner
       scripts so programming rigs can signal errors (e.g. status LEDs).
@@ -79,8 +82,12 @@ rpi-sb-provisioner (2.3.1) unstable; urgency=medium
     - Document IDP artefact handling, key registry and validation endpoints,
       PEM/PKCS#11 device-wrapping, and Raspberry Pi Connect registration fields
       across README and API guides.
+    - Document provision-failed hooks, per-stage environment variables, and
+      manufacturing metadata exported to post-flash scripts.
+    - Document Ethernet image transfer over the fastboot TCP data plane when
+      provisioning boards are linked over a network interface.
 
- -- Tom Dewey <tom.dewey@raspberrypi.com>  Thu, 25 Jun 2026 14:37:15 +0100
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Mon, 30 Jun 2026 12:00:00 +0100
 
 rpi-sb-provisioner (2.3.0) unstable; urgency=medium
 

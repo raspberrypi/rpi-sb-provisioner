@@ -16,6 +16,8 @@ If `PROVISIONING_STYLE` is not specified, it defaults to `secure-boot`.
 
 The fully qualified path to your signing key, encoded in PEM format. This file is expected to contain an RSA 2048-bit private key.
 
+When keys are managed through the WebUI, multiple PEM and PKCS#11 keys are stored in a saved-key registry at `/etc/rpi-sb-provisioner/keys/registry.json`. The active registry entry is synced into `CUSTOMER_KEY_FILE_PEM` or `CUSTOMER_KEY_PKCS11_NAME` below.
+
 > **Warning**
 >
 > This file should be considered key material. When uploaded through the WebUI it is stored device-wrapped at rest, using a key derived from the provisioning Raspberry Pi firmware crypto device key. The plaintext key is still present in process memory while signing, so protect the provisioner host according to your threat model.

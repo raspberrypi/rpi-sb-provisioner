@@ -135,6 +135,13 @@ Connect your provisioning Raspberry Pi to the Compute Module IO Board as shown i
 ![rpi connection cm4io](docs/images/rpi-connection-cm4io.png)
 *A correctly connected provisioning system*
 
+> **Tip**
+>
+> When the provisioning host and the target IO board are on the same Ethernet
+> network (for example, a CM5 host provisioning a CM4 on its IO board), image
+> transfer can use the fastboot TCP data plane and is typically much faster
+> than USB alone. USB is still required for control-plane commands.
+
 > **Important**
 >
 > **Do not connect other USB devices** to the Compute Module IO board during provisioning. The provisioning Raspberry Pi can only supply 900mA of power to the connected device.
@@ -173,7 +180,7 @@ You need to set these options:
 
 - **Storage type:** Are your devices using SD cards, eMMC, or NVMe? Choose one: `sd`, `emmc`, or `nvme`
 
-- **Signing key:** For secure boot mode, you need a signing key (the web interface will guide you through creating one)
+- **Signing key:** For secure boot mode, you need a signing key. The Options page maintains a saved-key registry so you can store multiple PEM and PKCS#11 keys, validate each one, and choose which key is active for provisioning.
 
 - **OS Image:** Upload a "master" operating system image. For traditional provisioning this is an uncompressed `.img` file, typically created with `pi-gen` (see <https://github.com/RPi-Distro/pi-gen>). You can also upload an IDP artefact archive (`.tar.xz`, `.tar.zst`, `.tar.gz`, `.tgz` or `.zip`) produced by `rpi-image-gen`; the WebUI extracts it and uses its metadata to configure the device family, storage type and encryption settings.
 
@@ -496,6 +503,8 @@ The database stores information about each device:
 
 - Security settings
 
+- Active signing key fingerprint and label, when a key registry entry is in use
+
 - Raspberry Pi Connect registration status and device ID, when Connect registration is configured
 
 ### Viewing The Database
@@ -525,6 +534,23 @@ To get a list of only devices that have secure boot enabled:
 These devices will only run software signed with your signing key.
 
 ## Advanced: Customizing Device Configuration
+
+### Customisation Hooks
+
+Provisioning scripts can be extended at several hook points (for example
+`bootstrap`, `provision-started`, `bootfs-mounted`, `rootfs-mounted`,
+`post-flash`, and `provision-failed`). Use `provision-failed` to signal
+programming rigs when bootstrap, triage, or provisioning aborts — for example
+to drive a red status LED.
+
+Hook scripts receive stage-specific positional arguments plus environment
+variables such as `TARGET_USB_PATH`, `TARGET_DEVICE_PATH`, and
+`TARGET_DEVICE_SERIAL`. Post-flash hooks also receive manufacturing metadata
+(`BOARDNAME`, `ETH_MAC`, `OS_IMAGE_SHA256`, and related fields) after the
+device has been programmed.
+
+See the [Customisation API](docs/api/customisation.md) and the WebUI script
+templates for the full per-stage contract.
 
 ### Changing Boot Configuration
 

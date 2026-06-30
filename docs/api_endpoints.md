@@ -118,6 +118,16 @@ Manage system configuration options, firmware selection for different device fam
 
 - `POST /options/upload-key` - Upload and validate a PEM signing key
 
+- `GET /options/keys` - List saved signing keys and the active key
+
+- `POST /options/keys/activate` - Activate a saved signing key
+
+- `POST /options/keys/remove` - Remove a saved signing key
+
+- `POST /options/keys/register-pkcs11` - Add a PKCS#11 key to the registry
+
+- `POST /options/keys/wrap` - Device-wrap a saved PEM key at rest
+
 - `POST /options/validate-key` - Validate PEM or PKCS#11 signing keys
 
 - `GET /options/pkcs11-status` - Check OpenSSL PKCS#11 provider readiness
