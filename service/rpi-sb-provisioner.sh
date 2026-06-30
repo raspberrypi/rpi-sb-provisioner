@@ -582,9 +582,13 @@ announce_stop "Resizing rootfs image"
 # Re-check the fastboot devices specifier, as it may take a while for a device to gain IP connectivity
 setup_fastboot_and_id_vars "${FASTBOOT_DEVICE_SPECIFIER}"
 
+# Prefer the TCP data-plane specifier when the daemon advertises split
+# mode (-i usb+tcp); fall back to whatever the control plane is using.
+FLASH_SPECIFIER="${FASTBOOT_TCP_FLASH_SPECIFIER:-${FASTBOOT_DEVICE_SPECIFIER}}"
+
 announce_start "Writing OS images"
-fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}"p1 "${RPI_SB_WORKDIR}"/bootfs-temporary.simg
-fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" flash mapper/cryptroot "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
+fastboot -s "${FLASH_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}"p1 "${RPI_SB_WORKDIR}"/bootfs-temporary.simg
+fastboot -s "${FLASH_SPECIFIER}" flash mapper/cryptroot "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
 announce_stop "Writing OS images"
 
 metadata_gather
