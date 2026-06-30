@@ -64,11 +64,11 @@ rpi-sb-provisioner (2.3.1) unstable; urgency=medium
     - Record customer_key_fingerprint and customer_key_label from the active
       registry key at provision time, with postinst schema migration.
 
-  * Naked provisioner:
-    - Flash the OS image over the TCP data-plane specifier when the daemon
-      advertises split mode (-i usb+tcp), matching the IDP provisioner, so
-      image transfer over Ethernet works again instead of silently falling
-      back to USB serial (issue #314).
+  * Provisioners:
+    - Flash OS images over the TCP data-plane specifier when the daemon
+      advertises split mode (-i usb+tcp) in naked-, fde-, and sb-provisioner,
+      matching idp-provisioner, so image transfer over Ethernet works again
+      instead of silently falling back to USB serial (issue #314).
 
   * Triage:
     - Use best-effort USB path lookup for the initial TRIAGE-STARTED record:
