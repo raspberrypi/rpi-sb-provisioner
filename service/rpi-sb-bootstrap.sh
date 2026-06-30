@@ -85,6 +85,20 @@ cleanup() {
     # Clean up orphaned resources
     cleanup_orphans
 
+    if [ "${returnvalue}" -ne 0 ] && [ "${BOOTSTRAP_SKIP_FAILURE_HOOK:-0}" -ne 1 ]; then
+        case ${PROVISIONING_STYLE} in
+            "secure-boot")
+                run_provision_failed_hook "sb-provisioner" "bootstrap"
+                ;;
+            "fde-only")
+                run_provision_failed_hook "fde-provisioner" "bootstrap"
+                ;;
+            "naked")
+                run_provision_failed_hook "naked-provisioner" "bootstrap"
+                ;;
+        esac
+    fi
+
     if [ $returnvalue -eq 0 ]; then
         systemd-notify --status="Provisioning completed successfully" STOPPING=1
     else
@@ -245,6 +259,7 @@ if atomic_mkdir "$DEVICE_LOCK"; then
 else
     # Don't record state here, as this is an expected failure for devices
     # that produce multiple matching descriptors.
+    BOOTSTRAP_SKIP_FAILURE_HOOK=1
     die "Bootstrap already in progress for ${TARGET_DEVICE_SERIAL}"
 fi
 
