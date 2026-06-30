@@ -238,6 +238,9 @@ Shared utilities used by all phases:
 
 - USB path resolution
 
+- Fastboot route selection, including optional TCP data-plane image transfer
+  when the device advertises split USB+TCP mode and an Ethernet route is up
+
 - Error handling
 
 - Temporary directory management (`make_temp_dir`, `cleanup_orphans`)
@@ -713,7 +716,10 @@ Partition 1 contains boot files directly (traditional Raspberry Pi layout):
 
 ## Attack Surface Minimization
 
-- **No network services on provisioned devices:** All communication via USB
+- **No network services on provisioned devices:** Routine provisioning control
+  uses USB. When the host and target share an Ethernet link, fastbootd may
+  route bulk `flash` commands over TCP while control-plane commands remain on
+  USB.
 
 - **No persistent state on provisioned devices during provisioning:** Device powers down after completion
 
@@ -745,17 +751,14 @@ Partition 1 contains boot files directly (traditional Raspberry Pi layout):
 
 ## Custom Provisioning Hooks
 
-Customisation scripts can be installed at various hook points:
+Customisation scripts can be installed at hook points such as `bootstrap`,
+`provision-started`, `bootfs-mounted`, `rootfs-mounted`, `post-flash`, and
+`provision-failed`. Scripts receive stage-specific positional arguments plus
+environment variables (`TARGET_USB_PATH`, `TARGET_DEVICE_PATH`, and related
+identity fields). Post-flash hooks also receive manufacturing metadata after
+`metadata_gather`.
 
-- `bootstrap-begin` - Before bootstrap operations
-
-- `bootstrap-end` - After bootstrap completion
-
-- `mount-os` - After OS filesystem is mounted, before unmount
-
-- `post-flash` - After image flashing, before device power-down
-
-Hooks receive environment variables with device information and can modify mounted filesystems.
+See [customisation.md](api/customisation.md) for the full per-stage contract.
 
 ## API Integration
 
@@ -795,7 +798,11 @@ WebSocket API provides real-time updates for dashboards and monitoring tools.
 
 **Critical data to backup:**
 
-- Customer signing keys (`CUSTOMER_KEY_FILE_PEM`). If the key is device-wrapped, it is intentionally bound to the provisioning Raspberry Pi that wrapped it; keep an offline copy or HSM-backed key available according to your recovery plan.
+- Customer signing keys (`CUSTOMER_KEY_FILE_PEM` or the saved-key registry at
+  `/etc/rpi-sb-provisioner/keys/registry.json`). If a PEM key is
+  device-wrapped, it is intentionally bound to the provisioning Raspberry Pi
+  that wrapped it; keep an offline copy or HSM-backed key available according
+  to your recovery plan.
 
 - Configuration file (`/etc/rpi-sb-provisioner/config`)
 

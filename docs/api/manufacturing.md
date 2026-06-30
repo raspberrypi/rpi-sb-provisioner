@@ -43,6 +43,8 @@ The endpoint returns a JSON array where each element represents a provisioned de
     "os_image_sha256": "4f2d9c5b0e3b1d8a9c1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c",
     "connect_registered": "1",
     "connect_device_id": "device-123456",
+    "customer_key_fingerprint": "a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456",
+    "customer_key_label": "production-2026",
     "eeprom_size": 524288,
     "eeprom_jedec": "ef4018",
     "eeprom_unique_id": "0123456789abcdef",
@@ -80,6 +82,8 @@ The endpoint returns a JSON array where each element represents a provisioned de
 | os_image_sha256        | SHA256 of the traditional OS image, or the original uploaded IDP archive hash stored in its sidecar file                                                                                                                                                  |
 | connect_registered     | Raspberry Pi Connect registration result (1=registered, 0=not registered or registration failed, null=not attempted). Registration failures are non-fatal.                                                                                                |
 | connect_device_id      | Raspberry Pi Connect device ID returned by the management API, when registration succeeds                                                                                                                                                                 |
+| customer_key_fingerprint | SHA256 fingerprint of the active signing key from the saved-key registry at provision time                                                                                                                                                             |
+| customer_key_label     | Human-readable label of the active signing key from the saved-key registry at provision time                                                                                                                                                            |
 | eeprom_size            | EEPROM size in bytes, when reported by fastboot                                                                                                                                                                                                          |
 | eeprom_jedec           | EEPROM JEDEC identifier, when reported by fastboot                                                                                                                                                                                                       |
 | eeprom_unique_id       | EEPROM unique identifier, when reported by fastboot                                                                                                                                                                                                      |
