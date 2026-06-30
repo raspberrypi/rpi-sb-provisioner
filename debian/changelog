@@ -1,6 +1,14 @@
 rpi-sb-provisioner (2.3.1) unstable; urgency=medium
 
   * Customisation hooks:
+    - Add provision-failed stage for sb-, fde-, naked-, and idp-provisioner
+      scripts so programming rigs can signal errors (e.g. status LEDs).
+    - Invoke provision-failed from bootstrap, triage, and provisioner cleanup
+      on non-zero exit.
+    - Export PROVISION_FAILED_CONTEXT to provision-failed scripts.
+    - Do not invoke provision-failed for duplicate bootstrap@ lock contention
+      or triage failure while bootstrap is still in progress (expected USB
+      re-enumeration during DUT reboot).
     - Export TARGET_USB_PATH and TARGET_DEVICE_PATH to provisioning hooks
       via the environment so programming rigs can drive per-port indicators
       (issue #273).

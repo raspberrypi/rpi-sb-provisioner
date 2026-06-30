@@ -309,6 +309,56 @@ export_customisation_env() {
     export RPI_DEVICE_STORAGE_TYPE="${RPI_DEVICE_STORAGE_TYPE:-}"
 }
 
+# Echo the customisation-script provisioner prefix for this station's
+# configured image route (IDP directory vs traditional PROVISIONING_STYLE).
+get_configured_provisioner_name() {
+    if [ -d "${GOLD_MASTER_OS_FILE}" ]; then
+        echo "idp-provisioner"
+        return 0
+    fi
+    case ${PROVISIONING_STYLE} in
+        "secure-boot")
+            echo "sb-provisioner"
+            ;;
+        "fde-only")
+            echo "fde-provisioner"
+            ;;
+        "naked")
+            echo "naked-provisioner"
+            ;;
+        *)
+            echo ""
+            ;;
+    esac
+}
+
+# Run the provision-failed hook for programming-rig signalling (e.g. LEDs).
+# HOOK_CONTEXT is "bootstrap" (serial/family/usb/device path args) or
+# "provisioning" (fastboot specifier/serial/storage args).
+run_provision_failed_hook() {
+    PROVISIONER_NAME="$1"
+    HOOK_CONTEXT="${2:-provisioning}"
+
+    if [ -z "${PROVISIONER_NAME}" ]; then
+        log "No provisioner configured; skipping provision-failed hook"
+        return 0
+    fi
+
+    set +e
+    if [ "${HOOK_CONTEXT}" = "bootstrap" ]; then
+        export PROVISION_FAILED_CONTEXT=bootstrap
+        run_customisation_script "${PROVISIONER_NAME}" "provision-failed" \
+            "${TARGET_DEVICE_SERIAL}" "${TARGET_DEVICE_FAMILY}" \
+            "${TARGET_USB_PATH}" "${TARGET_DEVICE_PATH}"
+    else
+        export PROVISION_FAILED_CONTEXT=provisioning
+        run_customisation_script "${PROVISIONER_NAME}" "provision-failed" \
+            "${FASTBOOT_DEVICE_SPECIFIER}" "${TARGET_DEVICE_SERIAL}" \
+            "${RPI_DEVICE_STORAGE_TYPE}"
+    fi
+    unset PROVISION_FAILED_CONTEXT
+}
+
 run_customisation_script() {
     PROVISIONER_NAME="$1"
     STAGE_NAME="$2"
@@ -349,6 +399,12 @@ run_customisation_script() {
             TARGET_SERIAL_ARG="$4"
             STORAGE_TYPE_ARG="$5"
             "${SCRIPT_PATH}" "${FASTBOOT_SPEC_ARG}" "${TARGET_SERIAL_ARG}" "${STORAGE_TYPE_ARG}"
+        elif [ "${STAGE_NAME}" = "provision-failed" ]; then
+            if [ "${PROVISION_FAILED_CONTEXT:-provisioning}" = "bootstrap" ]; then
+                "${SCRIPT_PATH}" "$3" "$4" "$5" "$6"
+            else
+                "${SCRIPT_PATH}" "$3" "$4" "$5"
+            fi
         elif [ "${STAGE_NAME}" = "bootstrap" ]; then
             # For bootstrap stage, pass device detection info
             TARGET_DEVICE_SERIAL_ARG="$3"

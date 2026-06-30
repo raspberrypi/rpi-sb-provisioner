@@ -169,6 +169,10 @@ cleanup() {
 
     cleanup_orphans
 
+    if [ "${return_value}" -ne 0 ]; then
+        run_provision_failed_hook "naked-provisioner" "provisioning"
+    fi
+
     exit ${return_value}
 }
 trap cleanup EXIT INT TERM

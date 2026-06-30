@@ -257,6 +257,10 @@ cleanup() {
 
     cleanup_orphans
 
+    if [ "${returnvalue}" -ne 0 ]; then
+        run_provision_failed_hook "fde-provisioner" "provisioning"
+    fi
+
     exit ${returnvalue}
 }
 trap cleanup EXIT INT TERM

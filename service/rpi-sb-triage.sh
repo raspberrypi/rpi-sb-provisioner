@@ -26,11 +26,45 @@ log() {
     printf "[%s] %s\n" "${timestamp}" "$*"
 }
 
+read_config
+compute_image_summary
+
 die() {
     # shellcheck disable=SC2086
     echo "$@" ${DEBUG}
     exit 1
 }
+
+CLEANUP_DONE=0
+
+cleanup() {
+    returnvalue=$?
+
+    [ "$CLEANUP_DONE" -eq 1 ] && return
+    CLEANUP_DONE=1
+
+    set +e
+
+    if [ "${returnvalue}" -ne 0 ]; then
+        # Fastboot may appear briefly during bootstrap USB churn. A failed
+        # early triage while bootstrap still holds its lock is not a user-
+        # visible failure on programming rigs (keep the in-progress LED).
+        if [ -z "${FASTBOOT_DEVICE_SPECIFIER:-}" ] && \
+           [ -n "$(find /var/lock/rpi-sb-bootstrap -mindepth 1 -maxdepth 1 -type d -print -quit 2>/dev/null)" ]; then
+            log "Skipping provision-failed: bootstrap in progress (expected USB re-enumeration)"
+        else
+            PROVISIONER_NAME=$(get_configured_provisioner_name)
+            if [ -n "${FASTBOOT_DEVICE_SPECIFIER:-}" ]; then
+                run_provision_failed_hook "${PROVISIONER_NAME}" "provisioning"
+            else
+                run_provision_failed_hook "${PROVISIONER_NAME}" "bootstrap"
+            fi
+        fi
+    fi
+
+    exit ${returnvalue}
+}
+trap cleanup EXIT INT TERM
 
 timeout_nonfatal() {
     command="$*"
@@ -127,9 +161,6 @@ timeout_fatal() {
 # record_state call -- otherwise the device-details page shows an empty
 # image for the lifetime of triage and only fills in later, which looks
 # inconsistent.
-read_config
-compute_image_summary
-
 # Best-effort USB path purely for the initial TRIAGE-STARTED record;
 # setup_fastboot_and_id_vars recomputes it authoritatively below. Query the
 # full serial (the gadget's USB serial is the full value, not the lower half)

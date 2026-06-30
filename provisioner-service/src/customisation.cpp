@@ -19,10 +19,10 @@ namespace provisioner {
         // no host-side mounting, and omits bootstrap because the bootstrap
         // phase is keyed on PROVISIONING_STYLE rather than on IDP.
         const std::map<std::string, std::vector<std::string>> PROVISIONER_STAGES = {
-            {"sb-provisioner", {"bootstrap", "provision-started", "bootfs-mounted", "rootfs-mounted", "post-flash"}},
-            {"fde-provisioner", {"bootstrap", "provision-started", "bootfs-mounted", "rootfs-mounted", "post-flash"}},
-            {"naked-provisioner", {"bootstrap", "provision-started", "bootfs-mounted", "rootfs-mounted", "post-flash"}},
-            {"idp-provisioner", {"provision-started", "post-flash"}}
+            {"sb-provisioner", {"bootstrap", "provision-started", "bootfs-mounted", "rootfs-mounted", "post-flash", "provision-failed"}},
+            {"fde-provisioner", {"bootstrap", "provision-started", "bootfs-mounted", "rootfs-mounted", "post-flash", "provision-failed"}},
+            {"naked-provisioner", {"bootstrap", "provision-started", "bootfs-mounted", "rootfs-mounted", "post-flash", "provision-failed"}},
+            {"idp-provisioner", {"provision-started", "post-flash", "provision-failed"}}
         };
 
         // Description of each stage for display in the UI
@@ -31,7 +31,8 @@ namespace provisioner {
             {"provision-started", "Executed at the start of provisioning, before image preparation. Use for LED control or rig signalling"},
             {"bootfs-mounted", "Executed after boot image is mounted, before modifications"},
             {"rootfs-mounted", "Executed after rootfs is mounted, before final packaging"},
-            {"post-flash", "Executed after bootfs and rootfs have been flashed to the device"}
+            {"post-flash", "Executed after bootfs and rootfs have been flashed to the device"},
+            {"provision-failed", "Executed when bootstrap, triage, or provisioning fails. Use for rig error signalling (e.g. LEDs)"}
         };
 
         // Helper function to find copy sources for a given provisioner+stage.
@@ -176,6 +177,24 @@ namespace provisioner {
                 content += "# case \"${TARGET_USB_PATH}\" in 1-1.1) gpioset gpiochip0 17=0 ;; esac\n\n";
                 content += "# Example: run a fastboot command\n";
                 content += "# fastboot -s \"${FASTBOOT_DEVICE_SPECIFIER}\" getvar version\n\n";
+                content += "exit 0\n";
+            } else if (stage == "provision-failed") {
+                content += "# This script runs when bootstrap, triage, or provisioning fails.\n";
+                content += "# Typical use: signal programming rigs (LEDs, buzzers) that flashing failed.\n";
+                content += "# Arguments (provisioning-phase failure):\n";
+                content += "#   $1  Fastboot device specifier (may be empty during early bootstrap failure)\n";
+                content += "#   $2  Target device serial number\n";
+                content += "#   $3  Device storage type (may be empty during bootstrap/triage failure)\n";
+                content += "# Arguments (bootstrap-phase failure, sb/fde/naked only):\n";
+                content += "#   $1  Target device serial number\n";
+                content += "#   $2  Target device family\n";
+                content += "#   $3  Target USB path\n";
+                content += "#   $4  Target device path\n";
+                content += "#\n";
+                content += HOOK_ENV_DEVICE_IDENTITY;
+                content += "#\n";
+                content += "# Manufacturing metadata is not available on failure.\n\n";
+                content += "echo \"Provisioning failed for device ${TARGET_DEVICE_SERIAL}\"\n\n";
                 content += "exit 0\n";
             }
 

@@ -156,6 +156,12 @@ cleanup() {
     [ "$CLEANUP_DONE" -eq 1 ] && return
     CLEANUP_DONE=1
 
+    set +e
+
+    if [ "${return_value}" -ne 0 ]; then
+        run_provision_failed_hook "idp-provisioner" "provisioning"
+    fi
+
     exit ${return_value}
 }
 trap cleanup EXIT INT TERM
