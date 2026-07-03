@@ -484,10 +484,28 @@ getBootloaderUpdateVersion() {
    
    # Check if explicit firmware file is specified
    if [ -n "${RPI_DEVICE_FIRMWARE_FILE}" ] && [ -f "${RPI_DEVICE_FIRMWARE_FILE}" ]; then
-      log "Using explicitly specified firmware file: ${RPI_DEVICE_FIRMWARE_FILE}"
-      BOOTLOADER_UPDATE_IMAGE="${RPI_DEVICE_FIRMWARE_FILE}"
-      BOOTLOADER_UPDATE_VERSION=$(strings "${RPI_DEVICE_FIRMWARE_FILE}" | grep BUILD_TIMESTAMP | sed 's/.*=//g')
-      return
+      # RPI_DEVICE_FIRMWARE_FILE is a single global selection (driven by the
+      # configured RPI_DEVICE_FAMILY in the web UI), but the family of the
+      # device that actually connects is only known at runtime via BCM_CHIP.
+      # Applying a firmware image for the wrong chip family is never valid: a
+      # bootloader-2711 image against a 2712 device makes update_eeprom apply
+      # the 2712 signed-bootcode (--bootcode) path to a 512K EEPROM and fail
+      # with the misleading "update-bootcode: Can't update image - 128K must
+      # be reserved for bootcode". Refuse rather than silently substituting a
+      # different image; the primary family guard earlier in bootstrap catches
+      # the common case, this covers a stray file set without RPI_DEVICE_FAMILY.
+      case "${RPI_DEVICE_FIRMWARE_FILE}" in
+         */bootloader-${BCM_CHIP}/*)
+            log "Using explicitly specified firmware file: ${RPI_DEVICE_FIRMWARE_FILE}"
+            BOOTLOADER_UPDATE_IMAGE="${RPI_DEVICE_FIRMWARE_FILE}"
+            BOOTLOADER_UPDATE_VERSION=$(strings "${RPI_DEVICE_FIRMWARE_FILE}" | grep BUILD_TIMESTAMP | sed 's/.*=//g')
+            return
+            ;;
+         *)
+            record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
+            die "Configured RPI_DEVICE_FIRMWARE_FILE (${RPI_DEVICE_FIRMWARE_FILE}) is not a bootloader-${BCM_CHIP} image, but the connected device is BCM${BCM_CHIP}. Refusing to provision with mismatched-family firmware. Select a bootloader-${BCM_CHIP} firmware, or clear the selection to auto-select."
+            ;;
+      esac
    fi
    
    # Fall back to automatic selection from release channel
@@ -547,6 +565,35 @@ case $TARGET_DEVICE_FAMILY in
         die "Refusing to provision an unknown device family"
         ;;
 esac
+
+# Guard against a configured/connected device-family mismatch.
+#
+# RPI_DEVICE_FAMILY (set via the web UI: 4, 5 or 2W) pins the firmware and
+# boot.img this station builds, but it is a single global value. The family of
+# the device that actually connects is only known here at runtime, via the
+# rpiboot USB product ID (TARGET_DEVICE_FAMILY). If they disagree we would
+# apply the wrong-chip EEPROM/firmware - e.g. a bootloader-2711 image on a
+# Pi 5 - which fails deep inside update_eeprom with the opaque
+# "128K must be reserved for bootcode" error. Refuse up-front instead.
+#
+# Only Pi 4 (2711) vs Pi 5 (2712) can be compared reliably here; pre-Pi4
+# devices (2710/2764) and the "2W" family cannot be distinguished at this
+# stage and are intentionally not enforced.
+CONFIGURED_DEVICE_CHIP=
+case "${RPI_DEVICE_FAMILY}" in
+    4) CONFIGURED_DEVICE_CHIP=2711 ;;
+    5) CONFIGURED_DEVICE_CHIP=2712 ;;
+esac
+if [ -n "${CONFIGURED_DEVICE_CHIP}" ]; then
+    case "${TARGET_DEVICE_FAMILY}" in
+        2711|2712)
+            if [ "${TARGET_DEVICE_FAMILY}" != "${CONFIGURED_DEVICE_CHIP}" ]; then
+                record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
+                die "Device family mismatch: this station is configured for RPI_DEVICE_FAMILY=${RPI_DEVICE_FAMILY} (BCM${CONFIGURED_DEVICE_CHIP}) but the connected device is BCM${TARGET_DEVICE_FAMILY}. Refusing to provision. Connect a matching device, or change the device family / firmware selection."
+            fi
+            ;;
+    esac
+fi
 
 record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_STARTED}" "${TARGET_USB_PATH}"
 
