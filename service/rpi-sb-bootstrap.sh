@@ -391,7 +391,7 @@ update_eeprom() {
 
     log "update_eeprom() src_image: \"${src_image}\""
 
-    if signing_available; then
+    if signing_available && [ "${PROVISIONING_STYLE}" != "naked" ]; then
         if ! grep -q "SIGNED_BOOT=1" "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"; then
             # If the OTP bit to require secure boot are set then then
             # SIGNED_BOOT=1 is implicitly set in the EEPROM config.
