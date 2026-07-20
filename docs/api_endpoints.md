@@ -102,6 +102,12 @@ Complete lifecycle management of OS images and IDP artefacts, including upload, 
 
 - `GET /analyze-image` - Analyze traditional images or IDP artefact directories
 
+- `GET /get-boot-package-info` - Check whether a signed boot package exists for an image (secure-boot/fde-only)
+
+- `GET /generate-boot-package` - Trigger asynchronous boot package generation (secure-boot/fde-only)
+
+- `GET /download-boot-package` - Download the generated boot package (`.deb`)
+
 **Use Cases:** Image management, integrity verification, automated image deployment
 
 ## [Configuration API](api/configuration.md)
