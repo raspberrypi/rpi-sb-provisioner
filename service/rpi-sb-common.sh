@@ -543,13 +543,15 @@ init_signing_context() {
         SIGNING_MODE="pkcs11"
         log "Signing mode: PKCS#11 (${CUSTOMER_KEY_PKCS11_NAME})"
         
-        # Verify PKCS#11 key is accessible and derive public key.
-        # Uses the pkcs11-provider (OSSL_STORE resolves the pkcs11: URI) instead
-        # of the deprecated ENGINE API; openssl pkey is the provider-friendly
-        # equivalent of the legacy openssl rsa.
+        # Verify the PKCS#11 key is accessible and derive its public key. This
+        # goes through rpi-sb-keyhelper, which supplies the stored (device-
+        # wrapped) token PIN to the pkcs11-provider in-process. Some tokens
+        # require a C_Login even to read the public key, so the previous bare
+        # `openssl pkey` call failed here whenever the PIN lived only in the
+        # WebUI's pkcs11.pin store (issue #328).
         CUSTOMER_PUBLIC_KEY_FILE="$(mktemp)"
-        if ! "${OPENSSL}" pkey -provider pkcs11 -provider default \
-            -in "${CUSTOMER_KEY_PKCS11_NAME}" -pubout > "${CUSTOMER_PUBLIC_KEY_FILE}" 2>/dev/null; then
+        if ! rpi-sb-keyhelper pubkey --pkcs11-uri "${CUSTOMER_KEY_PKCS11_NAME}" \
+                > "${CUSTOMER_PUBLIC_KEY_FILE}" 2>/dev/null; then
             rm -f "${CUSTOMER_PUBLIC_KEY_FILE}"
             CUSTOMER_PUBLIC_KEY_FILE=""
             log "ERROR: Cannot access PKCS#11 key: ${CUSTOMER_KEY_PKCS11_NAME}"
@@ -645,13 +647,24 @@ get_openssl_sign_args() {
 # sidecar" pattern instead of calling openssl dgst directly.
 sign_image_hex() {
     _sign_src="$1"
-    if [ "${SIGNING_MODE}" = "pem-wrapped" ]; then
-        "${PEM_WRAPPER_SCRIPT}" -a rsa2048-sha256 "${_sign_src}" || return 1
-        echo
-    else
-        # shellcheck disable=SC2046
-        "${OPENSSL}" dgst -sign $(get_openssl_sign_args) -sha256 "${_sign_src}" | xxd -c 4096 -p
-    fi
+    case "${SIGNING_MODE}" in
+        pem-wrapped)
+            "${PEM_WRAPPER_SCRIPT}" -a rsa2048-sha256 "${_sign_src}" || return 1
+            echo
+            ;;
+        pkcs11)
+            # Route through the wrapper (not a bare `openssl dgst`) so the
+            # stored token PIN is supplied in-process: a direct openssl call
+            # here has no way to log in to the token. Wrapper emits hex with no
+            # trailing newline, so add one to match the other modes' output.
+            "${PKCS11_WRAPPER_SCRIPT}" -a rsa2048-sha256 "${_sign_src}" || return 1
+            echo
+            ;;
+        *)
+            # shellcheck disable=SC2046
+            "${OPENSSL}" dgst -sign $(get_openssl_sign_args) -sha256 "${_sign_src}" | xxd -c 4096 -p
+            ;;
+    esac
 }
 
 # Get arguments for rpi-eeprom-digest signing operations

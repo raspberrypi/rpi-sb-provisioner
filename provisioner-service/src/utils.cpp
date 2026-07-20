@@ -10,6 +10,7 @@
 #include "include/audit.h"
 #include "keywrap.h"
 #include "keyregistry.h"
+#include "pkcs11_common.h"
 #include <openssl/pem.h>
 #include <openssl/evp.h>
 #include <openssl/sha.h>
@@ -136,58 +137,23 @@ namespace provisioner {
         // ===== Key Parsing Implementation =====
         
         namespace {
-            // Read the stored PKCS#11 PIN so it can be handed to the provider
-            // in-process via the passphrase callback, rather than written into
-            // a pin-source= file referenced on a command line. Returns empty if
-            // no PIN is configured or it cannot be read.
+            // Read the stored PKCS#11 PIN via the shared primitive
+            // (pkcs11::readStoredPin), adding the service's logging - the shared
+            // TU is deliberately logger-free. Returns empty if no PIN is
+            // configured or it cannot be read. The PIN is handed to the provider
+            // in-process via pkcs11::pinPasswordCallback, never written to a
+            // pin-source= file referenced on a command line.
             std::string readStoredPkcs11Pin() {
-                if (!std::filesystem::exists(PKCS11_PIN_FILE)) {
-                    return {};
-                }
-                std::ifstream pinFile(PKCS11_PIN_FILE, std::ios::binary);
-                if (!pinFile.is_open()) {
-                    return {};
-                }
-                std::string raw((std::istreambuf_iterator<char>(pinFile)),
-                                std::istreambuf_iterator<char>());
-
-                // PINs are stored device-wrapped at rest (see savePkcs11Pin).
-                // A blob without the wrap magic is a legacy plaintext PIN from
-                // before wrapping existed: read it as-is so the install keeps
-                // working; it is re-wrapped the next time the PIN is saved.
-                std::string pin;
-                if (keywrap::isWrapped(raw)) {
-                    if (!keywrap::unwrap(raw, pin)) {
-                        LOG_ERROR << "Failed to unwrap stored PKCS#11 PIN "
-                                     "(wrong device or corrupt file)";
-                        return {};
-                    }
-                } else {
+                pkcs11::PinStatus status = pkcs11::PinStatus::NotConfigured;
+                std::string pin = pkcs11::readStoredPin(&status);
+                if (status == pkcs11::PinStatus::UnwrapFailed) {
+                    LOG_ERROR << "Failed to unwrap stored PKCS#11 PIN "
+                                 "(wrong device or corrupt file)";
+                } else if (status == pkcs11::PinStatus::LegacyPlaintext) {
                     LOG_WARN << "PKCS#11 PIN is stored unwrapped (legacy); "
                                 "re-save it to wrap at rest";
-                    pin = raw;
-                }
-
-                // The PIN is stored without a trailing newline, but strip any
-                // stray trailing whitespace defensively.
-                while (!pin.empty() && (pin.back() == '\n' || pin.back() == '\r')) {
-                    pin.pop_back();
                 }
                 return pin;
-            }
-
-            // pem_password_cb that copies a PIN held in *u into OpenSSL's buffer.
-            // Wrapped into a UI_METHOD via UI_UTIL_wrap_read_pem_callback so it
-            // satisfies OSSL_STORE's passphrase prompts (and thus the
-            // pkcs11-provider's C_Login) without any terminal interaction.
-            int pinPasswordCallback(char* buf, int size, int /*rwflag*/, void* u) {
-                const auto* pin = static_cast<const std::string*>(u);
-                if (!pin || pin->empty() || size <= 0) {
-                    return 0;
-                }
-                int len = static_cast<int>(std::min(pin->size(), static_cast<size_t>(size)));
-                std::memcpy(buf, pin->data(), static_cast<size_t>(len));
-                return len;
             }
 
             // Drain the OpenSSL error queue into a single string. Used only to
@@ -206,47 +172,6 @@ namespace provisioner {
                 }
                 return out;
             }
-
-            // RAII holder for a private library context with the default and
-            // pkcs11 providers loaded. Keeps the pkcs11-provider confined to the
-            // operation that needs it and off the process-wide default context
-            // (libcurl TLS, the PEM key path), and removes any dependency on the
-            // provider being activated in the system openssl.cnf.
-            struct Pkcs11Context {
-                OSSL_LIB_CTX* libctx = nullptr;
-                OSSL_PROVIDER* defProv = nullptr;
-                OSSL_PROVIDER* p11Prov = nullptr;
-
-                Pkcs11Context() = default;
-                Pkcs11Context(const Pkcs11Context&) = delete;
-                Pkcs11Context& operator=(const Pkcs11Context&) = delete;
-
-                // Returns true once the pkcs11 provider is loaded and ready.
-                bool load() {
-                    libctx = OSSL_LIB_CTX_new();
-                    if (!libctx) {
-                        return false;
-                    }
-                    defProv = OSSL_PROVIDER_load(libctx, "default");
-                    p11Prov = OSSL_PROVIDER_load(libctx, "pkcs11");
-                    return p11Prov != nullptr;
-                }
-
-                ~Pkcs11Context() {
-                    // Providers must be unloaded before the context is freed;
-                    // any EVP_PKEY obtained from the context must already be
-                    // freed by the caller before this runs.
-                    if (p11Prov) {
-                        OSSL_PROVIDER_unload(p11Prov);
-                    }
-                    if (defProv) {
-                        OSSL_PROVIDER_unload(defProv);
-                    }
-                    if (libctx) {
-                        OSSL_LIB_CTX_free(libctx);
-                    }
-                }
-            };
 
             // Percent-decode a PKCS#11 URI component for display (e.g. a token
             // label "My%20Token" -> "My Token"). Leaves malformed escapes as-is.
@@ -700,21 +625,8 @@ namespace provisioner {
             // do not depend on the provider being activated in the system
             // openssl.cnf -- matching the explicit `-provider pkcs11 -provider
             // default` flags used by the signing scripts.
-            OSSL_LIB_CTX* libctx = OSSL_LIB_CTX_new();
-            if (!libctx) {
-                info.success = false;
-                info.errorMessage = "Failed to create OpenSSL context";
-                info.statusLevel = "error";
-                info.statusMessage = "Internal error";
-                return info;
-            }
-            OSSL_PROVIDER* defProv = OSSL_PROVIDER_load(libctx, "default");
-            OSSL_PROVIDER* p11Prov = OSSL_PROVIDER_load(libctx, "pkcs11");
-            if (!p11Prov) {
-                if (defProv) {
-                    OSSL_PROVIDER_unload(defProv);
-                }
-                OSSL_LIB_CTX_free(libctx);
+            pkcs11::Context octx;
+            if (!octx.load()) {
                 info.success = false;
                 info.errorMessage = "PKCS#11 provider not available";
                 info.statusLevel = "error";
@@ -729,18 +641,13 @@ namespace provisioner {
             // never written to a pin-source= file referenced on a command line.
             std::string effectivePin = !pin.empty() ? pin : readStoredPkcs11Pin();
 
-            UI_METHOD* uiMethod = UI_UTIL_wrap_read_pem_callback(pinPasswordCallback, 0);
+            UI_METHOD* uiMethod = UI_UTIL_wrap_read_pem_callback(pkcs11::pinPasswordCallback, 0);
             if (!uiMethod) {
-                OSSL_PROVIDER_unload(p11Prov);
-                if (defProv) {
-                    OSSL_PROVIDER_unload(defProv);
-                }
-                OSSL_LIB_CTX_free(libctx);
                 info.success = false;
                 info.errorMessage = "Failed to set up PIN handling";
                 info.statusLevel = "error";
                 info.statusMessage = "Internal error";
-                return info;
+                return info;  // octx destructor unloads providers + frees libctx
             }
 
             // Clear stale errors so the failure classifier below only sees
@@ -748,7 +655,7 @@ namespace provisioner {
             ERR_clear_error();
 
             EVP_PKEY* pkey = nullptr;
-            OSSL_STORE_CTX* ctx = OSSL_STORE_open_ex(uri.c_str(), libctx, nullptr,
+            OSSL_STORE_CTX* ctx = OSSL_STORE_open_ex(uri.c_str(), octx.libctx, nullptr,
                                                      uiMethod, &effectivePin,
                                                      nullptr, nullptr, nullptr);
             if (ctx) {
@@ -800,12 +707,9 @@ namespace provisioner {
             // detail, so it is only inspected here and never logged.
             std::string errText = parsed ? std::string() : drainOpenSslErrors();
 
+            // pkey is already freed above; uiMethod is freed here; octx's
+            // destructor unloads the providers and frees libctx at scope exit.
             UI_destroy_method(uiMethod);
-            OSSL_PROVIDER_unload(p11Prov);
-            if (defProv) {
-                OSSL_PROVIDER_unload(defProv);
-            }
-            OSSL_LIB_CTX_free(libctx);
 
             if (parsed) {
                 LOG_INFO << "Parsed PKCS#11 key: " << info.algorithm << "-" << info.keySize
@@ -844,14 +748,14 @@ namespace provisioner {
             // Loading the provider into a throwaway private context is a cheap,
             // side-effect-free probe: it touches no token, so it never needs a
             // PIN, and leaves the process-wide default context untouched.
-            Pkcs11Context octx;
+            pkcs11::Context octx;
             return octx.load();
         }
 
         Pkcs11Discovery discoverPkcs11(const std::string& pin) {
             Pkcs11Discovery result;
 
-            Pkcs11Context octx;
+            pkcs11::Context octx;
             if (!octx.load()) {
                 result.providerAvailable = false;
                 result.errorMessage = "PKCS#11 provider not installed";
@@ -862,7 +766,7 @@ namespace provisioner {
             // Some tokens require a login before private objects are listed, so
             // supply the PIN (explicit or stored) the same way validation does.
             std::string effectivePin = !pin.empty() ? pin : readStoredPkcs11Pin();
-            UI_METHOD* uiMethod = UI_UTIL_wrap_read_pem_callback(pinPasswordCallback, 0);
+            UI_METHOD* uiMethod = UI_UTIL_wrap_read_pem_callback(pkcs11::pinPasswordCallback, 0);
             if (!uiMethod) {
                 result.errorMessage = "Internal error";
                 return result;
@@ -1233,6 +1137,86 @@ namespace provisioner {
             return CsrfTokenManager::getInstance().validateToken(sessionId, token);
         }
         
+        std::string shellQuoteConfigValue(const std::string& value) {
+            // A value made up only of these characters is safe to write bare:
+            // the shell performs no word-splitting, expansion or command
+            // substitution on it. Anything else (space, ';', '$', quotes, ...)
+            // forces single-quoting. This mirrors Python's shlex.quote so the
+            // packaged defaults (all bare, simple values) are left untouched
+            // and only values that genuinely need it - notably PKCS#11 URIs,
+            // which contain ';' - get quoted.
+            static const std::string safe =
+                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+                "_@%+=:,./-";
+            if (!value.empty() &&
+                value.find_first_not_of(safe) == std::string::npos) {
+                return value;
+            }
+
+            // Single-quote and escape any embedded single quote as '\'' :
+            // close the quote, emit an escaped quote, reopen. Nothing inside a
+            // single-quoted string is special to the shell, so this is total.
+            std::string out;
+            out.reserve(value.size() + 2);
+            out.push_back('\'');
+            for (char c : value) {
+                if (c == '\'') {
+                    out += "'\\''";
+                } else {
+                    out.push_back(c);
+                }
+            }
+            out.push_back('\'');
+            return out;
+        }
+
+        std::string unquoteConfigValue(const std::string& value) {
+            if (value.size() < 2) {
+                return value;
+            }
+
+            // Single-quoted: nothing is escaped inside except the '\'' sequence
+            // emitted by shellQuoteConfigValue. Rebuild the original by treating
+            // that four-character run as one literal quote and copying the rest.
+            if (value.front() == '\'' && value.back() == '\'') {
+                std::string out;
+                out.reserve(value.size());
+                for (size_t i = 1; i + 1 < value.size();) {
+                    if (value.compare(i, 4, "'\\''") == 0) {
+                        out.push_back('\'');
+                        i += 4;
+                    } else {
+                        out.push_back(value[i]);
+                        ++i;
+                    }
+                }
+                return out;
+            }
+
+            // Double-quoted: honour the backslash escapes the shell recognises
+            // inside double quotes ($, `, ", \, newline). Covers configs a user
+            // may have hand-edited with double quotes.
+            if (value.front() == '"' && value.back() == '"') {
+                std::string out;
+                out.reserve(value.size());
+                for (size_t i = 1; i + 1 < value.size(); ++i) {
+                    if (value[i] == '\\' && i + 1 < value.size() - 1) {
+                        char next = value[i + 1];
+                        if (next == '$' || next == '`' || next == '"' ||
+                            next == '\\' || next == '\n') {
+                            out.push_back(next);
+                            ++i;
+                            continue;
+                        }
+                    }
+                    out.push_back(value[i]);
+                }
+                return out;
+            }
+
+            return value;
+        }
+
         std::optional<std::string> getConfigValue(const std::string& key, bool logAccessToAudit) {
             std::optional<std::string> result = std::nullopt;
             
@@ -1254,7 +1238,7 @@ namespace provisioner {
                     if (delimiter_pos != std::string::npos) {
                         std::string current_key = line.substr(0, delimiter_pos);
                         if (current_key == key) {
-                            return line.substr(delimiter_pos + 1);
+                            return unquoteConfigValue(line.substr(delimiter_pos + 1));
                         }
                     }
                 }
@@ -1306,7 +1290,7 @@ namespace provisioner {
                     size_t delimiter_pos = line.find('=');
                     if (delimiter_pos != std::string::npos) {
                         std::string key = line.substr(0, delimiter_pos);
-                        std::string value = line.substr(delimiter_pos + 1);
+                        std::string value = unquoteConfigValue(line.substr(delimiter_pos + 1));
                         values[key] = value;
                     }
                 }

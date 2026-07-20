@@ -42,19 +42,13 @@ if [ -z "${CUSTOMER_KEY_PKCS11_NAME}" ]; then
     exit 1
 fi
 
-# Sign using the OpenSSL PKCS#11 provider (pkcs11-provider).
-# The ENGINE API (-engine pkcs11 -keyform engine) is deprecated in OpenSSL 3.x;
-# the provider resolves the pkcs11: URI passed to -sign via OSSL_STORE. The PIN
-# is taken from the URI (pin-value=/pin-source=), exactly as with the engine.
-# Output format: hex-encoded signature with no line breaks
-OPENSSL="${OPENSSL:-openssl}"
-
-if ! "${OPENSSL}" dgst -sha256 \
-    -provider pkcs11 -provider default \
-    -sign "${CUSTOMER_KEY_PKCS11_NAME}" \
-    "${INPUT_FILE}" | xxd -p -c 256; then
-    echo "Error: Signing failed" >&2
-    exit 1
-fi
-
-exit 0
+# Signing happens entirely inside rpi-sb-keyhelper: it reads the device-wrapped
+# token PIN stored by the WebUI (/etc/rpi-sb-provisioner/keys/pkcs11.pin),
+# unwraps it in its own process memory, supplies it to the pkcs11-provider via
+# OpenSSL's passphrase callback so the token's C_Login succeeds, signs on the
+# token, and prints the hex signature on stdout. The PIN never reaches this
+# shell, a command line, or a pin-source= file. Deployments that manage PIN
+# material outside the provisioner can still carry pin-value=/pin-source= in the
+# URI - with no stored PIN the callback is a no-op and the provider uses those.
+# Output format: hex-encoded signature with no line breaks (keyhelper contract).
+exec rpi-sb-keyhelper sign --pkcs11-uri "${CUSTOMER_KEY_PKCS11_NAME}" --in "${INPUT_FILE}"

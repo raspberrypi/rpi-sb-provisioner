@@ -3,6 +3,7 @@
 #include <drogon/HttpResponse.h>
 #include <drogon/HttpTypes.h>
 #include <openssl/evp.h>
+#include "pkcs11_common.h"
 #include <string>
 #include <sstream>
 #include <iomanip>
@@ -171,9 +172,10 @@ namespace provisioner {
         // ===== PKCS#11 PIN Management =====
         
         /**
-         * Path to the PKCS#11 PIN file
+         * Path to the PKCS#11 PIN file. Single source of truth lives in
+         * pkcs11_common.h (shared with the drogon-free rpi-sb-keyhelper).
          */
-        constexpr const char* PKCS11_PIN_FILE = "/etc/rpi-sb-provisioner/keys/pkcs11.pin";
+        constexpr const char* PKCS11_PIN_FILE = pkcs11::PIN_FILE;
         
         /**
          * Check if a PKCS#11 PIN is configured
@@ -401,7 +403,37 @@ namespace provisioner {
          * @return A map of all key-value pairs in the config file
          */
         std::map<std::string, std::string> getAllConfigValues(bool logAccessToAudit = true);
-        
+
+        /**
+         * Quote a value for safe inclusion in the shell-sourced config file.
+         *
+         * The config file is written by this service but sourced by the signing
+         * shell scripts (e.g. rpi-sb-pkcs11-sign.sh), so any value containing a
+         * shell metacharacter (space, ';', '$', ...) must be quoted or the
+         * shell mangles it. PKCS#11 URIs always contain ';' (type=private), so
+         * an unquoted value is silently truncated at the first ';'. Returns the
+         * value unchanged when it needs no quoting, otherwise single-quoted with
+         * embedded single quotes escaped as '\'' (the shlex.quote convention).
+         *
+         * @param value The raw configuration value
+         * @return A representation safe to write as the right-hand side of KEY=
+         */
+        std::string shellQuoteConfigValue(const std::string& value);
+
+        /**
+         * Inverse of shellQuoteConfigValue for the read path.
+         *
+         * Strips a single layer of single or double quotes (unescaping the
+         * embedded sequences those quoting styles use) so a round-tripped value
+         * reads back identically. Values with no surrounding quotes - the bare
+         * lines in the packaged defaults file and legacy user configs - are
+         * returned unchanged, keeping the reader backward-compatible.
+         *
+         * @param value The raw right-hand side of a KEY= line
+         * @return The unquoted value
+         */
+        std::string unquoteConfigValue(const std::string& value);
+
         /**
          * Create an appropriate error response for configuration file read errors
          * 

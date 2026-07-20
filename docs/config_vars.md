@@ -42,6 +42,10 @@ The value should take the format:
 
 ### Making your HSM available
 
+> For the full picture — supported tokens, requirements, PIN handling, a
+> SoftHSM2 smoke test, and troubleshooting — see the [PKCS#11 / HSM Support
+> guide](hsm-support.md). The essentials are below.
+
 No OpenSSL configuration is required. `rpi-sb-provisioner` activates the OpenSSL `pkcs11-provider` automatically, and the provider discovers tokens through [p11-kit](https://p11-glue.github.io/p11-glue/). To make your HSM visible, register its PKCS#11 module with p11-kit by dropping a one-line module file into `/usr/share/p11-kit/modules/` (for example `myhsm.module`):
 
     module: /usr/lib/aarch64-linux-gnu/libmyhsm-pkcs11.so
@@ -58,7 +62,9 @@ To confirm the token is discoverable, and to find the object alias for the `CUST
 
 > **Note**
 >
-> If the token requires a PIN, the WebUI can store it for signing operations. Stored PINs are device-wrapped at rest using the provisioning Raspberry Pi firmware crypto device key. You may still append a `pin-value=<PIN>` or `pin-source=<file>` attribute to `CUSTOMER_KEY_PKCS11_NAME` for deployments that manage PIN material outside the provisioner.
+> If the token requires a PIN, store it through the WebUI ("Save PIN & Validate"). Stored PINs are device-wrapped at rest using the provisioning Raspberry Pi firmware crypto device key, and are supplied to the token automatically for both key validation and provisioning-time signing. The PIN is unwrapped in-process and handed to the `pkcs11-provider` via OpenSSL's passphrase callback (inside `rpi-sb-keyhelper`), so it never appears on a command line or in a `pin-source=` file. You do not need to add any PIN attribute to `CUSTOMER_KEY_PKCS11_NAME` when the WebUI holds the PIN.
+>
+> For deployments that manage PIN material outside the provisioner, you may instead append a `pin-value=<PIN>` or `pin-source=<file>` attribute to `CUSTOMER_KEY_PKCS11_NAME`; a PIN carried in the URI takes precedence, and with no stored PIN the callback is a no-op.
 
 ## GOLD_MASTER_OS_FILE
 

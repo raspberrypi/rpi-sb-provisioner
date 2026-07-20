@@ -590,6 +590,8 @@ This README provides the essential information to get started. For more detailed
 
 - **Configuration options:** See [Configuration Reference](docs/config_vars.md)
 
+- **PKCS#11 / HSM signing:** See the [HSM Support Guide](docs/hsm-support.md) (supported tokens, requirements, PIN handling, validation)
+
 - **Device-specific guides:** See the `docs/device-guidance/` folder
 
 - **HTTP API documentation:** See [API Documentation](docs/api_endpoints.md) (for integration and automation)

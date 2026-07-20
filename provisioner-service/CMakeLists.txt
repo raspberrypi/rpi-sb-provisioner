@@ -302,6 +302,7 @@ target_sources(rpi-provisioner-ui
     src/utils.cpp
     src/keywrap.cpp
     src/keyregistry.cpp
+    src/pkcs11_common.cpp
     src/schema_validator.cpp
     ${VIEW_SOURCES}
 )
@@ -337,6 +338,7 @@ target_link_libraries(rpi-provisioner-ui
 add_executable(rpi-sb-keyhelper
     src/keyhelper.cpp
     src/keywrap.cpp
+    src/pkcs11_common.cpp
 )
 
 target_link_libraries(rpi-sb-keyhelper
