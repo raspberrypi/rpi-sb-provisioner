@@ -2,7 +2,7 @@ The Images API provides complete management of OS images used for device provisi
 
 The API supports both traditional `.img` files and IDP (Image Description Provisioning) artefact directories. IDP artefacts are directories containing a JSON image descriptor and one or more sparse images (`.simg` files), typically produced by `rpi-image-gen`.
 
-# /get-images
+# /images/list
 
 **HTTP Method:** GET
 
@@ -12,25 +12,31 @@ The API supports both traditional `.img` files and IDP (Image Description Provis
 
 **Response Format:**
 
+The response is a JSON object with a single `images` key containing the array of image entries:
+
 ``` json
-[
-  {
-    "name": "raspios-2025-04-01.img",
-    "path": "/srv/rpi-sb-provisioner/images/raspios-2025-04-01.img",
-    "sha256": "abc123...",
-    "size_mb": 4096.0,
-    "is_gold_master": false,
-    "is_idp": false
-  },
-  {
-    "name": "deb13-arm64-min-ab-luks2-2026-04-13",
-    "path": "/srv/rpi-sb-provisioner/images/deb13-arm64-min-ab-luks2-2026-04-13",
-    "sha256": "def456...",
-    "size_mb": 822.7,
-    "is_gold_master": true,
-    "is_idp": true
-  }
-]
+{
+  "images": [
+    {
+      "name": "raspios-2025-04-01.img",
+      "path": "/srv/rpi-sb-provisioner/images/raspios-2025-04-01.img",
+      "sha256": "abc123...",
+      "size_mb": 4096.0,
+      "is_gold_master": false,
+      "is_idp": false,
+      "type": "traditional"
+    },
+    {
+      "name": "deb13-arm64-min-ab-luks2-2026-04-13",
+      "path": "/srv/rpi-sb-provisioner/images/deb13-arm64-min-ab-luks2-2026-04-13",
+      "sha256": "def456...",
+      "size_mb": 822.7,
+      "is_gold_master": true,
+      "is_idp": true,
+      "type": "idp"
+    }
+  ]
+}
 ```
 
 **Field Descriptions:**
@@ -43,6 +49,7 @@ The API supports both traditional `.img` files and IDP (Image Description Provis
 | size_mb        | File size in megabytes. For IDP artefacts, this is the sum of all files in the directory                                                                  |
 | is_gold_master | Whether this image is currently selected as the gold master OS image                                                                                      |
 | is_idp         | Whether this entry is an IDP artefact directory (as opposed to a traditional `.img` file)                                                                 |
+| type           | Image type: `"idp"` for IDP artefact directories or `"traditional"` for `.img` files                                                                       |
 
 **Notes:**
 

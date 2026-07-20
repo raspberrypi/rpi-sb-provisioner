@@ -90,7 +90,7 @@ Complete lifecycle management of OS images and IDP artefacts, including upload, 
 
 **Key Endpoints:**
 
-- `GET /get-images` - List all available images
+- `GET /images/list` - List all available images
 
 - `GET /get-image-metadata` - Get image metadata (size, modification time, etc.)
 
