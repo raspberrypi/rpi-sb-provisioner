@@ -142,31 +142,28 @@ namespace {
     }
 
     bool writeConfigFromActive(const RegistryKey* active) {
-        auto existing = utils::getAllConfigValues();
-        existing["CUSTOMER_KEY_FILE_PEM"] = "";
-        existing["CUSTOMER_KEY_PKCS11_NAME"] = "";
-
+        std::string pem;
+        std::string pkcs11;
         if (active) {
             if (active->type == "pem") {
-                existing["CUSTOMER_KEY_FILE_PEM"] = active->path;
+                pem = active->path;
             } else if (active->type == "pkcs11") {
-                existing["CUSTOMER_KEY_PKCS11_NAME"] = active->uri;
+                pkcs11 = active->uri;
             }
         }
 
-        std::ofstream configWrite(utils::CONFIG_USER_PATH);
-        if (!configWrite.is_open()) {
-            LOG_ERROR << "Failed to open config for key activation";
-            return false;
+        // Route through the shared config writer so key activation is atomic,
+        // serialised against other config writers, and never exposes a partial
+        // file to the signing scripts. Shell-quoting (CUSTOMER_KEY_PKCS11_NAME
+        // contains ';', see #328) is applied inside setConfigValues.
+        bool ok = utils::setConfigValues({
+            {"CUSTOMER_KEY_FILE_PEM", pem},
+            {"CUSTOMER_KEY_PKCS11_NAME", pkcs11},
+        }).has_value();
+        if (!ok) {
+            LOG_ERROR << "Failed to write config for key activation";
         }
-        for (const auto& [k, v] : existing) {
-            // Shell-quote: the config is sourced by the signing scripts, and
-            // CUSTOMER_KEY_PKCS11_NAME contains ';' which would otherwise
-            // truncate on source (see utils::shellQuoteConfigValue / #328).
-            configWrite << k << "=" << utils::shellQuoteConfigValue(v) << "\n";
-        }
-        configWrite.close();
-        return true;
+        return ok;
     }
 
     std::optional<std::string> previousActiveFingerprint() {

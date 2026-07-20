@@ -1316,7 +1316,92 @@ namespace provisioner {
             
             return configValues;
         }
-        
+
+        // Serialises the read-modify-write of the config file across all writers
+        // in this process, so concurrent updates cannot lose each other. Readers
+        // do not take this lock - the atomic rename below is what protects them.
+        static std::mutex& configWriteMutex() {
+            static std::mutex m;
+            return m;
+        }
+
+        std::optional<std::map<std::string, std::string>> setConfigValues(
+            const std::map<std::string, std::string>& updates) {
+            std::lock_guard<std::mutex> lock(configWriteMutex());
+
+            // Start from the full merged config so we never drop existing keys,
+            // then apply the overrides.
+            std::map<std::string, std::string> options = getAllConfigValues();
+            for (const auto& [k, v] : updates) {
+                options[k] = v;
+            }
+
+            // Write atomically: serialise to a temp file in the same directory,
+            // then rename it over the target. rename(2) is atomic for a
+            // same-filesystem move, so any reader - including the signing shell
+            // scripts in another process - sees either the complete old file or
+            // the complete new one, never a truncated write in progress.
+            std::filesystem::path target(CONFIG_USER_PATH);
+            std::filesystem::path tmp = target;
+            tmp += ".tmp";
+
+            {
+                std::ofstream config_write(tmp, std::ios::trunc);
+                if (!config_write.is_open()) {
+                    LOG_ERROR << "Failed to open temp config file for writing: " << tmp;
+                    AuditLog::logFileSystemAccess("WRITE", tmp.string(), false, "",
+                        "Failed to open temp config file");
+                    return std::nullopt;
+                }
+
+                for (const auto& [k, v] : options) {
+                    config_write << k << "=" << shellQuoteConfigValue(v) << "\n";
+                }
+
+                config_write.flush();
+                if (!config_write.good()) {
+                    LOG_ERROR << "Error while writing temp config file: " << tmp;
+                    config_write.close();
+                    std::error_code rmec;
+                    std::filesystem::remove(tmp, rmec);
+                    AuditLog::logFileSystemAccess("WRITE", tmp.string(), false, "",
+                        "Error writing temp config file");
+                    return std::nullopt;
+                }
+            } // ofstream closed here, before the rename
+
+            // An in-place truncate (the pattern this replaces) preserved the
+            // existing file's mode; copy it onto the replacement so we don't
+            // silently relax permissions on the config to the umask default.
+            std::error_code ec;
+            if (std::filesystem::exists(target)) {
+                auto perms = std::filesystem::status(target).permissions();
+                std::filesystem::permissions(tmp, perms, ec);
+                if (ec) {
+                    LOG_WARN << "Could not copy config permissions onto temp file: " << ec.message();
+                    ec.clear();
+                }
+            }
+
+            std::filesystem::rename(tmp, target, ec);
+            if (ec) {
+                LOG_ERROR << "Failed to atomically replace config file: " << ec.message();
+                std::error_code rmec;
+                std::filesystem::remove(tmp, rmec);
+                AuditLog::logFileSystemAccess("WRITE", target.string(), false, "",
+                    "Atomic rename failed: " + ec.message());
+                return std::nullopt;
+            }
+
+            AuditLog::logFileSystemAccess("WRITE", target.string(), true, "",
+                "Config updated");
+            return options;
+        }
+
+        bool setConfigValue(const std::string& key, const std::string& value) {
+            return setConfigValues({{key, value}}).has_value();
+        }
+
         drogon::HttpResponsePtr createConfigErrorResponse(
             const drogon::HttpRequestPtr& req,
             const std::string& configKey) {

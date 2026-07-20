@@ -515,34 +515,30 @@ namespace provisioner {
                 callback(resp);
                 return;
             }
-            std::map<std::string, std::string> existing_options = utils::getAllConfigValues();
-
+            std::map<std::string, std::string> updates;
             for (const auto &key : body->getMemberNames()) {
-                LOG_INFO << "Options::set: " << key << " = " << body->get(key, "").asString();
-
-                // Merge with new values from request
-                existing_options[key] = body->get(key, "").asString();
-
-                // Write back merged config to user config file
-                std::ofstream config_write(utils::CONFIG_USER_PATH);
-                if (!config_write.is_open()) {
-                    LOG_ERROR << "Failed to open config file for writing";
-                    auto resp = provisioner::utils::createErrorResponse(
-                        req,
-                        "Failed to write configuration file",
-                        drogon::k500InternalServerError,
-                        "Config Error",
-                        "CONFIG_WRITE_ERROR"
-                    );
-                    callback(resp);
-                    return;
-                }
-
-                for (const auto &[k, v] : existing_options) {
-                    config_write << k << "=" << utils::shellQuoteConfigValue(v) << "\n";
-                }
-                config_write.close();
+                const std::string value = body->get(key, "").asString();
+                LOG_INFO << "Options::set: " << key << " = " << value;
+                updates[key] = value;
             }
+
+            // Persist atomically under the shared config-write lock. Returns the
+            // full merged config, which the side-effect handling below (workdir
+            // clear, manufacturing DB creation) needs.
+            auto merged = utils::setConfigValues(updates);
+            if (!merged) {
+                LOG_ERROR << "Failed to write configuration file";
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Failed to write configuration file",
+                    drogon::k500InternalServerError,
+                    "Config Error",
+                    "CONFIG_WRITE_ERROR"
+                );
+                callback(resp);
+                return;
+            }
+            std::map<std::string, std::string> existing_options = std::move(*merged);
 
             // Check if RPI_SB_WORKDIR is set, and if so, clear its contents
             auto workdirValue = utils::getConfigValue("RPI_SB_WORKDIR");
@@ -884,13 +880,8 @@ namespace provisioner {
                 }
             }
 
-            // Update config with the selected firmware path
-            std::map<std::string, std::string> existing_options = utils::getAllConfigValues();
-            existing_options["RPI_DEVICE_FIRMWARE_FILE"] = selectedFirmware;
-
-            // Write back the updated config to user config file
-            std::ofstream config_write(utils::CONFIG_USER_PATH);
-            if (!config_write.is_open()) {
+            // Update config with the selected firmware path (atomic, locked).
+            if (!utils::setConfigValue("RPI_DEVICE_FIRMWARE_FILE", selectedFirmware)) {
                 auto resp = provisioner::utils::createErrorResponse(
                     req,
                     "Failed to write configuration file",
@@ -901,11 +892,6 @@ namespace provisioner {
                 callback(resp);
                 return;
             }
-
-            for (const auto &[k, v] : existing_options) {
-                config_write << k << "=" << utils::shellQuoteConfigValue(v) << "\n";
-            }
-            config_write.close();
 
             // Mirror /options/set: a firmware change invalidates every cached
             // signed/staged artefact under $RPI_SB_WORKDIR. Without this, the

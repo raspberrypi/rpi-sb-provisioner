@@ -405,6 +405,41 @@ namespace provisioner {
         std::map<std::string, std::string> getAllConfigValues(bool logAccessToAudit = true);
 
         /**
+         * Atomically merge values into the user configuration file.
+         *
+         * Reads the full merged configuration (defaults overridden by the user
+         * config), applies the given overrides, then persists the whole set to
+         * CONFIG_USER_PATH with each value shell-quoted. Passing an empty value
+         * for a key clears it (e.g. dropping a stale GOLD_MASTER_OS_FILE when its
+         * image is deleted).
+         *
+         * Concurrency: the entire read-modify-write is serialised against every
+         * other config writer by a process-wide lock, so concurrent writers
+         * cannot lose each other's updates. The write itself is atomic (values
+         * are written to a temp file which is then renamed over the target), so
+         * any reader - in this process or an external one, such as the signing
+         * shell scripts - always observes either the complete old file or the
+         * complete new one, never a partial write. Readers therefore need no
+         * lock. All config writers MUST go through this function to preserve that
+         * guarantee.
+         *
+         * @param updates Key/value overrides to merge into the config
+         * @return The full merged config on success (for callers that need the
+         *         post-write state), or std::nullopt if the write failed
+         */
+        std::optional<std::map<std::string, std::string>> setConfigValues(
+            const std::map<std::string, std::string>& updates);
+
+        /**
+         * Convenience wrapper around setConfigValues for a single key.
+         *
+         * @param key The configuration key to set
+         * @param value The value to write (empty string clears the key)
+         * @return true if the config file was written successfully
+         */
+        bool setConfigValue(const std::string& key, const std::string& value);
+
+        /**
          * Quote a value for safe inclusion in the shell-sourced config file.
          *
          * The config file is written by this service but sourced by the signing
