@@ -358,13 +358,22 @@ PEM signing keys uploaded through the WebUI and stored HSM PINs are device-wrapp
 
 ### Signing Helpers
 
-Secure-boot signing can use either a PEM key or a PKCS#11 URI:
+Secure-boot signing can use either a PEM key or a PKCS#11 URI. Both wrappers
+route through `rpi-sb-keyhelper` so that secret material (a wrapped PEM key, or
+the token PIN) is only ever unwrapped in that helper's own process memory,
+never in the calling shell, on a command line, or in a `pin-source=` file:
 
 - `rpi-sb-pem-sign.sh` invokes `rpi-sb-keyhelper`, which unwraps a device-wrapped PEM key in process memory and emits the RSA SHA-256 signature expected by Raspberry Pi signing tools.
 
-- `rpi-sb-pkcs11-sign.sh` invokes OpenSSL with `pkcs11-provider` and `default` providers, resolving the configured `pkcs11:` URI through `OSSL_STORE`.
+- `rpi-sb-pkcs11-sign.sh` invokes `rpi-sb-keyhelper` with the configured `pkcs11:` URI. The helper loads the `pkcs11-provider` and `default` providers, resolves the URI through `OSSL_STORE`, and supplies the device-wrapped token PIN in-process via OpenSSL's passphrase callback so the token's `C_Login` succeeds. Public-key derivation for the URI (`init_signing_context`) goes through the same helper for the same reason.
 
-This keeps persistent PEM key material encrypted at rest and avoids the deprecated OpenSSL ENGINE path for HSM signing.
+The provider-load and PIN-unwrap logic is shared between the helper and the web
+service's key-validation path via `pkcs11_common`, a small translation unit kept
+free of the web-server dependency.
+
+This keeps persistent key material and the token PIN encrypted at rest and
+avoids the deprecated OpenSSL ENGINE path for HSM signing. See the
+[PKCS#11 / HSM Support guide](hsm-support.md) for supported tokens and setup.
 
 ### State Tracking (`/var/run/rpi-sb-state/`)
 

@@ -539,7 +539,7 @@ namespace provisioner {
                 }
 
                 for (const auto &[k, v] : existing_options) {
-                    config_write << k << "=" << v << "\n";
+                    config_write << k << "=" << utils::shellQuoteConfigValue(v) << "\n";
                 }
                 config_write.close();
             }
@@ -903,7 +903,7 @@ namespace provisioner {
             }
 
             for (const auto &[k, v] : existing_options) {
-                config_write << k << "=" << v << "\n";
+                config_write << k << "=" << utils::shellQuoteConfigValue(v) << "\n";
             }
             config_write.close();
 

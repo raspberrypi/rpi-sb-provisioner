@@ -160,7 +160,10 @@ namespace {
             return false;
         }
         for (const auto& [k, v] : existing) {
-            configWrite << k << "=" << v << "\n";
+            // Shell-quote: the config is sourced by the signing scripts, and
+            // CUSTOMER_KEY_PKCS11_NAME contains ';' which would otherwise
+            // truncate on source (see utils::shellQuoteConfigValue / #328).
+            configWrite << k << "=" << utils::shellQuoteConfigValue(v) << "\n";
         }
         configWrite.close();
         return true;
