@@ -409,6 +409,13 @@
             selectedNotice.style.cssText = 'padding: 8px 12px; background: #d4edda; color: #155724; border-radius: 4px; text-align: center;';
             selectedNotice.innerHTML = '&#10003; Currently selected';
             actions.appendChild(selectedNotice);
+
+            const deselectBtn = document.createElement('button');
+            deselectBtn.type = 'button';
+            deselectBtn.style.cssText = 'padding: 8px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;';
+            deselectBtn.textContent = 'Deselect Image';
+            deselectBtn.onclick = () => clearImageSelection();
+            actions.appendChild(deselectBtn);
         }
         
         if (!img.is_idp) {
@@ -432,13 +439,7 @@
         deleteBtn.type = 'button';
         deleteBtn.style.cssText = 'padding: 8px 12px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;';
         deleteBtn.textContent = 'Delete Image';
-        deleteBtn.onclick = () => deleteImage(img.name);
-        if (isSelected) {
-            deleteBtn.disabled = true;
-            deleteBtn.style.opacity = '0.5';
-            deleteBtn.style.cursor = 'not-allowed';
-            deleteBtn.title = 'Cannot delete the selected image';
-        }
+        deleteBtn.onclick = () => deleteImage(img.name, isSelected);
         actions.appendChild(deleteBtn);
         
         detailsEl.appendChild(actions);
@@ -825,21 +826,30 @@
         }
     });
     
+    // Persist an empty gold master selection and reset the dependent UI state.
+    // Returns true on success. Does not reload the image list or show a toast so
+    // it can be reused both by explicit deselection and by deleting the selected image.
+    async function applyClearedSelection() {
+        const response = await fetch('/options/set', addCsrfHeader({
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 'GOLD_MASTER_OS_FILE': '' })
+        }));
+
+        if (!response.ok) return false;
+
+        document.getElementById('GOLD_MASTER_OS_FILE').value = '';
+        // Clear any IDP progressive disclosure
+        applyIdpDisclosure(null);
+        // Restore hidden FDE tile
+        const fdeTile = document.getElementById('fde-only-tile');
+        if (fdeTile) fdeTile.style.display = '';
+        return true;
+    }
+
     async function clearImageSelection() {
         try {
-            const response = await fetch('/options/set', addCsrfHeader({
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 'GOLD_MASTER_OS_FILE': '' })
-            }));
-            
-            if (response.ok) {
-                document.getElementById('GOLD_MASTER_OS_FILE').value = '';
-                // Clear any IDP progressive disclosure
-                applyIdpDisclosure(null);
-                // Restore hidden FDE tile
-                const fdeTile = document.getElementById('fde-only-tile');
-                if (fdeTile) fdeTile.style.display = '';
+            if (await applyClearedSelection()) {
                 renderImageList();
                 showSuccess('Image selection cleared');
             } else {
@@ -873,24 +883,37 @@
         }
     }
     
-    async function deleteImage(name) {
-        if (!confirm('Delete image "' + name + '"?\n\nThis cannot be undone.')) {
+    async function deleteImage(name, isSelected) {
+        const confirmMsg = isSelected
+            ? 'Delete image "' + name + '"?\n\nThis is the currently selected image. Deleting it will leave no image selected, and you will need to choose another before provisioning.\n\nThis cannot be undone.'
+            : 'Delete image "' + name + '"?\n\nThis cannot be undone.';
+        if (!confirm(confirmMsg)) {
             return;
         }
-        
+
         try {
             const response = await fetch('/delete-image?name=' + encodeURIComponent(name), addCsrfHeader({
                 method: 'POST'
             }));
-            
+
             if (response.ok) {
+                // If we just deleted the selected image, clear the dangling
+                // gold master selection so the config never points at a missing file.
+                if (isSelected) {
+                    try {
+                        await applyClearedSelection();
+                    } catch (e) {
+                        console.warn('Could not clear selection after deleting selected image:', e);
+                    }
+                }
+
                 showSuccess('Image "' + name + '" deleted');
                 currentViewingImage = null;
-                
+
                 // Reset details panel
                 const detailsEl = document.getElementById('image-details');
                 detailsEl.innerHTML = '<div class="firmware-notes-placeholder">Select an image to view details</div>';
-                
+
                 // Reload image list
                 await loadImageList();
             } else {
