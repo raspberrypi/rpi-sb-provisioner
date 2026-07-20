@@ -3021,10 +3021,27 @@ namespace provisioner {
                         if (std::filesystem::exists(sidecarPath)) {
                             std::filesystem::remove(sidecarPath);
                         }
-                        AuditLog::logFileSystemAccess("DELETE", imagePath.string(), true, "", 
+                        AuditLog::logFileSystemAccess("DELETE", imagePath.string(), true, "",
                             "Image file deleted: " + imageName);
                     }
-                    
+
+                    // If the image we just deleted was the selected gold master,
+                    // clear the stale selection so the config never points at a
+                    // missing file. Without this, provisioning fails until the
+                    // value is cleared manually (see issue #325). The WebUI does
+                    // this too, but any client of /delete-image must be safe.
+                    auto goldMaster = provisioner::utils::getConfigValue("GOLD_MASTER_OS_FILE");
+                    if (goldMaster && !goldMaster->empty()) {
+                        std::filesystem::path goldMasterPath(*goldMaster);
+                        if (goldMasterPath == imagePath || goldMasterPath.filename() == imageName) {
+                            if (provisioner::utils::setConfigValue("GOLD_MASTER_OS_FILE", "")) {
+                                LOG_INFO << "Cleared GOLD_MASTER_OS_FILE after deleting selected image: " << imageName;
+                            } else {
+                                LOG_WARN << "Failed to clear GOLD_MASTER_OS_FILE after deleting selected image: " << imageName;
+                            }
+                        }
+                    }
+
                     resp->setStatusCode(drogon::k200OK);
                     callback(resp);
                     return;
