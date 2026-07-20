@@ -286,3 +286,163 @@ HTTP 200 OK with no body on success.
 - For IDP artefacts, the response is parsed from the JSON image descriptor without modifying the artefact
 
 - Returns an `error` field if analysis fails (e.g. missing JSON file, parse error)
+
+# /get-boot-package-info
+
+**HTTP Method:** GET
+
+**Description:** Reports whether a signed boot package (a Debian package, `rpi-sb-boot-update_*_all.deb`) has been generated for a given image. Boot packages are only produced in `secure-boot` or `fde-only` provisioning styles.
+
+**Parameters:**
+
+| Parameter | Type   | Required | Description           |
+|-----------|--------|----------|-----------------------|
+| name      | String | Yes      | Filename of the image |
+
+**Response Format:**
+
+When a boot package is available:
+
+``` json
+{
+  "exists": true,
+  "image_name": "raspios-2025-04-01.img",
+  "status": "available",
+  "package_name": "rpi-sb-boot-update_1.0_all.deb",
+  "package_path": "/srv/rpi-sb-provisioner/images/bootimg-output/rpi-sb-boot-update_1.0_all.deb"
+}
+```
+
+When no boot package has been generated for the image:
+
+``` json
+{
+  "exists": false,
+  "image_name": "raspios-2025-04-01.img",
+  "status": "not_found"
+}
+```
+
+When the current provisioning style does not support boot packages:
+
+``` json
+{
+  "exists": false,
+  "image_name": "raspios-2025-04-01.img",
+  "status": "unsupported"
+}
+```
+
+**Error Responses:**
+
+``` json
+{
+  "error": {
+    "status": 400,
+    "title": "Bad Request",
+    "code": "MISSING_PARAMETER",
+    "detail": "Missing required parameter: name"
+  }
+}
+```
+
+**Notes:**
+
+- `status` is one of `available`, `not_found`, or `unsupported`
+
+- Generated boot packages are stored in `/srv/rpi-sb-provisioner/images/bootimg-output`
+
+- Used by the WebUI to poll for completion after triggering `/generate-boot-package`
+
+# /generate-boot-package
+
+**HTTP Method:** GET
+
+**Description:** Triggers asynchronous generation of a signed boot package (`boot.img`) for the specified image. Only supported in `secure-boot` or `fde-only` provisioning styles.
+
+**Parameters:**
+
+| Parameter | Type   | Required | Description           |
+|-----------|--------|----------|-----------------------|
+| name      | String | Yes      | Filename of the image |
+
+**Response Format:**
+
+``` json
+{
+  "success": true,
+  "message": "Boot package generation started for raspios-2025-04-01.img",
+  "image_name": "raspios-2025-04-01.img"
+}
+```
+
+**Error Responses:**
+
+``` json
+{
+  "error": {
+    "status": 400,
+    "title": "Bad Request",
+    "code": "UNSUPPORTED_PROVISIONING_STYLE",
+    "detail": "Boot package generation only supported in secure-boot or fde-only mode (current: unsigned)"
+  }
+}
+```
+
+``` json
+{
+  "error": {
+    "status": 404,
+    "title": "Not Found",
+    "code": "IMAGE_NOT_FOUND",
+    "detail": "Image file not found: raspios-2025-04-01.img"
+  }
+}
+```
+
+**Notes:**
+
+- Generation runs in the background; the response only confirms the request was accepted
+
+- Poll `/get-boot-package-info` to determine when the package becomes `available`
+
+- Once generated, retrieve the package with `/download-boot-package`
+
+# /download-boot-package
+
+**HTTP Method:** GET
+
+**Description:** Downloads the generated boot package (`.deb`) for the specified image.
+
+**Parameters:**
+
+| Parameter | Type   | Required | Description           |
+|-----------|--------|----------|-----------------------|
+| name      | String | Yes      | Filename of the image |
+
+**Response Format:**
+
+On success, the response is the raw Debian package file with:
+
+- `Content-Type: application/octet-stream`
+
+- `Content-Disposition: attachment; filename="rpi-sb-boot-update_1.0_all.deb"`
+
+**Error Responses:**
+
+``` json
+{
+  "error": {
+    "status": 404,
+    "title": "Not Found",
+    "code": "BOOT_PACKAGE_NOT_FOUND",
+    "detail": "Boot package not found for this image"
+  }
+}
+```
+
+**Notes:**
+
+- Generate the package with `/generate-boot-package` before downloading
+
+- Returns `404` with code `BOOT_PACKAGE_NOT_FOUND` if no matching package exists in the output directory
