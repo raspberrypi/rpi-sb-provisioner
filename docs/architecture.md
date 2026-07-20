@@ -304,7 +304,7 @@ A web service provides monitoring, configuration, and API access.
 
 - `/customisation/*` - Provisioning script management
 
-- `/get-images`, `/analyze-image` - OS image management (traditional and IDP artefacts)
+- `/images/list`, `/analyze-image` - OS image management (traditional and IDP artefacts)
 
 - `/internal/state-changed`, `/internal/manufacturing-recorded` - Local-only notifications from provisioning scripts to refresh WebUI state promptly
 
