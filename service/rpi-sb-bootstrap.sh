@@ -244,13 +244,6 @@ consume_onetime_special_flags() {
 read_config
 compute_image_summary
 
-# Initialize signing context (validates key config, derives public key)
-# This is safe to call even for naked provisioning - it will set SIGNING_MODE="none"
-if ! init_signing_context; then
-    log "Warning: Failed to initialize signing context"
-    # Don't fail here - naked provisioning doesn't need signing
-fi
-
 systemd-notify --ready --status="Provisioning started"
 # Create device-specific lock
 DEVICE_LOCK="${LOCK_BASE}/${TARGET_DEVICE_SERIAL}"
@@ -566,6 +559,16 @@ case ${PROVISIONING_STYLE} in
         log "Warning: Unknown provisioning style: ${PROVISIONING_STYLE}, skipping bootstrap customization"
         ;;
 esac
+
+# Initialize signing context (validates key config, derives public key) now that
+# the bootstrap customisation hook has run. The hook may create the key material
+# or the symlink that CUSTOMER_KEY_FILE_PEM points at, so signing initialisation
+# must follow it (issue #324). Safe to call even for naked provisioning - it will
+# set SIGNING_MODE="none".
+if ! init_signing_context; then
+    log "Warning: Failed to initialize signing context"
+    # Don't fail here - naked provisioning doesn't need signing
+fi
 
 # Determine if we're enforcing secure boot, and if so, prepare the environment & eeprom accordingly.
 if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then 
