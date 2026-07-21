@@ -149,6 +149,10 @@ Format-Specific:
 
 - `RPI_CONNECT_API_KEY` - Must not contain whitespace
 
+Boolean Toggles:
+
+- `RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE` - Enabled by default; rewrites `BOOT_ORDER` so the selected storage device boots first. Stored as `1` (on) or empty (off); the WebUI exposes this as a switch
+
 **Security Measures:**
 
 - **HTTP Method Restriction:** Only accepts POST requests; returns 405 Method Not Allowed for other methods

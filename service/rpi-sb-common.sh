@@ -332,6 +332,131 @@ get_configured_provisioner_name() {
     esac
 }
 
+# Map a storage type to its Raspberry Pi BOOT_ORDER nibble.
+# See https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#BOOT_ORDER
+# Accepts both the raw config values (sd/emmc/nvme) and the resolved block
+# device names (mmcblk0/nvme0n1) for robustness. Returns non-zero for anything
+# unmapped so callers can skip cleanly rather than corrupt the boot order.
+storage_type_to_boot_code() {
+    case "$1" in
+        sd|emmc|mmcblk0) echo "1" ;;   # SD/eMMC share the SDIO boot path
+        nvme|nvme0n1)    echo "6" ;;   # NVMe
+        *)               return 1 ;;
+    esac
+}
+
+# Resolve the storage type (sd/emmc/nvme) to use for boot-order decisions.
+# Prefers the station config, then falls back to the IDP artefact's declared
+# storage type. The fallback is what makes boot-order matching work for IDP
+# runs during bootstrap, where RPI_DEVICE_STORAGE_TYPE is often unset because
+# the IDP provisioner only adopts it from the JSON later in the pipeline.
+# Echoes the resolved type, or nothing if it cannot be determined.
+resolve_effective_storage_type() {
+    if [ -n "${RPI_DEVICE_STORAGE_TYPE:-}" ]; then
+        printf '%s\n' "${RPI_DEVICE_STORAGE_TYPE}"
+        return 0
+    fi
+
+    if [ -n "${GOLD_MASTER_OS_FILE:-}" ] && [ -d "${GOLD_MASTER_OS_FILE}" ] \
+       && command -v jq >/dev/null 2>&1; then
+        _idp_json=$(find "${GOLD_MASTER_OS_FILE}" -maxdepth 1 -name '*.json' -type f 2>/dev/null | head -n1)
+        if [ -n "${_idp_json}" ]; then
+            _st=$(jq -r '.IGmeta.IGconf_device_storage_type // empty' < "${_idp_json}" 2>/dev/null)
+            [ -n "${_st}" ] && printf '%s\n' "${_st}"
+        fi
+    fi
+
+    # Always succeed: an undetermined storage type is a caller-handled
+    # condition (empty output), not a failure that should trip `set -e`.
+    return 0
+}
+
+# Move hex nibble $2 to the least-significant (first-tried) position of the
+# BOOT_ORDER digit string $1, preserving the remaining fallbacks in order.
+# Idempotent: promoting an already-first nibble yields the same string. If the
+# nibble is absent it is appended, adding the device as the first boot option.
+# e.g. _promote_boot_nibble "f2461" 6 -> "f2416"
+_promote_boot_nibble() {
+    _digits="$1"
+    _target="$2"
+    _out=""
+    _removed=0
+    while [ -n "${_digits}" ]; do
+        _c=${_digits%"${_digits#?}"}   # first char
+        _digits=${_digits#?}           # rest
+        if [ "${_removed}" -eq 0 ] && [ "${_c}" = "${_target}" ]; then
+            _removed=1
+            continue
+        fi
+        _out="${_out}${_c}"
+    done
+    # BOOT_ORDER is tried least-significant-nibble first, i.e. right-to-left,
+    # so the promoted device must be the rightmost (last) digit.
+    printf '%s%s\n' "${_out}" "${_target}"
+}
+
+# Whether storage-based BOOT_ORDER matching is enabled. This feature is on by
+# default; it is only disabled when explicitly set to an empty or falsey value.
+# The WebUI toggle stores "1" (on) / "" (off); hand-edited configs may also use
+# 0/false/no/off. An entirely unset variable falls back to on (default-on).
+boot_order_match_storage_enabled() {
+    # Single-dash default: an unset variable falls back to on (default-on),
+    # but an explicitly empty value (how the WebUI stores "off") disables it.
+    case "${RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE-1}" in
+        ''|0|false|FALSE|False|no|NO|No|off|OFF|Off) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+# When storage-based BOOT_ORDER matching is enabled, rewrite the BOOT_ORDER
+# line in the given bootloader config file so the target storage device is the
+# first boot option, keeping the shipped fallbacks (and restart) behind it.
+#
+# Must be called before the config is signed/flashed. No-op (and never fatal)
+# when: the feature is disabled, the storage type can't be resolved or isn't
+# mappable, the config file is missing, or it doesn't contain exactly one
+# BOOT_ORDER line (we leave hand-authored multi-section configs untouched).
+maybe_reorder_boot_order_for_storage() {
+    _config="$1"
+
+    boot_order_match_storage_enabled || return 0
+
+    if [ ! -f "${_config}" ]; then
+        log "BOOT_ORDER reorder: config file '${_config}' not found; skipping"
+        return 0
+    fi
+
+    _stype=$(resolve_effective_storage_type)
+    if [ -z "${_stype}" ]; then
+        log "BOOT_ORDER reorder requested but storage type is unknown; leaving BOOT_ORDER unchanged"
+        return 0
+    fi
+
+    if ! _code=$(storage_type_to_boot_code "${_stype}"); then
+        log "BOOT_ORDER reorder: unsupported storage type '${_stype}'; leaving BOOT_ORDER unchanged"
+        return 0
+    fi
+
+    _count=$(grep -cE '^BOOT_ORDER=' "${_config}" 2>/dev/null || true)
+    if [ "${_count}" != "1" ]; then
+        log "BOOT_ORDER reorder: expected exactly one BOOT_ORDER line in '${_config}', found ${_count}; leaving config untouched"
+        return 0
+    fi
+
+    _val=$(grep -E '^BOOT_ORDER=' "${_config}" | sed 's/^BOOT_ORDER=//')
+    _hex=${_val#0x}
+    _hex=${_hex#0X}
+    _new=$(_promote_boot_nibble "${_hex}" "${_code}")
+
+    if [ "0x${_new}" = "${_val}" ]; then
+        log "BOOT_ORDER already prioritises storage '${_stype}' (${_val}); no change"
+        return 0
+    fi
+
+    sed -i -e "s/^BOOT_ORDER=.*/BOOT_ORDER=0x${_new}/" "${_config}"
+    log "BOOT_ORDER reordered for storage '${_stype}': ${_val} -> 0x${_new}"
+}
+
 # Run the provision-failed hook for programming-rig signalling (e.g. LEDs).
 # HOOK_CONTEXT is "bootstrap" (serial/family/usb/device path args) or
 # "provisioning" (fastboot specifier/serial/storage args).
