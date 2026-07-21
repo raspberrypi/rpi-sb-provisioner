@@ -665,6 +665,11 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                 identifyBootloaderConfig
                 enforceSecureBootloaderConfig
 
+                # Optionally make the selected storage device the first boot
+                # option. Must run before the config is signed below so the
+                # reordered BOOT_ORDER is covered by the signature.
+                maybe_reorder_boot_order_for_storage "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
+
                 if [ ! -e "${DESTINATION_EEPROM_SIGNATURE}" ]; then
                     if [ ! -e "${SOURCE_EEPROM_IMAGE}" ]; then
                         record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
@@ -820,7 +825,11 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                     
                     # Copy unsigned bootcode
                     cp "${BOOTCODE_BINARY_IMAGE}" "${BOOTCODE_FLASHING_NAME}"
-                    
+
+                    # Optionally make the selected storage device the first boot
+                    # option, before the config is baked into the EEPROM below.
+                    maybe_reorder_boot_order_for_storage "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
+
                     # Update EEPROM using the standard update_eeprom function
                     # Calling without pem_file creates an unsigned EEPROM update
                     if [ ! -e "${DESTINATION_EEPROM_SIGNATURE}" ]; then

@@ -94,6 +94,20 @@ This should be your 'gold master' OS image. This can be either:
 
 Specify the kind of storage your target will use. Supported values are `sd`, `emmc`, `nvme`.
 
+## RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE
+
+**Optional, enabled by default**
+
+When enabled, the bootloader `BOOT_ORDER` flashed to the device is rewritten so the selected storage device is the **first** boot option, with the shipped fallbacks (and restart) kept behind it. For example, when provisioning `nvme`, the default `0xf2461` becomes `0xf2416`. `sd` and `emmc` are already first in the default order, so no change is made for those.
+
+This feature is **on by default**. To disable it and use the shipped `BOOT_ORDER` unchanged, set the value to empty or a falsey token (`0`, `false`, `no`, `off`), or turn off the corresponding switch in the WebUI.
+
+The storage type is taken from `RPI_DEVICE_STORAGE_TYPE` when set. For IDP artefacts that do not set it, the storage type declared in the artefact's JSON (`IGconf_device_storage_type`) is used instead, so IDP runs are covered.
+
+> **Note**
+>
+> The reorder is applied to the bootloader configuration during the bootstrap phase, before it is signed and flashed. If you supply your own `RPI_DEVICE_BOOTLOADER_CONFIG_FILE` containing multiple `BOOT_ORDER` lines (for example, section-scoped filters), it is left untouched.
+
 ## RPI_DEVICE_STORAGE_CIPHER
 
 **Optional**

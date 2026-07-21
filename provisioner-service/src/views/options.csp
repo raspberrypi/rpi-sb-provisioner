@@ -953,6 +953,11 @@
     std::string keypairDir = options.count("RPI_DEVICE_RETRIEVE_KEYPAIR") ? options["RPI_DEVICE_RETRIEVE_KEYPAIR"] : "";
     bool lockJtag = options.count("RPI_DEVICE_LOCK_JTAG") && !options["RPI_DEVICE_LOCK_JTAG"].empty();
     bool eepromWp = options.count("RPI_DEVICE_EEPROM_WP_SET") && !options["RPI_DEVICE_EEPROM_WP_SET"].empty();
+    // Boot-order matching is on by default: absent key -> on; only an empty or
+    // falsey value turns it off (mirrors boot_order_match_storage_enabled() in
+    // rpi-sb-common.sh so the switch state matches provisioning behaviour).
+    std::string bootOrderMatchRaw = options.count("RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE") ? options["RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE"] : "1";
+    bool bootOrderMatchStorage = !(bootOrderMatchRaw.empty() || bootOrderMatchRaw == "0" || bootOrderMatchRaw == "false" || bootOrderMatchRaw == "no" || bootOrderMatchRaw == "off");
     std::string rpibootGpio = options.count("RPI_DEVICE_RPIBOOT_GPIO") ? options["RPI_DEVICE_RPIBOOT_GPIO"] : "";
     std::string connectApiKey = options.count("RPI_CONNECT_API_KEY") ? options["RPI_CONNECT_API_KEY"] : "";
     std::string connectDescription = options.count("RPI_CONNECT_DESCRIPTION") ? options["RPI_CONNECT_DESCRIPTION"] : "";
@@ -1093,6 +1098,19 @@
                     <span class="inline-help-icon">&#9432;</span>
                     <span>Custom bootloader configuration file. A sensible default is provided if not specified.</span>
                 </div>
+            </div>
+
+            <!-- Match Boot Order to Storage Toggle -->
+            <div class="toggle-group">
+                <label class="toggle-switch">
+                    <input type="checkbox" id="RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE" name="RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE" <%c++ if(bootOrderMatchStorage) $$ << "checked"; %> onchange="validateAndSaveField('RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE')">
+                    <span class="toggle-slider"></span>
+                </label>
+                <div class="toggle-content">
+                    <div class="toggle-title">Boot selected storage first</div>
+                    <div class="toggle-description">Rewrites the bootloader BOOT_ORDER so the selected storage device is tried first, keeping the other devices as fallbacks. Enabled by default. For IDP artefacts, the storage type is taken from the artefact when not set here.</div>
+                </div>
+                <div id="feedback-RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE" class="field-feedback"></div>
             </div>
         </div>
 
