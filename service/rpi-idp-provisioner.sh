@@ -43,6 +43,7 @@ read_config
 compute_image_summary
 
 CLEANUP_DONE=0
+DELETE_PRIVATE_TMPDIR=
 
 check_command_exists() {
     command_to_test=$1
@@ -157,6 +158,17 @@ cleanup() {
     CLEANUP_DONE=1
 
     set +e
+
+    # Only remove the workdir if we created it ourselves; a station-configured
+    # RPI_SB_WORKDIR is a deliberate cross-run cache and must survive.
+    if [ -n "${DELETE_PRIVATE_TMPDIR}" ]; then
+        announce_start "Deleting customised intermediates"
+        # shellcheck disable=SC2086
+        rm -rf "${RPI_SB_WORKDIR}" ${DEBUG}
+        sync
+        DELETE_PRIVATE_TMPDIR=
+        announce_stop "Deleting customised intermediates"
+    fi
 
     if [ "${return_value}" -ne 0 ]; then
         run_provision_failed_hook "idp-provisioner" "provisioning"
@@ -298,6 +310,26 @@ announce_stop "IDP pre-flight validation"
 # device name rather than the raw IDP value.
 run_customisation_script "idp-provisioner" "provision-started" "${FASTBOOT_DEVICE_SPECIFIER}" "${TARGET_DEVICE_SERIAL}" "${RPI_DEVICE_STORAGE_TYPE}"
 
+### Working directory
+#
+# RPI_SB_WORKDIR is where we keep anything worth reusing between provisioning
+# runs. It is optional -- when a station doesn't configure one we create an
+# ephemeral directory and remove it on exit, exactly as the other provisioners
+# do. Because an IDP artefact ships its partitions pre-built, the only thing
+# the IDP path currently caches is the signed boot slot.
+announce_start "Finding the cache directory"
+if [ -z "${RPI_SB_WORKDIR}" ]; then
+    RPI_SB_WORKDIR=$(make_temp_dir "rpi-sb-provisioner.XXX")
+    DELETE_PRIVATE_TMPDIR="true"
+    announce_stop "Finding the cache directory: Created ${RPI_SB_WORKDIR} (none configured)"
+elif [ ! -d "${RPI_SB_WORKDIR}" ]; then
+    RPI_SB_WORKDIR=$(make_temp_dir "rpi-sb-provisioner.XXX")
+    DELETE_PRIVATE_TMPDIR="true"
+    announce_stop "Finding the cache directory: Created ${RPI_SB_WORKDIR} (configured path isn't a directory)"
+else
+    announce_stop "Finding the cache directory: Using specified name"
+fi
+
 ### Boot slot signing for secure-boot
 #
 # A signed-boot Pi 5 EEPROM rejects raw firmware/kernel files in the slot
@@ -321,10 +353,6 @@ if [ "${PROVISIONING_STYLE}" = "secure-boot" ]; then
         die "RPI_DEVICE_FAMILY not set; required for rpi-make-boot-image"
     fi
 
-    if [ -z "${RPI_SB_WORKDIR}" ] || [ ! -d "${RPI_SB_WORKDIR}" ]; then
-        die "RPI_SB_WORKDIR is not a usable directory: '${RPI_SB_WORKDIR}'"
-    fi
-
     SIGNED_CACHE_DIR="${RPI_SB_WORKDIR}/idp-signed-boot"
     mkdir -p "${SIGNED_CACHE_DIR}"
 
@@ -333,21 +361,39 @@ if [ "${PROVISIONING_STYLE}" = "secure-boot" ]; then
     # from one transform.
     PUBKEY_HASH=$(sha256sum "${CUSTOMER_PUBLIC_KEY_FILE}" | awk '{print $1}')
 
-    # Find every partitionimages entry flagged bootable and collect its source
-    # simg filename. rpi-image-gen sets bootable="true" (string, not bool) on
-    # the slot VFAT(s); it's the structurally correct discriminator because it
-    # sits on the same object whose .simage we need, and the bootloader never
-    # looks inside encrypted groups so we don't have to walk the provisionmap
-    # to skip them. A/B images legitimately list the same simage twice
-    # (boot_a and boot_b both point at boot.vfat.sparse), so we dedupe.
+    # Collect the source simg filename of every boot-role partition.
+    #
+    # Discovery is by provisionmap .static.role == "boot" (walked recursively,
+    # so top-level partitions, slots and encrypted groups are all covered).
+    # partitionimages.bootable is NOT a usable discriminator on its own:
+    # rpi-image-gen legitimately flags bootconfig as bootable="true" because
+    # the EEPROM reads autoboot.txt out of it, so a bootable-based predicate
+    # sweeps bootconfig into the signing set. That both breaks A/B slot
+    # selection (autoboot.txt would end up bundled inside boot.img instead of
+    # sitting in the filesystem where the bootloader looks for it) and, in
+    # practice, aborts the run outright -- bootconfig's ~64 bytes of content
+    # size the inner FAT below mkfs.fat's viable floor.
+    #
+    # Flat (non-slotted) layouts carry no roles at all, so fall back to the
+    # bootable flag there; those images have no bootconfig to confuse us.
+    #
+    # A/B images legitimately list the same simage twice (boot_a and boot_b
+    # both point at boot.sparse), so we dedupe.
     UNIQUE_SOURCE_SIMGS=$(jq -r '
-        [ .layout.partitionimages | to_entries[]
-          | select(.value.bootable == "true")
-          | .value.simage // empty ] | unique | .[]
+        [ .layout.provisionmap? // [] | .. | objects
+          | select(has("image") and (.static?.role? == "boot"))
+          | .image ] as $bootrole
+        | ( [ .layout.partitionimages | to_entries[]
+              | select(.key as $k | $bootrole | index($k))
+              | .value.simage // empty ] | unique ) as $byrole
+        | ( [ .layout.partitionimages | to_entries[]
+              | select(.value.bootable == "true")
+              | .value.simage // empty ] | unique ) as $byflag
+        | ( if ($bootrole | length) > 0 then $byrole else $byflag end ) | .[]
     ' < "${IDP_JSON}")
 
     if [ -z "${UNIQUE_SOURCE_SIMGS}" ]; then
-        die "secure-boot configured but no bootable partitions in ${IDP_JSON}"
+        die "secure-boot configured but no boot-role partitions in ${IDP_JSON}"
     fi
 
     for src_simg in ${UNIQUE_SOURCE_SIMGS}; do
