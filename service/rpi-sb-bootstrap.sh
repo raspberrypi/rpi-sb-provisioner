@@ -404,7 +404,14 @@ update_eeprom() {
         TMP_CONFIG_SIG="$(mktemp)"
         log "Signing bootloader config"
         # shellcheck disable=SC2046
-        rpi-eeprom-digest $(get_eeprom_digest_sign_args) -i "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" -o "${TMP_CONFIG_SIG}"
+        log_stderr rpi-eeprom-digest $(get_eeprom_digest_sign_args) -i "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" -o "${TMP_CONFIG_SIG}"
+        # This signature is embedded in the EEPROM image below (-d), so an empty
+        # one would be baked into the device rather than merely written to disk.
+        if ! validate_sig_file "${TMP_CONFIG_SIG}" "bootloader config signature"; then
+            rm -f "${TMP_CONFIG_SIG}"
+            record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
+            die "Failed to sign the bootloader config - refusing to build an EEPROM image with an invalid config signature"
+        fi
 
         # shellcheck disable=SC2086
         cat "${TMP_CONFIG_SIG}" ${DEBUG}
@@ -418,10 +425,10 @@ update_eeprom() {
                 cd "${customer_signed_bootcode_binary_workdir}" || return
                 rpi-eeprom-config -x "${src_image}"
                 # shellcheck disable=SC2046
-                rpi-sign-bootcode --debug -c 2712 -i bootcode.bin -o bootcode.bin.signed $(get_sign_bootcode_key_args) -v 0 -n 16
+                log_stderr rpi-sign-bootcode --debug -c 2712 -i bootcode.bin -o bootcode.bin.signed $(get_sign_bootcode_key_args) -v 0 -n 16
                 if isABCapableImage "${src_image}"; then
                     # shellcheck disable=SC2046
-                    rpi-sign-bootcode --debug -c 2712 -i bootsys -o bootsys.signed $(get_sign_bootcode_key_args) -v 0 -n 16
+                    log_stderr rpi-sign-bootcode --debug -c 2712 -i bootsys -o bootsys.signed $(get_sign_bootcode_key_args) -v 0 -n 16
                     rpi-eeprom-config \
                         --out "${dst_image}.intermediate" \
                         --bootcode "${customer_signed_bootcode_binary_workdir}/bootcode.bin.signed" \
@@ -593,7 +600,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                     BOOTCODE_BINARY_IMAGE="${FIRMWARE_IMAGE_DIR}/recovery.bin"
                     BOOTCODE_FLASHING_NAME="${SECURE_BOOTLOADER_DIRECTORY}/bootcode5.bin"
                     # shellcheck disable=SC2046
-                    rpi-sign-bootcode --debug -c 2712 -i "${BOOTCODE_BINARY_IMAGE}" -o "${BOOTCODE_FLASHING_NAME}" $(get_sign_bootcode_key_args) -v 0 -n 16
+                    log_stderr rpi-sign-bootcode --debug -c 2712 -i "${BOOTCODE_BINARY_IMAGE}" -o "${BOOTCODE_FLASHING_NAME}" $(get_sign_bootcode_key_args) -v 0 -n 16
                 else
                     log "Warning: Special re-provisioning only supported on Pi 5 (2712), skipping for device family ${TARGET_DEVICE_FAMILY}"
                 fi
@@ -616,8 +623,14 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
             [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal rpiboot -j "${METADATA_DIR}" -d "${SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
             extract_board_type
         else
+            # NB: config.txt is the marker the branch above uses to decide the
+            # cache is complete, so it is deliberately *not* created here. It is
+            # written once the EEPROM image and its signature exist and have
+            # been validated (see "program_pubkey=1" below). Creating it up
+            # front meant a run that died mid-build left the directory looking
+            # finished, and every subsequent attempt re-flashed the partial
+            # artefacts it contained (issue #337).
             log "Creating secure bootloader for future reuse"
-            touch "${SECURE_BOOTLOADER_DIRECTORY}/config.txt"
 
             announce_start "Setting up the environment for a signed-boot capable device"
             if [ -z "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" ]; then
@@ -673,6 +686,18 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                 # reordered BOOT_ORDER is covered by the signature.
                 maybe_reorder_boot_order_for_storage "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
 
+                # Never reuse a cached signature on the strength of it merely
+                # existing: a failed signing run leaves behind a file with the
+                # hash and timestamp but no rsa2048 line, which would then be
+                # re-flashed on every attempt for as long as the cache lives.
+                if [ -e "${DESTINATION_EEPROM_SIGNATURE}" ]; then
+                    if [ ! -e "${DESTINATION_EEPROM_IMAGE}" ] || \
+                       ! validate_sig_file "${DESTINATION_EEPROM_SIGNATURE}" "cached ${DESTINATION_EEPROM_SIGNATURE}"; then
+                        log "Discarding unusable cached EEPROM signature, regenerating"
+                        rm -f "${DESTINATION_EEPROM_SIGNATURE}"
+                    fi
+                fi
+
                 if [ ! -e "${DESTINATION_EEPROM_SIGNATURE}" ]; then
                     if [ ! -e "${SOURCE_EEPROM_IMAGE}" ]; then
                         record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
@@ -680,7 +705,12 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                     else
                         update_eeprom "${SOURCE_EEPROM_IMAGE}" "${DESTINATION_EEPROM_IMAGE}"
                         # shellcheck disable=SC2046
-                        rpi-eeprom-digest $(get_eeprom_digest_sign_args) -i "${DESTINATION_EEPROM_IMAGE}" -o "${DESTINATION_EEPROM_SIGNATURE}"
+                        log_stderr rpi-eeprom-digest $(get_eeprom_digest_sign_args) -i "${DESTINATION_EEPROM_IMAGE}" -o "${DESTINATION_EEPROM_SIGNATURE}"
+                        if ! validate_sig_file "${DESTINATION_EEPROM_SIGNATURE}"; then
+                            rm -f "${DESTINATION_EEPROM_SIGNATURE}"
+                            record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
+                            die "Failed to sign the EEPROM image - refusing to flash a bootloader the device will reject"
+                        fi
                     fi
                 else
                     log "Using existing EEPROM signature: ${DESTINATION_EEPROM_SIGNATURE}"
@@ -725,7 +755,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                         # Additionally, this only works on Raspberry Pi 5-family devices.
                         log "Re-signing bootcode for special re-provisioning case"
                         # shellcheck disable=SC2046
-                        rpi-sign-bootcode --debug -c 2712 -i "${BOOTCODE_BINARY_IMAGE}" -o "${BOOTCODE_FLASHING_NAME}" $(get_sign_bootcode_key_args) -v 0 -n 16
+                        log_stderr rpi-sign-bootcode --debug -c 2712 -i "${BOOTCODE_BINARY_IMAGE}" -o "${BOOTCODE_FLASHING_NAME}" $(get_sign_bootcode_key_args) -v 0 -n 16
                     else
                         log "Warning: Special re-provisioning only supported on Pi 5 (2712), skipping for device family ${TARGET_DEVICE_FAMILY}"
                     fi
@@ -751,7 +781,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                     cd "${FASTBOOT_SIGN_DIR}"
                     tar -vxf /usr/share/rpiboot/mass-storage-gadget64/bootfiles.bin
                     # shellcheck disable=SC2046
-                    rpi-sign-bootcode --debug -c 2712 -i 2712/bootcode5.bin -o 2712/bootcode5.bin.signed $(get_sign_bootcode_key_args) -v 0 -n 16
+                    log_stderr rpi-sign-bootcode --debug -c 2712 -i 2712/bootcode5.bin -o 2712/bootcode5.bin.signed $(get_sign_bootcode_key_args) -v 0 -n 16
                     mv -f "2712/bootcode5.bin.signed" "2712/bootcode5.bin"
                     tar -vcf "${RPI_SB_WORKDIR}/bootfiles.bin" -- *
                     cd -
@@ -763,12 +793,26 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
             esac
         fi
 
+        # As with the EEPROM signature above, a boot.sig left behind by a run
+        # whose signing step failed is worse than no cache at all - it would be
+        # staged and shipped to the device, which would then reject boot.img.
+        if [ -f "${RPI_SB_WORKDIR}/boot.sig" ] && \
+           ! validate_sig_file "${RPI_SB_WORKDIR}/boot.sig" "cached fastboot boot.sig"; then
+            log "Discarding unusable cached fastboot boot.sig, re-signing"
+            rm -f "${RPI_SB_WORKDIR}/boot.sig"
+        fi
+
         if [ ! -f "${RPI_SB_WORKDIR}/boot.img" ] || [ ! -f "${RPI_SB_WORKDIR}/boot.sig" ]; then
             announce_start "Signing fastboot image"
             cp "$(get_fastboot_gadget)" "${RPI_SB_WORKDIR}"/boot.img
             sha256sum "${RPI_SB_WORKDIR}"/boot.img | awk '{print $1}' > "${RPI_SB_WORKDIR}"/boot.sig
             printf 'rsa2048: ' >> "${RPI_SB_WORKDIR}"/boot.sig
             sign_image_hex "${RPI_SB_WORKDIR}"/boot.img >> "${RPI_SB_WORKDIR}"/boot.sig
+            if ! validate_sig_file "${RPI_SB_WORKDIR}/boot.sig" "fastboot boot.sig"; then
+                rm -f "${RPI_SB_WORKDIR}/boot.sig"
+                record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
+                die "Failed to sign the fastboot boot.img - refusing to stage an image the device will reject"
+            fi
             announce_stop "Signing fastboot image"
         fi
 
