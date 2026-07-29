@@ -214,6 +214,8 @@ BOOT_SIG="${TMP_DIR}/boot.sig"
 sha256sum "${BOOT_IMG}" | awk '{print $1}' > "${BOOT_SIG}"
 printf 'rsa2048: ' >> "${BOOT_SIG}"
 sign_image_hex "${BOOT_IMG}" >> "${BOOT_SIG}"
+validate_sig_file "${BOOT_SIG}" "boot.sig" \
+    || die "Failed to sign boot.img - refusing to emit a boot image the device will reject"
 
 log "Created boot.sig: ${BOOT_SIG}"
 announce_stop "boot.img signing"
