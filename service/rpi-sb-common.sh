@@ -167,6 +167,36 @@ announce_stop() {
     log "================================================================================"
 }
 
+# Run a command, folding anything it writes to stderr into the caller's log.
+#
+# Signing is performed by wrapper scripts that rpi-eeprom-digest and
+# rpi-sign-bootcode invoke as subprocesses, so their diagnostics (rpi-sb-keyhelper's
+# "cannot access PKCS#11 key", "failed to unwrap stored PKCS#11 PIN", ...) go to
+# the unit's stderr and land in the journal - not in the per-device log the
+# operator is actually reading. Without them a signing failure shows up only as
+# an unexplained abort, or worse as a silently unsigned artefact (issue #337).
+#
+# Returns the command's exit status. errexit is suspended for the command itself
+# (it runs as an `if` condition) so stderr is always logged before the caller
+# decides what to do with the failure.
+log_stderr() {
+    _ls_err="$(mktemp)" || { "$@"; return $?; }
+
+    if "$@" 2>"${_ls_err}"; then
+        _ls_rc=0
+    else
+        _ls_rc=$?
+    fi
+
+    # `|| [ -n ... ]` so a final line without a trailing newline is not dropped.
+    while IFS= read -r _ls_line || [ -n "${_ls_line}" ]; do
+        log "${_ls_line}"
+    done < "${_ls_err}"
+    rm -f "${_ls_err}"
+
+    return "${_ls_rc}"
+}
+
 read_config() {
     # Source package defaults first
     if [ -f /usr/share/rpi-sb-provisioner/defaults/config ]; then
@@ -792,6 +822,58 @@ sign_image_hex() {
     esac
 }
 
+# Assert that a .sig sidecar actually carries a usable RSA-2048 signature.
+#
+# Every producer of these files builds the signature inside a command
+# substitution - `echo "rsa2048: $(signer ...)"` - both in rpi-eeprom-digest
+# upstream and (historically) here. Command substitution discards the signer's
+# exit status, so when signing fails the hash/ts lines are still written, an
+# empty `rsa2048:` line is appended, and the producer exits 0. errexit never
+# fires and the result is a structurally plausible file that the device only
+# rejects at boot, from RECOVERY, with "Failed to parse signature file" ->
+# "Bad signature pieeprom.sig" (issue #337). Check the artefact instead of
+# trusting the exit status.
+#
+# Arguments:
+#   $1 - path to the .sig file
+#   $2 - optional description used in error messages (defaults to the path)
+#
+# Returns 0 only if the file contains an rsa2048 line of exactly 512
+# hexadecimal characters. The Raspberry Pi boot ROM accepts nothing but
+# RSA-2048 (256 bytes) here, so a signature of any other length is unusable
+# regardless of how it was produced.
+validate_sig_file() {
+    _sig_file="$1"
+    _sig_desc="${2:-$1}"
+
+    if [ ! -s "${_sig_file}" ]; then
+        log "ERROR: signature file is missing or empty: ${_sig_desc}"
+        return 1
+    fi
+
+    _sig_hex="$(sed -n 's/^rsa2048:[[:space:]]*//p' "${_sig_file}" | tr -d '\r\n')"
+
+    if [ -z "${_sig_hex}" ]; then
+        log "ERROR: no rsa2048 signature in ${_sig_desc} - the signing key produced no output."
+        log "ERROR: for a PKCS#11 token, check for rpi-sb-keyhelper errors above (token present? PIN saved and correct? URI valid?)."
+        return 1
+    fi
+
+    if [ "${#_sig_hex}" -ne 512 ]; then
+        log "ERROR: malformed rsa2048 signature in ${_sig_desc}: expected 512 hex characters (RSA-2048), got ${#_sig_hex}"
+        return 1
+    fi
+
+    case "${_sig_hex}" in
+        *[!0-9a-fA-F]*)
+            log "ERROR: rsa2048 signature in ${_sig_desc} is not hexadecimal"
+            return 1
+            ;;
+    esac
+
+    return 0
+}
+
 # Get arguments for rpi-eeprom-digest signing operations
 # Usage: rpi-eeprom-digest $(get_eeprom_digest_sign_args) -i <input> -o <output>
 #
@@ -1162,6 +1244,8 @@ prepare_signed_boot_simg() {
     printf 'rsa2048: ' >> "${_boot_sig}"
     sign_image_hex "${_boot_img}" >> "${_boot_sig}" \
         || { umount "${_src_mnt}" 2>/dev/null; _fail "sign boot.img"; return 1; }
+    validate_sig_file "${_boot_sig}" "IDP boot.sig" \
+        || { umount "${_src_mnt}" 2>/dev/null; _fail "validate boot.sig"; return 1; }
 
     umount "${_src_mnt}" || _fail "umount source vfat" || return 1
 
