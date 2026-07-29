@@ -150,9 +150,22 @@ writeSig() {
    echo "ts: $(date -u +%s)" >> "${OUTPUT}"
 
    if signing_available; then
-      # sign_image_hex emits hex directly; command substitution strips its
-      # trailing newline. Covers every mode, including device-wrapped PEM keys.
-      echo "rsa2048: $(sign_image_hex "${IMAGE}")" >> "${OUTPUT}"
+      # Capture into a variable first, and check the status. Written inline as
+      # `echo "rsa2048: $(sign_image_hex ...)"` the signer's exit status is
+      # discarded and errexit never sees it, so a signing failure would append
+      # an empty rsa2048 line and produce a file the device rejects only at
+      # boot (issue #337). Command substitution strips the trailing newline
+      # sign_image_hex emits. Covers every mode, including wrapped PEM keys.
+      if ! _writesig_hex="$(sign_image_hex "${IMAGE}")"; then
+         rm -f "${SIG_TMP}"
+         die "Failed to sign ${IMAGE}"
+      fi
+      echo "rsa2048: ${_writesig_hex}" >> "${OUTPUT}"
+
+      if ! validate_sig_file "${OUTPUT}"; then
+         rm -f "${SIG_TMP}" "${OUTPUT}"
+         die "Refusing to use an invalid signature file for ${IMAGE}"
+      fi
    fi
    rm -f "${SIG_TMP}"
 }
@@ -512,6 +525,8 @@ prepare_pre_boot_auth_images() {
         sha256sum "${TMP_DIR}"/boot.img | awk '{print $1}' > "${TMP_DIR}"/boot.sig
         printf 'rsa2048: ' >> "${TMP_DIR}"/boot.sig
         sign_image_hex "${TMP_DIR}"/boot.img >> "${TMP_DIR}"/boot.sig
+        validate_sig_file "${TMP_DIR}/boot.sig" "boot.sig" \
+            || die "Failed to sign boot.img - refusing to write a boot partition the device will reject"
         announce_stop "boot.img signing"
 
         announce_start "Boot Image partition extraction"
