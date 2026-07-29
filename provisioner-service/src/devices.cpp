@@ -133,7 +133,6 @@ namespace provisioner {
         std::condition_variable scanCv;
         bool scanRequested{false};
         std::thread eventSourceThread;
-        sd_event *eventSourceLoop{nullptr};
 
         void requestScan() {
             {
@@ -1168,13 +1167,24 @@ namespace provisioner {
             return 0;
         }
 
-        // Hosts sd_device_monitor (USB hotplug) in a single sd_event loop.
+        // Hosts sd_device_monitor (USB hotplug) in an sd_event loop that we
+        // step manually (see the shutdown note below).
         // State.db changes used to be observed via inotify on the state
         // directory, but the provisioning scripts now POST to
         // /internal/state-changed after each row write, so the watch is
         // gone — the self-trigger loop with our own SQLite reads goes
-        // with it. Shutdown is driven from ~Devices() via sd_event_exit(),
-        // which is thread-safe.
+        // with it.
+        //
+        // Shutdown: sd_event objects are NOT thread-safe and a blocked
+        // sd_event_loop() cannot be woken from another thread (sd_event_exit()
+        // only sets a flag; it does not interrupt the in-kernel poll). So
+        // rather than call sd_event_loop() and rely on a cross-thread exit,
+        // we step the loop with a bounded timeout and re-check the shutdown
+        // flag between iterations. Real uevents still wake the poll instantly;
+        // the timeout only bounds how long ~Devices() waits for us to notice
+        // topologyRunning has been cleared. Without this the join() in
+        // ~Devices() blocked forever and systemd SIGKILLed us after the stop
+        // timeout (see issue #334).
         void eventSourceWorker() {
             LOG_INFO << "Event source worker started";
 
@@ -1183,13 +1193,11 @@ namespace provisioner {
                 LOG_ERROR << "sd_event_new failed; falling back to timer-only scanning";
                 return;
             }
-            eventSourceLoop = event;
 
             sd_device_monitor *monitor = nullptr;
             if (sd_device_monitor_new(&monitor) < 0) {
                 LOG_ERROR << "sd_device_monitor_new failed";
                 sd_event_unref(event);
-                eventSourceLoop = nullptr;
                 return;
             }
             if (sd_device_monitor_filter_add_match_subsystem_devtype(monitor, "usb", nullptr) < 0) {
@@ -1200,15 +1208,22 @@ namespace provisioner {
                 LOG_ERROR << "sd_device_monitor_start failed";
                 sd_device_monitor_unref(monitor);
                 sd_event_unref(event);
-                eventSourceLoop = nullptr;
                 return;
             }
 
-            sd_event_loop(event);
+            // Step the loop in 1s slices so we notice topologyRunning being
+            // cleared on shutdown. A negative return is a real error; 0 (idle
+            // timeout) and positive (event dispatched) both just loop again.
+            while (topologyRunning) {
+                int r = sd_event_run(event, static_cast<uint64_t>(1000000));
+                if (r < 0) {
+                    LOG_ERROR << "sd_event_run failed: " << strerror(-r);
+                    break;
+                }
+            }
 
             sd_device_monitor_unref(monitor);
             sd_event_unref(event);
-            eventSourceLoop = nullptr;
             LOG_INFO << "Event source worker stopped";
         }
     }
@@ -1240,13 +1255,16 @@ namespace provisioner {
     }
 
     Devices::~Devices() {
-        // Stop topology watcher and event sources. Order: flip the flag,
-        // wake the topology worker via the cv, tell sd_event to exit, then
-        // join both threads.
+        // Stop topology watcher and event sources. Both workers observe
+        // topologyRunning: the topology worker also waits on scanCv (woken
+        // here), and the event-source worker polls sd_event with a bounded
+        // timeout (see eventSourceWorker). We deliberately do NOT call
+        // sd_event_exit() from this thread — sd_event is not thread-safe and
+        // it cannot wake a blocked loop anyway; clearing the flag is what
+        // stops it.
         if (topologyRunning) {
             topologyRunning = false;
             scanCv.notify_all();
-            if (eventSourceLoop) sd_event_exit(eventSourceLoop, 0);
             if (topologyThread.joinable()) topologyThread.join();
             if (eventSourceThread.joinable()) eventSourceThread.join();
         }
