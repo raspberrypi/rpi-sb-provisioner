@@ -378,20 +378,47 @@ isABCapableImage() {
 }
 
 # This function is adapted from the functions in the usbboot repo.
-# It handles both signed (secure-boot) and unsigned (naked) EEPROM updates
-# Uses the global signing context (must call init_signing_context first)
+# It handles both signed (secure-boot) and unsigned (naked, fde-only) EEPROM
+# updates. Signing uses the global signing context, so init_signing_context()
+# must have been called first.
+#
+# Whether to sign is decided by the caller and deliberately *not* inferred from
+# signing_available(): a customer key being configured on the provisioning
+# station says nothing about whether this device's OTP will carry the matching
+# key hash. Only the secure-boot flow writes program_pubkey=1, so only it may
+# ask for a signed EEPROM. A signed config - and, on 2712, signed
+# bootcode/bootsys - written while CUSTOMER_KEY_HASH is still blank produces a
+# device that does not boot at all: solid red power LED, no green activity, no
+# diagnostic blink code (issue #319).
+#
+# The device's actual OTP state would be the better signal, but it is not
+# knowable at this point: the rpiboot metadata parsed by extract_board_type()
+# does not exist until the recovery flash that this image is built for has run.
 #
 # Arguments:
 #   $1 - src_image: Source EEPROM image
 #   $2 - dst_image: Destination EEPROM image
+#   $3 - sign_mode: "sign" to sign the bootloader config (plus bootcode/bootsys
+#        on 2712) and embed the customer public key; anything else builds an
+#        unsigned image
 update_eeprom() {
     src_image="$1"
     dst_image="$2"
+    sign_mode="$3"
     sign_args=""
+    TMP_CONFIG_SIG=""
 
-    log "update_eeprom() src_image: \"${src_image}\""
+    log "update_eeprom() src_image: \"${src_image}\" sign_mode: \"${sign_mode}\""
 
-    if signing_available; then
+    if [ "${sign_mode}" = "sign" ]; then
+        # Caller asked for a signed EEPROM without the key material to produce
+        # one. Building it unsigned instead would hand a secure-boot device an
+        # EEPROM it must reject, so fail loudly rather than silently downgrade.
+        if ! signing_available; then
+            record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
+            die "Signed EEPROM requested but no signing key is configured - refusing to build an unsigned EEPROM for a secure-boot device"
+        fi
+
         if ! grep -q "SIGNED_BOOT=1" "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"; then
             # If the OTP bit to require secure boot are set then then
             # SIGNED_BOOT=1 is implicitly set in the EEPROM config.
@@ -449,6 +476,7 @@ update_eeprom() {
         esac
     else
         # Unsigned mode: just copy the source as intermediate
+        log "Building an unsigned EEPROM image (no config signature, no signed bootcode)"
         cp "${src_image}" "${dst_image}.intermediate"
     fi
 
@@ -463,7 +491,7 @@ update_eeprom() {
         die "Failed to update EEPROM image"
     fi
     rm -f "${dst_image}.intermediate"
-    rm -f "${TMP_CONFIG_SIG}"
+    [ -n "${TMP_CONFIG_SIG}" ] && rm -f "${TMP_CONFIG_SIG}"
     set +x
 
 cat <<EOF
@@ -624,6 +652,18 @@ if ! init_signing_context; then
     # Don't fail here - naked provisioning doesn't need signing
 fi
 
+# A signing key left configured alongside a non-secure-boot style is a common
+# leftover when a station is switched between provisioning styles, and it used
+# to be enough on its own to produce a signed EEPROM for a device whose OTP was
+# never programmed (issue #319). The key is now ignored outside secure boot, so
+# say so - a station that thought it was provisioning secure-boot devices should
+# not have to discover it from the absence of signatures.
+if signing_available && [ "${PROVISIONING_STYLE}" != "secure-boot" ]; then
+    log "Warning: A customer signing key is configured, but PROVISIONING_STYLE=${PROVISIONING_STYLE}."
+    log "Warning: The key will NOT be used - only secure-boot provisioning programs the key hash into device OTP."
+    log "Warning: Set PROVISIONING_STYLE=secure-boot if you intended to provision signed-boot devices."
+fi
+
 # Determine if we're enforcing secure boot, and if so, prepare the environment & eeprom accordingly.
 if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then 
     if [ "${PROVISIONING_STYLE}" = "secure-boot" ]; then
@@ -750,7 +790,11 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                         record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
                         die "No Raspberry Pi EEPROM file to use as key vector"
                     else
-                        update_eeprom "${SOURCE_EEPROM_IMAGE}" "${DESTINATION_EEPROM_IMAGE}"
+                        # Signed: this is the only flow that writes
+                        # program_pubkey=1 (below), so the same recovery run
+                        # programs the key hash the signatures are verified
+                        # against.
+                        update_eeprom "${SOURCE_EEPROM_IMAGE}" "${DESTINATION_EEPROM_IMAGE}" "sign"
                         # shellcheck disable=SC2046
                         log_stderr rpi-eeprom-digest $(get_eeprom_digest_sign_args) -i "${DESTINATION_EEPROM_IMAGE}" -o "${DESTINATION_EEPROM_SIGNATURE}"
                         if ! validate_sig_file "${DESTINATION_EEPROM_SIGNATURE}"; then
@@ -924,16 +968,21 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                     # option, before the config is baked into the EEPROM below.
                     maybe_reorder_boot_order_for_storage "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
 
-                    # Update EEPROM using the standard update_eeprom function
-                    # Calling without pem_file creates an unsigned EEPROM update
+                    # Update EEPROM using the standard update_eeprom function.
+                    # Always unsigned, whatever key the station has configured:
+                    # nothing in this branch writes program_pubkey=1, so the
+                    # device OTP keeps a blank CUSTOMER_KEY_HASH and a signed
+                    # EEPROM would leave it unbootable (issue #319). This covers
+                    # every non-secure-boot style, not just naked - fde-only
+                    # reaches the same code with the same bootloader.naked
+                    # config, and so does any unrecognised style.
                     if [ ! -e "${DESTINATION_EEPROM_SIGNATURE}" ]; then
                         if [ ! -e "${SOURCE_EEPROM_IMAGE}" ]; then
                             record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
                             die "No Raspberry Pi EEPROM file found for update"
                         else
                             log "Updating EEPROM with bootloader configuration (unsigned)"
-                            # Call update_eeprom - signing_available() will be false for naked mode
-                            update_eeprom "${SOURCE_EEPROM_IMAGE}" "${DESTINATION_EEPROM_IMAGE}"
+                            update_eeprom "${SOURCE_EEPROM_IMAGE}" "${DESTINATION_EEPROM_IMAGE}" "unsigned"
                             
                             # Create unsigned signature using rpi-eeprom-digest
                             # Without -k/-H parameter, creates hash + timestamp only
