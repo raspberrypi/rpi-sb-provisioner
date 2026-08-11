@@ -920,9 +920,17 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                 mkdir -p "${NON_SECURE_BOOTLOADER_DIRECTORY}"
                 
                 if [ ! -f "${NON_SECURE_BOOTLOADER_DIRECTORY}/config.txt" ]; then
+                    # NB: config.txt is the marker this branch uses to decide the
+                    # cache is complete, so it is deliberately *not* created
+                    # here. It is written once the EEPROM image and its digest
+                    # exist (see "set_reboot_order" below), immediately before
+                    # the recovery flash that consumes it. Creating it up front
+                    # meant a run that died mid-build left the directory looking
+                    # finished, and every subsequent attempt skipped the EEPROM
+                    # update entirely - the same trap #337 fixed for the
+                    # secure-boot branch above.
                     log "Creating non-secure bootloader for EEPROM update"
-                    touch "${NON_SECURE_BOOTLOADER_DIRECTORY}/config.txt"
-                    
+
                     announce_start "Setting up EEPROM update for non-secure-boot device"
                     if [ -z "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" ]; then
                         RPI_DEVICE_BOOTLOADER_CONFIG_FILE=/var/lib/rpi-sb-provisioner/bootloader.naked
@@ -976,6 +984,17 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                     # every non-secure-boot style, not just naked - fde-only
                     # reaches the same code with the same bootloader.naked
                     # config, and so does any unrecognised style.
+                    #
+                    # Now that a partial build no longer marks itself finished,
+                    # this block can be re-entered after a failed run, so the
+                    # digest is only reusable if the image it describes is still
+                    # there. An orphaned pieeprom.sig would otherwise be flashed
+                    # against a missing or half-written pieeprom.bin.
+                    if [ -e "${DESTINATION_EEPROM_SIGNATURE}" ] && [ ! -e "${DESTINATION_EEPROM_IMAGE}" ]; then
+                        log "Discarding orphaned EEPROM digest, regenerating"
+                        rm -f "${DESTINATION_EEPROM_SIGNATURE}"
+                    fi
+
                     if [ ! -e "${DESTINATION_EEPROM_SIGNATURE}" ]; then
                         if [ ! -e "${SOURCE_EEPROM_IMAGE}" ]; then
                             record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
