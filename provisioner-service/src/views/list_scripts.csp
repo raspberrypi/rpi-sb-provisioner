@@ -9,6 +9,8 @@
 auto scripts = @@.get<Json::Value>("scripts");
 auto provisioner_stages = @@.get<std::map<std::string, std::vector<std::string>>>("provisioner_stages");
 auto stage_descriptions = @@.get<std::map<std::string, std::string>>("stage_descriptions");
+auto provisioner_labels = @@.get<std::map<std::string, std::string>>("provisioner_labels");
+auto stage_labels = @@.get<std::map<std::string, std::string>>("stage_labels");
 std::string currentPage = "customisation";
 %>
 
@@ -124,14 +126,33 @@ std::string currentPage = "customisation";
   color: #155724;
 }
 
+/* Neutral, not the danger palette: disabling a hook is a normal action the
+   page itself offers a button for, so the result should not read as a fault.
+   Outlined rather than filled, to stay distinguishable from .hook-missing
+   without reaching for a semantic colour this state does not warrant. */
 .hook-disabled {
-  background-color: #f8d7da;
-  color: #721c24;
+  background-color: #fff;
+  color: #41464b;
+  box-shadow: inset 0 0 0 1px #adb5bd;
 }
 
+/* The script does not exist yet. Lightest treatment of the three: this is the
+   resting state for most hooks, not something that needs attention. */
 .hook-missing {
-  background-color: #e2e3e5;
-  color: #41464b;
+  background-color: #e9ecef;
+  color: #6c757d;
+}
+
+.provisioner-id {
+  font-size: 13px;
+  color: #666;
+  margin: -6px 0 4px;
+}
+
+.hook-filename {
+  font-size: 12px;
+  color: #777;
+  margin-bottom: 10px;
 }
 
 .hook-description {
@@ -173,14 +194,21 @@ std::string currentPage = "customisation";
             <div class="tab-buttons" role="tablist" aria-label="Provisioner script categories">
               <%c++ for (const auto& [provisioner, stages] : provisioner_stages) { %>
                 <button class="tab-button" onclick="openTab(event, '<%c++ $$ << provisioner; %>')" id="<%c++ $$ << provisioner; %>-tab" role="tab" aria-selected="false" aria-controls="<%c++ $$ << provisioner; %>">
-                  <%c++ $$ << provisioner; %>
+                  <%c++ {
+                      auto lit = provisioner_labels.find(provisioner);
+                      $$ << (lit != provisioner_labels.end() ? lit->second : provisioner);
+                  } %>
                 </button>
               <%c++ } %>
             </div>
             
             <%c++ for (const auto& [provisioner, validStages] : provisioner_stages) { %>
               <div id="<%c++ $$ << provisioner; %>" class="tab-content" role="tabpanel" aria-labelledby="<%c++ $$ << provisioner; %>-tab">
-                <h3><%c++ $$ << provisioner; %> scripts</h3>
+                <h3><%c++ {
+                      auto lit = provisioner_labels.find(provisioner);
+                      $$ << (lit != provisioner_labels.end() ? lit->second : provisioner);
+                  } %> scripts</h3>
+                <p class="provisioner-id">Scripts named <code><%c++ $$ << provisioner; %>-&lt;stage&gt;.sh</code></p>
                 
                 <div class="hook-grid">
                   <%c++ for (const auto& stage : validStages) { %>
@@ -220,15 +248,19 @@ std::string currentPage = "customisation";
                     
                     <div class="hook-card" data-filename="<%c++ $$ << hookFilename; %>">
                       <h4>
-                        <%c++ $$ << stage; %>
+                        <%c++ {
+                            auto slit = stage_labels.find(stage);
+                            $$ << (slit != stage_labels.end() ? slit->second : stage);
+                        } %>
                         <%c++ if (hookExists && hookEnabled) { %>
                           <span class="hook-status hook-enabled">Enabled</span>
                         <%c++ } else if (hookExists && !hookEnabled) { %>
                           <span class="hook-status hook-disabled">Disabled</span>
                         <%c++ } else { %>
-                          <span class="hook-status hook-missing">Not Created</span>
+                          <span class="hook-status hook-missing">Not set up</span>
                         <%c++ } %>
                       </h4>
+                      <div class="hook-filename"><code><%c++ $$ << hookFilename; %>.sh</code></div>
                       
                       <div class="hook-description">
                         <%c++ $$ << hookDescription; %>
@@ -420,7 +452,7 @@ function disableScript(filename) {
   
   if (disableButton) {
     console.log('Found disable button, setting to loading state');
-    disableButton.textContent = 'Disabling...';
+    disableButton.textContent = 'Disabling…';
     disableButton.disabled = true;
   } else {
     console.warn('Could not find disable button');
@@ -534,7 +566,7 @@ function enableScript(filename) {
   
   if (enableButton) {
     console.log('Found enable button, setting to loading state');
-    enableButton.textContent = 'Enabling...';
+    enableButton.textContent = 'Enabling…';
     enableButton.disabled = true;
   } else {
     console.warn('Could not find enable button');
@@ -676,7 +708,7 @@ function deleteScript(filename) {
         const statusSpan = card.querySelector('.hook-status');
         if (statusSpan) {
           statusSpan.className = 'hook-status hook-missing';
-          statusSpan.textContent = 'Not Created';
+          statusSpan.textContent = 'Not set up';
         }
         
         // Update actions div

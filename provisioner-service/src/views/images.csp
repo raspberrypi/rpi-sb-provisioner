@@ -140,7 +140,7 @@
 <!-- Gold Master Image -->
 <%c++ auto goldMasterFile = @@.get<std::map<std::string, std::string>>("options").count("GOLD_MASTER_OS_FILE") ? @@.get<std::map<std::string, std::string>>("options").at("GOLD_MASTER_OS_FILE") : std::string(); %>
 <div class="field-group">
-    <label class="field-label">Gold Master OS Image</label>
+    <label class="field-label">OS Image</label>
     <input type="hidden" name="GOLD_MASTER_OS_FILE" id="GOLD_MASTER_OS_FILE" value="<%c++ $$ << goldMasterFile; %>">
     
     <!-- Image Browser -->
@@ -156,14 +156,14 @@
         <div id="image-upload-container" style="display: none;">
             <div class="image-upload-zone" id="image-upload-zone">
                 <div>Drop an image file here or click to browse</div>
-                <div style="font-size: 0.8rem; color: #888; margin-top: 8px;">Image (.img, .img.xz, .img.zst) or IDP artefact archive (.tar.xz, .tar.zst)</div>
+                <div style="font-size: 0.8rem; color: #888; margin-top: 8px;">Plain image (.img, .img.xz, .img.zst) or IDP artefact archive (.tar.xz, .tar.zst)</div>
                 <input type="file" id="image-file-input" style="display: none;">
             </div>
             <div id="image-upload-progress" class="image-upload-progress" style="display: none;">
                 <div class="image-upload-progress-bar">
                     <div class="image-upload-progress-fill" id="image-upload-fill" style="width: 0%;"></div>
                 </div>
-                <div class="image-upload-progress-text" id="image-upload-text">Uploading...</div>
+                <div class="image-upload-progress-text" id="image-upload-text">Uploading…</div>
                 <div class="image-upload-elapsed" id="image-upload-elapsed"></div>
             </div>
         </div>
@@ -173,7 +173,7 @@
             <div class="firmware-list-container">
                 <div class="firmware-list-header">
                     <h4>Images</h4>
-                    <div class="firmware-loading" id="image-loading">Loading...</div>
+                    <div class="firmware-loading" id="image-loading">Loading…</div>
                 </div>
                 <div class="image-list" id="image-list">
                     <!-- Populated by JavaScript -->
@@ -192,7 +192,7 @@
     
     <div class="inline-help">
         <span class="inline-help-icon">&#9432;</span>
-        <span>Select a base OS image or IDP artefact. Traditional images (.img, .img.xz, .img.zst) require manual configuration. IDP artefacts (.tar.xz, .tar.zst from rpi-image-gen) carry their own configuration and will auto-fill settings below.</span>
+        <span>Select a base OS image, or an <strong>IDP (Image Definition Product)</strong> artefact built by rpi-image-gen. Plain images (.img, .img.xz, .img.zst) need configuring by hand below. IDP artefacts (.tar.xz, .tar.zst) carry their own device and encryption configuration and fill those settings in for you.</span>
     </div>
 </div>
 
@@ -206,7 +206,7 @@
     
     async function loadImageList() {
         const listEl = document.getElementById('image-list');
-        listEl.innerHTML = '<div class="image-empty">Loading images...</div>';
+        listEl.innerHTML = '<div class="image-empty">Loading images\u2026</div>';
         
         try {
             const response = await fetch('/images/list');
@@ -302,7 +302,7 @@
         const sizeMB = img.size_mb ? img.size_mb.toFixed(1) + ' MB' : 'Unknown size';
         const sha256Display = img.sha256 && img.sha256.length > 10 && !img.sha256.includes('Calculating')
             ? img.sha256 
-            : (img.sha256 || 'Calculating...');
+            : (img.sha256 || 'Calculating…');
         
         detailsEl.innerHTML = '';
         
@@ -329,9 +329,9 @@
         };
         
         if (img.is_idp) {
-            addMeta('Type', 'IDP Artefact');
+            addMeta('Type', 'IDP artefact');
         } else {
-            addMeta('Type', 'Traditional Image');
+            addMeta('Type', 'Plain image');
         }
         addMeta('Size', sizeMB);
         if (!img.is_idp) {
@@ -345,7 +345,7 @@
         if (img.is_idp) {
             const idpSection = document.createElement('div');
             idpSection.style.cssText = 'margin-top: 16px; padding-top: 16px; border-top: 1px solid #e0e0e0;';
-            idpSection.innerHTML = '<span style="color: #888;">Analysing IDP artefact...</span>';
+            idpSection.innerHTML = '<span style="color: #888;">Analysing IDP artefact\u2026</span>';
             detailsEl.appendChild(idpSection);
 
             fetch('/analyze-image?name=' + encodeURIComponent(img.name))
@@ -384,7 +384,7 @@
             const bootStatus = document.createElement('dd');
             bootStatus.id = 'boot-package-status-' + img.name.replace(/[^a-zA-Z0-9]/g, '_');
             bootStatus.style.cssText = 'margin: 4px 0 0 0;';
-            bootStatus.innerHTML = '<span style="color: #888;">Checking...</span>';
+            bootStatus.innerHTML = '<span style="color: #888;">Checking\u2026</span>';
             bootSection.appendChild(bootStatus);
             
             detailsEl.appendChild(bootSection);
@@ -460,7 +460,7 @@
                         statusEl.innerHTML += '<br><span style="font-size: 0.85rem; color: #666;">Version: ' + data.version + '</span>';
                     }
                 } else if (data.generating) {
-                    statusEl.innerHTML = '<span style="color: #ffc107;">Generating...</span>';
+                    statusEl.innerHTML = '<span style="color: #ffc107;">Generating…</span>';
                     // Poll for updates
                     setTimeout(() => checkBootPackageStatus(name), 2000);
                 } else {
@@ -486,12 +486,12 @@
         const btn = document.getElementById(btnId);
         
         if (statusEl) {
-            statusEl.innerHTML = '<span style="color: #ffc107;">Generating...</span>';
+            statusEl.innerHTML = '<span style="color: #ffc107;">Generating…</span>';
         }
         if (btn) {
             btn.disabled = true;
             btn.style.opacity = '0.5';
-            btn.textContent = 'Generating...';
+            btn.textContent = 'Generating…';
         }
         
         try {
@@ -1053,7 +1053,7 @@
             progressFill.style.width = '100%';
             progressFill.classList.add('indeterminate');
             progressText.classList.add('processing');
-            progressText.textContent = processingLabel + '...';
+            progressText.textContent = processingLabel + '…';
             let elapsed = 0;
             elapsedText.textContent = 'This may take a while for large files';
             processingTimerId = setInterval(() => {
@@ -1067,7 +1067,7 @@
         progressFill.style.width = '0%';
         progressFill.classList.remove('indeterminate');
         progressText.classList.remove('processing');
-        progressText.textContent = 'Uploading ' + file.name + '...';
+        progressText.textContent = 'Uploading ' + file.name + '…';
         elapsedText.textContent = '';
 
         try {
@@ -1100,7 +1100,7 @@
                                 progressFill.classList.remove('indeterminate');
                                 progressFill.style.width = '100%';
                                 progressText.classList.remove('processing');
-                                progressText.textContent = 'Finishing...';
+                                progressText.textContent = 'Finishing\u2026';
                                 elapsedText.textContent = '';
                                 try { ws.close(); } catch(e) {}
                                 activeProgressWs = null;
@@ -1133,7 +1133,7 @@
                                 } else {
                                     if (!progressFill.classList.contains('indeterminate')) progressFill.classList.add('indeterminate');
                                     progressFill.style.width = '100%';
-                                    progressText.textContent = label + '...';
+                                    progressText.textContent = label + '…';
                                     elapsedText.textContent = formatBytes(msg.bytes_written) + ' written';
                                 }
                             }
@@ -1163,7 +1163,7 @@
                 uploadDone = true;
                 if (!processingLabel) {
                     progressFill.style.width = '100%';
-                    progressText.textContent = 'Finalising...';
+                    progressText.textContent = 'Finalising\u2026';
                     return;
                 }
                 // If WS connected, it will drive the progress UI from here.

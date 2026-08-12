@@ -328,9 +328,9 @@ try {
                             </button>
                         </div>
                         <div class="modal-body">
-                            <h6>About Customization Scripts</h6>
+                            <h6>About Customisation Scripts</h6>
                             <p>
-                                Customization scripts allow you to add custom operations at specific points in the provisioning process. 
+                                Customisation scripts allow you to add custom operations at specific points in the provisioning process. 
                                 These scripts run at predetermined stages in each provisioner's workflow.
                             </p>
                             
