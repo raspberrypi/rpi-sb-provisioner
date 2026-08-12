@@ -734,7 +734,7 @@
             // Add IDP info banner
             const banner = document.createElement('div');
             banner.className = 'idp-info-banner';
-            banner.innerHTML = '<strong>Encryption is defined by the IDP artefact.</strong> Only the secure boot setting applies here. Choose whether to program this device for secure boot (OTP key + signed EEPROM).';
+            banner.innerHTML = '<strong>Encryption is defined by the IDP artefact.</strong> Only the secure boot setting applies here \u2014 whether to program this device for secure boot, which burns your signing key hash into OTP permanently and signs the EEPROM.';
             securitySection.querySelector('.section-header').after(banner);
             
             // Hide the FDE-only tile (meaningless for IDP)
