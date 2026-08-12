@@ -1346,6 +1346,39 @@ namespace provisioner {
         return {};
     }
 
+    // Canonical definition of the per-device override flags.
+    //
+    // These strings are rendered on the device detail page AND returned by
+    // GET /devices/{serialno}/flags. They were previously duplicated between
+    // the two, and the copies had already drifted apart in wording, so a
+    // client and the UI could report different things about the same flag.
+    // Keep one definition here and read it from both.
+    struct SpecialFlagInfo {
+        std::string id;           // directory name suffix (e.g. "skip-eeprom")
+        std::string label;        // human-readable label
+        std::string description;  // what this flag does
+        std::string constraint;   // device constraint, empty = all devices
+    };
+
+    static const std::vector<SpecialFlagInfo> &specialFlagCatalogue()
+    {
+        static const std::vector<SpecialFlagInfo> catalogue = {
+            {"skip-eeprom",
+             "Skip EEPROM Update",
+             "Skips writing the EEPROM and bootloader during the bootstrap phase. "
+             "Use this for devices that already have the correct EEPROM configuration, "
+             "or that have already been signed.",
+             ""},
+            {"reprovision-device",
+             "Re-provision Device",
+             "Provisions a device that has already been provisioned, instead of skipping it. "
+             "Re-signs the bootcode from the original firmware recovery.bin rather than the "
+             "cached signed copy.",
+             "Raspberry Pi 5 family only (BCM2712)"},
+        };
+        return catalogue;
+    }
+
     void Devices::registerHandlers(drogon::HttpAppFramework &app)
     {
         app.registerHandler("/devices", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
@@ -1686,19 +1719,7 @@ namespace provisioner {
                 // lowercased 8-char truncation, so findSpecialFlagFile probes
                 // both forms.
                 std::vector<std::map<std::string, std::string>> flagsList;
-                struct FlagDef {
-                    std::string id;
-                    std::string label;
-                    std::string description;
-                    std::string constraint;
-                };
-                std::vector<FlagDef> flagDefs = {
-                    {"skip-eeprom", "Skip EEPROM Update",
-                     "Skips writing the EEPROM/bootloader during bootstrap. Use for devices that already have the correct EEPROM or have been signed.", ""},
-                    {"reprovision-device", "Re-provision Device",
-                     "Re-provisions an already-provisioned device by re-signing bootcode from original firmware. Only works on Pi 5 family.", "Pi 5 only (BCM2712)"},
-                };
-                for (const auto &fd : flagDefs) {
+                for (const auto &fd : specialFlagCatalogue()) {
                     std::map<std::string, std::string> flagMap;
                     flagMap["id"] = fd.id;
                     flagMap["label"] = fd.label;
@@ -2066,28 +2087,10 @@ namespace provisioner {
         }); // devices/_test/{scenario} handler
 
         // ===== Special Flags Management =====
-        // Known special flags and their descriptions
-        struct SpecialFlagInfo {
-            std::string id;           // directory name suffix (e.g., "skip-eeprom")
-            std::string label;        // human-readable label
-            std::string description;  // what this flag does
-            std::string constraint;   // any device constraint (empty = all devices)
-        };
-
-        static const std::vector<SpecialFlagInfo> knownFlags = {
-            {"skip-eeprom",
-             "Skip EEPROM Update",
-             "Skips writing the EEPROM/bootloader during the bootstrap phase. "
-             "Use this for devices that already have the correct EEPROM configuration, "
-             "or devices that have already been signed.",
-             ""},
-            {"reprovision-device",
-             "Re-provision Device",
-             "Re-provisions a device that has already been provisioned. "
-             "This re-signs the bootcode using the original firmware recovery.bin "
-             "instead of the cached signed bootcode. Only works on Raspberry Pi 5 family devices.",
-             "Pi 5 only (BCM2712)"},
-        };
+        // Flag labels and descriptions come from specialFlagCatalogue(), which
+        // the device detail page renders from as well.
+        // static so the non-capturing handler lambdas below can reference it.
+        static const std::vector<SpecialFlagInfo> &knownFlags = specialFlagCatalogue();
 
         // GET /devices/{serialno}/flags - Read current flag status
         app.registerHandler("/devices/{serialno}/flags",

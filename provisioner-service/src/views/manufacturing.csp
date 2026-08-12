@@ -85,7 +85,7 @@
             } else if (value === '0') {
                 return '<span class="security-disabled" aria-label="Not requested" title="Secure provisioning did not opt into this lock">Not requested</span>';
             }
-            return '<span class="security-unknown" aria-label="Not configured" title="Not configured">&mdash;</span>';
+            return '<span class="security-unknown" aria-label="Not configured" title="Not configured">Not configured</span>';
         }
 
         // Scroll indicator state -- kept outside the function to avoid
@@ -140,21 +140,40 @@
             return parseFloat((bytes / Math.pow(k, i)).toFixed(decimals)) + ' ' + sizes[i];
         }
         
-        // Apply human-readable sizes to eMMC size cells
+        // Show the readable size in the cell and keep the exact byte count in
+        // the tooltip. The other way round hides the useful figure from touch
+        // devices (no hover) and from anyone reading the rendered table.
         function applyEmmcSizeTooltips() {
             const emmcCells = document.querySelectorAll('.emmc-size');
             emmcCells.forEach(cell => {
-                const sizeInBytes = cell.getAttribute('data-size');
-                const humanSize = formatBytes(parseInt(sizeInBytes));
-                cell.setAttribute('title', humanSize);
+                const sizeInBytes = parseInt(cell.getAttribute('data-size'));
+                if (isNaN(sizeInBytes)) return;
+                cell.textContent = formatBytes(sizeInBytes);
+                cell.setAttribute('title', sizeInBytes.toLocaleString() + ' bytes');
             });
+        }
+
+        // The bootloader build timestamp arrives as seconds since the epoch.
+        // Rendering it raw leaves the reader to convert a 10-digit integer.
+        function formatBuildTimestamp(seconds) {
+            const n = parseInt(seconds);
+            if (!n || isNaN(n)) return '';
+            const d = new Date(n * 1000);
+            if (isNaN(d.getTime())) return '';
+            const p = (v) => String(v).padStart(2, '0');
+            return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) +
+                   ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
         }
         
         // Pagination state
         let allData = [];
         let currentPage = 1;
         let pageSize = 50;
-        const COLUMN_COUNT = 31;
+        // Must match the number of <th> elements in renderCurrentPage(), which
+        // in turn covers every column the devices table exposes (see
+        // EXPECTED_SCHEMA in host-support/manufacturing-data) except the
+        // internal row id.
+        const COLUMN_COUNT = 30;
         
         function totalPages() {
             return Math.max(1, Math.ceil(allData.length / pageSize));
@@ -197,6 +216,8 @@
                             <th scope="col">EEPROM JEDEC</th>
                             <th scope="col">EEPROM Unique ID</th>
                             <th scope="col">Bootloader Build TS</th>
+                            <th scope="col" title="Label of the signing key that was active when this device was provisioned">Signing Key Label</th>
+                            <th scope="col" title="SHA256 fingerprint of the active signing key at provision time. Match this against the Active key on the Options page when re-provisioning.">Signing Key Hash</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -220,7 +241,7 @@
                             <td>${escapeHtml(device.processor)}</td>
                             <td>${escapeHtml(device.memory)}</td>
                             <td>${escapeHtml(device.manufacturer)}</td>
-                            <td>${escapeHtml(device.secure)}</td>
+                            <td class="security-field">${formatSecurityField(device.secure)}</td>
                             <td class="security-field">${formatRequestedField(device.jtag_locked)}</td>
                             <td class="security-field">${formatRequestedField(device.eeprom_write_protected)}</td>
                             <td class="security-field">${formatSecurityField(device.pubkey_programmed)}</td>
@@ -233,7 +254,9 @@
                             <td>${escapeHtml(device.eeprom_size)}</td>
                             <td style="font-family: monospace;">${escapeHtml(device.eeprom_jedec)}</td>
                             <td style="font-family: monospace;">${escapeHtml(device.eeprom_unique_id)}</td>
-                            <td>${escapeHtml(device.bootloader_build_timestamp)}</td>
+                            <td>${escapeHtml(formatBuildTimestamp(device.bootloader_build_timestamp))}</td>
+                            <td>${escapeHtml(device.customer_key_label)}</td>
+                            <td style="font-family: monospace;">${escapeHtml(device.customer_key_fingerprint)}</td>
                         </tr>
                     `;
                 });
@@ -385,7 +408,7 @@
             function requestedLabel(val) {
                 if (val === '1') return 'Requested';
                 if (val === '0') return 'Not requested';
-                return '';
+                return 'Not configured';
             }
 
             const headers = [
@@ -396,7 +419,8 @@
                 'OS Image Filename','OS Image SHA256',
                 'Connect Reg.','Connect Device ID',
                 'EEPROM Size','EEPROM JEDEC',
-                'EEPROM Unique ID','Bootloader Build TS'
+                'EEPROM Unique ID','Bootloader Build TS',
+                'Signing Key Label','Signing Key Hash'
             ];
 
             const rows = [headers.map(csvEscape).join(',')];
@@ -406,7 +430,8 @@
                     csvEscape(d.serial), csvEscape(d.eth_mac), csvEscape(d.wifi_mac),
                     csvEscape(d.bt_mac), csvEscape(d.mmc_size), csvEscape(d.mmc_cid),
                     csvEscape(d.rpi_duid), csvEscape(d.board_revision), csvEscape(d.processor),
-                    csvEscape(d.memory), csvEscape(d.manufacturer), csvEscape(d.secure),
+                    csvEscape(d.memory), csvEscape(d.manufacturer),
+                    csvEscape(securityLabel(d.secure)),
                     csvEscape(requestedLabel(d.jtag_locked)),
                     csvEscape(requestedLabel(d.eeprom_write_protected)),
                     csvEscape(securityLabel(d.pubkey_programmed)),
@@ -417,7 +442,9 @@
                     csvEscape(d.connect_device_id),
                     csvEscape(d.eeprom_size), csvEscape(d.eeprom_jedec),
                     csvEscape(d.eeprom_unique_id),
-                    csvEscape(d.bootloader_build_timestamp)
+                    csvEscape(formatBuildTimestamp(d.bootloader_build_timestamp)),
+                    csvEscape(d.customer_key_label),
+                    csvEscape(d.customer_key_fingerprint)
                 ].join(','));
             });
             

@@ -162,7 +162,7 @@
         }
     </style>
     <!-- Include the ZXing library from local static files -->
-    <script src="/js/zxing.js"></script>
+    <script src="/static/js/zxing.js"></script>
     
     <!-- Fallback message if camera access fails -->
     <div id="cameraError" style="display: none; color: #a94442; background-color: #f2dede; border: 1px solid #ebccd1; padding: 15px; margin: 15px 0; border-radius: 5px;">
@@ -390,6 +390,12 @@
                     showError('Error listing video devices: ' + err);
                 });
             
+            startButton.addEventListener('click', () => {
+                // Scanning is started once on load; the simplest correct
+                // restart is to re-run that same initialisation.
+                window.location.reload();
+            });
+
             stopButton.addEventListener('click', () => {
                 console.log('Stop button clicked');
                 
