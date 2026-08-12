@@ -150,6 +150,11 @@
             color: red;
         }
         
+        .success-unknown {
+            color: #666;
+            font-style: italic;
+        }
+        
         .no-entries {
             text-align: center;
             padding: 20px;
@@ -273,12 +278,19 @@
                             }
                         %></td>
                         <td><%c++ 
+                            // Absent or unrecognised values are reported as unknown,
+                            // not as failures: in an audit log, asserting "Failed"
+                            // about an outcome that was never recorded is wrong.
                             if (entry.find("success") != entry.end()) {
                                 if (entry.at("success") == "Yes") {
                                     $$ << "<span class='success-true'>Success</span>";
-                                } else {
+                                } else if (entry.at("success") == "No") {
                                     $$ << "<span class='success-false'>Failed</span>";
+                                } else {
+                                    $$ << "<span class='success-unknown'>Unknown</span>";
                                 }
+                            } else {
+                                $$ << "<span class='success-unknown'>Unknown</span>";
                             }
                         %></td>
                         <td><%c++ 

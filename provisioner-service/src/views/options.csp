@@ -717,6 +717,28 @@
             flex-shrink: 0;
             margin-top: 1px;
         }
+
+        /* Neutral explanatory note. Referenced by the RPIBOOT GPIO block,
+           which previously used this class before it was defined and so
+           rendered as unstyled body text. */
+        .inline-info {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            padding: 10px 12px;
+            background: #e8f4fd;
+            border: 1px solid #b8daff;
+            border-radius: 6px;
+            margin-top: 10px;
+            font-size: 0.85rem;
+            color: #004085;
+            line-height: 1.4;
+        }
+
+        .inline-info-icon {
+            flex-shrink: 0;
+            margin-top: 1px;
+        }
         
         /* ===== Form Field Styling ===== */
         .field-group {
@@ -1183,7 +1205,10 @@
                             <span class="tile-title">AES-XTS</span>
                         </div>
                         <p class="tile-description">Hardware-accelerated on Pi 5. Software fallback on other devices.</p>
-                        <span class="tile-badge recommended" id="aes-badge">Best for Pi 5</span>
+                        <%c++ // Rendered from the saved device family so the pre-script state matches
+                              // what updateCipherRecommendations() will set, rather than marking both
+                              // ciphers "Recommended" until scripts run. %>
+                        <span class="tile-badge <%c++ $$ << (deviceFamily == "5" ? "recommended" : "info"); %>" id="aes-badge"><%c++ $$ << (deviceFamily == "5" ? "Recommended" : "Works, but slower"); %></span>
                     </label>
 
                     <label class="tile-option <%c++ if(storageCipher == "xchacha12,aes-adiantum-plain64") $$ << "selected"; %>">
@@ -1193,7 +1218,7 @@
                             <span class="tile-title">Adiantum</span>
                         </div>
                         <p class="tile-description">Optimized for devices without AES hardware acceleration.</p>
-                        <span class="tile-badge recommended" id="adiantum-badge">Best for Pi 4 / Zero 2</span>
+                        <span class="tile-badge <%c++ $$ << (deviceFamily == "5" ? "info" : "recommended"); %>" id="adiantum-badge"><%c++ $$ << (deviceFamily == "5" ? "Works, but slower" : "Recommended"); %></span>
                     </label>
                 </div>
                 <div id="feedback-RPI_DEVICE_STORAGE_CIPHER" class="field-feedback"></div>
@@ -1759,6 +1784,12 @@
                     useBtn.className = 'primary';
                     useBtn.textContent = 'Use for provisioning';
                     useBtn.disabled = !key.isFitForPurpose;
+                    // A disabled button with no reason attached reads as a bug.
+                    // The detail is in the meta line, but put it on the control too.
+                    if (useBtn.disabled) {
+                        useBtn.title = key.statusMessage ||
+                            'Raspberry Pi secure boot requires an RSA 2048-bit key. This key cannot be used.';
+                    }
                     useBtn.addEventListener('click', () => activateSigningKey(key.id));
                     actions.appendChild(useBtn);
                 }
