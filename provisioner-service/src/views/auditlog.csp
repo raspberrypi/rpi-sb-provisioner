@@ -176,9 +176,9 @@
                     <label for="event_type">Event Type:</label>
                     <select id="event_type" name="event_type">
                         <option value="">All Events</option>
-                        <option value="HANDLER_ACCESS" <%c++ if (@@.get<std::string>("event_type") == "HANDLER_ACCESS") $$ << "selected"; %>>Handler Access</option>
+                        <option value="HANDLER_ACCESS" <%c++ if (@@.get<std::string>("event_type") == "HANDLER_ACCESS") $$ << "selected"; %>>API Access</option>
                         <option value="FILE_ACCESS" <%c++ if (@@.get<std::string>("event_type") == "FILE_ACCESS") $$ << "selected"; %>>File Access</option>
-                        <option value="SYSTEMD_LOG_ACCESS" <%c++ if (@@.get<std::string>("event_type") == "SYSTEMD_LOG_ACCESS") $$ << "selected"; %>>Systemd Log Access</option>
+                        <option value="SYSTEMD_LOG_ACCESS" <%c++ if (@@.get<std::string>("event_type") == "SYSTEMD_LOG_ACCESS") $$ << "selected"; %>>Systemd Log</option>
                     </select>
                 </div>
                 
@@ -217,10 +217,10 @@
                     <th scope="col">Timestamp</th>
                     <th scope="col">Event Type</th>
                     <th scope="col">Client IP</th>
-                    <th scope="col">Handler / Operation</th>
+                    <th scope="col">Endpoint / Operation</th>
                     <th scope="col">Target Path</th>
                     <th scope="col">Success</th>
-                    <th scope="col">Additional Info</th>
+                    <th scope="col" title="Event detail where recorded, otherwise the requesting User-Agent">Additional Info</th>
                 </tr>
             </thead>
             <tbody>
@@ -256,7 +256,7 @@
                             if (entry.find("timestamp") != entry.end() && !entry.at("timestamp").empty()) {
                                 $$ << entry.at("timestamp");
                             } else {
-                                $$ << "N/A";
+                                $$ << "<span class='success-unknown'>Not recorded</span>";
                             }
                         %></td>
                         <td><span class="event-type <%c++ $$ << eventTypeClass; %>"><%c++ $$ << displayEventType; %></span></td>

@@ -260,7 +260,7 @@
         const container = document.getElementById('tiles-root');
         const emptyEl = document.getElementById('tiles-empty');
         const STEP_NAMES = ['Bootstrap', 'Triage', 'Provisioning', 'Complete'];
-        const STEP_SHORT = ['Boot', 'Tri', 'Prov', 'Done'];
+        const STEP_SHORT = ['Boot', 'Check', 'Prov', 'Done'];
         const GRACE_SHORT = 5000;
         const GRACE_REBOOT = 30000;
 
@@ -353,7 +353,7 @@
 
             const serial = n.serial || '';
             const usbPath = String(n.id);
-            const displayName = serial || ('Port ' + usbPath);
+            const displayName = serial || ('USB ' + usbPath);
             el.setAttribute('aria-label', 'Device ' + displayName);
 
             el.setAttribute('data-usb-path', usbPath);
@@ -395,7 +395,7 @@
             let html = '';
             if (n.image) html += '<div class="tile-meta-row"><span class="tile-meta-label">Image:</span><span class="tile-meta-value">' + escapeHtml(n.image) + '</span></div>';
             if (n.ip) html += '<div class="tile-meta-row"><span class="tile-meta-label">IP:</span><span class="tile-meta-value">' + escapeHtml(n.ip) + '</span></div>';
-            html += '<div class="tile-meta-row"><span class="tile-meta-label">Port:</span><span class="tile-meta-value">' + escapeHtml(String(n.id)) + '</span></div>';
+            html += '<div class="tile-meta-row"><span class="tile-meta-label">USB path:</span><span class="tile-meta-value">' + escapeHtml(String(n.id)) + '</span></div>';
             meta.innerHTML = html;
         }
 

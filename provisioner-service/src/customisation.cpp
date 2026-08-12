@@ -25,6 +25,27 @@ namespace provisioner {
             {"idp-provisioner", {"provision-started", "post-flash", "provision-failed"}}
         };
 
+        // Display names for the provisioner identifiers used as tab labels.
+        // The raw keys are service names; showing them unmodified put config
+        // vocabulary in the UI where the Options page uses prose.
+        const std::map<std::string, std::string> PROVISIONER_LABELS = {
+            {"sb-provisioner",    "Secure Boot"},
+            {"fde-provisioner",   "Full-disk Encryption"},
+            {"naked-provisioner", "Naked"},
+            {"idp-provisioner",   "IDP Artefact"}
+        };
+
+        // Display names for each stage. The kebab-case id remains on the card
+        // as secondary text, because that is the script filename on disk.
+        const std::map<std::string, std::string> STAGE_LABELS = {
+            {"bootstrap",         "Bootstrap"},
+            {"provision-started", "Provisioning started"},
+            {"bootfs-mounted",    "Boot filesystem mounted"},
+            {"rootfs-mounted",    "Root filesystem mounted"},
+            {"post-flash",        "After flashing"},
+            {"provision-failed",  "Provisioning failed"}
+        };
+
         // Description of each stage for display in the UI
         const std::map<std::string, std::string> STAGE_DESCRIPTIONS = {
             {"bootstrap", "Executed when a device is detected, before provisioning begins"},
@@ -382,6 +403,8 @@ namespace provisioner {
                 // Pass the PROVISIONER_STAGES map directly to the template
                 data.insert("provisioner_stages", PROVISIONER_STAGES);
                 data.insert("stage_descriptions", STAGE_DESCRIPTIONS);
+                data.insert("provisioner_labels", PROVISIONER_LABELS);
+                data.insert("stage_labels", STAGE_LABELS);
                 data.insert("currentPage", std::string("customisation"));
                 auto resp = drogon::HttpResponse::newHttpViewResponse("list_scripts.csp", data);
                 resp->setStatusCode(k200OK);

@@ -357,7 +357,7 @@
             <span id="info-serial" data-field="serial">[[device.serial]]</span>
         </div>
         <div class="info-row">
-            <span class="info-label">Port:</span>
+            <span class="info-label">USB path:</span>
             <span id="info-port" data-field="port">[[device.port]]</span>
         </div>
         <div class="info-row">
@@ -421,11 +421,11 @@
     </div>
 
     <div class="flags-section">
-        <h2>Special Flags</h2>
+        <h2>Per-device Overrides</h2>
         <p class="section-description">
-            Control special provisioning behaviour for this device. 
-            <strong>One-time</strong> flags are automatically cleared after the next provisioning cycle.
-            <strong>Persistent</strong> flags remain active until manually removed.
+            Change provisioning behaviour for this device only, overriding the global settings on the Options page.
+            <strong>One-time</strong> overrides are cleared automatically after the next provisioning cycle.
+            <strong>Persistent</strong> overrides stay in effect until you remove them.
         </p>
 
         <%c++ 
@@ -731,7 +731,7 @@
 
         // Add saving state
         card.classList.add('flag-saving');
-        feedback.textContent = 'Saving...';
+        feedback.textContent = 'Saving\u2026';
         feedback.className = 'flag-feedback visible';
 
         fetch('/devices/' + encodeURIComponent(deviceSerial) + '/flags', {

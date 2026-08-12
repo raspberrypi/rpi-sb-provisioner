@@ -160,7 +160,7 @@ nav.rpi-navbar {
         <a href="/services" <%c++ if(@@.get<std::string>("currentPage") == "services") { %>class="active" aria-current="page"<%c++ } %>>Services</a>
         <a href="/manu-db" <%c++ if(@@.get<std::string>("currentPage") == "manufacturing") { %>class="active" aria-current="page"<%c++ } %>>Manufacturing Database</a>
         <a href="/auditlog" <%c++ if(@@.get<std::string>("currentPage") == "auditlog") { %>class="active" aria-current="page"<%c++ } %>>Audit Log</a>
-        <a href="/scantool" <%c++ if(@@.get<std::string>("currentPage") == "scantool") { %>class="active" aria-current="page"<%c++ } %>>QR Scanner</a>
+        <a href="/scantool" <%c++ if(@@.get<std::string>("currentPage") == "scantool") { %>class="active" aria-current="page"<%c++ } %>>Code Scanner</a>
     </div>
     
     <div class="rpi-right-items">

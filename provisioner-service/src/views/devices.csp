@@ -389,7 +389,7 @@
             
             function labelForNode(n) {
                 if (!n) return '';
-                if (n.id === 'server') return 'Server';
+                if (n.id === 'server') return 'Provisioning Server';
                 // Handle placeholder nodes with explicit labels (tiers, root ports)
                 if (n.label) return n.label;
                 if (n.isHub) {
@@ -627,8 +627,8 @@
                     .text('Legend');
                 
                 const legendItems = [
-                    { color: '#fff', stroke: '#666', label: 'Server' },
-                    { color: '#f5f0ff', stroke: '#b39ddb', label: 'USB Tier' },
+                    { color: '#fff', stroke: '#666', label: 'Provisioning Server' },
+                    { color: '#f5f0ff', stroke: '#b39ddb', label: 'USB root hub' },
                     { color: '#e3f2fd', stroke: '#2196f3', label: 'USB 3 Port' },
                     { color: '#fff8e1', stroke: '#ff9800', label: 'USB 2 Port' },
                     { color: '#eef6ff', stroke: '#9ec9ff', label: 'Hub' },
@@ -1199,7 +1199,7 @@
             <span class="test-panel-title">🧪 USB Test Mode</span>
             <button class="test-panel-close" onclick="toggleTestPanel()">&times;</button>
         </div>
-        <div id="test-status" class="test-panel-status">Status: Checking...</div>
+        <div id="test-status" class="test-panel-status">Status: Checking\u2026</div>
         <button class="test-btn" onclick="injectTestScenario('direct')">
             Direct <span class="test-btn-desc">4 devices on root ports</span>
         </button>
@@ -1224,15 +1224,15 @@
     </div>
     
     <h1>Devices</h1>
-    <div class="view-tabs" role="tablist" aria-label="Device view options">
-        <button id="tab-rel" class="view-tab active" role="tab" aria-selected="true" aria-controls="rel-view">Relational</button>
-        <button id="tab-topo" class="view-tab" role="tab" aria-selected="false" aria-controls="topo-view">Detail</button>
-        <button id="tab-tiles" class="view-tab" role="tab" aria-selected="false" aria-controls="tiles-view">Tiles</button>
+    <div class="view-tabs" role="tablist" aria-label="Choose how to view connected devices">
+        <button id="tab-rel" class="view-tab active" role="tab" aria-selected="true" aria-controls="rel-view">Topology map</button>
+        <button id="tab-topo" class="view-tab" role="tab" aria-selected="false" aria-controls="topo-view">Port tree</button>
+        <button id="tab-tiles" class="view-tab" role="tab" aria-selected="false" aria-controls="tiles-view">Device cards</button>
     </div>
     <div id="rel-view" class="view-container active" role="tabpanel" aria-labelledby="tab-rel">
         <div class="mindmap-container" role="img" aria-label="Interactive USB device topology graph showing connected devices and their relationships">
             <svg id="d3-graph-svg" aria-hidden="true"></svg>
-            <p class="sr-only">This visualization shows USB devices connected to the provisioning server. Use the Detail tab for an accessible text-based view of the same information.</p>
+            <p class="sr-only">This visualization shows USB devices connected to the provisioning server. Use the Port tree tab for an accessible text-based view of the same information.</p>
         </div>
     </div>
     <div id="topo-view" class="view-container" role="tabpanel" aria-labelledby="tab-topo" hidden>
@@ -1303,16 +1303,16 @@
                     testStatus.textContent = testModeActive ? 'Status: TEST MODE ACTIVE' : 'Status: Normal (real USB)';
                     testStatus.className = 'test-panel-status' + (testModeActive ? ' active' : '');
                 } else {
-                    testStatus.textContent = 'Status: Unavailable (not localhost?)';
+                    testStatus.textContent = 'Status: Unavailable \u2014 test mode is offered to local connections only';
                 }
             } catch (e) {
-                testStatus.textContent = 'Status: Error checking';
+                testStatus.textContent = 'Status: Could not reach the server';
             }
         }
         
         async function injectTestScenario(scenario) {
             try {
-                testStatus.textContent = 'Loading: ' + scenario + '...';
+                testStatus.textContent = 'Loading ' + scenario + '\u2026';
                 const resp = await fetch('/devices/_test/' + scenario);
                 if (resp.ok) {
                     const data = await resp.json();

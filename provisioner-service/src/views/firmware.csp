@@ -251,7 +251,7 @@
             <div class="firmware-list-container">
                 <div class="firmware-list-header">
                     <h4>Available Versions</h4>
-                    <div class="firmware-loading" id="firmware-loading">Loading...</div>
+                    <div class="firmware-loading" id="firmware-loading">Loading…</div>
                 </div>
                 <div class="firmware-list" id="firmware-list">
                     <!-- Populated by JavaScript -->
@@ -293,7 +293,7 @@
         const listEl = document.getElementById('firmware-list');
         const loadingEl = document.getElementById('firmware-loading');
         
-        loadingEl.textContent = 'Loading...';
+        loadingEl.textContent = 'Loading…';
         loadingEl.style.display = 'block';
         
         try {
@@ -413,7 +413,7 @@
         content += `<div style="margin-top: 20px; padding-top: 16px; border-top: 1px solid #e0e0e0;">`;
         content += `<dt style="font-weight: 600; color: #555; margin-bottom: 8px;">Release Notes</dt>`;
         
-        notesEl.innerHTML = content + `<dd style="margin: 0;"><span style="color: #888;">Loading...</span></dd></div>`;
+        notesEl.innerHTML = content + `<dd style="margin: 0;"><span style="color: #888;">Loading…</span></dd></div>`;
         
         try {
             const response = await fetch(`/options/firmware/notes/${version}`);
