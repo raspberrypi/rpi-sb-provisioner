@@ -196,15 +196,31 @@ if [ -d "${RPI_DEVICE_RETRIEVE_KEYPAIR}" ]; then
 fi
 mkdir -p "${KEYPAIR_DIR}"
 log "Capturing device keypair to ${KEYPAIR_DIR}"
-N_ALREADY_PROVISIONED=0
-PRIVATE_KEY=$(get_variable private-key) || N_ALREADY_PROVISIONED=$?
-if [ 0 -ne "$N_ALREADY_PROVISIONED" ]; then
-    log "Warning: Unable to retrieve device private key; already provisioned"
+
+# Both keys come back as multi-line PEM, so they must be read with
+# get_variable_pem(): get_variable() stops at the first newline and would
+# leave nothing but the "-----BEGIN ...-----" header on disk.
+#
+# The private key is only ever exportable while the OTP ECDSA key-slot is
+# unprovisioned AND unlocked. rpi-fastbootd LOCKs the slot at startup and
+# again immediately after `oem fwcrypto init` (run above), so on any device
+# that has a device key -- which is now every device we triage -- getvar
+# answers "refused" rather than a PEM. That is intended: the key is meant to
+# stay in firmware. Treat the absence of a PEM as normal and keep going; the
+# public key is what we retain for device identity.
+if get_variable_pem private-key > "${KEYPAIR_DIR}/${TARGET_DEVICE_SERIAL}.der"; then
+    log "Captured device private key"
 else
-    echo "${PRIVATE_KEY}" > "${KEYPAIR_DIR}/${TARGET_DEVICE_SERIAL}.der"
-    PRIVATE_KEY=""
+    rm -f "${KEYPAIR_DIR}/${TARGET_DEVICE_SERIAL}.der"
+    log "Device private key is not exportable (OTP key-slot locked); capturing public key only"
 fi
-get_variable public-key > "${KEYPAIR_DIR}/${TARGET_DEVICE_SERIAL}.pub"
+
+if get_variable_pem public-key > "${KEYPAIR_DIR}/${TARGET_DEVICE_SERIAL}.pub"; then
+    log "Captured device public key"
+else
+    rm -f "${KEYPAIR_DIR}/${TARGET_DEVICE_SERIAL}.pub"
+    log "Warning: Unable to retrieve device public key"
+fi
 
 # Based on the image type and provisioning style, we can determine which
 # systemd unit to trigger.  All units are parameterised with the device serial.
