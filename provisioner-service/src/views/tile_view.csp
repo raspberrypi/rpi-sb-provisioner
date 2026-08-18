@@ -53,6 +53,9 @@
     .device-tile.tile-active { border-color: #ffc107; }
     .device-tile.tile-complete { border-color: #28a745; background: #f0faf2; }
     .device-tile.tile-error { border-color: #dc3545; background: #fdf0f1; }
+    /* Device seen on a USB port excluded by the usb-ports.d rules: not a
+       failure, so it is muted rather than flagged. */
+    .device-tile.tile-skipped { border-color: #adb5bd; background: #f6f7f8; opacity: 0.75; }
     .device-tile.tile-rebooting {
         opacity: 0.6;
         animation: tileReboot 2s ease-in-out infinite;
@@ -267,6 +270,9 @@
         function parseProvisioningStep(stateStr) {
             if (!stateStr) return { step: -1, status: 'none' };
             const s = stateStr.toUpperCase();
+            // Deliberately skipped by a USB port restriction -- no step of the
+            // pipeline was entered, so it is neither active nor an error.
+            if (s.includes('PORT-EXCLUDED')) return { step: -1, status: 'skipped' };
             if (s.includes('ABORTED')) {
                 if (s.includes('PROVISIONER')) return { step: 2, status: 'error' };
                 if (s.includes('TRIAGE')) return { step: 1, status: 'error' };
@@ -384,8 +390,9 @@
         }
 
         function updateTileState(el, parsed) {
-            el.classList.remove('tile-active', 'tile-complete', 'tile-error');
-            if (parsed.status === 'error') el.classList.add('tile-error');
+            el.classList.remove('tile-active', 'tile-complete', 'tile-error', 'tile-skipped');
+            if (parsed.status === 'skipped') el.classList.add('tile-skipped');
+            else if (parsed.status === 'error') el.classList.add('tile-error');
             else if (parsed.step >= 3) el.classList.add('tile-complete');
             else if (parsed.step >= 0) el.classList.add('tile-active');
         }
@@ -393,6 +400,11 @@
         function updateMeta(el, n) {
             const meta = el.querySelector('.tile-meta');
             let html = '';
+            // Say why a muted tile is muted, otherwise a skipped device just
+            // looks like one that has stalled before its first step.
+            if ((n.state || '').toUpperCase().includes('PORT-EXCLUDED')) {
+                html += '<div class="tile-meta-row"><span class="tile-meta-label">Skipped:</span><span class="tile-meta-value">USB port not permitted</span></div>';
+            }
             if (n.image) html += '<div class="tile-meta-row"><span class="tile-meta-label">Image:</span><span class="tile-meta-value">' + escapeHtml(n.image) + '</span></div>';
             if (n.ip) html += '<div class="tile-meta-row"><span class="tile-meta-label">IP:</span><span class="tile-meta-value">' + escapeHtml(n.ip) + '</span></div>';
             html += '<div class="tile-meta-row"><span class="tile-meta-label">USB path:</span><span class="tile-meta-value">' + escapeHtml(String(n.id)) + '</span></div>';

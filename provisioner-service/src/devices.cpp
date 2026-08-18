@@ -22,10 +22,79 @@
 #include <random>
 #include <cstdio>
 #include <sys/stat.h>
+#include <fnmatch.h>
 #include "utils.h"
 #include "include/audit.h"
 
 using namespace drogon;
+
+
+// ---------------------------------------------------------------------------
+// USB port restriction rules
+//
+// Mirrors usb_port_permitted() in rpi-sb-common.sh so the visualisers agree
+// with the decision the provisioning scripts actually make. Rules are *.conf
+// drop-ins read from two directories, /etc masking /usr/share by basename;
+// each line is a USB topology path, shell globs permitted. No patterns at all
+// means no restriction, and every port is permitted.
+namespace {
+    constexpr const char *USB_PORT_RULES_VENDOR_DIR = "/usr/share/rpi-sb-provisioner/usb-ports.d";
+    constexpr const char *USB_PORT_RULES_LOCAL_DIR  = "/etc/rpi-sb-provisioner/usb-ports.d";
+
+    // Effective patterns, in the order the files were read. Recomputed on each
+    // topology scan: a handful of small files, and it means an edit to the
+    // rules shows up in the UI without restarting the service.
+    std::vector<std::string> readUsbPortPatterns() {
+        std::vector<std::string> patterns;
+        std::set<std::string> claimed;   // basenames already taken by /etc
+
+        for (const char *dir : {USB_PORT_RULES_LOCAL_DIR, USB_PORT_RULES_VENDOR_DIR}) {
+            std::error_code ec;
+            if (!std::filesystem::is_directory(dir, ec)) continue;
+
+            // Sort by filename so the merge is deterministic; directory
+            // iteration order is not guaranteed.
+            std::vector<std::filesystem::path> files;
+            for (const auto &entry : std::filesystem::directory_iterator(dir, ec)) {
+                if (ec) break;
+                if (!entry.is_regular_file(ec)) continue;
+                if (entry.path().extension() != ".conf") continue;
+                files.push_back(entry.path());
+            }
+            std::sort(files.begin(), files.end());
+
+            for (const auto &f : files) {
+                const std::string base = f.filename().string();
+                if (!claimed.insert(base).second) continue;   // masked by /etc
+
+                std::ifstream in(f);
+                if (!in) continue;
+                std::string line;
+                while (std::getline(in, line)) {
+                    const auto hash = line.find('#');
+                    if (hash != std::string::npos) line.erase(hash);
+                    // Strip all whitespace: topology paths never contain any,
+                    // and this also drops a trailing \r from a CRLF file.
+                    line.erase(std::remove_if(line.begin(), line.end(),
+                                              [](unsigned char c) { return std::isspace(c); }),
+                               line.end());
+                    if (!line.empty()) patterns.push_back(line);
+                }
+            }
+        }
+        return patterns;
+    }
+
+    bool usbPortPermitted(const std::string &usbPath,
+                          const std::vector<std::string> &patterns) {
+        if (patterns.empty()) return true;          // unrestricted
+        if (usbPath.empty()) return false;          // cannot honour an allowlist
+        for (const auto &pat : patterns) {
+            if (fnmatch(pat.c_str(), usbPath.c_str(), 0) == 0) return true;
+        }
+        return false;
+    }
+}
 
 // Forward declare snapshot helper accessible to other scopes in this TU
 namespace provisioner { std::string getTopologySnapshotString(); }
@@ -1002,6 +1071,9 @@ namespace provisioner {
                                    const std::vector<std::string> &removed = {}) {
             Json::Value root;
             root["type"] = "topology";
+            // Read once per payload, not once per node: the rule files are
+            // small but this runs for every node on every scan.
+            const std::vector<std::string> usbPortPatterns = readUsbPortPatterns();
             Json::Value arr(Json::arrayValue);
             for (const auto &p : nodes) {
                 const UsbNode &n = p.second;
@@ -1015,6 +1087,14 @@ namespace provisioner {
                 Json::Value j;
                 j["id"] = n.id;
                 if (!n.parentId.empty()) j["parentId"] = n.parentId; else j["parentId"] = Json::nullValue;
+                // Whether the provisioner would act on a device here. Only
+                // meaningful for real topology paths -- the synthetic server
+                // node is not a port. Always emitted (rather than only when
+                // false) so the client can distinguish "excluded" from "this
+                // build does not report it".
+                if (n.id != "server") {
+                    j["portPermitted"] = usbPortPermitted(n.id, usbPortPatterns);
+                }
                 j["isHub"] = n.isHub;
                 if (!n.vendor.empty()) j["vendor"] = n.vendor;
                 if (!n.product.empty()) j["product"] = n.product;
@@ -1032,6 +1112,12 @@ namespace provisioner {
                 arr.append(j);
             }
             root["nodes"] = arr;
+            {
+                Json::Value rules(Json::arrayValue);
+                for (const auto &pat : usbPortPatterns) rules.append(pat);
+                root["usbPortRules"] = rules;
+                root["usbPortRestrictionActive"] = !usbPortPatterns.empty();
+            }
             if (!removed.empty()) {
                 Json::Value r(Json::arrayValue);
                 for (const auto &id : removed) r.append(id);
