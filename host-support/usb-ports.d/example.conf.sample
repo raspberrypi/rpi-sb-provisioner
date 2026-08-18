@@ -1,0 +1,21 @@
+# Example USB port restriction rules for rpi-sb-provisioner.
+#
+# Copy this file to /etc/rpi-sb-provisioner/usb-ports.d/ with a .conf
+# extension to activate it -- the .sample suffix means it is ignored here.
+#
+#     cp example.conf.sample /etc/rpi-sb-provisioner/usb-ports.d/50-jig.conf
+#
+# One USB topology path per line, as found under /sys/bus/usb/devices.
+# Shell globs are permitted. See the README alongside this file.
+
+# A single-headed programming jig: one wired port, nothing else.
+1-1.2
+
+# A four-way jig behind a hub would instead read:
+# 1-1.1
+# 1-1.2
+# 1-1.3
+# 1-1.4
+
+# Or, to accept every port on that hub:
+# 1-1.*

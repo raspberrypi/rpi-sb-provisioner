@@ -169,6 +169,18 @@ timeout_fatal() {
 # triage before it could even record TRIAGE-STARTED or write any log.
 TARGET_USB_PATH=$(get_usb_path_for_serial "${TARGET_DEVICE_SERIAL}") || TARGET_USB_PATH=""
 
+# Enforce the USB port restriction before recording TRIAGE-STARTED, so a
+# device on an unwired jig port never appears to have entered provisioning.
+# A device that reached fastboot through bootstrap has already passed this
+# check, but one that boots straight to fastboot (an already-provisioned
+# board being re-triaged) arrives here without having been filtered. The
+# check is a no-op unless a rule file is installed -- see
+# usb_port_permitted() in rpi-sb-common.sh.
+if ! usb_port_permitted "${TARGET_USB_PATH}"; then
+    record_usb_port_exclusion "triage" "${TARGET_USB_PATH}" "${TARGET_DEVICE_SERIAL}" || true
+    exit 0
+fi
+
 # Record state changes atomically
 record_state "${TARGET_DEVICE_SERIAL}" "${TRIAGE_STARTED}" "${TARGET_USB_PATH}"
 
