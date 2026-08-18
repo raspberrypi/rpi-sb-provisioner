@@ -184,6 +184,19 @@ fi
 # Record state changes atomically
 record_state "${TARGET_DEVICE_SERIAL}" "${TRIAGE_STARTED}" "${TARGET_USB_PATH}"
 
+# Establish that there is a usable OS image before engaging the device. This
+# is a misconfiguration that no amount of retrying will resolve, so say so
+# plainly here rather than letting a provisioner discover it much later --
+# previously an unset GOLD_MASTER_OS_FILE got all the way to losetup, which
+# retried for 25 seconds before failing with an error about loop devices.
+if ! classify_gold_master_os; then
+    mark_permanent_failure
+    log "${GOLD_MASTER_OS_ERROR}"
+    record_state "${TARGET_DEVICE_SERIAL}" "${TRIAGE_ABORTED}" "${TARGET_USB_PATH}"
+    die "${GOLD_MASTER_OS_ERROR}"
+fi
+log "OS image: ${GOLD_MASTER_OS_FILE} (${GOLD_MASTER_OS_KIND})"
+
 if [ -d "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL32}" ]; then
     cp -rf "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL32}/." "${LOG_DIRECTORY}/"
     rm -rf "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL32}"
@@ -245,12 +258,16 @@ echo "${TRIAGE_STARTED}" >> "${LOG_DIRECTORY}"/triage.log
 # timestamp as PROVISIONER-STARTED but sort after it -- the state race seen in
 # the UI.  Triage's job is done once it has selected the provisioner, so record
 # TRIAGE-FINISHED first and hand off last.
-if [ -d "${GOLD_MASTER_OS_FILE}" ]; then
-    # GOLD_MASTER_OS_FILE is a directory -- this is an IDP artefact.
+# Routing keys off the classification above rather than a bare `-d` test. The
+# two are not equivalent: `-d` is also false for an IDP artefact whose
+# directory is simply absent -- an unmounted share, a deleted export -- which
+# silently routed such a device to the .img provisioner, where it failed later
+# with an error naming loop devices rather than the missing artefact.
+if [ "${GOLD_MASTER_OS_KIND}" = "idp" ]; then
     # Route to the IDP provisioner regardless of PROVISIONING_STYLE,
     # since the IDP provisioner handles the image format natively.
     # (Secure boot is handled by the bootstrap phase, not the provisioner.)
-    log "GOLD_MASTER_OS_FILE is a directory; selecting IDP Provisioner"
+    log "GOLD_MASTER_OS_FILE is an IDP artefact directory; selecting IDP Provisioner"
     TARGET_PROVISIONER_UNIT="rpi-idp-provisioner@${TARGET_DEVICE_SERIAL}.service"
 else
     # Traditional .img file -- use the PROVISIONING_STYLE switch as before
@@ -268,7 +285,9 @@ else
             TARGET_PROVISIONER_UNIT="rpi-naked-provisioner@${TARGET_DEVICE_SERIAL}.service"
         ;;
         *)
+            mark_permanent_failure
             log "Fatal: Unknown provisioning style: ${PROVISIONING_STYLE}"
+            record_state "${TARGET_DEVICE_SERIAL}" "${TRIAGE_ABORTED}" "${TARGET_USB_PATH}"
             exit 1
         ;;
     esac

@@ -193,6 +193,34 @@ rpi-sb-provisioner (2.3.2) unstable; urgency=medium
       collapse while hiding, taking childless root-port groups and tiers with
       them, and are unchanged when nothing is being hidden.
 
+  * Failing usefully on misconfiguration:
+    - Establish that a usable OS image is configured before engaging the
+      device. An unset GOLD_MASTER_OS_FILE previously reached losetup, which
+      retried for 25 seconds and then failed reporting a loop-device error,
+      having already recorded PROVISIONER-STARTED and taken the device
+      through bootstrap. Triage now classifies the configured image up front
+      and aborts with the actual reason; the provisioners re-check, since
+      their units can be started directly and the configuration can change
+      between triage selecting one and it running.
+    - Route to the IDP provisioner by classification rather than a bare
+      directory test. `-d` is also false for an IDP artefact whose directory
+      is merely absent -- an unmounted share, a deleted export -- so such a
+      device was silently handed to the .img provisioner and failed later
+      with an error naming loop devices rather than the missing artefact.
+      The directory is now held to the same one-descriptor rule the IDP
+      provisioner enforces in its own pre-flight, so the two cannot disagree
+      about whether an artefact is usable.
+    - Report whether a failure is permanent, via PROVISION_FAILED_PERMANENT
+      in the provision-failed hook environment. Hooks could previously only
+      see the stage a failure occurred in, and bootstrap-stage failures are
+      a mix of the transient (USB re-enumeration as the device reboots) and
+      the permanent (no signing key, no OS image). Anything filtering out
+      the former to avoid false alarms necessarily discarded the latter too,
+      so a jig could sit on its in-progress indicator indefinitely with a
+      misconfiguration that would never resolve. The stage is unchanged --
+      it still selects the hook's positional arguments -- so existing hooks
+      keep working and can adopt the flag when they choose.
+
   * Service lifecycle:
     - Explicitly handle device event loop termination.
 

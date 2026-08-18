@@ -310,6 +310,14 @@ record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_STARTED}" "${TARGET_USB_PA
 
 systemd-notify --ready --status="Provisioning started"
 
+# Re-check the OS image here as well as in triage: these units can be started
+# directly, and the configuration can change between triage selecting a
+# provisioner and that provisioner running.
+if ! classify_gold_master_os; then
+    mark_permanent_failure
+    die "${GOLD_MASTER_OS_ERROR}"
+fi
+
 # Run provision-started hook (e.g. LED control on programming rigs)
 run_customisation_script "fde-provisioner" "provision-started" "${FASTBOOT_DEVICE_SPECIFIER}" "${TARGET_DEVICE_SERIAL}" "${RPI_DEVICE_STORAGE_TYPE}"
 
