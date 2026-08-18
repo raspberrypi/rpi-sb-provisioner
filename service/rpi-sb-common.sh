@@ -591,8 +591,36 @@ run_customisation_script() {
     fi
 }
 
+# Retrieve a single-line fastboot variable. NOTE: the value is truncated at
+# the first newline -- use get_variable_pem() for multi-line values such as
+# public-key/private-key, which the gadget returns as armoured PEM.
 get_variable() {
     fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar "$1" 2>&1 | grep -oP "${1}"': \K[^\r\n]*' || true
+}
+
+# Retrieve a fastboot variable whose value is an armoured PEM block, printing
+# the whole block (BEGIN line through END line) on stdout.
+#
+# rpi-fastbootd returns public-key/private-key as multi-line PEM, so
+# get_variable() captures only "-----BEGIN PUBLIC KEY-----" and drops the
+# body. Extract the armoured block instead: strip fastboot's "<var>: " prefix
+# from the BEGIN line and ignore its trailing progress output.
+#
+# Returns 1 (printing nothing) when the device did not return a PEM block --
+# e.g. private-key answers "refused" once the OTP ECDSA key-slot is LOCKED,
+# which rpi-fastbootd does at startup and again immediately after
+# `oem fwcrypto init`.
+get_variable_pem() {
+    _gvp_output=$(fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar "$1" 2>&1 | tr -d '\r') || true
+    _gvp_pem=$(printf '%s\n' "${_gvp_output}" | \
+        sed -n '/-----BEGIN /,/-----END /{
+            s/^.*\(-----BEGIN \)/\1/
+            p
+        }')
+    if [ -z "${_gvp_pem}" ]; then
+        return 1
+    fi
+    printf '%s\n' "${_gvp_pem}"
 }
 
 # =============================================================================
