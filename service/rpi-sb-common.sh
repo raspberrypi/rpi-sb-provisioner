@@ -490,6 +490,93 @@ maybe_reorder_boot_order_for_storage() {
 # Run the provision-failed hook for programming-rig signalling (e.g. LEDs).
 # HOOK_CONTEXT is "bootstrap" (serial/family/usb/device path args) or
 # "provisioning" (fastboot specifier/serial/storage args).
+# Mark the failure in progress as a permanent misconfiguration -- something
+# retrying the same device will never resolve, such as no OS image or no
+# signing key being configured. Distinct from the stage the failure happened
+# in, which run_provision_failed_hook already reports: a bootstrap-stage
+# failure may be either transient (USB re-enumeration churn as the device
+# reboots) or permanent, and hooks that want to react loudly to the latter
+# cannot tell them apart from the stage alone.
+mark_permanent_failure() {
+    PROVISION_FAILURE_PERMANENT=1
+    export PROVISION_FAILURE_PERMANENT
+}
+
+# Classify the configured OS image, failing early when it cannot be used.
+#
+# GOLD_MASTER_OS_FILE names either a regular file (a whole-disk .img) or a
+# directory (an rpi-image-gen IDP artefact). Telling "not configured",
+# "configured but absent" and "present but unusable" apart matters because
+# triage picks the provisioner from the *shape* of this path: an IDP artefact
+# whose directory is momentarily missing -- an unmounted share, say -- is
+# otherwise indistinguishable from a .img, and gets routed to a provisioner
+# that cannot read it and fails much later with an unrelated error.
+#
+# Results come back in globals, deliberately, and nothing is written to
+# stdout: capturing a reason with $( ) would run this in a subshell and throw
+# GOLD_MASTER_OS_KIND away with it. Call it directly:
+#
+#     if ! classify_gold_master_os; then
+#         die "${GOLD_MASTER_OS_ERROR}"
+#     fi
+#
+# Sets and exports GOLD_MASTER_OS_KIND to "image" or "idp" on success, so
+# callers -- and the customisation hooks they run -- can branch on the form of
+# the artefact without re-testing the path. Sets GOLD_MASTER_OS_ERROR to the
+# reason on failure.
+# Exit:   0 when usable, 1 otherwise.
+classify_gold_master_os() {
+    GOLD_MASTER_OS_KIND=""
+    GOLD_MASTER_OS_ERROR=""
+    export GOLD_MASTER_OS_KIND GOLD_MASTER_OS_ERROR
+
+    if [ -z "${GOLD_MASTER_OS_FILE}" ]; then
+        GOLD_MASTER_OS_ERROR="No OS image is configured. Set GOLD_MASTER_OS_FILE in /etc/rpi-sb-provisioner/config, or select an image in the web UI."
+        return 1
+    fi
+
+    if [ -d "${GOLD_MASTER_OS_FILE}" ]; then
+        # IDP artefact. Apply the same descriptor rule the IDP provisioner
+        # enforces in its own pre-flight, so the two cannot disagree about
+        # whether a directory is a usable artefact.
+        _cgm_json_count=$(find "${GOLD_MASTER_OS_FILE}" -maxdepth 1 -name '*.json' -type f 2>/dev/null | wc -l)
+        if [ "${_cgm_json_count}" -eq 0 ]; then
+            GOLD_MASTER_OS_ERROR="GOLD_MASTER_OS_FILE is a directory with no JSON description file: ${GOLD_MASTER_OS_FILE}. An IDP artefact directory must contain exactly one."
+            return 1
+        fi
+        if [ "${_cgm_json_count}" -gt 1 ]; then
+            GOLD_MASTER_OS_ERROR="GOLD_MASTER_OS_FILE is a directory with ${_cgm_json_count} JSON description files: ${GOLD_MASTER_OS_FILE}. An IDP artefact directory must contain exactly one."
+            return 1
+        fi
+        GOLD_MASTER_OS_KIND="idp"
+        return 0
+    fi
+
+    if [ -f "${GOLD_MASTER_OS_FILE}" ]; then
+        if [ ! -s "${GOLD_MASTER_OS_FILE}" ]; then
+            GOLD_MASTER_OS_ERROR="Configured OS image is empty: ${GOLD_MASTER_OS_FILE}"
+            return 1
+        fi
+        if [ ! -r "${GOLD_MASTER_OS_FILE}" ]; then
+            GOLD_MASTER_OS_ERROR="Configured OS image is not readable: ${GOLD_MASTER_OS_FILE}"
+            return 1
+        fi
+        GOLD_MASTER_OS_KIND="image"
+        return 0
+    fi
+
+    if [ -e "${GOLD_MASTER_OS_FILE}" ]; then
+        GOLD_MASTER_OS_ERROR="Configured OS image is neither a regular file nor a directory: ${GOLD_MASTER_OS_FILE}"
+        return 1
+    fi
+
+    # Absent entirely. Deliberately does not guess whether a .img or an IDP
+    # directory was intended -- the path is gone, so the shape is unknowable,
+    # and a mount that has not come back is the common cause.
+    GOLD_MASTER_OS_ERROR="Configured OS image does not exist: ${GOLD_MASTER_OS_FILE}. If this is an IDP artefact directory on a removable or network mount, check the mount is present."
+    return 1
+}
+
 run_provision_failed_hook() {
     PROVISIONER_NAME="$1"
     HOOK_CONTEXT="${2:-provisioning}"
@@ -500,6 +587,10 @@ run_provision_failed_hook() {
     fi
 
     set +e
+    # Reported alongside the stage rather than folded into it: the stage still
+    # selects the hook's positional arguments, so widening it would change the
+    # contract every existing hook is written against.
+    export PROVISION_FAILED_PERMANENT="${PROVISION_FAILURE_PERMANENT:-0}"
     if [ "${HOOK_CONTEXT}" = "bootstrap" ]; then
         export PROVISION_FAILED_CONTEXT=bootstrap
         run_customisation_script "${PROVISIONER_NAME}" "provision-failed" \
@@ -512,6 +603,7 @@ run_provision_failed_hook() {
             "${RPI_DEVICE_STORAGE_TYPE}"
     fi
     unset PROVISION_FAILED_CONTEXT
+    unset PROVISION_FAILED_PERMANENT
 }
 
 run_customisation_script() {
@@ -815,6 +907,7 @@ get_openssl_sign_args() {
         *)
             # NB: pem-wrapped has no openssl directive form (the key is never on
             # disk). Such callers must use sign_image_hex(), not this function.
+            mark_permanent_failure
             log "ERROR: No signing key configured (get_openssl_sign_args)"
             return 1
             ;;
@@ -954,6 +1047,7 @@ get_sign_bootcode_key_args() {
             echo "-k ${CUSTOMER_KEY_FILE_PEM}"
             ;;
         *)
+            mark_permanent_failure
             log "ERROR: No signing key configured (bootcode signing requires a key)"
             return 1
             ;;

@@ -656,6 +656,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                 if [ "${TARGET_DEVICE_FAMILY}" = "2712" ]; then
                     if ! signing_available; then
                         record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
+                        mark_permanent_failure
                         die "No signing key configured for re-provisioning. Aborting."
                     fi
                     log "Re-signing bootcode for special re-provisioning case"
