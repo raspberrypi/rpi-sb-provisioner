@@ -1322,3 +1322,161 @@ prepare_signed_boot_simg() {
     rm -rf "${_work}"
     return 0
 }
+
+# ---------------------------------------------------------------------------
+# USB port restriction
+#
+# On a fixed programming jig only a known set of USB ports is wired to a
+# device head; anything else plugged into the host (a keyboard, a USB stick,
+# an engineer's laptop cable) must never be picked up and programmed. The
+# restriction is expressed as drop-in rule files rather than a config
+# variable so that a jig-specific package can ship the topology for its
+# hardware without touching /etc/rpi-sb-provisioner/config.
+#
+# Two directories are consulted, in ascending precedence:
+#
+#   /usr/share/rpi-sb-provisioner/usb-ports.d/   package-supplied rules
+#   /etc/rpi-sb-provisioner/usb-ports.d/         local administrator rules
+#
+# Only files named *.conf are read. Files are merged by basename, with the
+# /etc copy winning, so a local empty file of the same name masks a
+# package-supplied one entirely -- the same convention systemd uses for its
+# own drop-ins.
+#
+# Each line is a USB topology path in the form the kernel uses for a device
+# directory under /sys/bus/usb/devices ("<bus>-<port>[.<port>...]", e.g.
+# "1-1.2"). Shell glob metacharacters are permitted, so "1-1.*" covers every
+# downstream port of the hub on bus 1 port 1. Blank lines and lines whose
+# first non-whitespace character is '#' are ignored.
+#
+# If no rule file yields a single pattern -- the default for a fresh install,
+# where neither directory contains a *.conf -- the restriction is inactive
+# and every port is accepted, preserving the historical behaviour.
+USB_PORT_RULES_VENDOR_DIR="${USB_PORT_RULES_VENDOR_DIR:-/usr/share/rpi-sb-provisioner/usb-ports.d}"
+USB_PORT_RULES_LOCAL_DIR="${USB_PORT_RULES_LOCAL_DIR:-/etc/rpi-sb-provisioner/usb-ports.d}"
+
+# State for the "port excluded" outcome, recorded against the stage that
+# rejected the device so the WebUI can distinguish a deliberate skip from a
+# provisioning failure.
+export PORT_EXCLUDED="PORT-EXCLUDED"
+
+# List the effective rule files, one absolute path per line, after applying
+# the /etc-masks-/usr/share precedence: local files first, then any package
+# file whose basename the local directory did not already claim. Ordering is
+# deterministic because pathname expansion sorts each directory's matches,
+# though it does not affect the result -- the patterns are a set.
+#
+# Output (stdout): newline-separated absolute paths, possibly empty.
+# Exit:   always 0.
+list_usb_port_rule_files() {
+    _upr_seen=""
+    for _upr_dir in "${USB_PORT_RULES_LOCAL_DIR}" "${USB_PORT_RULES_VENDOR_DIR}"; do
+        [ -d "${_upr_dir}" ] || continue
+        for _upr_file in "${_upr_dir}"/*.conf; do
+            [ -f "${_upr_file}" ] || continue
+            _upr_base=$(basename "${_upr_file}")
+            # A basename already claimed by the higher-precedence directory
+            # masks the lower one. The guard newlines keep the substring
+            # test from matching a partial basename.
+            case "${_upr_seen}" in
+                *"
+${_upr_base}
+"*) continue ;;
+            esac
+            _upr_seen="${_upr_seen}
+${_upr_base}
+"
+            printf '%s\n' "${_upr_file}"
+        done
+    done
+    return 0
+}
+
+# Read every effective rule file and emit the patterns they contain, one per
+# line, stripped of comments and surrounding whitespace.
+#
+# Output (stdout): newline-separated glob patterns, possibly empty.
+# Exit:   always 0.
+list_usb_port_patterns() {
+    list_usb_port_rule_files | while IFS= read -r _upp_file; do
+        # `|| [ -n ... ]` so a final line without a trailing newline is kept.
+        while IFS= read -r _upp_line || [ -n "${_upp_line}" ]; do
+            # Strip a trailing comment, then surrounding whitespace.
+            _upp_line=${_upp_line%%#*}
+            _upp_line=$(printf '%s' "${_upp_line}" | tr -d '[:space:]')
+            [ -n "${_upp_line}" ] || continue
+            printf '%s\n' "${_upp_line}"
+        done < "${_upp_file}"
+    done
+    return 0
+}
+
+# Report whether a USB port restriction is in force.
+#
+# Exit:   0 if at least one pattern is configured, 1 if unrestricted.
+usb_port_restriction_active() {
+    [ -n "$(list_usb_port_patterns | head -n1)" ]
+}
+
+# Decide whether a device on a given USB topology path may be provisioned.
+#
+# Arguments:
+#   $1 - USB topology path (e.g. "1-1.2"). May be empty if the caller could
+#        not resolve one.
+#
+# Exit:   0 if the device is permitted, 1 if it must be skipped.
+#
+# An empty path is permitted while unrestricted, but rejected once rules are
+# in force: an allowlist cannot be honoured for a device whose port is
+# unknown, and on a jig the safe reading of "I cannot tell where this is
+# plugged in" is "do not program it".
+usb_port_permitted() {
+    _upp_path="$1"
+
+    usb_port_restriction_active || return 0
+
+    if [ -z "${_upp_path}" ]; then
+        return 1
+    fi
+
+    # The loop runs in a subshell, so a match cannot set a variable the
+    # caller would see -- it signals through the subshell's exit status
+    # instead. Draining the loop without a match must therefore exit 1
+    # explicitly, since a while loop that ends because `read` hit EOF is
+    # itself a success.
+    list_usb_port_patterns | {
+        while IFS= read -r _upp_pattern; do
+            # shellcheck disable=SC2254 # deliberate glob match against the pattern
+            case "${_upp_path}" in
+                ${_upp_pattern}) exit 0 ;;
+            esac
+        done
+        exit 1
+    }
+}
+
+# Reject a device that is not on a permitted USB port: log the reason,
+# record the skip against the calling stage, and return non-zero so the
+# caller can exit without running its failure hooks.
+#
+# Arguments:
+#   $1 - Stage name for the state record ("bootstrap" or "triage")
+#   $2 - USB topology path, possibly empty
+#   $3 - Device serial for the state record
+#
+# Exit:   always 1, so callers can write `check || exit 0`.
+record_usb_port_exclusion() {
+    _upe_stage="$1"
+    _upe_path="$2"
+    _upe_serial="$3"
+
+    if [ -z "${_upe_path}" ]; then
+        log "USB port restriction active but this device's port could not be determined; skipping ${_upe_stage}"
+    else
+        log "USB port ${_upe_path} is not listed in ${USB_PORT_RULES_LOCAL_DIR} or ${USB_PORT_RULES_VENDOR_DIR}; skipping ${_upe_stage}"
+    fi
+    log "Permitted USB ports: $(list_usb_port_patterns | tr '\n' ' ')"
+
+    record_state "${_upe_serial}" "${PORT_EXCLUDED}" "${_upe_stage}"
+    return 1
+}
