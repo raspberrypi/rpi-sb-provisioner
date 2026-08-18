@@ -411,3 +411,21 @@ This will generate packages with:
     Maintainer: Acme Corporation <ops@acme.com>
 
 See [Boot Image Generator Documentation](boot-img-generator.md) for more information about the automatic boot image generation feature.
+
+# Settings that are not configuration variables
+
+## Restricting provisioning to specific USB ports
+
+Which USB ports the provisioner will pick devices up from is **not** controlled
+by a variable in `/etc/rpi-sb-provisioner/config`. It is controlled by drop-in
+rule files, so that a package describing a particular programming jig can ship
+the topology for that hardware without touching this configuration file:
+
+    /usr/share/rpi-sb-provisioner/usb-ports.d/    package-supplied rules
+    /etc/rpi-sb-provisioner/usb-ports.d/          local administrator rules
+
+With no `*.conf` file in either directory — the state of a fresh install — the
+restriction is inactive and devices on every port are provisioned.
+
+See the [USB Port Restriction Guide](usb-port-restriction.md) for the file
+format, merge and masking rules, and how a skipped device is reported.
