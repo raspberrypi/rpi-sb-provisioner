@@ -20,6 +20,20 @@
         .badge-gen { color: #fff; background: #5c6bc0; }      /* known model generation */
         .badge-unknown { color: #212529; background: #ffc107; } /* connected, model not yet known */
         .badge-empty { color: #fff; background: #9e9e9e; }    /* no device on this port */
+        .badge-permitted { color: #fff; background: #2e7d32; }  /* port the USB filter allows */
+        /* Ports the usb-ports.d filter excludes: still drawn (they are real
+           hardware) but muted, so the permitted port reads as the live one. */
+        .node.port-excluded { opacity: 0.5; border-style: dashed; }
+        .node.port-permitted { border-color: #2e7d32; }
+        /* Filter status bar */
+        .port-filter-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+                           margin: 8px 0 12px; padding: 8px 12px; border: 1px solid #c8e6c9;
+                           border-radius: 6px; background: #f1f8e9; font-size: 0.9rem; }
+        .port-filter-bar[hidden] { display: none; }
+        .port-filter-bar .pf-label { font-weight: 600; }
+        .port-filter-bar .pf-rule { font-family: monospace; background: #fff; border: 1px solid #c8e6c9;
+                                    border-radius: 4px; padding: 1px 6px; margin-right: 4px; }
+        .port-filter-bar label { display: flex; align-items: center; gap: 6px; cursor: pointer; margin-left: auto; }
         /* Tabs and relational (mind map) view styling */
         .view-tabs { margin: 12px 0 8px; display: flex; gap: 8px; }
         .view-tab { border: 1px solid #9ec9ff; background: #eef6ff; color: #0b3d91; padding: 6px 10px; border-radius: 14px; font-weight: 600; cursor: pointer; }
@@ -40,6 +54,11 @@
         .d3-node-circle.tier { fill: #f5f0ff; stroke: #b39ddb; stroke-width: 3; }  /* USB 2/3 Root - purple */
         .d3-node-circle.rootport-ss { fill: #e3f2fd; stroke: #2196f3; stroke-width: 2; }  /* USB 3 Root Port - blue (SuperSpeed) */
         .d3-node-circle.rootport-hs { fill: #fff8e1; stroke: #ff9800; stroke-width: 2; }  /* USB 2 Root Port - orange (HighSpeed) */
+        /* USB port filter, mirrored from the port tree: permitted ports get a
+           green ring, excluded ones fade back. Applied as extra classes so the
+           existing node-type fills are preserved. */
+        .d3-node-circle.port-permitted { stroke: #2e7d32; stroke-width: 4; }
+        .d3-node-circle.port-excluded { opacity: 0.4; stroke-dasharray: 3 2; }
         .d3-node-circle:hover { stroke-width: 4; filter: brightness(1.1); }
         .d3-node-circle.clicked { stroke: #0b69ff; stroke-width: 4; filter: drop-shadow(0 0 8px rgba(11, 105, 255, 0.5)); }
         
@@ -105,10 +124,77 @@
     <script>
         let ws = null;
         const elementsById = new Map();
+
+        // --- USB port filter state ------------------------------------------
+        // The server computes portPermitted per node (mirroring
+        // usb_port_permitted() in rpi-sb-common.sh) and sends the effective
+        // rule list alongside, so the views never have to glob-match here.
+        let usbPortRules = [];
+        let usbPortRestrictionActive = false;
+        // Last full node set from the server, kept so toggling the checkbox can
+        // re-render immediately instead of waiting for the next scan.
+        let lastTopologyNodes = [];
+        const PF_HIDE_KEY = 'devices-hide-excluded-ports';
+        // Three states: '1' / '0' when the operator has chosen, null when they
+        // have not. Unchosen defaults to hiding whenever a filter is in force,
+        // because on a jig the excluded ports are noise; with no filter there
+        // is nothing to hide either way.
+        let pfHidePref = null;
+        try { pfHidePref = localStorage.getItem(PF_HIDE_KEY); } catch (e) {}
+        let hideExcludedPorts = false;
+        function resolveHideDefault() {
+            hideExcludedPorts = (pfHidePref === null) ? usbPortRestrictionActive : (pfHidePref === '1');
+        }
+
+        // Drop excluded ports, but keep any node on the path to a permitted
+        // one. Without the ancestor walk, permitting a port behind a hub
+        // (e.g. 1-1.2) would hide the hub and orphan the very node the user
+        // asked to see.
+        function filterToPermitted(nodes) {
+            if (!hideExcludedPorts || !usbPortRestrictionActive) return nodes;
+            const byId = new Map(nodes.map(n => [String(n.id), n]));
+            const keep = new Set(['server']);
+            for (const n of nodes) {
+                if (n.portPermitted !== true) continue;
+                let cur = n;
+                let guard = 0;
+                while (cur && guard++ < 32) {
+                    keep.add(String(cur.id));
+                    const pid = cur.parentId ? String(cur.parentId) : null;
+                    if (!pid || keep.has(pid)) { if (pid) keep.add(pid); break; }
+                    cur = byId.get(pid);
+                }
+            }
+            return nodes.filter(n => keep.has(String(n.id)));
+        }
+
+        function renderPortFilterBar() {
+            const bar = document.getElementById('port-filter-bar');
+            if (!bar) return;
+            bar.hidden = !usbPortRestrictionActive;
+            if (!usbPortRestrictionActive) return;
+            const rulesEl = document.getElementById('pf-rules');
+            if (rulesEl) {
+                rulesEl.innerHTML = usbPortRules
+                    .map(r => '<span class="pf-rule"></span>')
+                    .join('');
+                // Set text via textContent so a rule string cannot inject markup.
+                rulesEl.querySelectorAll('.pf-rule').forEach((el, i) => { el.textContent = usbPortRules[i]; });
+            }
+            const cb = document.getElementById('pf-hide-excluded');
+            if (cb) cb.checked = hideExcludedPorts;
+        }
+
+        function rerenderFromCache() {
+            const shown = filterToPermitted(lastTopologyNodes);
+            try { applyTopology(shown); } catch (e) { console.error('tree re-render error:', e); }
+            if (window.__d3Apply) { try { window.__d3Apply(shown); } catch (e) { console.error('D3 re-render error:', e); } }
+        }
     
         function makeNodeElement(node) {
             const el = document.createElement('div');
             el.className = 'node ' + (node.isHub ? 'hub' : 'device');
+            applyPortFilterClass(el, node);
             el.dataset.id = node.id;
             const title = document.createElement('div');
             title.className = 'title';
@@ -363,7 +449,41 @@
             return idStr;
         }
     
+        // Mark a tree node according to the USB port filter. Only applied while
+        // a restriction is in force -- with no rules every port is permitted,
+        // and badging them all would say nothing.
+        function applyPortFilterClass(el, node) {
+            el.classList.remove('port-permitted', 'port-excluded');
+            if (!usbPortRestrictionActive) return;
+            if (node.id === 'server') return;
+            if (node.portPermitted === true) el.classList.add('port-permitted');
+            else if (node.portPermitted === false) el.classList.add('port-excluded');
+        }
+
+        // Bring an existing node's badge in line with computeBadge(). Nodes are
+        // created once and updated in place, so without this a port that
+        // becomes permitted (or stops being) keeps its original badge.
+        function refreshBadge(el, n) {
+            const title = el.querySelector('.title');
+            if (!title) return;
+            let badge = title.querySelector('.badge');
+            const b = computeBadge(n);
+            if (!b) { if (badge) badge.remove(); return; }
+            if (!badge) {
+                badge = document.createElement('span');
+                title.appendChild(badge);
+            }
+            const cls = 'badge ' + b.className;
+            if (badge.className !== cls) badge.className = cls;
+            if (badge.textContent !== b.text) badge.textContent = b.text;
+        }
+
         function computeBadge(n) {
+            // Precedence: whether this port is usable at all is more important
+            // than which generation of board is sitting in it.
+            if (usbPortRestrictionActive && n.portPermitted === true && n.id !== 'server') {
+                return { className: 'badge-permitted', text: '\u2713' };
+            }
             if (n.placeholder) return { className: 'badge-empty', text: '?' };
             if (n.modelGen === 5) return { className: 'badge-gen', text: '5' };
             if (n.modelGen === 4) return { className: 'badge-gen', text: '4' };
@@ -419,17 +539,38 @@
             }
             
             function getNodeClass(n) {
+                return [baseNodeClass(n), portFilterClass(n)].filter(Boolean).join(' ');
+            }
+
+            function baseNodeClass(n) {
                 if (n.id === 'server') return 'server';
                 if (n.isTier) return 'tier';  // USB 2/3 Root
                 if (n.isRootPort) return n.speed === 'ss' ? 'rootport-ss' : 'rootport-hs';  // Root Port by speed
                 if (n.isHub) return 'hub';
                 return 'device';
             }
+
+            // Tier and root-port nodes are synthesised in the browser and carry
+            // no portPermitted flag, so they are never marked -- only the real
+            // topology nodes the server reported on are.
+            function portFilterClass(n) {
+                if (!usbPortRestrictionActive) return '';
+                if (n.id === 'server' || n.isTier || n.isRootPort) return '';
+                if (n.portPermitted === true) return 'port-permitted';
+                if (n.portPermitted === false) return 'port-excluded';
+                return '';
+            }
             
             function tooltipText(n) {
                 const parts = [];
                 parts.push(`<strong>${labelForNode(n)}</strong>`);
                 if (n.id && n.id !== 'server') parts.push(`ID: ${n.id}`);
+                if (usbPortRestrictionActive && typeof n.portPermitted === 'boolean'
+                    && !n.isTier && !n.isRootPort && n.id !== 'server') {
+                    parts.push(n.portPermitted
+                        ? 'USB filter: permitted'
+                        : 'USB filter: excluded (will not be provisioned)');
+                }
                 if (n.model) parts.push(`Model: ${n.model}`);
                 if (n.state) parts.push(`State: ${n.state}`);
                 if (n.ip) parts.push(`IP: ${n.ip}`);
@@ -850,7 +991,9 @@
                         .on('drag', dragged)
                         .on('end', dragended));
                 
-                // Add circles
+                // Add circles. The class is also refreshed on the merged
+                // selection below, so a port that changes permitted-ness is
+                // restyled without being torn down and recreated.
                 nodeEnter.append('circle')
                     .attr('class', d => `d3-node-circle ${getNodeClass(d)}`)
                     .attr('r', d => getNodeRadius(d))
@@ -904,6 +1047,10 @@
                 nodeGroupsMerged.select('.d3-node-label').text(d => labelForNode(d));
                 nodeGroupsMerged.select('.d3-node-state').text(d => d.state || '');
                 nodeGroupsMerged.select('.d3-watermark').text(d => generationText(d));
+                // Re-derive the circle class so a port whose permitted-ness
+                // changed is restyled in place.
+                nodeGroupsMerged.select('circle')
+                    .attr('class', d => `d3-node-circle ${getNodeClass(d)}`);
                 
                 // Update simulation
                 simulation.nodes(nodesData).on('tick', ticked);
@@ -1033,12 +1180,21 @@
             const hsBusToOrdinal = new Map();
             for (let i=0;i<hsBusOrder.length;i++) hsBusToOrdinal.set(hsBusOrder[i], i+1);
             // Only create HS groups for ports we actually intend to show
+            const collapsing = hideExcludedPorts && usbPortRestrictionActive;
             const desiredMaxHs = Math.max(...Array.from(portsByTier.hs).map(p => parseInt(p, 10)).concat([0]));
-            const desiredMaxSs = Math.max(2, ...Array.from(portsByTier.ss).map(p => parseInt(p, 10)).concat([0]));
-            const hsTierEl = ensureRootTier('hs');
-            for (let i = 1; i <= desiredMaxHs; i++) ensureRootPortGroupUnder(hsTierEl, i);
-            const ssTierEl = ensureRootTier('ss');
-            for (let i = 1; i <= desiredMaxSs; i++) ensureRootPortGroupUnder(ssTierEl, i);
+            // Normally a floor of 2 keeps spare USB 3 ports visible to plug
+            // into; while hiding excluded ports that is the very noise being
+            // removed, so fall back to only what the surviving nodes need.
+            const ssFloor = collapsing ? 0 : 2;
+            const desiredMaxSs = Math.max(ssFloor, ...Array.from(portsByTier.ss).map(p => parseInt(p, 10)).concat([0]));
+            if (desiredMaxHs > 0 || !collapsing) {
+                const hsTierEl = ensureRootTier('hs');
+                for (let i = 1; i <= desiredMaxHs; i++) ensureRootPortGroupUnder(hsTierEl, i);
+            }
+            if (desiredMaxSs > 0) {
+                const ssTierEl = ensureRootTier('ss');
+                for (let i = 1; i <= desiredMaxSs; i++) ensureRootPortGroupUnder(ssTierEl, i);
+            }
             // Sort by parent depth, then by speed (descending) to ensure parent-before-child ordering
             // and higher-speed nodes processed first within each depth level
             sortedNodes.sort((a,b) => {
@@ -1106,6 +1262,8 @@
                         el.className = desiredClass;
                     }
                     applyStateClass(el, n.state);
+                    applyPortFilterClass(el, n);
+                    refreshBadge(el, n);
                     // Reparent only if needed
                     if (el.parentElement && el.parentElement !== childrenEl) {
                         try { console.log('applyTopology: reparent', id, 'to parent', parentId); } catch(e) {}
@@ -1116,7 +1274,47 @@
             // Do not remove unseen elements blindly. Only the backend should decide removals.
             // This avoids pruning placeholders or briefly missing nodes during enumeration.
             // If we add explicit removal messages in the future, handle them here.
-            try { console.debug('applyTopology: pruning disabled; unseen nodes retained this tick'); } catch(e) {}
+            if (!collapsing) {
+                try { console.debug('applyTopology: pruning disabled; unseen nodes retained this tick'); } catch(e) {}
+                return;
+            }
+
+            // Collapsing: drop elements for ports that were filtered out, then
+            // the now-childless root-port groups and tiers above them. Without
+            // this the toggle would leave the old nodes on screen, since the
+            // tree is built by mutation rather than rebuilt each tick.
+            // elementsById also holds the synthetic scaffolding (server, the
+            // USB 2/3 tiers, the per-root-port groups), and none of those are
+            // in `seen` -- they are containers, not reported nodes. Pruning by
+            // "not seen" alone would therefore delete the very group holding
+            // the permitted port, so only real topology paths are considered
+            // here and the scaffolding is collapsed afterwards by emptiness.
+            const isSynthetic = (id) =>
+                id === 'server' || id === 'usb2-root' || id === 'usb3-root' || id.startsWith('rootport-');
+            const dropElement = (id, el) => {
+                if (el.parentElement) el.parentElement.removeChild(el);
+                // Must also forget it: ensureRootTier/ensureRootPortGroupUnder
+                // return the cached element, and a detached one would silently
+                // swallow every child appended to it on the next tick.
+                elementsById.delete(id);
+            };
+            for (const [id, el] of Array.from(elementsById.entries())) {
+                if (isSynthetic(id) || seen.has(id)) continue;
+                dropElement(id, el);
+            }
+            // Collapse upwards: empty root-port groups first, then any tier
+            // left with no groups under it.
+            const isEmptyGroup = (el) => {
+                const kids = el.querySelector('.children');
+                return !kids || kids.children.length === 0;
+            };
+            for (const [id, el] of Array.from(elementsById.entries())) {
+                if (id.startsWith('rootport-') && isEmptyGroup(el)) dropElement(id, el);
+            }
+            for (const tierId of ['usb2-root', 'usb3-root']) {
+                const el = elementsById.get(tierId);
+                if (el && isEmptyGroup(el)) dropElement(tierId, el);
+            }
         }
     
         let isPageUnloading = false;
@@ -1135,9 +1333,14 @@
                         // Update bus speed map and companion pairs before processing
                         updateBusSpeedMap(msg.nodes);
                         if (Array.isArray(msg.companionPairs)) backendCompanionPairs = msg.companionPairs;
-                        applyTopology(msg.nodes);
+                        if (Array.isArray(msg.usbPortRules)) usbPortRules = msg.usbPortRules;
+                        usbPortRestrictionActive = msg.usbPortRestrictionActive === true;
+                        resolveHideDefault();
+                        renderPortFilterBar();
+                        lastTopologyNodes = msg.nodes;
+                        applyTopology(filterToPermitted(msg.nodes));
                         // Also update D3 interactive graph if active
-                        if (window.__d3Apply) { try { window.__d3Apply(msg.nodes); } catch(e) { console.error('D3 update error:', e); } }
+                        if (window.__d3Apply) { try { window.__d3Apply(filterToPermitted(msg.nodes)); } catch(e) { console.error('D3 update error:', e); } }
                         // Update tile view
                         if (window.__tilesApply) { try { window.__tilesApply(msg.nodes, msg.removed); } catch(e) { console.error('Tiles update error:', e); } }
                         // Then process removals explicitly from backend
@@ -1229,6 +1432,11 @@
         <button id="tab-topo" class="view-tab" role="tab" aria-selected="false" aria-controls="topo-view">Port tree</button>
         <button id="tab-tiles" class="view-tab" role="tab" aria-selected="false" aria-controls="tiles-view">Device cards</button>
     </div>
+    <div id="port-filter-bar" class="port-filter-bar" role="status" hidden>
+        <span class="pf-label">USB port filter active:</span>
+        <span id="pf-rules"></span>
+        <label><input type="checkbox" id="pf-hide-excluded"> Hide excluded ports</label>
+    </div>
     <div id="rel-view" class="view-container active" role="tabpanel" aria-labelledby="tab-rel">
         <div class="mindmap-container" role="img" aria-label="Interactive USB device topology graph showing connected devices and their relationships">
             <svg id="d3-graph-svg" aria-hidden="true"></svg>
@@ -1250,6 +1458,21 @@
         applyTopology([{ id: 'server', isHub: true }]);
         // Initialize D3 interactive graph
         window.__d3Apply = D3Graph.init();
+        // USB port filter toggle. The preference is per-browser, so an
+        // operator watching one jig head can hide the rest of the host's
+        // ports without changing anything for anyone else.
+        renderPortFilterBar();
+        (function wirePortFilterToggle() {
+            const cb = document.getElementById('pf-hide-excluded');
+            if (!cb) return;
+            cb.checked = hideExcludedPorts;
+            cb.addEventListener('change', () => {
+                hideExcludedPorts = cb.checked;
+                pfHidePref = hideExcludedPorts ? '1' : '0';
+                try { localStorage.setItem(PF_HIDE_KEY, pfHidePref); } catch (e) {}
+                rerenderFromCache();
+            });
+        })();
         // Tabs
         const tabs = {
             rel:   { btn: document.getElementById('tab-rel'),   view: document.getElementById('rel-view') },
