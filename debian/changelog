@@ -58,6 +58,23 @@ rpi-sb-provisioner (2.3.2) unstable; urgency=medium
       another process. Writes now serialise behind a process-wide mutex and
       land via a temp file and rename(2), which needs no reader-side lock.
 
+  * Device keypair capture:
+    - Stop truncating the captured device public key to its PEM header. The
+      gadget returns public-key and private-key as multi-line PEM, but triage
+      read them with get_variable(), which stops at the first newline, so
+      every <serial>.pub written since the keypair capture landed contained
+      only "-----BEGIN PUBLIC KEY-----" (#341). Read armoured values with a
+      new get_variable_pem() helper instead, and reuse it for the Connect
+      registration path, which had carried a private copy of the workaround.
+    - Stop writing a bogus <serial>.der. get_variable() ends in `|| true`, so
+      the exit status triage tested for "already provisioned" was always 0 and
+      the gadget's literal "refused" reply was written to disk as if it were
+      key material. Triage now omits the file when the device declines to
+      export the key, which is the normal case: provisioning the firmware
+      crypto key locks the OTP ECDSA slot immediately.
+    - Document that only <serial>.pub is expected in a keypair directory, and
+      that both files are PEM rather than DER.
+
   * Fastboot gadget update:
     - Refresh the bundled fastboot gadgets.
 
