@@ -1,5 +1,8 @@
 rpi-sb-provisioner (2.3.2) unstable; urgency=medium
 
+  * Final 2.3.2 release:
+    - Roll up the 2.3.2 development work into a supported release.
+
   * IDP provisioning fixes:
     - Select secure-boot boot slots by the provisionmap .static.role == "boot"
       attribute rather than the partitionimages bootable flag. rpi-image-gen
@@ -175,6 +178,20 @@ rpi-sb-provisioner (2.3.2) unstable; urgency=medium
     - Skip a device whose USB path cannot be determined while a restriction
       is in force, since an allowlist cannot be honoured for a device whose
       port is unknown.
+    - Show the restriction in the port tree and the topology map, which
+      previously drew every port as equally usable. The service computes
+      whether each port is permitted -- mirroring the shell's matching, so
+      the views cannot disagree with the decision the scripts make -- and
+      publishes the effective rules alongside the topology. A status bar
+      names the active rules and offers a Hide excluded ports toggle, on by
+      default whenever a restriction is in force.
+    - Fix two port tree defects that hiding exposed. The tier scaffolding
+      forced a minimum of two USB 3 root ports so spare ports stayed visible
+      to plug into, which left a phantom USB 3 Root on a host that has no
+      SuperSpeed device; and the tree is built by mutation with pruning
+      deliberately disabled, so filtered-out ports stayed on screen. Both now
+      collapse while hiding, taking childless root-port groups and tiers with
+      them, and are unchanged when nothing is being hidden.
 
   * Service lifecycle:
     - Explicitly handle device event loop termination.
@@ -190,7 +207,7 @@ rpi-sb-provisioner (2.3.2) unstable; urgency=medium
       path for a port and how a skipped device is reported. Link it from
       the README and config_vars.md.
 
- -- Tom Dewey <tom.dewey@raspberrypi.com>  Wed, 12 Aug 2026 10:55:40 +0100
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Tue, 18 Aug 2026 14:27:41 +0100
 
 rpi-sb-provisioner (2.3.1) unstable; urgency=medium
 
