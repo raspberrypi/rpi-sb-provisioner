@@ -35,18 +35,14 @@ connect_register_device() {
 
     _connect_tmpdir=$(mktemp -d)
 
-    # Retrieve public key PEM from device.  Cannot use get_variable() here
-    # because it truncates at the first newline and PEM is multiline.
-    # Instead capture the full fastboot output and extract the PEM block.
-    _connect_fb_output=$(fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar public-key 2>&1 | tr -d '\r') || true
-    _connect_public_key_pem=$(printf '%s\n' "${_connect_fb_output}" | \
-        sed -n '/-----BEGIN PUBLIC KEY-----/,/-----END PUBLIC KEY-----/{
-            s/^.*\(-----BEGIN PUBLIC KEY-----\)/\1/
-            p
-        }')
+    # Retrieve public key PEM from device.  get_variable() cannot be used for
+    # this: it truncates at the first newline and PEM is multiline.
+    _connect_public_key_pem=$(get_variable_pem public-key) || _connect_public_key_pem=""
     if [ -z "${_connect_public_key_pem}" ]; then
         log "WARNING: Could not retrieve device public key, skipping Connect registration"
-        log "fastboot output: ${_connect_fb_output}"
+        # Re-read purely for diagnostics: get_variable_pem() discards the raw
+        # reply, and getvar is read-only, so a second query is harmless.
+        log "fastboot output: $(fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar public-key 2>&1 | tr -d '\r')"
         CONNECT_REGISTERED_VALUE="0"
         rm -rf "${_connect_tmpdir}"
         announce_stop "Connect device identity registration: no public key"
