@@ -245,9 +245,13 @@ Description prefix used when registering devices with Raspberry Pi Connect. The 
 
 **Optional**
 
-Specify a directory to copy the device unique keypair to. The keys will be named \<serial\>.der and \<serial\>.pub
+Specify a directory to copy the device unique keypair to. The keys will be named \<serial\>.der and \<serial\>.pub, and are written in PEM format.
 
 Set to the path of a directory to use, otherwise keys will be stored alongside provisioning logs in a directory named "keypair".
+
+> **Note**
+>
+> In practice only \<serial\>.pub is produced. Triage provisions the device's firmware crypto key (`oem fwcrypto init`), which locks the OTP ECDSA key-slot immediately, and the fastboot gadget also locks any already-provisioned slot at startup. Once locked, the device refuses to export its raw private key and \<serial\>.der is omitted. This is deliberate: the private key is meant to stay inside the firmware, reachable only through the on-device signing API.
 
 > **Note**
 >
