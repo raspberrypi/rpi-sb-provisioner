@@ -151,6 +151,31 @@ rpi-sb-provisioner (2.3.2) unstable; urgency=medium
       British spelling throughout, and settle on one ellipsis character and
       one word per meaning for absent values.
 
+  * USB port restriction:
+    - Restrict provisioning to a known set of USB ports, so a single-headed
+      programming jig only picks up boards in its head and leaves anything
+      else plugged into the host alone. Ports are listed as topology paths
+      (e.g. 1-1.2), shell globs included, in *.conf drop-ins under
+      /usr/share/rpi-sb-provisioner/usb-ports.d for packages describing a
+      particular jig and /etc/rpi-sb-provisioner/usb-ports.d for the local
+      administrator. Files merge by basename with the /etc copy winning, so
+      differently-named files are additive and an empty same-named file
+      masks a package-supplied rule set.
+    - Default to the historical behaviour: with no *.conf in either
+      directory the restriction is inactive and every port is accepted.
+    - Enforce the restriction in both entry points -- rpi-sb-bootstrap.sh
+      for rpiboot devices and rpi-sb-triage.sh for fastboot devices, which
+      checks independently because an already-provisioned board can reach
+      fastboot without passing through bootstrap.
+    - Treat a non-permitted port as a skip rather than a failure: record a
+      PORT-EXCLUDED state and log the reason, but take no lock, write no
+      udev rule, run no rpiboot and fire no provision-failed hook. Skipped
+      devices render muted in the device tiles and carry an explanatory
+      banner on the device details page.
+    - Skip a device whose USB path cannot be determined while a restriction
+      is in force, since an allowlist cannot be honoured for a device whose
+      port is unknown.
+
   * Service lifecycle:
     - Explicitly handle device event loop termination.
 
@@ -160,6 +185,10 @@ rpi-sb-provisioner (2.3.2) unstable; urgency=medium
       Link it from config_vars.md and the README, and correct the stale
       Signing Helpers section in architecture.md.
     - Cover boot package generation, and capture the images endpoint change.
+    - Add docs/usb-port-restriction.md, covering the drop-in directories,
+      the file format, merge and masking rules, how to find the topology
+      path for a port and how a skipped device is reported. Link it from
+      the README and config_vars.md.
 
  -- Tom Dewey <tom.dewey@raspberrypi.com>  Wed, 12 Aug 2026 10:55:40 +0100
 
