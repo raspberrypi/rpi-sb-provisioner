@@ -1,3 +1,21 @@
+rpi-sb-provisioner (2.3.3) unstable; urgency=medium
+
+  * Fix the permanent-failure marker never reaching the provision-failed
+    hook from the signing paths. mark_permanent_failure() recorded its state
+    in a shell variable, but the two callers that most need it --
+    get_openssl_sign_args() and get_sign_bootcode_key_args() -- are invoked
+    as `$(...)`, and a variable set inside a command substitution dies with
+    that subshell. A station with no signing key configured therefore
+    reported PROVISION_FAILED_PERMANENT=0, so a hook filtering transient
+    bootstrap-phase failures discarded it as churn and left the head on its
+    in-progress indicator indefinitely -- exactly the case 2.3.2 set out to
+    fix. The marker is now a file keyed on the invoking shell's PID, which
+    subshells inherit unchanged, so it survives the capture while keeping
+    concurrent devices independent. It is cleared once the outcome has been
+    reported, so a later run reusing the PID cannot inherit it.
+
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Tue, 18 Aug 2026 16:55:56 +0100
+
 rpi-sb-provisioner (2.3.2) unstable; urgency=medium
 
   * Final 2.3.2 release:

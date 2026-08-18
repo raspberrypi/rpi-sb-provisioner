@@ -497,9 +497,34 @@ maybe_reorder_boot_order_for_storage() {
 # failure may be either transient (USB re-enumeration churn as the device
 # reboots) or permanent, and hooks that want to react loudly to the latter
 # cannot tell them apart from the stage alone.
+# Where the permanence marker lives. $$ is the invoking shell's PID and is
+# not changed by subshells, so a marker written inside $( ) is found by the
+# parent that spawned it, while concurrent devices stay independent.
+: "${PROVISION_FAILURE_FLAG:=/run/rpi-sb-provisioner/permanent-failure.$$}"
+
 mark_permanent_failure() {
     PROVISION_FAILURE_PERMANENT=1
     export PROVISION_FAILURE_PERMANENT
+
+    # The variable alone is not enough. Several callers invoke the signing
+    # helpers as `$(get_sign_bootcode_key_args)`, and a variable set inside a
+    # command substitution dies with that subshell -- so the failure was
+    # reported as transient, and a jig sat on its in-progress LED for a
+    # misconfiguration that would never resolve. A file outlives the subshell.
+    mkdir -p "$(dirname "${PROVISION_FAILURE_FLAG}")" 2>/dev/null || true
+    : > "${PROVISION_FAILURE_FLAG}" 2>/dev/null || true
+}
+
+# True when this run has been marked permanent, by either route.
+permanent_failure_marked() {
+    [ "${PROVISION_FAILURE_PERMANENT:-0}" = "1" ] || [ -e "${PROVISION_FAILURE_FLAG}" ]
+}
+
+# Drop the marker. Called once the outcome has been reported, so a later run
+# that happens to reuse this PID does not inherit it.
+clear_permanent_failure() {
+    PROVISION_FAILURE_PERMANENT=0
+    rm -f "${PROVISION_FAILURE_FLAG}" 2>/dev/null || true
 }
 
 # Classify the configured OS image, failing early when it cannot be used.
@@ -590,7 +615,11 @@ run_provision_failed_hook() {
     # Reported alongside the stage rather than folded into it: the stage still
     # selects the hook's positional arguments, so widening it would change the
     # contract every existing hook is written against.
-    export PROVISION_FAILED_PERMANENT="${PROVISION_FAILURE_PERMANENT:-0}"
+    if permanent_failure_marked; then
+        export PROVISION_FAILED_PERMANENT=1
+    else
+        export PROVISION_FAILED_PERMANENT=0
+    fi
     if [ "${HOOK_CONTEXT}" = "bootstrap" ]; then
         export PROVISION_FAILED_CONTEXT=bootstrap
         run_customisation_script "${PROVISIONER_NAME}" "provision-failed" \
@@ -604,6 +633,7 @@ run_provision_failed_hook() {
     fi
     unset PROVISION_FAILED_CONTEXT
     unset PROVISION_FAILED_PERMANENT
+    clear_permanent_failure
 }
 
 run_customisation_script() {
