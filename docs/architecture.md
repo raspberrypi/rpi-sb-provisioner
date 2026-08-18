@@ -120,7 +120,7 @@ Provisioning proceeds through three phases, each implemented as a systemd templa
 **Key operations:**
 \* Verify device is in fastboot mode
 \* Provision the device unique secret (`oem fwcrypto init`) if not already present — every provisioned device receives one regardless of provisioning style, as it is used for HMAC-based LUKS key derivation and device identity
-\* Capture device keypair (private and public keys) to the log directory or a configured retrieval path
+\* Capture the device public key to the log directory or a configured retrieval path. The private key is captured too if the device will still export it, but provisioning the key locks the OTP slot, so in practice only the public key is retained
 \* Read configuration to determine provisioning route:
 - If `GOLD_MASTER_OS_FILE` points to a directory (IDP artefact), start `rpi-idp-provisioner@.service` regardless of `PROVISIONING_STYLE`
 - Otherwise, start provisioner based on `PROVISIONING_STYLE`:
@@ -404,8 +404,9 @@ Directory structure:
         triage.log          # Triage phase operations
         provisioner.log     # Provisioning phase operations
         keypair/            # Device-unique keys (if enabled)
-          <serial>.der      # Private key
-          <serial>.pub      # Public key
+          <serial>.der      # Private key, PEM-encoded. Only written while the
+                            # OTP key-slot is unlocked; normally absent.
+          <serial>.pub      # Public key, PEM-encoded
 
 **Log format:** Timestamped entries with explicit command output
 
