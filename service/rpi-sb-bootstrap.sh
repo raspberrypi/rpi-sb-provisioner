@@ -145,6 +145,24 @@ fi
 EARLY_LOG_DIRECTORY="/var/log/rpi-sb-provisioner/early/${TARGET_DEVICE_PATH}"
 mkdir -p "${EARLY_LOG_DIRECTORY}"
 
+# Enforce the USB port restriction before this device is given any state of
+# its own. On a fixed programming jig only the wired head ports should ever
+# be picked up, so a device on any other port must not take a lock, write a
+# udev rule, or have rpiboot run against it. The check is a no-op unless a
+# rule file is installed -- see usb_port_permitted() in rpi-sb-common.sh.
+#
+# The unit is Type=notify, so READY=1 has to be sent even on this path;
+# exiting without it would make systemd report a protocol failure rather
+# than the deliberate skip this is.
+if ! usb_port_permitted "${TARGET_USB_PATH}"; then
+    # Guarded: systemd-notify exits non-zero when NOTIFY_SOCKET is unset, and
+    # under `set -e` that would abort before the skip could be recorded when
+    # the script is run by hand rather than by the unit.
+    systemd-notify --ready --status="Skipped: USB port not permitted" || true
+    record_usb_port_exclusion "bootstrap" "${TARGET_USB_PATH}" "${TARGET_DEVICE_SERIAL}" || true
+    exit 0
+fi
+
 # rpiboot writes <serial>.json into this directory as it collects OTP
 # metadata from the device.  We parse USER_BOARDREV out of it after the
 # first rpiboot call to record the board type (e.g. Pi 5, CM5) as generic
@@ -678,6 +696,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                 if [ "${TARGET_DEVICE_FAMILY}" = "2712" ]; then
                     if ! signing_available; then
                         record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
+                        mark_permanent_failure
                         die "No signing key configured for re-provisioning. Aborting."
                     fi
                     log "Re-signing bootcode for special re-provisioning case"

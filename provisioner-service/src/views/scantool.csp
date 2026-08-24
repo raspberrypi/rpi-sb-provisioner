@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <title>QR Code Scanner</title>
+    <title>Code Scanner</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <%view stylesheet %>
@@ -13,6 +13,12 @@
             margin: 0 auto;
             padding: 20px;
             position: relative;
+        }
+        
+        .scanner-intro {
+            color: #555;
+            margin-top: -8px;
+            margin-bottom: 18px;
         }
         
         .scan-container {
@@ -162,7 +168,7 @@
         }
     </style>
     <!-- Include the ZXing library from local static files -->
-    <script src="/js/zxing.js"></script>
+    <script src="/static/js/zxing.js"></script>
     
     <!-- Fallback message if camera access fails -->
     <div id="cameraError" style="display: none; color: #a94442; background-color: #f2dede; border: 1px solid #ebccd1; padding: 15px; margin: 15px 0; border-radius: 5px;">
@@ -175,7 +181,8 @@
     
     <main id="main-content">
     <div class="container">
-        <h1>QR Code Scanner</h1>
+        <h1>Code Scanner</h1>
+        <p class="scanner-intro">Scans QR and Data Matrix codes, and checks the value against the manufacturing database.</p>
         
         <div id="results">
             <div id="success-container" class="message-container success" role="status" aria-live="polite">
@@ -218,7 +225,7 @@
                 </tr>
                 <tr>
                     <td>Camera Support:</td>
-                    <td id="metric-cameraSupport">Checking...</td>
+                    <td id="metric-cameraSupport">Checking…</td>
                 </tr>
                 <tr>
                     <td>Video Dimensions:</td>
@@ -229,7 +236,7 @@
                     <td id="metric-scannerState">Inactive</td>
                 </tr>
                 <tr>
-                    <td>Frames Processed:</td>
+                    <td>Seconds Scanning:</td>
                     <td id="metric-framesProcessed">0</td>
                 </tr>
                 <tr>
@@ -346,9 +353,9 @@
                             verifyQRCode(code)
                                 .then(response => {
                                     if (response.exists) {
-                                        showSuccess(code, "Valid", "Device ID found in manufacturing database");
+                                        showSuccess(code, "Found", "This device is recorded in the manufacturing database.");
                                     } else {
-                                        showError("Device ID not found in manufacturing database: " + code);
+                                        showError("No record for " + code + ". This device was not provisioned by this server, or was provisioned against a different manufacturing database.");
                                     }
                                 })
                                 .catch(error => {
@@ -390,6 +397,12 @@
                     showError('Error listing video devices: ' + err);
                 });
             
+            startButton.addEventListener('click', () => {
+                // Scanning is started once on load; the simplest correct
+                // restart is to re-run that same initialisation.
+                window.location.reload();
+            });
+
             stopButton.addEventListener('click', () => {
                 console.log('Stop button clicked');
                 

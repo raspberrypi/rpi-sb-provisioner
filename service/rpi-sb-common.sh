@@ -490,6 +490,93 @@ maybe_reorder_boot_order_for_storage() {
 # Run the provision-failed hook for programming-rig signalling (e.g. LEDs).
 # HOOK_CONTEXT is "bootstrap" (serial/family/usb/device path args) or
 # "provisioning" (fastboot specifier/serial/storage args).
+# Mark the failure in progress as a permanent misconfiguration -- something
+# retrying the same device will never resolve, such as no OS image or no
+# signing key being configured. Distinct from the stage the failure happened
+# in, which run_provision_failed_hook already reports: a bootstrap-stage
+# failure may be either transient (USB re-enumeration churn as the device
+# reboots) or permanent, and hooks that want to react loudly to the latter
+# cannot tell them apart from the stage alone.
+mark_permanent_failure() {
+    PROVISION_FAILURE_PERMANENT=1
+    export PROVISION_FAILURE_PERMANENT
+}
+
+# Classify the configured OS image, failing early when it cannot be used.
+#
+# GOLD_MASTER_OS_FILE names either a regular file (a whole-disk .img) or a
+# directory (an rpi-image-gen IDP artefact). Telling "not configured",
+# "configured but absent" and "present but unusable" apart matters because
+# triage picks the provisioner from the *shape* of this path: an IDP artefact
+# whose directory is momentarily missing -- an unmounted share, say -- is
+# otherwise indistinguishable from a .img, and gets routed to a provisioner
+# that cannot read it and fails much later with an unrelated error.
+#
+# Results come back in globals, deliberately, and nothing is written to
+# stdout: capturing a reason with $( ) would run this in a subshell and throw
+# GOLD_MASTER_OS_KIND away with it. Call it directly:
+#
+#     if ! classify_gold_master_os; then
+#         die "${GOLD_MASTER_OS_ERROR}"
+#     fi
+#
+# Sets and exports GOLD_MASTER_OS_KIND to "image" or "idp" on success, so
+# callers -- and the customisation hooks they run -- can branch on the form of
+# the artefact without re-testing the path. Sets GOLD_MASTER_OS_ERROR to the
+# reason on failure.
+# Exit:   0 when usable, 1 otherwise.
+classify_gold_master_os() {
+    GOLD_MASTER_OS_KIND=""
+    GOLD_MASTER_OS_ERROR=""
+    export GOLD_MASTER_OS_KIND GOLD_MASTER_OS_ERROR
+
+    if [ -z "${GOLD_MASTER_OS_FILE}" ]; then
+        GOLD_MASTER_OS_ERROR="No OS image is configured. Set GOLD_MASTER_OS_FILE in /etc/rpi-sb-provisioner/config, or select an image in the web UI."
+        return 1
+    fi
+
+    if [ -d "${GOLD_MASTER_OS_FILE}" ]; then
+        # IDP artefact. Apply the same descriptor rule the IDP provisioner
+        # enforces in its own pre-flight, so the two cannot disagree about
+        # whether a directory is a usable artefact.
+        _cgm_json_count=$(find "${GOLD_MASTER_OS_FILE}" -maxdepth 1 -name '*.json' -type f 2>/dev/null | wc -l)
+        if [ "${_cgm_json_count}" -eq 0 ]; then
+            GOLD_MASTER_OS_ERROR="GOLD_MASTER_OS_FILE is a directory with no JSON description file: ${GOLD_MASTER_OS_FILE}. An IDP artefact directory must contain exactly one."
+            return 1
+        fi
+        if [ "${_cgm_json_count}" -gt 1 ]; then
+            GOLD_MASTER_OS_ERROR="GOLD_MASTER_OS_FILE is a directory with ${_cgm_json_count} JSON description files: ${GOLD_MASTER_OS_FILE}. An IDP artefact directory must contain exactly one."
+            return 1
+        fi
+        GOLD_MASTER_OS_KIND="idp"
+        return 0
+    fi
+
+    if [ -f "${GOLD_MASTER_OS_FILE}" ]; then
+        if [ ! -s "${GOLD_MASTER_OS_FILE}" ]; then
+            GOLD_MASTER_OS_ERROR="Configured OS image is empty: ${GOLD_MASTER_OS_FILE}"
+            return 1
+        fi
+        if [ ! -r "${GOLD_MASTER_OS_FILE}" ]; then
+            GOLD_MASTER_OS_ERROR="Configured OS image is not readable: ${GOLD_MASTER_OS_FILE}"
+            return 1
+        fi
+        GOLD_MASTER_OS_KIND="image"
+        return 0
+    fi
+
+    if [ -e "${GOLD_MASTER_OS_FILE}" ]; then
+        GOLD_MASTER_OS_ERROR="Configured OS image is neither a regular file nor a directory: ${GOLD_MASTER_OS_FILE}"
+        return 1
+    fi
+
+    # Absent entirely. Deliberately does not guess whether a .img or an IDP
+    # directory was intended -- the path is gone, so the shape is unknowable,
+    # and a mount that has not come back is the common cause.
+    GOLD_MASTER_OS_ERROR="Configured OS image does not exist: ${GOLD_MASTER_OS_FILE}. If this is an IDP artefact directory on a removable or network mount, check the mount is present."
+    return 1
+}
+
 run_provision_failed_hook() {
     PROVISIONER_NAME="$1"
     HOOK_CONTEXT="${2:-provisioning}"
@@ -500,6 +587,10 @@ run_provision_failed_hook() {
     fi
 
     set +e
+    # Reported alongside the stage rather than folded into it: the stage still
+    # selects the hook's positional arguments, so widening it would change the
+    # contract every existing hook is written against.
+    export PROVISION_FAILED_PERMANENT="${PROVISION_FAILURE_PERMANENT:-0}"
     if [ "${HOOK_CONTEXT}" = "bootstrap" ]; then
         export PROVISION_FAILED_CONTEXT=bootstrap
         run_customisation_script "${PROVISIONER_NAME}" "provision-failed" \
@@ -512,6 +603,7 @@ run_provision_failed_hook() {
             "${RPI_DEVICE_STORAGE_TYPE}"
     fi
     unset PROVISION_FAILED_CONTEXT
+    unset PROVISION_FAILED_PERMANENT
 }
 
 run_customisation_script() {
@@ -591,8 +683,36 @@ run_customisation_script() {
     fi
 }
 
+# Retrieve a single-line fastboot variable. NOTE: the value is truncated at
+# the first newline -- use get_variable_pem() for multi-line values such as
+# public-key/private-key, which the gadget returns as armoured PEM.
 get_variable() {
     fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar "$1" 2>&1 | grep -oP "${1}"': \K[^\r\n]*' || true
+}
+
+# Retrieve a fastboot variable whose value is an armoured PEM block, printing
+# the whole block (BEGIN line through END line) on stdout.
+#
+# rpi-fastbootd returns public-key/private-key as multi-line PEM, so
+# get_variable() captures only "-----BEGIN PUBLIC KEY-----" and drops the
+# body. Extract the armoured block instead: strip fastboot's "<var>: " prefix
+# from the BEGIN line and ignore its trailing progress output.
+#
+# Returns 1 (printing nothing) when the device did not return a PEM block --
+# e.g. private-key answers "refused" once the OTP ECDSA key-slot is LOCKED,
+# which rpi-fastbootd does at startup and again immediately after
+# `oem fwcrypto init`.
+get_variable_pem() {
+    _gvp_output=$(fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar "$1" 2>&1 | tr -d '\r') || true
+    _gvp_pem=$(printf '%s\n' "${_gvp_output}" | \
+        sed -n '/-----BEGIN /,/-----END /{
+            s/^.*\(-----BEGIN \)/\1/
+            p
+        }')
+    if [ -z "${_gvp_pem}" ]; then
+        return 1
+    fi
+    printf '%s\n' "${_gvp_pem}"
 }
 
 # =============================================================================
@@ -787,6 +907,7 @@ get_openssl_sign_args() {
         *)
             # NB: pem-wrapped has no openssl directive form (the key is never on
             # disk). Such callers must use sign_image_hex(), not this function.
+            mark_permanent_failure
             log "ERROR: No signing key configured (get_openssl_sign_args)"
             return 1
             ;;
@@ -926,6 +1047,7 @@ get_sign_bootcode_key_args() {
             echo "-k ${CUSTOMER_KEY_FILE_PEM}"
             ;;
         *)
+            mark_permanent_failure
             log "ERROR: No signing key configured (bootcode signing requires a key)"
             return 1
             ;;
@@ -1293,4 +1415,162 @@ prepare_signed_boot_simg() {
 
     rm -rf "${_work}"
     return 0
+}
+
+# ---------------------------------------------------------------------------
+# USB port restriction
+#
+# On a fixed programming jig only a known set of USB ports is wired to a
+# device head; anything else plugged into the host (a keyboard, a USB stick,
+# an engineer's laptop cable) must never be picked up and programmed. The
+# restriction is expressed as drop-in rule files rather than a config
+# variable so that a jig-specific package can ship the topology for its
+# hardware without touching /etc/rpi-sb-provisioner/config.
+#
+# Two directories are consulted, in ascending precedence:
+#
+#   /usr/share/rpi-sb-provisioner/usb-ports.d/   package-supplied rules
+#   /etc/rpi-sb-provisioner/usb-ports.d/         local administrator rules
+#
+# Only files named *.conf are read. Files are merged by basename, with the
+# /etc copy winning, so a local empty file of the same name masks a
+# package-supplied one entirely -- the same convention systemd uses for its
+# own drop-ins.
+#
+# Each line is a USB topology path in the form the kernel uses for a device
+# directory under /sys/bus/usb/devices ("<bus>-<port>[.<port>...]", e.g.
+# "1-1.2"). Shell glob metacharacters are permitted, so "1-1.*" covers every
+# downstream port of the hub on bus 1 port 1. Blank lines and lines whose
+# first non-whitespace character is '#' are ignored.
+#
+# If no rule file yields a single pattern -- the default for a fresh install,
+# where neither directory contains a *.conf -- the restriction is inactive
+# and every port is accepted, preserving the historical behaviour.
+USB_PORT_RULES_VENDOR_DIR="${USB_PORT_RULES_VENDOR_DIR:-/usr/share/rpi-sb-provisioner/usb-ports.d}"
+USB_PORT_RULES_LOCAL_DIR="${USB_PORT_RULES_LOCAL_DIR:-/etc/rpi-sb-provisioner/usb-ports.d}"
+
+# State for the "port excluded" outcome, recorded against the stage that
+# rejected the device so the WebUI can distinguish a deliberate skip from a
+# provisioning failure.
+export PORT_EXCLUDED="PORT-EXCLUDED"
+
+# List the effective rule files, one absolute path per line, after applying
+# the /etc-masks-/usr/share precedence: local files first, then any package
+# file whose basename the local directory did not already claim. Ordering is
+# deterministic because pathname expansion sorts each directory's matches,
+# though it does not affect the result -- the patterns are a set.
+#
+# Output (stdout): newline-separated absolute paths, possibly empty.
+# Exit:   always 0.
+list_usb_port_rule_files() {
+    _upr_seen=""
+    for _upr_dir in "${USB_PORT_RULES_LOCAL_DIR}" "${USB_PORT_RULES_VENDOR_DIR}"; do
+        [ -d "${_upr_dir}" ] || continue
+        for _upr_file in "${_upr_dir}"/*.conf; do
+            [ -f "${_upr_file}" ] || continue
+            _upr_base=$(basename "${_upr_file}")
+            # A basename already claimed by the higher-precedence directory
+            # masks the lower one. The guard newlines keep the substring
+            # test from matching a partial basename.
+            case "${_upr_seen}" in
+                *"
+${_upr_base}
+"*) continue ;;
+            esac
+            _upr_seen="${_upr_seen}
+${_upr_base}
+"
+            printf '%s\n' "${_upr_file}"
+        done
+    done
+    return 0
+}
+
+# Read every effective rule file and emit the patterns they contain, one per
+# line, stripped of comments and surrounding whitespace.
+#
+# Output (stdout): newline-separated glob patterns, possibly empty.
+# Exit:   always 0.
+list_usb_port_patterns() {
+    list_usb_port_rule_files | while IFS= read -r _upp_file; do
+        # `|| [ -n ... ]` so a final line without a trailing newline is kept.
+        while IFS= read -r _upp_line || [ -n "${_upp_line}" ]; do
+            # Strip a trailing comment, then surrounding whitespace.
+            _upp_line=${_upp_line%%#*}
+            _upp_line=$(printf '%s' "${_upp_line}" | tr -d '[:space:]')
+            [ -n "${_upp_line}" ] || continue
+            printf '%s\n' "${_upp_line}"
+        done < "${_upp_file}"
+    done
+    return 0
+}
+
+# Report whether a USB port restriction is in force.
+#
+# Exit:   0 if at least one pattern is configured, 1 if unrestricted.
+usb_port_restriction_active() {
+    [ -n "$(list_usb_port_patterns | head -n1)" ]
+}
+
+# Decide whether a device on a given USB topology path may be provisioned.
+#
+# Arguments:
+#   $1 - USB topology path (e.g. "1-1.2"). May be empty if the caller could
+#        not resolve one.
+#
+# Exit:   0 if the device is permitted, 1 if it must be skipped.
+#
+# An empty path is permitted while unrestricted, but rejected once rules are
+# in force: an allowlist cannot be honoured for a device whose port is
+# unknown, and on a jig the safe reading of "I cannot tell where this is
+# plugged in" is "do not program it".
+usb_port_permitted() {
+    _upp_path="$1"
+
+    usb_port_restriction_active || return 0
+
+    if [ -z "${_upp_path}" ]; then
+        return 1
+    fi
+
+    # The loop runs in a subshell, so a match cannot set a variable the
+    # caller would see -- it signals through the subshell's exit status
+    # instead. Draining the loop without a match must therefore exit 1
+    # explicitly, since a while loop that ends because `read` hit EOF is
+    # itself a success.
+    list_usb_port_patterns | {
+        while IFS= read -r _upp_pattern; do
+            # shellcheck disable=SC2254 # deliberate glob match against the pattern
+            case "${_upp_path}" in
+                ${_upp_pattern}) exit 0 ;;
+            esac
+        done
+        exit 1
+    }
+}
+
+# Reject a device that is not on a permitted USB port: log the reason,
+# record the skip against the calling stage, and return non-zero so the
+# caller can exit without running its failure hooks.
+#
+# Arguments:
+#   $1 - Stage name for the state record ("bootstrap" or "triage")
+#   $2 - USB topology path, possibly empty
+#   $3 - Device serial for the state record
+#
+# Exit:   always 1, so callers can write `check || exit 0`.
+record_usb_port_exclusion() {
+    _upe_stage="$1"
+    _upe_path="$2"
+    _upe_serial="$3"
+
+    if [ -z "${_upe_path}" ]; then
+        log "USB port restriction active but this device's port could not be determined; skipping ${_upe_stage}"
+    else
+        log "USB port ${_upe_path} is not listed in ${USB_PORT_RULES_LOCAL_DIR} or ${USB_PORT_RULES_VENDOR_DIR}; skipping ${_upe_stage}"
+    fi
+    log "Permitted USB ports: $(list_usb_port_patterns | tr '\n' ' ')"
+
+    record_state "${_upe_serial}" "${PORT_EXCLUDED}" "${_upe_stage}"
+    return 1
 }

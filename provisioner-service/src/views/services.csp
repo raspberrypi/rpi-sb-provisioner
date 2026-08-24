@@ -26,7 +26,7 @@
     <%c++ } %>
     <h1>System Services</h1>
     
-    <div class="service-info">Services shown include both active and inactive (including completed/dead) services.</div>
+    <div class="service-info">Shows all provisioner services, including those that have finished or stopped.</div>
     
     <%view auto_refresh_toggle %>
     
@@ -43,7 +43,7 @@
         %>
         <div class="loading-container">
             <div class="loading-spinner"></div>
-            <p>Loading services...</p>
+            <p>Loading services…</p>
         </div>
         <%c++ } else { %>
         <table>
@@ -51,9 +51,9 @@
             <thead>
                 <tr>
                     <th scope="col">Service Name</th>
-                    <th scope="col">Status</th>
-                    <th scope="col">Active</th>
-                    <th scope="col">Last Updated</th>
+                    <th scope="col" title="systemd load state, e.g. loaded or not-found">Load State</th>
+                    <th scope="col" title="systemd active state, e.g. active (running) or inactive (dead)">Run State</th>
+                    <th scope="col" title="When this service last changed state">Last State Change</th>
                     <th scope="col">Actions</th>
                 </tr>
             </thead>
@@ -82,7 +82,7 @@
                                 [](char c) { return c == ' ' || c == '(' || c == ')'; }), activeClass.end());
                             $$ << activeClass;
                         %>"><%c++ $$ << service.at("active"); %></td>
-                        <td class="timestamp-cell" data-timestamp="0">Loading...</td>
+                        <td class="timestamp-cell" data-timestamp="0">Loading…</td>
                         <td>
                             <a href="/service-log/<%c++ $$ << service.at("full_name"); %>" class="log-link" aria-label="View logs for <%c++ $$ << service.at("full_name"); %>">View Logs</a>
                         </td>
@@ -115,7 +115,7 @@
             
             // Check if date is valid
             if (isNaN(date.getTime())) {
-                return 'Invalid date';
+                return 'Unknown';
             }
             
             // Format as local time: YYYY-MM-DD HH:MM:SS
@@ -147,9 +147,9 @@
                         <thead>
                             <tr>
                                 <th scope="col">Service Name</th>
-                                <th scope="col">Status</th>
-                                <th scope="col">Active</th>
-                                <th scope="col">Last Updated</th>
+                                <th scope="col" title="systemd load state, e.g. loaded or not-found">Load State</th>
+                                <th scope="col" title="systemd active state, e.g. active (running) or inactive (dead)">Run State</th>
+                                <th scope="col" title="When this service last changed state">Last State Change</th>
                                 <th scope="col">Actions</th>
                             </tr>
                         </thead>

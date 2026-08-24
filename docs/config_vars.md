@@ -245,9 +245,13 @@ Description prefix used when registering devices with Raspberry Pi Connect. The 
 
 **Optional**
 
-Specify a directory to copy the device unique keypair to. The keys will be named \<serial\>.der and \<serial\>.pub
+Specify a directory to copy the device unique keypair to. The keys will be named \<serial\>.der and \<serial\>.pub, and are written in PEM format.
 
 Set to the path of a directory to use, otherwise keys will be stored alongside provisioning logs in a directory named "keypair".
+
+> **Note**
+>
+> In practice only \<serial\>.pub is produced. Triage provisions the device's firmware crypto key (`oem fwcrypto init`), which locks the OTP ECDSA key-slot immediately, and the fastboot gadget also locks any already-provisioned slot at startup. Once locked, the device refuses to export its raw private key and \<serial\>.der is omitted. This is deliberate: the private key is meant to stay inside the firmware, reachable only through the on-device signing API.
 
 > **Note**
 >
@@ -407,3 +411,21 @@ This will generate packages with:
     Maintainer: Acme Corporation <ops@acme.com>
 
 See [Boot Image Generator Documentation](boot-img-generator.md) for more information about the automatic boot image generation feature.
+
+# Settings that are not configuration variables
+
+## Restricting provisioning to specific USB ports
+
+Which USB ports the provisioner will pick devices up from is **not** controlled
+by a variable in `/etc/rpi-sb-provisioner/config`. It is controlled by drop-in
+rule files, so that a package describing a particular programming jig can ship
+the topology for that hardware without touching this configuration file:
+
+    /usr/share/rpi-sb-provisioner/usb-ports.d/    package-supplied rules
+    /etc/rpi-sb-provisioner/usb-ports.d/          local administrator rules
+
+With no `*.conf` file in either directory — the state of a fresh install — the
+restriction is inactive and devices on every port are provisioned.
+
+See the [USB Port Restriction Guide](usb-port-restriction.md) for the file
+format, merge and masking rules, and how a skipped device is reported.

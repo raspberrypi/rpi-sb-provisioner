@@ -223,6 +223,14 @@ fi
 
 systemd-notify --ready --status="Provisioning started"
 
+# Re-check the OS image here as well as in triage: these units can be started
+# directly, and the configuration can change between triage selecting a
+# provisioner and that provisioner running.
+if ! classify_gold_master_os; then
+    mark_permanent_failure
+    die "${GOLD_MASTER_OS_ERROR}"
+fi
+
 announce_start "Writing OS images"
 
 # Determine which image to flash. If bootfs-mounted or rootfs-mounted customisation

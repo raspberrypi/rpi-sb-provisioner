@@ -1,0 +1,77 @@
+USB port restriction rules
+==========================
+
+By default rpi-sb-provisioner programs any Raspberry Pi device that appears
+on any USB port of the provisioning host. On a fixed programming jig that is
+rarely what you want: only the ports wired to a jig head should ever be
+picked up, and a board plugged in anywhere else must be left alone.
+
+Dropping a *.conf file into either of the directories below restricts
+provisioning to the ports those files name. With no *.conf file in either
+directory the restriction is inactive and every port is accepted, which is
+the behaviour of a fresh install.
+
+Directories
+-----------
+
+    /usr/share/rpi-sb-provisioner/usb-ports.d/    package-supplied rules
+    /etc/rpi-sb-provisioner/usb-ports.d/          local administrator rules
+
+This directory is intended for jig-specific packages: a package describing a
+particular piece of programming hardware can ship its topology here without
+touching /etc/rpi-sb-provisioner/config, and without conflicting with the
+local administrator's own rules.
+
+Files from both directories are merged by basename, with the /etc copy
+winning. Shipping an empty /etc file of the same name as a package-supplied
+one therefore masks it entirely -- the same convention systemd uses for its
+own drop-ins. Files with different names are additive: the permitted set is
+the union of every pattern from every effective file.
+
+File format
+-----------
+
+One USB topology path per line, in the form the kernel uses for a device
+directory under /sys/bus/usb/devices:
+
+    <bus>-<port>[.<port>...]
+
+Shell glob metacharacters are permitted. Blank lines are ignored, as is
+anything from a '#' to the end of a line.
+
+    # Jig head A
+    1-1.2
+
+    # Jig head B
+    1-1.3
+
+    # Every downstream port of the hub on bus 3, port 4
+    3-4.*
+
+Finding the path for a port
+---------------------------
+
+Plug a device into the port you want to allow and read the path back:
+
+    udevadm info --name=/dev/bus/usb/<bus>/<dev> | grep -oE '[0-9]+-[0-9]+(\.[0-9]+)*$'
+
+or simply list what the kernel currently sees:
+
+    ls /sys/bus/usb/devices/
+
+The path is a property of the physical port, not of the device, so it stays
+the same as boards are swapped through a jig head -- and it stays the same
+across the USB re-enumeration a device performs between bootstrap and
+fastboot.
+
+Effect
+------
+
+A device on a port that is not permitted is skipped: the reason is written
+to the provisioning log, a PORT-EXCLUDED state is recorded against it so the
+skip is visible in the web UI, and no lock, udev rule or rpiboot invocation
+is created for it. It is not reported as a provisioning failure.
+
+Note that when a restriction is in force, a device whose USB path cannot be
+determined at all is also skipped. An allowlist cannot be honoured for a
+device whose port is unknown.

@@ -236,7 +236,17 @@
             border: 1px solid #f5c6cb;
             color: #721c24;
         }
-        
+
+        /* Permanent device modification, on an option we still recommend.
+           Red edge to flag irreversibility without the filled-red "don't do
+           this" reading of .tile-warning.danger. */
+        .tile-warning.irreversible {
+            background: #fff;
+            border: 1px solid #f1aeb5;
+            border-left: 4px solid #dc3545;
+            color: #721c24;
+        }
+
         .tile-check {
             position: absolute;
             top: 12px;
@@ -717,7 +727,81 @@
             flex-shrink: 0;
             margin-top: 1px;
         }
-        
+
+        /* Neutral explanatory note. Referenced by the RPIBOOT GPIO block,
+           which previously used this class before it was defined and so
+           rendered as unstyled body text. */
+        .inline-info {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            padding: 10px 12px;
+            background: #e8f4fd;
+            border: 1px solid #b8daff;
+            border-radius: 6px;
+            margin-top: 10px;
+            font-size: 0.85rem;
+            color: #004085;
+            line-height: 1.4;
+        }
+
+        .inline-info-icon {
+            flex-shrink: 0;
+            margin-top: 1px;
+        }
+
+        /* ===== Irreversible-action warnings =====
+           Reserved for changes that cannot be undone on the device: OTP
+           writes, and locks that remove Raspberry Pi engineers' ability to
+           assist with hardware debugging. Deliberately distinct from
+           .inline-warning (amber, advisory) so permanence is not read as
+           one more piece of advice. */
+        .inline-danger {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            padding: 12px 14px;
+            background: #f8d7da;
+            border: 1px solid #dc3545;
+            border-left-width: 4px;
+            border-radius: 6px;
+            margin-top: 10px;
+            font-size: 0.85rem;
+            color: #721c24;
+            line-height: 1.45;
+        }
+
+        .inline-danger-icon {
+            flex-shrink: 0;
+            margin-top: 1px;
+            font-size: 1.05rem;
+        }
+
+        .inline-danger strong { color: #5a1220; }
+
+        /* A toggle whose "on" position is permanent. The red edge is present
+           before the switch is flipped, so the cost is visible at the point
+           of decision rather than in a footnote below the section. */
+        .toggle-group.toggle-irreversible {
+            border-color: #f1aeb5;
+            border-left: 4px solid #dc3545;
+            background: #fdf6f7;
+        }
+
+        .toggle-irreversible-tag {
+            display: inline-block;
+            font-size: 0.7rem;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            font-weight: 700;
+            padding: 2px 7px;
+            border-radius: 3px;
+            background: #dc3545;
+            color: #fff;
+            margin-left: 8px;
+            vertical-align: 2px;
+        }
+
         /* ===== Form Field Styling ===== */
         .field-group {
             margin-bottom: 20px;
@@ -924,7 +1008,7 @@
     
     <div class="auto-save-notice" role="note">
         <span class="auto-save-notice-icon" aria-hidden="true">&#128190;</span>
-        <span>Changes are saved automatically as you make them.</span>
+        <span>Changes are saved as you make them. Text fields save when you click away from them.</span>
     </div>
     
     <div id="success-message" class="page-message success" role="status" aria-live="polite">
@@ -1014,9 +1098,9 @@
                         <input type="radio" name="RPI_DEVICE_FAMILY" value="2W" <%c++ if(deviceFamily == "2W") $$ << "checked"; %>>
                         <span class="tile-check">&#10003;</span>
                         <div class="tile-header">
-                            <span class="tile-title">Zero 2 W</span>
+                            <span class="tile-title">Raspberry Pi Zero 2 W</span>
                         </div>
-                        <p class="tile-description">Zero 2 W. FDE and naked provisioning only.</p>
+                        <p class="tile-description">Supports full-disk encryption, or provisioning with no encryption. Cannot verify its boot chain.</p>
                         <span class="tile-badge warning">No secure boot</span>
                     </label>
                 </div>
@@ -1051,7 +1135,7 @@
                         <div class="tile-header">
                             <span class="tile-title">NVMe</span>
                         </div>
-                        <p class="tile-description">NVMe SSD storage. Requires Pi 5 or HAT.</p>
+                        <p class="tile-description">NVMe SSD storage. Needs a Raspberry Pi 5, or an NVMe HAT on a Compute Module 4.</p>
                     </label>
                 </div>
                 <div id="feedback-RPI_DEVICE_STORAGE_TYPE" class="field-feedback"></div>
@@ -1074,12 +1158,12 @@
                 </select>
                 <div id="feedback-RPI_DEVICE_RPIBOOT_GPIO" class="field-feedback"></div>
                 <div class="inline-info" style="margin-top: 8px;">
-                    <span class="inline-info-icon">&#9432;</span>
-                    <span>Raspberry Pi 4 family devices require a GPIO pin to enter RPIBOOT mode (unlike Raspberry Pi 5 which has a power button). This pin is programmed into OTP alongside the secure boot key. <strong>GPIO 8 is strongly recommended</strong> for consistency across your fleet.</span>
+                    <span class="inline-info-icon" aria-hidden="true">&#9432;</span>
+                    <span>Raspberry Pi 4 family devices require a GPIO pin to enter RPIBOOT mode (unlike Raspberry Pi 5, which has a power button). <strong>GPIO 8 is strongly recommended</strong> for consistency across your fleet.</span>
                 </div>
-                <div class="inline-warning" style="margin-top: 8px;">
-                    <span class="inline-warning-icon">&#9888;</span>
-                    <span>This value is permanently written to OTP and cannot be changed. Ensure you use the same GPIO pin you will physically wire to ground during provisioning.</span>
+                <div class="inline-danger" style="margin-top: 8px;">
+                    <span class="inline-danger-icon" aria-hidden="true">&#9888;</span>
+                    <span><strong>This value is burned into OTP and can never be changed.</strong> It is programmed alongside the secure boot key, once, on the first secure-boot provisioning of each device. Pick the pin you will physically wire to ground &mdash; a device provisioned with the wrong pin cannot be recovered into RPIBOOT mode.</span>
                 </div>
             </div>
 
@@ -1136,6 +1220,9 @@
                         </div>
                         <p class="tile-description">Signed bootloader chain with encrypted storage. Devices only boot verified, signed code.</p>
                         <span class="tile-badge recommended">Recommended</span>
+                        <div class="tile-warning irreversible">
+                            <strong>Permanently modifies the device.</strong> Your signing key's hash is burned into OTP on first provisioning and cannot be changed or removed afterwards. Provision a test device before committing a production run.
+                        </div>
                     </label>
 
                     <label class="tile-option <%c++ if(provisioningStyle == "fde-only") $$ << "selected"; %>" id="fde-only-tile">
@@ -1182,8 +1269,11 @@
                         <div class="tile-header">
                             <span class="tile-title">AES-XTS</span>
                         </div>
-                        <p class="tile-description">Hardware-accelerated on Pi 5. Software fallback on other devices.</p>
-                        <span class="tile-badge recommended" id="aes-badge">Best for Pi 5</span>
+                        <p class="tile-description">Hardware-accelerated on Raspberry Pi 5. Software fallback on other devices.</p>
+                        <%c++ // Rendered from the saved device family so the pre-script state matches
+                              // what updateCipherRecommendations() will set, rather than marking both
+                              // ciphers "Recommended" until scripts run. %>
+                        <span class="tile-badge <%c++ $$ << (deviceFamily == "5" ? "recommended" : "info"); %>" id="aes-badge"><%c++ $$ << (deviceFamily == "5" ? "Recommended" : "Works, but slower"); %></span>
                     </label>
 
                     <label class="tile-option <%c++ if(storageCipher == "xchacha12,aes-adiantum-plain64") $$ << "selected"; %>">
@@ -1192,8 +1282,8 @@
                         <div class="tile-header">
                             <span class="tile-title">Adiantum</span>
                         </div>
-                        <p class="tile-description">Optimized for devices without AES hardware acceleration.</p>
-                        <span class="tile-badge recommended" id="adiantum-badge">Best for Pi 4 / Zero 2</span>
+                        <p class="tile-description">Optimised for devices without AES hardware acceleration.</p>
+                        <span class="tile-badge <%c++ $$ << (deviceFamily == "5" ? "info" : "recommended"); %>" id="adiantum-badge"><%c++ $$ << (deviceFamily == "5" ? "Works, but slower" : "Recommended"); %></span>
                     </label>
                 </div>
                 <div id="feedback-RPI_DEVICE_STORAGE_CIPHER" class="field-feedback"></div>
@@ -1363,7 +1453,7 @@
                         <label class="file-upload-zone" id="key-upload-zone" for="key-file-input">
                             <div class="upload-icon">&#128196;</div>
                             <div class="upload-text">Drop a PEM private key here or click to browse</div>
-                            <div class="upload-hint">RSA 2048-bit private key. Upload adds to your saved keys.</div>
+                            <div class="upload-hint">RSA 2048-bit private key. Uploading saves it and makes it the active signing key.</div>
                             <input type="file" id="key-file-input" accept=".pem,.key" style="display: none;">
                         </label>
                         <div id="pem-key-list" class="signing-key-list" aria-live="polite"></div>
@@ -1378,11 +1468,15 @@
 
                     <div class="key-panel <%c++ if(!keyPkcs11.empty()) $$ << "active"; %>" data-panel="pkcs11">
                         <div class="pkcs11-builder">
-                            <div id="pkcs11-provider-status" class="pkcs11-provider-status loading">Checking for PKCS#11 provider...</div>
+                            <div id="pkcs11-provider-status" class="pkcs11-provider-status loading">Checking for PKCS#11 provider\u2026</div>
 
                             <div class="pkcs11-input-group">
-                                <label for="pkcs11-alias">Keypair Alias</label>
-                                <input type="text" id="pkcs11-alias" placeholder="e.g., my-signing-key" oninput="updatePkcs11Preview()" onblur="savePkcs11Value()">
+                                <label for="pkcs11-alias">Key Label</label>
+                                <input type="text" id="pkcs11-alias" placeholder="e.g. my-signing-key" oninput="updatePkcs11Preview()" onblur="savePkcs11Value()">
+                                <div class="inline-help" style="margin-top: 6px;">
+                                    <span class="inline-help-icon" aria-hidden="true">&#9432;</span>
+                                    <span>The PKCS#11 object label of your key on the token. Used to build the URI below.</span>
+                                </div>
                                 <div id="feedback-CUSTOMER_KEY_PKCS11_NAME" class="field-feedback"></div>
                             </div>
 
@@ -1394,10 +1488,10 @@
 
                             <div id="pkcs11-discovered-list" class="signing-key-list" aria-live="polite"></div>
                             <div id="pkcs11-key-list" class="signing-key-list" aria-live="polite"></div>
-                            <div id="pkcs11-key-empty" class="signing-key-empty">No HSM keys saved yet. Detect keys on your token or enter an alias below.</div>
+                            <div id="pkcs11-key-empty" class="signing-key-empty">No HSM keys saved yet. Use <strong>Detect keys on HSM</strong> above, or enter a key label above to build the URI by hand.</div>
 
                             <div class="pkcs11-preview" id="pkcs11-preview">
-                                <div class="pkcs11-preview-label">Manual PKCS#11 URI:</div>
+                                <div class="pkcs11-preview-label">Generated PKCS#11 URI (built from the key label above):</div>
                                 <code id="pkcs11-uri">pkcs11:object=<em>&lt;alias&gt;</em>;type=private</code>
                             </div>
 
@@ -1415,13 +1509,13 @@
                                     </button>
                                 </div>
                                 <div id="pin-status" class="pin-status">
-                                    <span class="pin-status-loading">Checking PIN status...</span>
+                                    <span class="pin-status-loading">Checking PIN status\u2026</span>
                                 </div>
                                 <!-- Encryption-at-rest status for the PIN, inline with the PIN entry -->
                                 <div id="enc-status-pin" class="enc-status-inline"></div>
                                 <div id="feedback-pkcs11-pin" class="field-feedback"></div>
                             </div>
-                            <button type="button" class="pin-save-btn" id="pin-save-btn" onclick="savePkcs11Pin()">Save PIN &amp; Validate</button>
+                            <button type="button" class="pin-save-btn" id="pin-save-btn" onclick="savePkcs11Pin()">Validate &amp; Save PIN</button>
                             <button type="button" class="pin-remove-btn" id="pin-remove-btn" onclick="removePkcs11Pin()" style="display: none;">Remove PIN</button>
                         </div>
 
@@ -1456,7 +1550,7 @@
             
             <!-- Work Directory -->
             <div class="field-group">
-                <label class="field-label" for="RPI_SB_WORKDIR">Work Directory <span class="optional-badge">Recommended</span></label>
+                <label class="field-label" for="RPI_SB_WORKDIR">Work Directory <span class="optional-badge">Optional &mdash; recommended</span></label>
                 <input type="text" class="field-input" id="RPI_SB_WORKDIR" name="RPI_SB_WORKDIR" 
                        value="<%c++ $$ << workDir; %>" 
                        placeholder="/srv/rpi-sb-provisioner/workdir"
@@ -1471,7 +1565,7 @@
             
             <!-- Manufacturing Database -->
             <div class="field-group">
-                <label class="field-label" for="RPI_SB_PROVISIONER_MANUFACTURING_DB">Manufacturing Database</label>
+                <label class="field-label" for="RPI_SB_PROVISIONER_MANUFACTURING_DB">Manufacturing Database <span class="optional-badge">Optional</span></label>
                 <input type="text" class="field-input" id="RPI_SB_PROVISIONER_MANUFACTURING_DB" name="RPI_SB_PROVISIONER_MANUFACTURING_DB" 
                        value="<%c++ $$ << mfgDb; %>" 
                        placeholder="/srv/rpi-sb-provisioner/manufacturing.db"
@@ -1533,7 +1627,7 @@
                 <label class="field-label" for="RPI_CONNECT_DESCRIPTION">Description Prefix <span class="optional-badge">Optional</span></label>
                 <input type="text" class="field-input" id="RPI_CONNECT_DESCRIPTION" name="RPI_CONNECT_DESCRIPTION"
                        value="<%c++ $$ << connectDescription; %>"
-                       placeholder="e.g. Factory-A (appended with board type and serial)"
+                       placeholder="e.g. Factory-A &mdash; board type and serial are added after this"
                        onblur="validateAndSaveField('RPI_CONNECT_DESCRIPTION')">
                 <div id="feedback-RPI_CONNECT_DESCRIPTION" class="field-feedback"></div>
 
@@ -1551,38 +1645,38 @@
                     <span class="section-title-icon">&#128737;</span>
                     Hardware Security
                 </h2>
-                <p class="section-description">Optional hardware-level security features. These settings are permanent on the device.</p>
+                <p class="section-description">Optional hardware-level locks. Both are written to the device permanently and cannot be undone afterwards &mdash; not by this tool, and not by Raspberry Pi.</p>
             </div>
-            
+
+            <div class="inline-danger">
+                <span class="inline-danger-icon" aria-hidden="true">&#9888;</span>
+                <span><strong>These two settings cannot be reversed.</strong> Once a device leaves provisioning with either lock applied, there is no way to remove it. Enable them only when your configuration is final and you have provisioned a test device successfully.</span>
+            </div>
+
             <!-- JTAG Lock Toggle -->
-            <div class="toggle-group">
+            <div class="toggle-group toggle-irreversible">
                 <label class="toggle-switch">
                     <input type="checkbox" id="RPI_DEVICE_LOCK_JTAG" name="RPI_DEVICE_LOCK_JTAG" <%c++ if(lockJtag) $$ << "checked"; %> onchange="validateAndSaveField('RPI_DEVICE_LOCK_JTAG')">
                     <span class="toggle-slider"></span>
                 </label>
                 <div class="toggle-content">
-                    <div class="toggle-title">Lock JTAG Access</div>
-                    <div class="toggle-description">Restricts JTAG debugging access to the device. Note: This prevents Raspberry Pi engineers from assisting with hardware debugging.</div>
+                    <div class="toggle-title">Lock JTAG Access<span class="toggle-irreversible-tag">Permanent</span></div>
+                    <div class="toggle-description">Permanently disables JTAG hardware debugging on the device. <strong>This also prevents Raspberry Pi engineers from assisting you with hardware debugging or failure analysis on affected devices, for the life of the device.</strong> Recorded in the manufacturing database as requested; the provisioner cannot read the lock back to confirm it applied.</div>
                 </div>
                 <div id="feedback-RPI_DEVICE_LOCK_JTAG" class="field-feedback"></div>
             </div>
-            
+
             <!-- EEPROM Write Protection Toggle -->
-            <div class="toggle-group">
+            <div class="toggle-group toggle-irreversible">
                 <label class="toggle-switch">
                     <input type="checkbox" id="RPI_DEVICE_EEPROM_WP_SET" name="RPI_DEVICE_EEPROM_WP_SET" <%c++ if(eepromWp) $$ << "checked"; %> onchange="validateAndSaveField('RPI_DEVICE_EEPROM_WP_SET')">
                     <span class="toggle-slider"></span>
                 </label>
                 <div class="toggle-content">
-                    <div class="toggle-title">Enable EEPROM Write Protection</div>
-                    <div class="toggle-description">Prevents modification of the device's boot EEPROM after provisioning. Protects the secure boot configuration.</div>
+                    <div class="toggle-title">Enable EEPROM Write Protection<span class="toggle-irreversible-tag">Permanent</span></div>
+                    <div class="toggle-description">Permanently prevents modification of the device's boot EEPROM, protecting the secure boot configuration. <strong>Bootloader and EEPROM updates will no longer be possible on affected devices</strong>, including security fixes. Recorded in the manufacturing database as requested; the provisioner cannot read the lock back to confirm it applied.</div>
                 </div>
                 <div id="feedback-RPI_DEVICE_EEPROM_WP_SET" class="field-feedback"></div>
-            </div>
-            
-            <div class="inline-warning">
-                <span class="inline-warning-icon">&#9888;</span>
-                <span><strong>Warning:</strong> These security settings are permanent and cannot be reversed. Enable only when you're certain of your configuration.</span>
             </div>
         </div>
         
@@ -1735,7 +1829,7 @@
                 const fp = document.createElement('div');
                 fp.className = 'signing-key-hash';
                 fp.title = 'Secure-boot key hash (OTP): ' + key.fingerprint;
-                fp.textContent = 'Key hash: ' + key.fingerprint.substring(0, 16) + '...';
+                fp.textContent = 'Key hash: ' + key.fingerprint.substring(0, 16) + '…';
                 tile.appendChild(fp);
             }
 
@@ -1759,6 +1853,12 @@
                     useBtn.className = 'primary';
                     useBtn.textContent = 'Use for provisioning';
                     useBtn.disabled = !key.isFitForPurpose;
+                    // A disabled button with no reason attached reads as a bug.
+                    // The detail is in the meta line, but put it on the control too.
+                    if (useBtn.disabled) {
+                        useBtn.title = key.statusMessage ||
+                            'Raspberry Pi secure boot requires an RSA 2048-bit key. This key cannot be used.';
+                    }
                     useBtn.addEventListener('click', () => activateSigningKey(key.id));
                     actions.appendChild(useBtn);
                 }
@@ -2034,7 +2134,7 @@
                 if (!validateResult.valid) {
                     if (feedbackDiv) {
                         feedbackDiv.className = 'field-feedback error';
-                        feedbackDiv.textContent = validateResult.error || 'Invalid value';
+                        feedbackDiv.textContent = validateResult.error || 'That value was rejected and was not saved.';
                     }
                     return;
                 }
@@ -2056,7 +2156,7 @@
                 if (saveResponse.ok) {
                     if (feedbackDiv) {
                         feedbackDiv.className = 'field-feedback success';
-                        feedbackDiv.textContent = 'Saved';
+                        feedbackDiv.textContent = 'Signing key saved';
                         setTimeout(() => {
                             feedbackDiv.className = 'field-feedback';
                             feedbackDiv.textContent = '';
@@ -2074,7 +2174,7 @@
                 console.error('PKCS11 save error:', error);
                 if (feedbackDiv) {
                     feedbackDiv.className = 'field-feedback error';
-                    feedbackDiv.textContent = 'Network error';
+                    feedbackDiv.textContent = 'Network error \u2014 the value was not saved. Check the connection and try again.';
                 }
             }
         }
@@ -2146,7 +2246,7 @@
 
             btn.disabled = true;
             statusDiv.className = 'pkcs11-detect-status';
-            statusDiv.textContent = 'Scanning for keys...';
+            statusDiv.textContent = 'Scanning for keys\u2026';
 
             try {
                 const body = {};
@@ -2357,7 +2457,7 @@
                 if (uri) {
                     if (feedbackDiv) {
                         feedbackDiv.className = 'field-feedback';
-                        feedbackDiv.textContent = 'Validating PIN with HSM...';
+                        feedbackDiv.textContent = 'Validating PIN with HSM\u2026';
                     }
                     
                     const validationResult = await validatePkcs11Key(uri, pin);
@@ -2375,7 +2475,7 @@
                 // PIN validated successfully - now save it
                 if (feedbackDiv) {
                     feedbackDiv.className = 'field-feedback';
-                    feedbackDiv.textContent = 'Saving PIN...';
+                    feedbackDiv.textContent = 'Saving PIN\u2026';
                 }
                 
                 const response = await fetch('/options/set-pkcs11-pin', addCsrfHeader({
@@ -2681,7 +2781,7 @@
             // Show validating state
             if (feedbackDiv) {
                 feedbackDiv.className = 'field-feedback validating';
-                feedbackDiv.textContent = 'Validating...';
+                feedbackDiv.textContent = 'Validating\u2026';
             }
             
             try {
@@ -2697,7 +2797,7 @@
                     if (!result.valid) {
                         if (feedbackDiv) {
                             feedbackDiv.className = 'field-feedback error';
-                            feedbackDiv.textContent = result.error || 'Validation failed';
+                            feedbackDiv.textContent = result.error || 'That value was rejected and was not saved.';
                         }
                         if (fieldElement.classList) fieldElement.classList.add('invalid');
                         return;
@@ -2731,7 +2831,7 @@
                 } else {
                     if (feedbackDiv) {
                         feedbackDiv.className = 'field-feedback error';
-                        feedbackDiv.textContent = 'Failed to save';
+                        feedbackDiv.textContent = 'Could not save \u2014 the value is unchanged.';
                     }
                 }
             } catch (error) {

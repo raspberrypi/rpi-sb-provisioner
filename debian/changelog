@@ -1,3 +1,242 @@
+rpi-sb-provisioner (2.3.2) unstable; urgency=medium
+
+  * Final 2.3.2 release:
+    - Roll up the 2.3.2 development work into a supported release.
+
+  * IDP provisioning fixes:
+    - Select secure-boot boot slots by the provisionmap .static.role == "boot"
+      attribute rather than the partitionimages bootable flag. rpi-image-gen
+      legitimately flags bootconfig as bootable, because the EEPROM reads
+      autoboot.txt out of it, so the previous predicate swept bootconfig into
+      the signing set and aborted provisioning at mkfs.fat. No image-rota
+      style layout could complete secure-boot provisioning as a result
+      (issue #336).
+    - Walk the provisionmap recursively so top-level partitions, A/B slots and
+      encrypted groups are all covered without hardcoding the nesting,
+      retaining the bootable flag as a fallback for flat layouts that declare
+      no roles at all.
+    - Create an ephemeral RPI_SB_WORKDIR when the station has not configured
+      one, instead of aborting. The IDP provisioner was alone in treating the
+      workdir as mandatory, contrary to the documented behaviour and to the
+      sb-, fde-, naked- and bootstrap scripts. A station-configured cache
+      survives; only a workdir we created is removed on exit.
+
+  * Signing validation and failure reporting:
+    - Always validate signature files, and always capture eeprom-digest and
+      sign-bootcode output, during bootstrap. Only generate config.txt once
+      the EEPROM artefacts have been validated.
+    - Validate boot signatures in the boot image generator, and validate and
+      capture signing command output in the secure-boot provisioner.
+    - Add sigfile validation and stderr capture to the common shell library.
+    - Move signing context initialisation below the provision-bootstrap hook
+      call, so hooks run before signing state is established.
+
+  * Bootstrap:
+    - Fail early when the firmware image does not match the connected
+      device's chip family, logging and aborting rather than provisioning a
+      mismatched bootloader image.
+    - Allow automatic boot order re-ordering, to support trying the chosen
+      storage medium first.
+
+  * HSM signing and config file safety:
+    - Wire the stored HSM PIN into provisioning-time signing. The
+      device-wrapped pkcs11.pin was previously consumed only by the WebUI's
+      key-validation path, so saving and validating a PIN succeeded while
+      signing failed for login-required tokens (#328). rpi-sb-keyhelper gains
+      PKCS#11 sign and pubkey modes that unwrap the PIN in memory and supply
+      it to the pkcs11-provider via OpenSSL's passphrase callback, never on a
+      command line or in a pin-source file.
+    - Shell-quote config values on write and unquote on read. The config file
+      is written by the service but sourced by the signing scripts, so any
+      value containing a shell metacharacter was mangled; a PKCS#11 URI always
+      contains ';' and was silently truncated at the first one. This was also
+      a latent config-injection vector, since the sourced file runs as root.
+    - Extract the shared provider-load and PIN-unwrap logic into
+      pkcs11_common, linked into both the service and the standalone
+      keyhelper, so the two can no longer drift.
+    - Make config file writes atomic and serialised. Four independent handlers
+      each performed an unguarded read-modify-write with an in-place truncate,
+      which under the multi-threaded event loop could lose updates or expose
+      an empty or partial file to readers, including the signing scripts in
+      another process. Writes now serialise behind a process-wide mutex and
+      land via a temp file and rename(2), which needs no reader-side lock.
+
+  * Device keypair capture:
+    - Stop truncating the captured device public key to its PEM header. The
+      gadget returns public-key and private-key as multi-line PEM, but triage
+      read them with get_variable(), which stops at the first newline, so
+      every <serial>.pub written since the keypair capture landed contained
+      only "-----BEGIN PUBLIC KEY-----" (#341). Read armoured values with a
+      new get_variable_pem() helper instead, and reuse it for the Connect
+      registration path, which had carried a private copy of the workaround.
+    - Stop writing a bogus <serial>.der. get_variable() ends in `|| true`, so
+      the exit status triage tested for "already provisioned" was always 0 and
+      the gadget's literal "refused" reply was written to disk as if it were
+      key material. Triage now omits the file when the device declines to
+      export the key, which is the normal case: provisioning the firmware
+      crypto key locks the OTP ECDSA slot immediately.
+    - Document that only <serial>.pub is expected in a keypair directory, and
+      that both files are PEM rather than DER.
+
+  * Fastboot gadget update:
+    - Refresh the bundled fastboot gadgets.
+
+  * WebUI, image management:
+    - Add a Deselect Image button, and allow deleting the currently selected
+      image behind a confirmation that warns it is the current selection.
+      Previously the only escape from a single-image selection was to clear
+      GOLD_MASTER_OS_FILE by hand over SSH (#325).
+    - /delete-image now clears GOLD_MASTER_OS_FILE when the deleted image was
+      the selected gold master, so every client of the endpoint leaves the
+      config in a sane state.
+
+  * WebUI, defects found during a copy review:
+    - Restore two manufacturing database columns that were being dropped. The
+      API returns all 30 schema columns, but the table and CSV export rendered
+      only 28, omitting customer_key_fingerprint and customer_key_label. The
+      fingerprint is what the Options page tells users is recorded so devices
+      can be matched when re-provisioning.
+    - Render the Secure column through the same formatter as its neighbours
+      instead of emitting the raw database value, format the bootloader build
+      timestamp rather than printing a Unix epoch, put the readable eMMC size
+      in the cell with the exact byte count in the tooltip, and preserve the
+      "not configured" state in the CSV export.
+    - Load ZXing from /static/js/zxing.js. Static assets are served under
+      /static/, so the library 404'd and the code scanner threw on
+      construction; the page could not run at all. Also give its Start button
+      a handler, which previously re-enabled after Stop and did nothing.
+    - Fold the two duplicated special-flag tables into one, so the device
+      detail page and GET /devices/{serialno}/flags can no longer describe the
+      same flag differently.
+    - Report an audit log outcome that was never recorded as Unknown rather
+      than Failed.
+    - Stop using error red for healthy devices in the topology view, where a
+      resolved model generation shared a badge colour with the unknown marker.
+    - Define .inline-info, referenced by the RPIBOOT GPIO note but never
+      declared, and render the cipher recommendation badges from the saved
+      device family so both are not marked Recommended before scripts run.
+
+  * WebUI, irreversible device changes:
+    - Flag changes that permanently modify a device in red, distinct from the
+      amber used for advisory notes. Applies to the JTAG lock, EEPROM write
+      protection, the RPIBOOT GPIO pin and the secure boot provisioning
+      style, all of which write OTP or apply a lock that cannot be removed.
+    - State plainly that locking JTAG prevents Raspberry Pi engineers from
+      assisting with hardware debugging or failure analysis on affected
+      devices for the life of the device, and that EEPROM write protection
+      blocks bootloader updates including security fixes.
+    - Mark the two Hardware Security toggles Permanent on the control itself,
+      so the cost is visible before the switch is flipped rather than in a
+      footnote below the section.
+
+  * WebUI, copy review:
+    - Spell out abbreviations that invited the wrong expansion in the
+      manufacturing database: "(req.)" read as required rather than
+      requested, and "Devkey" as device key rather than development key.
+      Rename Secure to Device Identity to match its documented meaning, and
+      settle on one name for the Connect device ID column across the table,
+      the CSV export and the API.
+    - Fix an empty-state message directing the reader below for a field that
+      sits above it, a generated PKCS#11 URI labelled Manual, and a PIN
+      button naming its two steps in the opposite order to the code.
+    - Rename the device view tabs from Relational, Detail and Tiles to names
+      describing what they show, label USB bus paths as such rather than as
+      ports, and stop abbreviating Triage to "Tri" beneath a step circle
+      numbered 2.
+    - Rename the Services columns Status and Active to Load State and Run
+      State, align the audit log filter labels with the labels the table
+      renders, and replace raw provisioner and stage identifiers on the
+      Customisation page with display names, keeping the identifier as
+      secondary text since it is the script filename on disk.
+    - Title the code scanner for the Data Matrix codes it also decodes, which
+      is what appears on Raspberry Pi packaging.
+    - Expand IDP on first use, correct Raspberry Pi product names, use
+      British spelling throughout, and settle on one ellipsis character and
+      one word per meaning for absent values.
+
+  * USB port restriction:
+    - Restrict provisioning to a known set of USB ports, so a single-headed
+      programming jig only picks up boards in its head and leaves anything
+      else plugged into the host alone. Ports are listed as topology paths
+      (e.g. 1-1.2), shell globs included, in *.conf drop-ins under
+      /usr/share/rpi-sb-provisioner/usb-ports.d for packages describing a
+      particular jig and /etc/rpi-sb-provisioner/usb-ports.d for the local
+      administrator. Files merge by basename with the /etc copy winning, so
+      differently-named files are additive and an empty same-named file
+      masks a package-supplied rule set.
+    - Default to the historical behaviour: with no *.conf in either
+      directory the restriction is inactive and every port is accepted.
+    - Enforce the restriction in both entry points -- rpi-sb-bootstrap.sh
+      for rpiboot devices and rpi-sb-triage.sh for fastboot devices, which
+      checks independently because an already-provisioned board can reach
+      fastboot without passing through bootstrap.
+    - Treat a non-permitted port as a skip rather than a failure: record a
+      PORT-EXCLUDED state and log the reason, but take no lock, write no
+      udev rule, run no rpiboot and fire no provision-failed hook. Skipped
+      devices render muted in the device tiles and carry an explanatory
+      banner on the device details page.
+    - Skip a device whose USB path cannot be determined while a restriction
+      is in force, since an allowlist cannot be honoured for a device whose
+      port is unknown.
+    - Show the restriction in the port tree and the topology map, which
+      previously drew every port as equally usable. The service computes
+      whether each port is permitted -- mirroring the shell's matching, so
+      the views cannot disagree with the decision the scripts make -- and
+      publishes the effective rules alongside the topology. A status bar
+      names the active rules and offers a Hide excluded ports toggle, on by
+      default whenever a restriction is in force.
+    - Fix two port tree defects that hiding exposed. The tier scaffolding
+      forced a minimum of two USB 3 root ports so spare ports stayed visible
+      to plug into, which left a phantom USB 3 Root on a host that has no
+      SuperSpeed device; and the tree is built by mutation with pruning
+      deliberately disabled, so filtered-out ports stayed on screen. Both now
+      collapse while hiding, taking childless root-port groups and tiers with
+      them, and are unchanged when nothing is being hidden.
+
+  * Failing usefully on misconfiguration:
+    - Establish that a usable OS image is configured before engaging the
+      device. An unset GOLD_MASTER_OS_FILE previously reached losetup, which
+      retried for 25 seconds and then failed reporting a loop-device error,
+      having already recorded PROVISIONER-STARTED and taken the device
+      through bootstrap. Triage now classifies the configured image up front
+      and aborts with the actual reason; the provisioners re-check, since
+      their units can be started directly and the configuration can change
+      between triage selecting one and it running.
+    - Route to the IDP provisioner by classification rather than a bare
+      directory test. `-d` is also false for an IDP artefact whose directory
+      is merely absent -- an unmounted share, a deleted export -- so such a
+      device was silently handed to the .img provisioner and failed later
+      with an error naming loop devices rather than the missing artefact.
+      The directory is now held to the same one-descriptor rule the IDP
+      provisioner enforces in its own pre-flight, so the two cannot disagree
+      about whether an artefact is usable.
+    - Report whether a failure is permanent, via PROVISION_FAILED_PERMANENT
+      in the provision-failed hook environment. Hooks could previously only
+      see the stage a failure occurred in, and bootstrap-stage failures are
+      a mix of the transient (USB re-enumeration as the device reboots) and
+      the permanent (no signing key, no OS image). Anything filtering out
+      the former to avoid false alarms necessarily discarded the latter too,
+      so a jig could sit on its in-progress indicator indefinitely with a
+      misconfiguration that would never resolve. The stage is unchanged --
+      it still selects the hook's positional arguments -- so existing hooks
+      keep working and can adopt the flag when they choose.
+
+  * Service lifecycle:
+    - Explicitly handle device event loop termination.
+
+  * Documentation:
+    - Add docs/hsm-support.md, covering supported tokens, requirements, PIN
+      handling, p11-kit setup, a SoftHSM2 smoke test and troubleshooting.
+      Link it from config_vars.md and the README, and correct the stale
+      Signing Helpers section in architecture.md.
+    - Cover boot package generation, and capture the images endpoint change.
+    - Add docs/usb-port-restriction.md, covering the drop-in directories,
+      the file format, merge and masking rules, how to find the topology
+      path for a port and how a skipped device is reported. Link it from
+      the README and config_vars.md.
+
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Tue, 18 Aug 2026 14:27:41 +0100
+
 rpi-sb-provisioner (2.3.1) unstable; urgency=medium
 
   * Final 2.3.1 release:

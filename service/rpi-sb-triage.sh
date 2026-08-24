@@ -169,8 +169,33 @@ timeout_fatal() {
 # triage before it could even record TRIAGE-STARTED or write any log.
 TARGET_USB_PATH=$(get_usb_path_for_serial "${TARGET_DEVICE_SERIAL}") || TARGET_USB_PATH=""
 
+# Enforce the USB port restriction before recording TRIAGE-STARTED, so a
+# device on an unwired jig port never appears to have entered provisioning.
+# A device that reached fastboot through bootstrap has already passed this
+# check, but one that boots straight to fastboot (an already-provisioned
+# board being re-triaged) arrives here without having been filtered. The
+# check is a no-op unless a rule file is installed -- see
+# usb_port_permitted() in rpi-sb-common.sh.
+if ! usb_port_permitted "${TARGET_USB_PATH}"; then
+    record_usb_port_exclusion "triage" "${TARGET_USB_PATH}" "${TARGET_DEVICE_SERIAL}" || true
+    exit 0
+fi
+
 # Record state changes atomically
 record_state "${TARGET_DEVICE_SERIAL}" "${TRIAGE_STARTED}" "${TARGET_USB_PATH}"
+
+# Establish that there is a usable OS image before engaging the device. This
+# is a misconfiguration that no amount of retrying will resolve, so say so
+# plainly here rather than letting a provisioner discover it much later --
+# previously an unset GOLD_MASTER_OS_FILE got all the way to losetup, which
+# retried for 25 seconds before failing with an error about loop devices.
+if ! classify_gold_master_os; then
+    mark_permanent_failure
+    log "${GOLD_MASTER_OS_ERROR}"
+    record_state "${TARGET_DEVICE_SERIAL}" "${TRIAGE_ABORTED}" "${TARGET_USB_PATH}"
+    die "${GOLD_MASTER_OS_ERROR}"
+fi
+log "OS image: ${GOLD_MASTER_OS_FILE} (${GOLD_MASTER_OS_KIND})"
 
 if [ -d "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL32}" ]; then
     cp -rf "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL32}/." "${LOG_DIRECTORY}/"
@@ -196,15 +221,31 @@ if [ -d "${RPI_DEVICE_RETRIEVE_KEYPAIR}" ]; then
 fi
 mkdir -p "${KEYPAIR_DIR}"
 log "Capturing device keypair to ${KEYPAIR_DIR}"
-N_ALREADY_PROVISIONED=0
-PRIVATE_KEY=$(get_variable private-key) || N_ALREADY_PROVISIONED=$?
-if [ 0 -ne "$N_ALREADY_PROVISIONED" ]; then
-    log "Warning: Unable to retrieve device private key; already provisioned"
+
+# Both keys come back as multi-line PEM, so they must be read with
+# get_variable_pem(): get_variable() stops at the first newline and would
+# leave nothing but the "-----BEGIN ...-----" header on disk.
+#
+# The private key is only ever exportable while the OTP ECDSA key-slot is
+# unprovisioned AND unlocked. rpi-fastbootd LOCKs the slot at startup and
+# again immediately after `oem fwcrypto init` (run above), so on any device
+# that has a device key -- which is now every device we triage -- getvar
+# answers "refused" rather than a PEM. That is intended: the key is meant to
+# stay in firmware. Treat the absence of a PEM as normal and keep going; the
+# public key is what we retain for device identity.
+if get_variable_pem private-key > "${KEYPAIR_DIR}/${TARGET_DEVICE_SERIAL}.der"; then
+    log "Captured device private key"
 else
-    echo "${PRIVATE_KEY}" > "${KEYPAIR_DIR}/${TARGET_DEVICE_SERIAL}.der"
-    PRIVATE_KEY=""
+    rm -f "${KEYPAIR_DIR}/${TARGET_DEVICE_SERIAL}.der"
+    log "Device private key is not exportable (OTP key-slot locked); capturing public key only"
 fi
-get_variable public-key > "${KEYPAIR_DIR}/${TARGET_DEVICE_SERIAL}.pub"
+
+if get_variable_pem public-key > "${KEYPAIR_DIR}/${TARGET_DEVICE_SERIAL}.pub"; then
+    log "Captured device public key"
+else
+    rm -f "${KEYPAIR_DIR}/${TARGET_DEVICE_SERIAL}.pub"
+    log "Warning: Unable to retrieve device public key"
+fi
 
 # Based on the image type and provisioning style, we can determine which
 # systemd unit to trigger.  All units are parameterised with the device serial.
@@ -217,12 +258,16 @@ echo "${TRIAGE_STARTED}" >> "${LOG_DIRECTORY}"/triage.log
 # timestamp as PROVISIONER-STARTED but sort after it -- the state race seen in
 # the UI.  Triage's job is done once it has selected the provisioner, so record
 # TRIAGE-FINISHED first and hand off last.
-if [ -d "${GOLD_MASTER_OS_FILE}" ]; then
-    # GOLD_MASTER_OS_FILE is a directory -- this is an IDP artefact.
+# Routing keys off the classification above rather than a bare `-d` test. The
+# two are not equivalent: `-d` is also false for an IDP artefact whose
+# directory is simply absent -- an unmounted share, a deleted export -- which
+# silently routed such a device to the .img provisioner, where it failed later
+# with an error naming loop devices rather than the missing artefact.
+if [ "${GOLD_MASTER_OS_KIND}" = "idp" ]; then
     # Route to the IDP provisioner regardless of PROVISIONING_STYLE,
     # since the IDP provisioner handles the image format natively.
     # (Secure boot is handled by the bootstrap phase, not the provisioner.)
-    log "GOLD_MASTER_OS_FILE is a directory; selecting IDP Provisioner"
+    log "GOLD_MASTER_OS_FILE is an IDP artefact directory; selecting IDP Provisioner"
     TARGET_PROVISIONER_UNIT="rpi-idp-provisioner@${TARGET_DEVICE_SERIAL}.service"
 else
     # Traditional .img file -- use the PROVISIONING_STYLE switch as before
@@ -240,7 +285,9 @@ else
             TARGET_PROVISIONER_UNIT="rpi-naked-provisioner@${TARGET_DEVICE_SERIAL}.service"
         ;;
         *)
+            mark_permanent_failure
             log "Fatal: Unknown provisioning style: ${PROVISIONING_STYLE}"
+            record_state "${TARGET_DEVICE_SERIAL}" "${TRIAGE_ABORTED}" "${TARGET_USB_PATH}"
             exit 1
         ;;
     esac

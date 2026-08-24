@@ -318,6 +318,12 @@
             border: 1px solid #c3e6cb;
             color: #155724;
         }
+        .detail-banner.banner-skipped {
+            display: block;
+            background: #e9ecef;
+            border: 1px solid #ced4da;
+            color: #41464b;
+        }
 
         @media (max-width: 600px) {
             .info-row {
@@ -357,7 +363,7 @@
             <span id="info-serial" data-field="serial">[[device.serial]]</span>
         </div>
         <div class="info-row">
-            <span class="info-label">Port:</span>
+            <span class="info-label">USB path:</span>
             <span id="info-port" data-field="port">[[device.port]]</span>
         </div>
         <div class="info-row">
@@ -421,11 +427,11 @@
     </div>
 
     <div class="flags-section">
-        <h2>Special Flags</h2>
+        <h2>Per-device Overrides</h2>
         <p class="section-description">
-            Control special provisioning behaviour for this device. 
-            <strong>One-time</strong> flags are automatically cleared after the next provisioning cycle.
-            <strong>Persistent</strong> flags remain active until manually removed.
+            Change provisioning behaviour for this device only, overriding the global settings on the Options page.
+            <strong>One-time</strong> overrides are cleared automatically after the next provisioning cycle.
+            <strong>Persistent</strong> overrides stay in effect until you remove them.
         </p>
 
         <%c++ 
@@ -505,6 +511,9 @@
         function parseState(stateStr) {
             if (!stateStr) return { step: -1, status: 'none' };
             var s = stateStr.toUpperCase();
+            // Deliberately skipped by a USB port restriction -- no step of the
+            // pipeline was entered, so it is neither active nor an error.
+            if (s.indexOf('PORT-EXCLUDED') !== -1) return { step: -1, status: 'skipped' };
             if (s.indexOf('ABORTED') !== -1) {
                 if (s.indexOf('PROVISIONER') !== -1) return { step: 2, status: 'error' };
                 if (s.indexOf('TRIAGE') !== -1) return { step: 1, status: 'error' };
@@ -587,6 +596,22 @@
 
         function hideBanner() { banner.className = 'detail-banner'; banner.textContent = ''; }
 
+        function isPortExcluded(s) {
+            return !!s && s.toUpperCase().indexOf('PORT-EXCLUDED') !== -1;
+        }
+
+        function maybeShowPortExcludedBanner(s) {
+            if (!isPortExcluded(s)) return false;
+            showBanner('skipped', 'Skipped: this device is on a USB port that is not permitted by the rules in /etc/rpi-sb-provisioner/usb-ports.d.');
+            return true;
+        }
+
+        // The stepper renders from the server-side state on load, but the
+        // banner lives in this scope -- so a device that was already skipped
+        // before the page opened needs the banner raised here rather than
+        // waiting for a state change that will never come.
+        maybeShowPortExcludedBanner(lastKnownState);
+
         function findDevice(nodes) {
             if (!Array.isArray(nodes)) return null;
             for (var i = 0; i < nodes.length; i++) {
@@ -664,6 +689,7 @@
                     try { console.log('detail: state changed "' + lastKnownState + '" -> "' + device.state + '"'); } catch(e) {}
                     lastKnownState = device.state;
                     ProgressStepper.render(device.state);
+                    maybeShowPortExcludedBanner(device.state);
                     fetchLogs();
                 }
             } else {
@@ -731,7 +757,7 @@
 
         // Add saving state
         card.classList.add('flag-saving');
-        feedback.textContent = 'Saving...';
+        feedback.textContent = 'Saving\u2026';
         feedback.className = 'flag-feedback visible';
 
         fetch('/devices/' + encodeURIComponent(deviceSerial) + '/flags', {

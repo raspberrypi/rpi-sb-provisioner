@@ -165,7 +165,7 @@ class ZXingScanner {
     statusDisplay.style.padding = '5px';
     statusDisplay.style.borderRadius = '3px';
     statusDisplay.style.zIndex = '30';
-    statusDisplay.textContent = 'Starting camera...';
+    statusDisplay.textContent = 'Starting camera…';
     this.element.appendChild(statusDisplay);
     this.statusDisplay = statusDisplay;
     
@@ -192,7 +192,7 @@ class ZXingScanner {
   }
   
   _startCamera() {
-    this.statusDisplay.textContent = 'Requesting camera access...';
+    this.statusDisplay.textContent = 'Requesting camera access…';
     
     const constraints = {
       audio: false,
@@ -205,7 +205,7 @@ class ZXingScanner {
     
     navigator.mediaDevices.getUserMedia(constraints)
       .then(stream => {
-        this.statusDisplay.textContent = 'Camera connected, starting preview...';
+        this.statusDisplay.textContent = 'Camera connected, starting preview…';
         this._onCameraSuccess(stream);
       })
       .catch(error => {
@@ -227,14 +227,14 @@ class ZXingScanner {
       }
       
       this.videoElement.onloadedmetadata = () => {
-        this.statusDisplay.textContent = 'Camera ready, starting scan...';
+        this.statusDisplay.textContent = 'Camera ready, starting scan…';
         console.log('Video metadata loaded, dimensions:', 
           this.videoElement.videoWidth, 'x', this.videoElement.videoHeight);
           
         this.videoElement.play()
           .then(() => {
             console.log('Video playback started');
-            this.statusDisplay.textContent = 'Scanning...';
+            this.statusDisplay.textContent = 'Scanning…';
             
             // Set canvas dimensions
             const videoWidth = this.videoElement.videoWidth;
@@ -452,7 +452,7 @@ class ZXingScanner {
           console.log(`[DEBUG] Average pixel value (sample): ${avgPixelValue.toFixed(2)}/255`);
           
           if (this.statusDisplay) {
-            this.statusDisplay.textContent = `Scanning ${scanAreaLabel}...`;
+            this.statusDisplay.textContent = `Scanning ${scanAreaLabel}…`;
           }
         }
         
@@ -467,7 +467,7 @@ class ZXingScanner {
         try {
           // Attempt to decode
           if (isDebugFrame) {
-            console.log("[DEBUG] Attempting to decode with ZXing...");
+            console.log("[DEBUG] Attempting to decode with ZXing…");
           }
           
           const result = this.reader.decode(bitmap);
@@ -475,7 +475,7 @@ class ZXingScanner {
           // Success!
           console.log("[SUCCESS] Code detected:", result.getText(), "format:", ZXingScanner.formatName(result.getBarcodeFormat()));
           if (this.statusDisplay) {
-            this.statusDisplay.textContent = `Detected: ${result.getText().substring(0, 20)}...`;
+            this.statusDisplay.textContent = `Detected: ${result.getText().substring(0, 20)}…`;
           }
           
           this._onCodeDetected(result);
@@ -583,7 +583,7 @@ class ZXingScanner {
         if (this.statusDisplay) {
           this.statusDisplay.textContent = this.testModeEnabled 
             ? 'Test mode enabled' 
-            : 'Scanning...';
+            : 'Scanning…';
         }
         
         // If we're enabling test mode and not currently scanning, restart scanning
@@ -607,7 +607,7 @@ class ZXingScanner {
     if (this.videoElement && this.videoElement.srcObject) {
       this.isScanning = true;
       if (this.statusDisplay) {
-        this.statusDisplay.textContent = 'Scanning...';
+        this.statusDisplay.textContent = 'Scanning…';
       }
       console.log('Scanning resumed');
       this._scanFrame();

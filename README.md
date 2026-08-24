@@ -598,6 +598,8 @@ This README provides the essential information to get started. For more detailed
 
 - **Mass production scaling:** See [Scaling Guide](docs/mass-provisioning-guidance/scaling.md) (for high-volume operations)
 
+- **Restricting which USB ports are used:** See the [USB Port Restriction Guide](docs/usb-port-restriction.md) (for programming jigs, where only the wired head ports should be provisioned)
+
 ## Report Problems
 
 This tool is under active development. If you find a problem:
@@ -618,6 +620,7 @@ This tool is under active development. If you find a problem:
 | **Clear cache** | Web interface → Options → Clear Cached Files |
 | **Device ready?** | Both LEDs off = Ready |
 | **Get help** | Check [Troubleshooting](#troubleshooting) section above |
+| **Limit to jig ports** | Drop a `*.conf` listing USB paths into `/etc/rpi-sb-provisioner/usb-ports.d/`; see [USB Port Restriction](docs/usb-port-restriction.md) |
 | **API access** | See [API Documentation](docs/api_endpoints.md) for HTTP API |
 | **System architecture** | See [Architecture](docs/architecture.md) to understand how it works |
 
