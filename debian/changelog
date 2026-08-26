@@ -14,6 +14,20 @@ rpi-sb-provisioner (2.3.3) unstable; urgency=medium
     concurrent devices independent. It is cleared once the outcome has been
     reported, so a later run reusing the PID cannot inherit it.
 
+  * Stop the UI service aborting at startup when it cannot establish its own
+    package version. The GitHub release check parsed that version with
+    std::stoi, which throws on a component holding no leading digits, and
+    nothing on the path catches it. getPackageVersion() falls back to
+    "unknown" whenever dpkg-query cannot answer -- which is any binary run
+    from a build tree rather than an installed package -- so the service
+    terminated during startup, before it bound its listener, whenever GitHub
+    was reachable enough to return a release tag to compare against. An
+    unreachable GitHub returns early and never reaches the comparison, which
+    is why this went unnoticed on stations without network access. A version
+    that will not parse is now treated as "no update known"; Debian revisions
+    and pre-release suffixes order exactly as before, so non-native builds
+    keep receiving update notifications.
+
  -- Tom Dewey <tom.dewey@raspberrypi.com>  Tue, 18 Aug 2026 16:55:56 +0100
 
 rpi-sb-provisioner (2.3.2) unstable; urgency=medium
