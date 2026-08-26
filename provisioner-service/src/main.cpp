@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <cstdio>
 #include <memory>
+#include <optional>
 #include <regex>
 #include <iostream>
 #include <getopt.h>
@@ -61,33 +62,65 @@ struct VersionInfo {
     std::string release_url;
 };
 
-// Function to compare semantic versions (returns -1 if v1 < v2, 0 if equal, 1 if v1 > v2)
-int compareVersions(const std::string& v1, const std::string& v2) {
-    std::vector<int> version1, version2;
-    
-    // Parse version1
-    std::stringstream ss1(v1);
+// Parse one dot-separated version component, tolerating a trailing suffix such
+// as a Debian revision ("2-1") or a pre-release marker ("3~rc1"), which is what
+// std::stoi accepted implicitly. Returns false when the component carries no
+// leading digits at all.
+static bool parseVersionComponent(const std::string& part, int& value) {
+    const size_t end = part.find_first_not_of("0123456789");
+    const std::string digits = (end == std::string::npos) ? part : part.substr(0, end);
+    if (digits.empty()) {
+        return false;
+    }
+    try {
+        value = std::stoi(digits);
+    } catch (const std::out_of_range&) {
+        return false;
+    }
+    return true;
+}
+
+// Split a dotted version into its numeric components. Returns false if any
+// component is unparseable, leaving the caller to decide what a non-version
+// string means rather than inventing a number for it.
+static bool parseVersion(const std::string& version, std::vector<int>& parts) {
+    parts.clear();
+    std::stringstream ss(version);
     std::string part;
-    while (std::getline(ss1, part, '.')) {
-        version1.push_back(std::stoi(part));
+    while (std::getline(ss, part, '.')) {
+        int value = 0;
+        if (!parseVersionComponent(part, value)) {
+            return false;
+        }
+        parts.push_back(value);
     }
-    
-    // Parse version2
-    std::stringstream ss2(v2);
-    while (std::getline(ss2, part, '.')) {
-        version2.push_back(std::stoi(part));
+    return !parts.empty();
+}
+
+// Compare semantic versions: -1 if v1 < v2, 0 if equal, 1 if v1 > v2, or
+// std::nullopt when either side is not a version at all.
+//
+// The nullopt case is load-bearing. getPackageVersion() returns "unknown" when
+// dpkg-query cannot answer -- which is every run from a build tree with no
+// package installed -- and this function used to hand that straight to
+// std::stoi, whose std::invalid_argument was caught by nobody and terminated
+// the process during startup, before the listener came up.
+std::optional<int> compareVersions(const std::string& v1, const std::string& v2) {
+    std::vector<int> version1, version2;
+    if (!parseVersion(v1, version1) || !parseVersion(v2, version2)) {
+        return std::nullopt;
     }
-    
+
     // Pad shorter version with zeros
     while (version1.size() < version2.size()) version1.push_back(0);
     while (version2.size() < version1.size()) version2.push_back(0);
-    
+
     // Compare each part
     for (size_t i = 0; i < version1.size(); ++i) {
         if (version1[i] < version2[i]) return -1;
         if (version1[i] > version2[i]) return 1;
     }
-    
+
     return 0; // Equal
 }
 
@@ -135,9 +168,14 @@ VersionInfo checkForNewerRelease(const std::string& current_version) {
         info.latest = tag_name;
         info.release_url = html_url;
         
-        // Compare versions using proper semantic version comparison
+        // Compare versions using proper semantic version comparison. A version
+        // we cannot parse -- ours or the tag's -- is not evidence of an update,
+        // so leave has_newer false and let the UI say nothing.
         if (!tag_name.empty() && !current_version.empty() && tag_name != current_version) {
-            info.has_newer = compareVersions(current_version, tag_name) < 0;
+            const std::optional<int> ordering = compareVersions(current_version, tag_name);
+            if (ordering.has_value()) {
+                info.has_newer = *ordering < 0;
+            }
         }
     }
     
