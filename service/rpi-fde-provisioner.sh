@@ -12,9 +12,11 @@ DEBUG=
 
 OPENSSL=${OPENSSL:-openssl}
 
-export PROVISIONER_FINISHED="FDE-PROVISIONER-FINISHED"
-export PROVISIONER_ABORTED="FDE-PROVISIONER-ABORTED"
-export PROVISIONER_STARTED="FDE-PROVISIONER-STARTED"
+# Stage prefix for record_progress(); see host-support/state-recording.
+export STATE_PREFIX="FDE-PROVISIONER"
+export PROVISIONER_FINISHED="${STATE_PREFIX}-FINISHED"
+export PROVISIONER_ABORTED="${STATE_PREFIX}-ABORTED"
+export PROVISIONER_STARTED="${STATE_PREFIX}-STARTED"
 
 # shellcheck disable=SC1091
 . "$(dirname "$0")/rpi-sb-common.sh"
@@ -396,6 +398,7 @@ prepare_pre_boot_auth_images_as_filesystems() {
     # and need to generate the bootfs-temporary.simg file, which will also create the
     # mount points for the boot and root partitions.
     if [ ! -f "${RPI_SB_WORKDIR}/rootfs-temporary.simg" ] || [ ! -f "${RPI_SB_WORKDIR}/bootfs-temporary.simg" ]; then
+        record_progress "IMAGE-PREPARING"
         announce_start "OS Image Mounting"
 
         # Mount the 'complete' image as a series of partitions 
@@ -506,6 +509,7 @@ prepare_pre_boot_auth_images_as_bootimg() {
     # and need to generate the bootfs-temporary.simg file, which will also create the
     # mount points for the boot and root partitions.
     if [ ! -f "${RPI_SB_WORKDIR}/rootfs-temporary.simg" ] || [ ! -f "${RPI_SB_WORKDIR}/bootfs-temporary.simg" ]; then
+        record_progress "IMAGE-PREPARING"
         announce_start "OS Image Mounting"
 
         # Mount the 'complete' image as a series of partitions 
@@ -638,6 +642,7 @@ case "${RPI_DEVICE_FAMILY}" in
         ;;
 esac
 
+record_progress "STORAGE-ERASING"
 announce_start "Erase / Partition Device Storage"
 
 # Arbitrary sleeps to handle lack of correct synchronisation in fastbootd.
@@ -668,6 +673,7 @@ prepare_rootfs_image() {
     fi
 }
 
+record_progress "IMAGE-RESIZING"
 announce_start "Resizing rootfs image"
 # Need mke2fs with '-E android_sparse' support
 # Debian's 'android-sdk-platform-tools' provides the option but is not correctly
@@ -688,10 +694,13 @@ setup_fastboot_and_id_vars "${FASTBOOT_DEVICE_SPECIFIER}"
 FLASH_SPECIFIER="${FASTBOOT_TCP_FLASH_SPECIFIER:-${FASTBOOT_DEVICE_SPECIFIER}}"
 
 announce_start "Writing OS images"
+record_progress "WRITING-BOOTFS"
 fastboot -s "${FLASH_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}"p1 "${RPI_SB_WORKDIR}"/bootfs-temporary.simg
+record_progress "WRITING-ROOTFS"
 fastboot -s "${FLASH_SPECIFIER}" flash mapper/cryptroot "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
 announce_stop "Writing OS images"
 
+record_progress "FINALISING"
 metadata_gather
 
 # Run customisation script for post-flash stage

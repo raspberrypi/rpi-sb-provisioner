@@ -1116,7 +1116,24 @@
                 }
             }
             
-            return { init };
+            // Re-fit to the container. init() runs while the graph's tab may
+            // be hidden (device cards lead), where clientWidth/Height read 0
+            // and its fallbacks stand in; this picks up the real size once
+            // the tab is shown, and on window resize.
+            function resize() {
+                const container = document.querySelector('.mindmap-container');
+                if (!container || !svg) return;
+                const w = container.clientWidth;
+                if (!w) return; // still hidden
+                const h = Math.max(container.clientHeight, 500);
+                if (w === graphWidth && h === graphHeight) return;
+                graphWidth = w;
+                graphHeight = h;
+                svg.attr('width', graphWidth).attr('height', graphHeight);
+                if (simulation) simulation.alpha(0.3).restart();
+            }
+
+            return { init, resize };
         })();
 
         function metaFor(n) {
@@ -1428,16 +1445,16 @@
     
     <h1>Devices</h1>
     <div class="view-tabs" role="tablist" aria-label="Choose how to view connected devices">
-        <button id="tab-rel" class="view-tab active" role="tab" aria-selected="true" aria-controls="rel-view">Topology map</button>
+        <button id="tab-tiles" class="view-tab active" role="tab" aria-selected="true" aria-controls="tiles-view">Device cards</button>
+        <button id="tab-rel" class="view-tab" role="tab" aria-selected="false" aria-controls="rel-view">Topology map</button>
         <button id="tab-topo" class="view-tab" role="tab" aria-selected="false" aria-controls="topo-view">Port tree</button>
-        <button id="tab-tiles" class="view-tab" role="tab" aria-selected="false" aria-controls="tiles-view">Device cards</button>
     </div>
     <div id="port-filter-bar" class="port-filter-bar" role="status" hidden>
         <span class="pf-label">USB port filter active:</span>
         <span id="pf-rules"></span>
         <label><input type="checkbox" id="pf-hide-excluded"> Hide excluded ports</label>
     </div>
-    <div id="rel-view" class="view-container active" role="tabpanel" aria-labelledby="tab-rel">
+    <div id="rel-view" class="view-container" role="tabpanel" aria-labelledby="tab-rel" hidden>
         <div class="mindmap-container" role="img" aria-label="Interactive USB device topology graph showing connected devices and their relationships">
             <svg id="d3-graph-svg" aria-hidden="true"></svg>
             <p class="sr-only">This visualization shows USB devices connected to the provisioning server. Use the Port tree tab for an accessible text-based view of the same information.</p>
@@ -1448,7 +1465,7 @@
             <div id="topology-root"></div>
         </div>
     </div>
-    <div id="tiles-view" class="view-container" role="tabpanel" aria-labelledby="tab-tiles" hidden>
+    <div id="tiles-view" class="view-container active" role="tabpanel" aria-labelledby="tab-tiles">
         <%view tile_view %>
     </div>
     
@@ -1458,6 +1475,7 @@
         applyTopology([{ id: 'server', isHub: true }]);
         // Initialize D3 interactive graph
         window.__d3Apply = D3Graph.init();
+        window.addEventListener('resize', () => D3Graph.resize());
         // USB port filter toggle. The preference is per-browser, so an
         // operator watching one jig head can hide the rest of the host's
         // ports without changing anything for anyone else.
@@ -1473,16 +1491,24 @@
                 rerenderFromCache();
             });
         })();
-        // Tabs
+        // Tabs. Device cards lead, and are the default at every width: they
+        // are the view that answers "how far has this board got, and which
+        // board is it" without the operator having to hunt (issue #345).
         const tabs = {
+            tiles: { btn: document.getElementById('tab-tiles'), view: document.getElementById('tiles-view') },
             rel:   { btn: document.getElementById('tab-rel'),   view: document.getElementById('rel-view') },
-            topo:  { btn: document.getElementById('tab-topo'),  view: document.getElementById('topo-view') },
-            tiles: { btn: document.getElementById('tab-tiles'), view: document.getElementById('tiles-view') }
+            topo:  { btn: document.getElementById('tab-topo'),  view: document.getElementById('topo-view') }
         };
-        const TAB_STORAGE_KEY = 'devices-active-tab';
+        // v2: the previous key was written on every page load, including the
+        // one that merely applied the old default, so every returning browser
+        // had a stored preference it had never actually expressed. Only
+        // explicit clicks are remembered now, and the new key ignores the
+        // values recorded under the old rules.
+        const TAB_STORAGE_KEY = 'devices-active-tab-v2';
+        const DEFAULT_TAB = 'tiles';
         const VALID_TABS = Object.keys(tabs);
-        function setActive(which) {
-            if (!VALID_TABS.includes(which)) which = 'rel';
+        function setActive(which, remember) {
+            if (!VALID_TABS.includes(which)) which = DEFAULT_TAB;
             for (const [key, t] of Object.entries(tabs)) {
                 const active = key === which;
                 t.btn.classList.toggle('active', active);
@@ -1491,18 +1517,20 @@
                 if (active) t.view.removeAttribute('hidden');
                 else t.view.setAttribute('hidden', '');
             }
-            try { localStorage.setItem(TAB_STORAGE_KEY, which); } catch(e) {}
+            if (remember) { try { localStorage.setItem(TAB_STORAGE_KEY, which); } catch(e) {} }
+            // The graph is laid out for the size of its container, which is
+            // zero while the tab is hidden -- so refit it on the way in.
+            if (which === 'rel' && D3Graph.resize) D3Graph.resize();
             history.replaceState(null, '', '#' + which);
         }
         for (const key of VALID_TABS) {
-            tabs[key].btn.addEventListener('click', () => setActive(key));
+            tabs[key].btn.addEventListener('click', () => setActive(key, true));
         }
         // Restore persisted tab from URL hash or localStorage
         const hashTab = location.hash.replace('#', '');
         const savedTab = hashTab && VALID_TABS.includes(hashTab) ? hashTab : null;
         const storedTab = (() => { try { return localStorage.getItem(TAB_STORAGE_KEY); } catch(e) { return null; } })();
-        const defaultTab = window.innerWidth <= 768 ? 'tiles' : 'rel';
-        setActive(savedTab || storedTab || defaultTab);
+        setActive(savedTab || storedTab || DEFAULT_TAB, false);
         initWebSocket();
         
         // Secret Test Mode Controls

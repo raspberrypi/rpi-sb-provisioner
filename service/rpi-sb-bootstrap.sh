@@ -7,9 +7,11 @@ DEBUG=
 
 OPENSSL=${OPENSSL:-openssl}
 
-export BOOTSTRAP_FINISHED="BOOTSTRAP-FINISHED"
-export BOOTSTRAP_ABORTED="BOOTSTRAP-ABORTED"
-export BOOTSTRAP_STARTED="BOOTSTRAP-STARTED"
+# Stage prefix for record_progress(); see host-support/state-recording.
+export STATE_PREFIX="BOOTSTRAP"
+export BOOTSTRAP_FINISHED="${STATE_PREFIX}-FINISHED"
+export BOOTSTRAP_ABORTED="${STATE_PREFIX}-ABORTED"
+export BOOTSTRAP_STARTED="${STATE_PREFIX}-STARTED"
 
 
 # Lock directories
@@ -726,6 +728,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                         ;;
                 esac
             fi
+            record_progress "EEPROM-UPDATING"
             [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal rpiboot -j "${METADATA_DIR}" -d "${SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
             extract_board_type
         else
@@ -738,6 +741,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
             # artefacts it contained (issue #337).
             log "Creating secure bootloader for future reuse"
 
+            record_progress "BOOTLOADER-PREPARING"
             announce_start "Setting up the environment for a signed-boot capable device"
             if [ -z "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" ]; then
                 RPI_DEVICE_BOOTLOADER_CONFIG_FILE=/var/lib/rpi-sb-provisioner/bootloader.secure
@@ -872,6 +876,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                 else
                     log "Normal provisioning mode (not re-provisioning)"
                 fi
+                record_progress "EEPROM-UPDATING"
                 [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal rpiboot -j "${METADATA_DIR}" -d "${SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
             extract_board_type
             else
@@ -913,6 +918,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
         fi
 
         if [ ! -f "${RPI_SB_WORKDIR}/boot.img" ] || [ ! -f "${RPI_SB_WORKDIR}/boot.sig" ]; then
+            record_progress "BOOTCODE-SIGNING"
             announce_start "Signing fastboot image"
             cp "$(get_fastboot_gadget)" "${RPI_SB_WORKDIR}"/boot.img
             sha256sum "${RPI_SB_WORKDIR}"/boot.img | awk '{print $1}' > "${RPI_SB_WORKDIR}"/boot.sig
@@ -950,6 +956,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                     # secure-boot branch above.
                     log "Creating non-secure bootloader for EEPROM update"
 
+                    record_progress "BOOTLOADER-PREPARING"
                     announce_start "Setting up EEPROM update for non-secure-boot device"
                     if [ -z "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" ]; then
                         RPI_DEVICE_BOOTLOADER_CONFIG_FILE=/var/lib/rpi-sb-provisioner/bootloader.naked
@@ -1037,6 +1044,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                     echo "set_reboot_order=0x3" > "${NON_SECURE_BOOTLOADER_DIRECTORY}/config.txt"
                     echo "recovery_reboot=1" >> "${NON_SECURE_BOOTLOADER_DIRECTORY}/config.txt"
                     
+                    record_progress "EEPROM-UPDATING"
                     log "Updating EEPROM to latest version"
                     [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal rpiboot -j "${METADATA_DIR}" -d "${NON_SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
                     extract_board_type

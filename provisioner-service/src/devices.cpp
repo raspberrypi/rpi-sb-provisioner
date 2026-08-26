@@ -17,6 +17,7 @@
 #include <condition_variable>
 #include <atomic>
 #include <chrono>
+#include <ctime>
 #include <algorithm>
 #include <cctype>
 #include <random>
@@ -162,6 +163,15 @@ namespace provisioner {
         std::vector<Device> devices;
     };
 
+    // One row of state.db for a device, newest first. The tile view shows the
+    // last few of these so an operator can see what a device has just done
+    // rather than only where it currently is (issue #345).
+    struct StateEvent {
+        std::string state;
+        std::string ts;
+        bool operator==(const StateEvent &o) const { return state == o.state && ts == o.ts; }
+    };
+
     // Representation of a USB node (hub or device)
     struct UsbNode {
         std::string id;          // unique path id (e.g. 1-1.4)
@@ -183,6 +193,12 @@ namespace provisioner {
         // for Pi 5, "18" for CM5).  Captured by the bootstrap script via
         // `rpiboot -j` and persisted in state.db as generic device metadata.
         std::string boardType;
+        // Wired MAC, from manufacturing.db. Only known once metadata_gather()
+        // has run, so it appears late in the run -- which is precisely when an
+        // operator wants to tell one finished module from another.
+        std::string ethMac;
+        // Recent state transitions, newest first (see StateEvent).
+        std::vector<StateEvent> history;
     };
 
     // Tracker state
@@ -873,11 +889,52 @@ namespace provisioner {
             return nodes;
         }
 
+        // How many recent transitions per device the tile view is given. Six
+        // covers bootstrap -> triage -> provisioner handoff plus a few
+        // in-provisioner steps, which is as much as fits on a tile.
+        constexpr size_t STATE_HISTORY_DEPTH = 6;
+
+        // Whether a state ends a device's pass through the pipeline. Rows are
+        // keyed by USB path, so a jig port that has flashed several boards
+        // since the service started has all of their rows -- and walking back
+        // past one of these would show the previous board's run as though it
+        // were this one's. BOOTSTRAP-FINISHED and TRIAGE-FINISHED are
+        // deliberately not terminal: they are handoffs within a single run.
+        bool isRunTerminalState(const std::string &state) {
+            std::string s = state;
+            std::transform(s.begin(), s.end(), s.begin(),
+                           [](unsigned char c){ return static_cast<char>(std::toupper(c)); });
+            return s.find("ABORTED") != std::string::npos
+                || s.find("PROVISIONER-FINISHED") != std::string::npos
+                || s.find("PORT-EXCLUDED") != std::string::npos;
+        }
+
+        // state.db stores ts as SQLite's CURRENT_TIMESTAMP, i.e. UTC
+        // 'YYYY-MM-DD HH:MM:SS' text. Render appStartMs in the same form so
+        // the freshness filter below is a text comparison the column can
+        // actually satisfy; comparing it against an integer made every row
+        // look fresh, because SQLite sorts every integer before any text.
+        std::string appStartTimestamp() {
+            const std::time_t secs = static_cast<std::time_t>(appStartMs.load() / 1000);
+            std::tm tmUtc{};
+            if (!gmtime_r(&secs, &tmUtc)) return std::string{};
+            char buf[32];
+            if (std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tmUtc) == 0) return std::string{};
+            return buf;
+        }
+
         void enrichWithProvisioningState(std::unordered_map<std::string, UsbNode> &nodes) {
             // Build latest record per endpoint (descending ts ensures first seen is newest)
-            struct DbRecord { std::string serial, state, image, ip, boardType; };
+            struct DbRecord {
+                std::string serial, state, image, ip, boardType;
+                std::vector<StateEvent> history;
+                // Set once the walk back through this endpoint's rows has
+                // reached the end of the previous device's run.
+                bool historyClosed{false};
+                bool sawNonTerminal{false};
+            };
             std::unordered_map<std::string, DbRecord> latestByEndpoint;
-            struct MfgRecord { std::string boardname, processor, osImageFilename; };
+            struct MfgRecord { std::string boardname, processor, osImageFilename, ethMac; };
             std::unordered_map<std::string, MfgRecord> latestMfgBySerial;
 
             sqlite3* db;
@@ -891,15 +948,16 @@ namespace provisioner {
             // writes several rows in one second. Ordering on ts alone leaves
             // their order to the query planner, which can mis-pick the latest
             // state per endpoint. id reflects true insertion order.
-            const char* sql = "SELECT serial, endpoint, state, image, ip_address, board_type FROM devices WHERE ts >= ? ORDER BY ts DESC, id DESC";
+            const char* sql = "SELECT serial, endpoint, state, image, ip_address, board_type, ts FROM devices WHERE ts >= ? ORDER BY ts DESC, id DESC";
             sqlite3_stmt* stmt;
             rc = sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr);
             if (rc != SQLITE_OK) {
                 sqlite3_close(db);
                 return;
             }
-            // Bind application start time (milliseconds)
-            sqlite3_bind_int64(stmt, 1, static_cast<sqlite3_int64>(appStartMs.load()));
+            // Bind application start time, formatted to match the ts column
+            const std::string startTs = appStartTimestamp();
+            sqlite3_bind_text(stmt, 1, startTs.c_str(), -1, SQLITE_TRANSIENT);
             while (sqlite3_step(stmt) == SQLITE_ROW) {
                 const unsigned char* serial = sqlite3_column_text(stmt, 0);
                 const unsigned char* endpoint = sqlite3_column_text(stmt, 1);
@@ -907,18 +965,43 @@ namespace provisioner {
                 const unsigned char* image = sqlite3_column_text(stmt, 3);
                 const unsigned char* ip = sqlite3_column_text(stmt, 4);
                 const unsigned char* boardType = sqlite3_column_text(stmt, 5);
+                const unsigned char* ts = sqlite3_column_text(stmt, 6);
                 if (!endpoint) continue;
                 std::string endpointStr = reinterpret_cast<const char*>(endpoint);
                 std::string boardTypeStr = boardType ? reinterpret_cast<const char*>(boardType) : std::string{};
                 std::string serialStr = serial ? reinterpret_cast<const char*>(serial) : std::string{};
-                if (latestByEndpoint.find(endpointStr) == latestByEndpoint.end()) {
-                    latestByEndpoint.emplace(endpointStr, DbRecord{
+                std::string stateStr = state ? reinterpret_cast<const char*>(state) : std::string{};
+                auto it = latestByEndpoint.find(endpointStr);
+                if (it == latestByEndpoint.end()) {
+                    it = latestByEndpoint.emplace(endpointStr, DbRecord{
                         serialStr,
-                        state ? reinterpret_cast<const char*>(state) : std::string{},
+                        stateStr,
                         image ? reinterpret_cast<const char*>(image) : std::string{},
                         ip ? reinterpret_cast<const char*>(ip) : std::string{},
-                        boardTypeStr
-                    });
+                        boardTypeStr,
+                        {},
+                        false,
+                        false
+                    }).first;
+                }
+                // Rows arrive newest first, so appending keeps the history in
+                // newest-first order and the depth cap keeps the oldest out.
+                DbRecord &rec = it->second;
+                if (!rec.historyClosed && rec.history.size() < STATE_HISTORY_DEPTH) {
+                    const bool terminal = isRunTerminalState(stateStr);
+                    // A run's own terminal row is the newest one, and a failure
+                    // can record two in a row (the abort, then die()), so only a
+                    // terminal row reached after a non-terminal one belongs to
+                    // the previous device.
+                    if (terminal && rec.sawNonTerminal) {
+                        rec.historyClosed = true;
+                    } else {
+                        if (!terminal) rec.sawNonTerminal = true;
+                        rec.history.push_back(StateEvent{
+                            stateStr,
+                            ts ? reinterpret_cast<const char*>(ts) : std::string{}
+                        });
+                    }
                 }
             }
             sqlite3_finalize(stmt);
@@ -930,7 +1013,7 @@ namespace provisioner {
                 int rc2 = sqlite3_open("/srv/rpi-sb-provisioner/manufacturing.db", &mdb);
                 if (rc2 == SQLITE_OK) {
                     sqlite3_busy_timeout(mdb, 5000);
-                    const char* msql = "SELECT serial, boardname, processor, os_image_filename FROM devices ORDER BY provision_ts DESC";
+                    const char* msql = "SELECT serial, boardname, processor, os_image_filename, eth_mac FROM devices ORDER BY provision_ts DESC";
                     sqlite3_stmt* mstmt = nullptr;
                     rc2 = sqlite3_prepare_v2(mdb, msql, -1, &mstmt, nullptr);
                     if (rc2 == SQLITE_OK) {
@@ -939,13 +1022,15 @@ namespace provisioner {
                             const unsigned char* boardname = sqlite3_column_text(mstmt, 1);
                             const unsigned char* processor = sqlite3_column_text(mstmt, 2);
                             const unsigned char* osImage = sqlite3_column_text(mstmt, 3);
+                            const unsigned char* ethMac = sqlite3_column_text(mstmt, 4);
                             if (!serial) continue;
                             std::string s = reinterpret_cast<const char*>(serial);
                             if (latestMfgBySerial.find(s) == latestMfgBySerial.end()) {
                                 latestMfgBySerial.emplace(s, MfgRecord{
                                     boardname ? reinterpret_cast<const char*>(boardname) : std::string{},
                                     processor ? reinterpret_cast<const char*>(processor) : std::string{},
-                                    osImage ? reinterpret_cast<const char*>(osImage) : std::string{}
+                                    osImage ? reinterpret_cast<const char*>(osImage) : std::string{},
+                                    ethMac ? reinterpret_cast<const char*>(ethMac) : std::string{}
                                 });
                             }
                         }
@@ -965,6 +1050,7 @@ namespace provisioner {
                 if (n.isHub) continue; // never apply provisioning state to hubs
                 if (n.isPlaceholder) continue; // empty port: runtime fields describe a device that isn't here
                 n.state = rec.state;
+                n.history = rec.history;
                 // Do not clobber existing non-empty image (used for model inference) with empty DB values
                 if (!rec.image.empty()) {
                     n.image = rec.image;
@@ -981,6 +1067,7 @@ namespace provisioner {
                         if (!mr.boardname.empty()) n.model = mr.boardname;
                         else if (!mr.processor.empty() && n.model.empty()) n.model = mr.processor;
                         if (n.image.empty() && !mr.osImageFilename.empty()) n.image = mr.osImageFilename;
+                        if (!mr.ethMac.empty()) n.ethMac = mr.ethMac;
                     }
                 }
             }
@@ -1006,6 +1093,7 @@ namespace provisioner {
                 if (sit != latestBySerial.end()) {
                     const auto &rec = sit->second;
                     n.state = rec.state;
+                    n.history = rec.history;
                     if (!rec.image.empty()) {
                         n.image = rec.image;
                     }
@@ -1019,6 +1107,7 @@ namespace provisioner {
                         if (!mr.boardname.empty()) n.model = mr.boardname;
                         else if (!mr.processor.empty() && n.model.empty()) n.model = mr.processor;
                         if (n.image.empty() && !mr.osImageFilename.empty()) n.image = mr.osImageFilename;
+                        if (!mr.ethMac.empty()) n.ethMac = mr.ethMac;
                     }
                 }
             }
@@ -1109,6 +1198,17 @@ namespace provisioner {
                 int gen = inferModelGeneration(n);
                 if (gen > 0) j["modelGen"] = gen;
                 if (!n.boardType.empty()) j["boardType"] = n.boardType;
+                if (!n.ethMac.empty()) j["ethMac"] = n.ethMac;
+                if (!n.history.empty()) {
+                    Json::Value hist(Json::arrayValue);
+                    for (const auto &ev : n.history) {
+                        Json::Value h;
+                        h["state"] = ev.state;
+                        h["ts"] = ev.ts;
+                        hist.append(h);
+                    }
+                    j["history"] = hist;
+                }
                 arr.append(j);
             }
             root["nodes"] = arr;
@@ -1215,7 +1315,8 @@ namespace provisioner {
                             const UsbNode &b = it->second;
                             if (a.parentId != b.parentId || a.vendor != b.vendor || a.product != b.product ||
                                 a.serial != b.serial || a.isHub != b.isHub || a.state != b.state ||
-                                a.image != b.image || a.ip != b.ip) { changed = true; break; }
+                                a.image != b.image || a.ip != b.ip || a.ethMac != b.ethMac ||
+                                a.history != b.history) { changed = true; break; }
                         }
                     }
                     if (changed) {

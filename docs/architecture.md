@@ -647,6 +647,13 @@ Partition 1 contains boot files directly (traditional Raspberry Pi layout):
        ↓
     12. Provisioning complete
 
+Each stage also records the individual step it is entering -- image
+preparation, signing, storage erase, each partition write, and so on -- via
+`record_progress()` in `host-support/state-recording`. Every state carries the
+name of the stage that wrote it, so the web UI can place a step it does not
+recognise in the correct stage of its progress display; adding a step needs no
+UI change.
+
 ## Monitoring Flow
 
     Web Browser → HTTP Request → provisioner-service

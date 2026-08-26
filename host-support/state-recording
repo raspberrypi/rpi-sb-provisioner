@@ -149,6 +149,31 @@ record_state() {
     fi
 }
 
+# record_progress() - Record a fine-grained progress state for the device the
+# calling script is working on.
+#
+# Parameters:
+#   $1 (step) - Step name, appended to ${STATE_PREFIX} (e.g. "WRITING-ROOTFS")
+#
+# Each provisioning script exports STATE_PREFIX ("BOOTSTRAP", "TRIAGE",
+# "SB-PROVISIONER", ...), so `record_progress WRITING-ROOTFS` lands the row as
+# "SB-PROVISIONER-WRITING-ROOTFS". Keeping the stage prefix on every state is
+# what lets the web UI place a state it has never seen before in the right
+# stage of the progress stepper, so new steps can be added here without a
+# matching UI change.
+#
+# One naming rule matters: a step name must not contain ABORTED or FINISHED,
+# which the UI reads as "this stage has ended". Anything else is free-form --
+# the UI renders an unrecognised step name by sentence-casing it, so
+# "WRITING-ROOTFS" reads as "Writing rootfs" until it is given a nicer label.
+#
+# Silently does nothing when STATE_PREFIX is unset, so a script that has not
+# opted in cannot write half-formed state names.
+record_progress() {
+    [ -n "${STATE_PREFIX:-}" ] || return 0
+    record_state "${TARGET_DEVICE_SERIAL}" "${STATE_PREFIX}-$1" "${TARGET_USB_PATH}"
+}
+
 # get_usb_path_for_serial() - Finds the USB path for a device with a specific serial number
 #
 # Parameters:

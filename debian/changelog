@@ -28,6 +28,55 @@ rpi-sb-provisioner (2.3.3) unstable; urgency=medium
     and pre-release suffixes order exactly as before, so non-native builds
     keep receiving update notifications.
 
+  * Make the device cards the default view on the Devices page, and move
+    them to the left of the view selector. The topology map led, so an
+    operator watching a flash had to switch to the cards on every visit --
+    and the tab the page remembered was written on every page load,
+    including the one that had merely applied the old default, so a browser
+    that had never expressed a preference still had one recorded. Only an
+    explicit click is remembered now, under a new storage key, and the graph
+    refits itself when its tab is revealed rather than laying out against a
+    hidden container. Reported by Patrick Groothuizen (#345).
+
+  * Show what a device is actually doing on its card, rather than only which
+    of the four stages it has reached. Each card now carries a
+    plain-language activity line -- "Writing root filesystem", "Updating
+    bootloader EEPROM" -- with a live counter for how long that step has
+    been running, so a stalled device is visible without opening its log.
+    Where few enough devices are connected for it to fit, the card also
+    lists that device's recent state transitions with timestamps, which is
+    the per-device form of the state-transition table earlier releases
+    showed. Those rows are keyed by USB path, so the list stops at the end
+    of the previous board's run rather than presenting it as this one's. The
+    wired MAC is shown alongside the serial once the provisioner has read it
+    from the device, so a finished module can be identified without
+    cross-referencing.
+
+  * Report provisioning progress in much finer detail. The provisioners
+    recorded three states per stage -- started, finished, aborted -- so
+    everything between them was invisible: a device spent minutes on
+    IMAGE-PREPARING or WRITING-ROOTFS indistinguishably from one that had
+    hung. Every stage now records the step it is entering, via a
+    record_progress() helper that keeps the stage name on the front of each
+    state, so the UI places a step it has never seen in the right stage
+    without needing to know it. That covers image preparation, signing,
+    storage erase and partitioning, each partition write (including one
+    state per partition in the IDP flash loop), and finalisation; the
+    customisation hooks report themselves too, so an operator script that
+    blocks is no longer mistaken for the provisioner stalling; and a device
+    queued behind another head's shared image build now says so instead of
+    appearing to sit still.
+
+  * Make the Devices page ignore state.db rows written before the service
+    started, as it was always meant to. The freshness filter bound the start
+    time as an integer against a text timestamp column, and SQLite sorts
+    every integer before any text, so the comparison was true for every row
+    ever recorded -- a freshly connected board inherited whatever state the
+    previous occupant of that USB port had finished in. Consequently a
+    device left connected across a service restart now shows no state until
+    it next changes, which is the honest answer: the service cannot know the
+    board still in the socket is the one those rows describe.
+
  -- Tom Dewey <tom.dewey@raspberrypi.com>  Tue, 18 Aug 2026 16:55:56 +0100
 
 rpi-sb-provisioner (2.3.2) unstable; urgency=medium
