@@ -5,9 +5,11 @@ set -x
 
 OPENSSL=${OPENSSL:-openssl}
 
-export TRIAGE_FINISHED="TRIAGE-FINISHED"
-export TRIAGE_ABORTED="TRIAGE-ABORTED"
-export TRIAGE_STARTED="TRIAGE-STARTED"
+# Stage prefix for record_progress(); see host-support/state-recording.
+export STATE_PREFIX="TRIAGE"
+export TRIAGE_FINISHED="${STATE_PREFIX}-FINISHED"
+export TRIAGE_ABORTED="${STATE_PREFIX}-ABORTED"
+export TRIAGE_STARTED="${STATE_PREFIX}-STARTED"
 
 # Source common helper functions
 # shellcheck disable=SC1091
@@ -212,6 +214,7 @@ setup_fastboot_and_id_vars "${TARGET_DEVICE_SERIAL}"
 # slot was empty (just generated) or already populated (no-op). Any
 # non-zero exit here is a real firmware/transport failure, not "key
 # already exists", so we can rely on the exit status alone.
+record_progress "DEVICE-KEY-CHECKING"
 log "Ensuring device firmware crypto key is provisioned"
 timeout_fatal fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem fwcrypto init
 
@@ -220,6 +223,7 @@ if [ -d "${RPI_DEVICE_RETRIEVE_KEYPAIR}" ]; then
     KEYPAIR_DIR="${RPI_DEVICE_RETRIEVE_KEYPAIR}"
 fi
 mkdir -p "${KEYPAIR_DIR}"
+record_progress "KEYPAIR-CAPTURING"
 log "Capturing device keypair to ${KEYPAIR_DIR}"
 
 # Both keys come back as multi-line PEM, so they must be read with

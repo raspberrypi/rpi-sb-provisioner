@@ -10,9 +10,11 @@ set -x
 
 DEBUG=
 
-export PROVISIONER_FINISHED="NAKED-PROVISIONER-FINISHED"
-export PROVISIONER_ABORTED="NAKED-PROVISIONER-ABORTED"
-export PROVISIONER_STARTED="NAKED-PROVISIONER-STARTED"
+# Stage prefix for record_progress(); see host-support/state-recording.
+export STATE_PREFIX="NAKED-PROVISIONER"
+export PROVISIONER_FINISHED="${STATE_PREFIX}-FINISHED"
+export PROVISIONER_ABORTED="${STATE_PREFIX}-ABORTED"
+export PROVISIONER_STARTED="${STATE_PREFIX}-STARTED"
 
 # Source common helper functions
 # shellcheck disable=SC1091
@@ -241,6 +243,7 @@ FLASH_IMAGE="${GOLD_MASTER_OS_FILE}"
 if customisation_script_is_runnable "naked-provisioner" "bootfs-mounted" || \
    customisation_script_is_runnable "naked-provisioner" "rootfs-mounted"; then
 
+    record_progress "IMAGE-PREPARING"
     announce_start "OS Image Customisation"
 
     announce_start "Copying gold master image for customisation"
@@ -313,6 +316,7 @@ if customisation_script_is_runnable "naked-provisioner" "bootfs-mounted" || \
     announce_stop "OS Image Customisation"
 fi
 
+record_progress "STORAGE-ERASING"
 announce_start "Erase Device Storage"
 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" erase "${RPI_DEVICE_STORAGE_TYPE}"
 sleep 3
@@ -324,6 +328,7 @@ setup_fastboot_and_id_vars "${FASTBOOT_DEVICE_SPECIFIER}"
 # Prefer the TCP data-plane specifier when the daemon advertises split
 # mode (-i usb+tcp); fall back to whatever the control plane is using.
 FLASH_SPECIFIER="${FASTBOOT_TCP_FLASH_SPECIFIER:-${FASTBOOT_DEVICE_SPECIFIER}}"
+record_progress "WRITING-OS"
 fastboot -s "${FLASH_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}" "${FLASH_IMAGE}"
 
 # If we customised the image, delete the modified copy immediately after flash.
@@ -335,6 +340,7 @@ if [ "${FLASH_IMAGE}" != "${GOLD_MASTER_OS_FILE}" ]; then
 fi
 announce_stop "Writing OS images"
 
+record_progress "FINALISING"
 announce_start "Set LED status"
 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem led PWR 0
 announce_stop "Set LED status"

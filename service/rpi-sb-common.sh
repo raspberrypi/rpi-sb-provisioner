@@ -71,7 +71,8 @@ with_lock() {
         # Try to acquire lock with timeout
         start_time=$(date +%s)
         end_time=$((start_time + timeout))
-        
+        waiting_reported=0
+
         while true; do
             if flock -n -x 9; then
                 # Lock acquired, run the command
@@ -80,14 +81,30 @@ with_lock() {
                 # Lock is released when fd 9 is closed upon subshell exit
                 exit $ret
             fi
-            
+
             # Check if timeout has been reached
             current_time=$(date +%s)
             if [ "$current_time" -ge "$end_time" ]; then
                 # Timeout reached
                 exit 1
             fi
-            
+
+            # These locks serialise the shared image builds, so on a
+            # multi-head jig one device can sit here for minutes while a
+            # sibling does the work. Say so once, rather than leaving the
+            # device showing the state it was in before it started waiting --
+            # which reads as a stall. The lock's basename names the artefact.
+            #
+            # Only after a couple of seconds: heads started together contend
+            # for a fraction of one, and a waiting state for that is noise in
+            # the device's history.
+            if [ "${waiting_reported}" -eq 0 ] && \
+               [ "$((current_time - start_time))" -ge 2 ] && \
+               command -v record_progress >/dev/null 2>&1; then
+                waiting_reported=1
+                record_progress "AWAITING-$(basename "${lock_file}" .lock | tr 'a-z' 'A-Z')"
+            fi
+
             # Wait a bit before trying again
             sleep 0.1 2>/dev/null || sleep 1
         done
@@ -651,7 +668,20 @@ run_customisation_script() {
             log "Skipping disabled customisation script: ${SCRIPT_NAME}"
             return 0
         fi
-        
+
+        # Report the hook as its own state. Customisation scripts are operator
+        # code of unknown duration, so without this a hook that blocks looks
+        # exactly like the provisioner itself stalling.
+        #
+        # provision-failed is excluded deliberately: it runs from the failure
+        # path, after the stage has already recorded ABORTED, and recording
+        # anything afterwards would put the device back into a running state in
+        # the UI. The `command -v` guard keeps this library usable by callers
+        # that have not sourced state-recording.
+        if [ "${STAGE_NAME}" != "provision-failed" ] && command -v record_progress >/dev/null 2>&1; then
+            record_progress "HOOK-$(printf '%s' "${STAGE_NAME}" | tr 'a-z' 'A-Z')"
+        fi
+
         # Temporarily disable error exit so we can capture the script's exit code
         # Save current error exit setting and disable it
         ERROR_EXIT_WAS_SET=0

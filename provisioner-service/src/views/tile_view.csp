@@ -177,6 +177,65 @@
     }
     .tile-step.step-complete .tile-step-line { background: #28a745; }
 
+    /* Current activity: the plain-language answer to "what is this board
+       doing right now", with a live timer so a stall is visible. */
+    .tile-activity {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        margin: 10px 0 2px;
+        font-size: 0.95rem;
+        color: #333;
+    }
+    .tile-activity-label {
+        font-weight: 600;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .tile-activity-elapsed {
+        margin-left: auto;
+        flex-shrink: 0;
+        font-size: 0.8rem;
+        color: #888;
+        font-variant-numeric: tabular-nums;
+    }
+    .device-tile.tile-complete .tile-activity-label { color: #1e7e34; }
+    .device-tile.tile-error .tile-activity-label { color: #b21f2d; }
+
+    /* Recent state transitions. Hidden by default so a full jig stays
+       scannable; the container gains .tiles-detailed when few enough devices
+       are connected for every tile to carry its own log (issue #345). */
+    .tile-history { display: none; }
+    .tiles-detailed .tile-history {
+        display: block;
+        margin: 10px 0 0;
+        padding: 8px 0 0;
+        border-top: 1px dashed #e0e0e0;
+        list-style: none;
+        font-size: 0.8rem;
+        color: #666;
+    }
+    /* A device with no recorded transitions would otherwise show a bare rule. */
+    .tiles-detailed .tile-history:empty { display: none; }
+    .tile-history-row {
+        display: flex;
+        gap: 8px;
+        line-height: 1.55;
+        white-space: nowrap;
+    }
+    .tile-history-row:first-child { color: #333; font-weight: 600; }
+    .tile-history-time {
+        flex-shrink: 0;
+        font-family: monospace;
+        color: #999;
+        font-variant-numeric: tabular-nums;
+    }
+    .tile-history-state {
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
     .tile-meta {
         font-size: 0.85rem;
         color: #666;
@@ -226,6 +285,7 @@
 
     /* Responsive: Tablet */
     @media (max-width: 768px) {
+        .tiles-detailed .tile-history { font-size: 0.75rem; }
         .tiles-container {
             grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
             gap: 10px;
@@ -266,6 +326,28 @@
         const STEP_SHORT = ['Boot', 'Check', 'Prov', 'Done'];
         const GRACE_SHORT = 5000;
         const GRACE_REBOOT = 30000;
+        // At or below this many connected devices every tile also carries its
+        // recent state transitions. Above it the tiles stay compact, because
+        // a full jig is read by scanning colours, not by reading logs.
+        const DETAIL_TILE_LIMIT = 6;
+
+        // Which stage of the pipeline a state belongs to, or -1 if unknown.
+        // The provisioning scripts keep the stage name on every state they
+        // write (see record_progress() in host-support/state-recording), so
+        // states this UI has never seen still land in the right stage.
+        function stageOfState(s) {
+            // Anchored on the prefix first, so a step name that happens to
+            // contain another stage's word ("BOOTSTRAP-HOOK-BOOTSTRAP") is
+            // still placed by the stage that wrote it.
+            if (/^(?:SB|FDE|NAKED|IDP)-PROVISIONER-/.test(s)) return 2;
+            if (s.startsWith('TRIAGE')) return 1;
+            if (s.startsWith('BOOTSTRAP')) return 0;
+            // Unprefixed and older state names.
+            if (s.includes('PROVISIONER')) return 2;
+            if (s.includes('TRIAGE')) return 1;
+            if (s.includes('BOOTSTRAP') || s.includes('FASTBOOT')) return 0;
+            return -1;
+        }
 
         function parseProvisioningStep(stateStr) {
             if (!stateStr) return { step: -1, status: 'none' };
@@ -273,19 +355,106 @@
             // Deliberately skipped by a USB port restriction -- no step of the
             // pipeline was entered, so it is neither active nor an error.
             if (s.includes('PORT-EXCLUDED')) return { step: -1, status: 'skipped' };
-            if (s.includes('ABORTED')) {
-                if (s.includes('PROVISIONER')) return { step: 2, status: 'error' };
-                if (s.includes('TRIAGE')) return { step: 1, status: 'error' };
-                return { step: 0, status: 'error' };
+            const stage = stageOfState(s);
+            if (s.includes('ABORTED')) return { step: stage < 0 ? 0 : stage, status: 'error' };
+            if (stage === 2) {
+                if (s.includes('PROVISIONER-FINISHED')) return { step: 3, status: 'complete' };
+                return { step: 2, status: 'active' };
             }
-            if (s.includes('PROVISIONER-FINISHED')) return { step: 3, status: 'complete' };
-            if (s.includes('PROVISIONER-STARTED') || s.includes('PROVISIONER')) return { step: 2, status: 'active' };
-            if (s === 'TRIAGE-FINISHED') return { step: 1, status: 'complete' };
-            if (s.includes('TRIAGE')) return { step: 1, status: 'active' };
-            if (s === 'BOOTSTRAP-FINISHED') return { step: 0, status: 'complete' };
-            if (s.includes('BOOTSTRAP') || s.includes('FASTBOOT')) return { step: 0, status: 'active' };
+            if (stage === 1) {
+                if (s === 'TRIAGE-FINISHED') return { step: 1, status: 'complete' };
+                return { step: 1, status: 'active' };
+            }
+            if (stage === 0) {
+                if (s === 'BOOTSTRAP-FINISHED') return { step: 0, status: 'complete' };
+                return { step: 0, status: 'active' };
+            }
             try { console.debug('tiles: parse-state "' + stateStr + '" -> step=-1 status=none'); } catch(e) {}
             return { step: -1, status: 'none' };
+        }
+
+        // Plain-language names for the states the provisioners write. Keyed on
+        // the whole state where the stage changes the meaning ("STARTED"), and
+        // on the step name alone otherwise, so one entry covers all four
+        // provisioners. Anything unlisted falls back to the step name itself,
+        // which is why a new record_progress step needs no change here.
+        const STATE_LABELS = {
+            'BOOTSTRAP-STARTED': 'Starting bootstrap',
+            'BOOTSTRAP-FINISHED': 'Bootstrap complete',
+            'BOOTSTRAP-ABORTED': 'Bootstrap failed',
+            'BOOTSTRAP-FIRMWARE-UPDATED': 'Firmware updated',
+            'BOOTSTRAP-FASTBOOT-INITIALISATION-STARTED': 'Booting into fastboot',
+            'TRIAGE-STARTED': 'Identifying device',
+            'TRIAGE-FINISHED': 'Triage complete',
+            'TRIAGE-ABORTED': 'Triage failed'
+        };
+        const STEP_LABELS = {
+            'STARTED': 'Starting provisioning',
+            'FINISHED': 'Provisioning complete',
+            'ABORTED': 'Provisioning failed',
+            'BOOTLOADER-PREPARING': 'Preparing bootloader',
+            'BOOTCODE-SIGNING': 'Signing boot firmware',
+            'EEPROM-UPDATING': 'Updating bootloader EEPROM',
+            'DEVICE-KEY-CHECKING': 'Checking device key',
+            'KEYPAIR-CAPTURING': 'Capturing device keypair',
+            'IMAGE-PREPARING': 'Preparing OS image',
+            'IMAGE-SIGNING': 'Signing boot image',
+            'IMAGE-RESIZING': 'Resizing OS image',
+            'STORAGE-ERASING': 'Erasing device storage',
+            'STORAGE-PARTITIONING': 'Partitioning device storage',
+            'WRITING-BOOTFS': 'Writing boot partition',
+            'WRITING-ROOTFS': 'Writing root filesystem',
+            'WRITING-OS': 'Writing OS image',
+            'FINALISING': 'Finalising',
+            // with_lock() names these after the artefact whose shared build
+            // this device is queued behind (see rpi-sb-common.sh).
+            'AWAITING-PRE-BOOT-AUTH-IMAGES': 'Waiting for the shared boot image build',
+            'AWAITING-ROOTFS-IMAGE': 'Waiting for the shared rootfs build',
+            'AWAITING-IDP-SIGNED-BOOT': 'Waiting for the shared boot slot signing'
+        };
+        const STAGE_PREFIX_RE = /^(?:BOOTSTRAP|TRIAGE|(?:SB|FDE|NAKED|IDP)-PROVISIONER)-/;
+
+        function sentenceCase(words) {
+            const text = words.replace(/-/g, ' ').toLowerCase();
+            return text.charAt(0).toUpperCase() + text.slice(1);
+        }
+
+        function stateLabel(stateStr) {
+            if (!stateStr) return 'Waiting';
+            const s = stateStr.toUpperCase();
+            if (s.includes('PORT-EXCLUDED')) return 'Skipped: USB port not permitted';
+            if (STATE_LABELS[s]) return STATE_LABELS[s];
+            const step = s.replace(STAGE_PREFIX_RE, '');
+            if (STEP_LABELS[step]) return STEP_LABELS[step];
+            // Customisation hooks are named after the stage that runs them,
+            // so one rule covers every hook the provisioners have.
+            if (step.startsWith('HOOK-')) return 'Running ' + step.slice(5).toLowerCase() + ' hook';
+            return sentenceCase(step);
+        }
+
+        // state.db timestamps are SQLite CURRENT_TIMESTAMP: UTC, second
+        // resolution, no zone marker. Say so explicitly, or the browser reads
+        // them as local time and every tile is hours out.
+        function parseStateTs(ts) {
+            if (!ts) return null;
+            const d = new Date(String(ts).replace(' ', 'T') + 'Z');
+            return isNaN(d.getTime()) ? null : d;
+        }
+
+        function formatClock(date) {
+            if (!date) return '';
+            try { return date.toLocaleTimeString(); } catch (e) { return ''; }
+        }
+
+        function formatElapsed(ms) {
+            // Clamp: the host writes the timestamps and the browser reads
+            // them, and the two clocks need not agree to the second.
+            const total = Math.max(0, Math.floor(ms / 1000));
+            if (total < 60) return total + 's';
+            const mins = Math.floor(total / 60);
+            const secs = total % 60;
+            if (mins < 60) return mins + 'm ' + String(secs).padStart(2, '0') + 's';
+            return Math.floor(mins / 60) + 'h ' + String(mins % 60).padStart(2, '0') + 'm';
         }
 
         function isTransitionalState(stateStr) {
@@ -372,7 +541,13 @@
             if (n.modelGen) headerHTML += '<span class="tile-badge tile-badge-gen">' + n.modelGen + '</span>';
             headerHTML += '</div>';
 
-            el.innerHTML = headerHTML + createStepperHTML() + '<div class="tile-meta"></div>';
+            el.innerHTML = headerHTML + createStepperHTML() +
+                '<div class="tile-activity">' +
+                    '<span class="tile-activity-label"></span>' +
+                    '<span class="tile-activity-elapsed"></span>' +
+                '</div>' +
+                '<div class="tile-meta"></div>' +
+                '<ol class="tile-history" aria-label="Recent state changes"></ol>';
 
             const parsed = parseProvisioningStep(n.state);
             updateStepper(el, parsed);
@@ -382,7 +557,18 @@
             el.setAttribute('data-step', String(parsed.step));
             el.setAttribute('data-step-status', parsed.status);
 
-            const entry = { element: el, state: n.state || '', serial: serial, usbPath: usbPath, graceTimer: null };
+            const entry = {
+                element: el,
+                state: n.state || '',
+                status: parsed.status,
+                serial: serial,
+                usbPath: usbPath,
+                graceTimer: null,
+                stateSince: stateStartedAt(n.history) || new Date(),
+                historyKey: ''
+            };
+            applyHistory(entry, n.history);
+            updateActivity(entry);
             el.addEventListener('click', () => { window.location.href = deviceLink(entry); });
             el.addEventListener('keydown', (e) => { if (e.key === 'Enter') window.location.href = deviceLink(entry); });
 
@@ -397,15 +583,76 @@
             else if (parsed.step >= 0) el.classList.add('tile-active');
         }
 
+        // When the current state began. The newest history row is
+        // authoritative; without one (a device with no rows yet, or a service
+        // too old to send history) the caller falls back to the moment this
+        // browser first saw the state.
+        function stateStartedAt(history) {
+            const list = Array.isArray(history) ? history : [];
+            return list.length ? parseStateTs(list[0].ts) : null;
+        }
+
+        function historyKeyOf(history) {
+            const list = Array.isArray(history) ? history : [];
+            return list.map(h => (h.ts || '') + '|' + (h.state || '')).join(';');
+        }
+
+        function applyHistory(entry, history) {
+            const key = historyKeyOf(history);
+            if (key === entry.historyKey) return;
+            entry.historyKey = key;
+            const listEl = entry.element.querySelector('.tile-history');
+            if (!listEl) return;
+            const list = Array.isArray(history) ? history : [];
+            let html = '';
+            for (const h of list) {
+                html += '<li class="tile-history-row">' +
+                    '<span class="tile-history-time">' + escapeHtml(formatClock(parseStateTs(h.ts))) + '</span>' +
+                    '<span class="tile-history-state">' + escapeHtml(stateLabel(h.state)) + '</span>' +
+                    '</li>';
+            }
+            listEl.innerHTML = html;
+        }
+
+        function elapsedTextFor(entry) {
+            if (!entry.stateSince) return '';
+            if (entry.status === 'active') return formatElapsed(Date.now() - entry.stateSince.getTime());
+            if (entry.status === 'complete' || entry.status === 'error') {
+                const when = formatClock(entry.stateSince);
+                return when ? 'at ' + when : '';
+            }
+            return '';
+        }
+
+        function updateActivity(entry) {
+            const labelEl = entry.element.querySelector('.tile-activity-label');
+            const elapsedEl = entry.element.querySelector('.tile-activity-elapsed');
+            if (labelEl) labelEl.textContent = stateLabel(entry.state);
+            if (elapsedEl) elapsedEl.textContent = elapsedTextFor(entry);
+        }
+
+        // Keep the "how long has it been doing that" counters honest without
+        // waiting for the next server push -- a stalled device stops sending
+        // updates, which is exactly when the number matters.
+        function tickElapsed() {
+            if (document.hidden) return;
+            for (const entry of tileMap.values()) {
+                if (entry.status !== 'active') continue;
+                const el = entry.element.querySelector('.tile-activity-elapsed');
+                if (el) el.textContent = elapsedTextFor(entry);
+            }
+        }
+
         function updateMeta(el, n) {
             const meta = el.querySelector('.tile-meta');
             let html = '';
-            // Say why a muted tile is muted, otherwise a skipped device just
-            // looks like one that has stalled before its first step.
-            if ((n.state || '').toUpperCase().includes('PORT-EXCLUDED')) {
-                html += '<div class="tile-meta-row"><span class="tile-meta-label">Skipped:</span><span class="tile-meta-value">USB port not permitted</span></div>';
-            }
+            // Why a muted tile is muted is stated by the activity line above,
+            // so it is deliberately not repeated here.
             if (n.image) html += '<div class="tile-meta-row"><span class="tile-meta-label">Image:</span><span class="tile-meta-value">' + escapeHtml(n.image) + '</span></div>';
+            // Known only once metadata has been gathered from the device, so
+            // it appears late in the run -- which is when an operator is
+            // trying to tell one finished module from another.
+            if (n.ethMac) html += '<div class="tile-meta-row"><span class="tile-meta-label">MAC:</span><span class="tile-meta-value">' + escapeHtml(n.ethMac) + '</span></div>';
             if (n.ip) html += '<div class="tile-meta-row"><span class="tile-meta-label">IP:</span><span class="tile-meta-value">' + escapeHtml(n.ip) + '</span></div>';
             html += '<div class="tile-meta-row"><span class="tile-meta-label">USB path:</span><span class="tile-meta-value">' + escapeHtml(String(n.id)) + '</span></div>';
             meta.innerHTML = html;
@@ -437,8 +684,13 @@
         }
 
         function updateEmptyState() {
-            const hasTiles = tileMap.size > 0 && Array.from(tileMap.values()).some(e => !e.element.classList.contains('tile-removing'));
-            emptyEl.style.display = hasTiles ? 'none' : '';
+            let live = 0;
+            for (const e of tileMap.values()) {
+                if (!e.element.classList.contains('tile-removing')) live++;
+            }
+            emptyEl.style.display = live > 0 ? 'none' : '';
+            // Few enough devices for every tile to carry its own log.
+            container.classList.toggle('tiles-detailed', live > 0 && live <= DETAIL_TILE_LIMIT);
         }
 
         function update(nodes, removed) {
@@ -465,9 +717,13 @@
                     const newState = n.state || '';
                     let changed = false;
 
+                    applyHistory(existing, n.history);
+
                     if (oldState !== newState) {
                         existing.state = newState;
                         const parsed = parseProvisioningStep(newState);
+                        existing.status = parsed.status;
+                        existing.stateSince = stateStartedAt(n.history) || new Date();
                         updateStepper(existing.element, parsed);
                         updateTileState(existing.element, parsed);
                         existing.element.setAttribute('data-state', newState);
@@ -476,6 +732,7 @@
                         flashTile(existing.element);
                         changed = true;
                     }
+                    updateActivity(existing);
 
                     const newSerial = n.serial || '';
                     if (newSerial && newSerial !== existing.serial) {
@@ -547,7 +804,8 @@
 
         function init() {
             window.__tilesApply = update;
-            window.__tileDebug = { tileMap, parseProvisioningStep };
+            setInterval(tickElapsed, 1000);
+            window.__tileDebug = { tileMap, parseProvisioningStep, stateLabel };
             try { console.log('tiles: initialized'); } catch(e) {}
             return update;
         }

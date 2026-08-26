@@ -18,9 +18,11 @@ set -x
 
 DEBUG=
 
-export PROVISIONER_FINISHED="IDP-PROVISIONER-FINISHED"
-export PROVISIONER_ABORTED="IDP-PROVISIONER-ABORTED"
-export PROVISIONER_STARTED="IDP-PROVISIONER-STARTED"
+# Stage prefix for record_progress(); see host-support/state-recording.
+export STATE_PREFIX="IDP-PROVISIONER"
+export PROVISIONER_FINISHED="${STATE_PREFIX}-FINISHED"
+export PROVISIONER_ABORTED="${STATE_PREFIX}-ABORTED"
+export PROVISIONER_STARTED="${STATE_PREFIX}-STARTED"
 
 # Source common helper functions
 # shellcheck disable=SC1091
@@ -235,6 +237,7 @@ fi
 #
 # Fail fast on the host before wasting device time.
 
+record_progress "IMAGE-PREPARING"
 announce_start "IDP pre-flight validation"
 
 # Exactly one JSON file must be present
@@ -355,6 +358,7 @@ fi
 SIGNED_BOOT_SUBST=""
 
 if [ "${PROVISIONING_STYLE}" = "secure-boot" ]; then
+    record_progress "IMAGE-SIGNING"
     announce_start "Sign boot slots for secure-boot"
 
     if [ -z "${RPI_DEVICE_FAMILY}" ]; then
@@ -448,6 +452,7 @@ resolve_flash_source() {
 
 ### IDP Provisioning Protocol
 
+record_progress "STORAGE-ERASING"
 announce_start "Erase Device Storage"
 timeout_fatal_secs 30 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" erase "${RPI_DEVICE_STORAGE_TYPE}"
 sleep 3
@@ -461,10 +466,12 @@ timeout_fatal_secs 30 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" stage "${IDP_JS
 timeout_fatal_secs 30 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem idpinit
 announce_stop "IDP Stage and Initialise"
 
+record_progress "STORAGE-PARTITIONING"
 announce_start "IDP Write Partitions"
 timeout_fatal_secs 120 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem idpwrite
 announce_stop "IDP Write Partitions"
 
+record_progress "WRITING-OS"
 announce_start "IDP Flash Images"
 PARTITION_INDEX=0
 while true; do
@@ -516,6 +523,14 @@ while true; do
     # Prefer the TCP data-plane specifier when the daemon advertises split
     # mode (-i usb+tcp); fall back to whatever the control plane is using.
     FLASH_SPECIFIER="${FASTBOOT_TCP_FLASH_SPECIFIER:-${FASTBOOT_DEVICE_SPECIFIER}}"
+    # Report each partition as its own state: an IDP artefact can carry many,
+    # each taking minutes, so a single "writing" state for the whole loop
+    # leaves the tile view looking stalled for the duration. The block device
+    # is folded to the record_progress character set (see
+    # host-support/state-recording) -- "mapper/cryptroot" becomes
+    # "MAPPER-CRYPTROOT".
+    BLOCKDEV_STATE=$(printf '%s' "${BLOCKDEV}" | tr -c 'A-Za-z0-9' '-' | tr 'a-z' 'A-Z')
+    record_progress "WRITING-${BLOCKDEV_STATE}"
     timeout_fatal_secs 600 fastboot -s "${FLASH_SPECIFIER}" flash "${BLOCKDEV}" "${FLASH_SOURCE}"
     FLASH_END=$(date +%s)
     FLASH_DURATION=$((FLASH_END - FLASH_START))
@@ -524,6 +539,7 @@ done
 log "Flashed ${PARTITION_INDEX} partition(s) total"
 announce_stop "IDP Flash Images"
 
+record_progress "FINALISING"
 announce_start "IDP Finalise"
 timeout_fatal_secs 60 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem idpdone
 announce_stop "IDP Finalise"

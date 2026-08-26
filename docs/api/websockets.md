@@ -23,11 +23,17 @@ Server sends JSON messages with current topology:
       "product": "2712",
       "productName": "BCM2712 Boot",
       "serial": "c561b701c85be8ea",
-      "state": "provisioning",
+      "state": "SB-PROVISIONER-WRITING-ROOTFS",
       "image": "raspios-2025-04-01.img",
       "model": "CM5",
       "ip": "192.168.1.100",
-      "modelGen": 5
+      "ethMac": "d8:3a:dd:12:34:56",
+      "modelGen": 5,
+      "history": [
+        { "state": "SB-PROVISIONER-WRITING-ROOTFS", "ts": "2026-08-26 09:41:12" },
+        { "state": "SB-PROVISIONER-WRITING-BOOTFS", "ts": "2026-08-26 09:40:58" },
+        { "state": "SB-PROVISIONER-STORAGE-ERASING", "ts": "2026-08-26 09:40:31" }
+      ]
     }
   ],
   "removed": ["1-1.3"]
@@ -43,6 +49,22 @@ Server sends JSON messages with current topology:
 - Includes placeholder nodes for empty hub ports
 
 - The `removed` array lists device IDs that were disconnected
+
+- `state` is the device's most recent row in `state.db`. Every state carries
+  the name of the stage that wrote it (`BOOTSTRAP`, `TRIAGE`, or
+  `<STYLE>-PROVISIONER`) followed by a step name, so a consumer can place a
+  step it has not seen before in the right stage
+
+- `history` holds that device's most recent state transitions, newest first,
+  each with the `state.db` timestamp (UTC, second resolution). Rows are keyed
+  by USB path, so the list stops at the end of the previous device's run on
+  that port. Only rows written since the service started are reported, so a
+  device connected across a service restart has no history until it next
+  changes state
+
+- `ethMac` is the wired MAC, read from `manufacturing.db`. It is only present
+  once the provisioner has gathered metadata from the device, which happens
+  towards the end of a run
 
 # /ws/sha256
 
