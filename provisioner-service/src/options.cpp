@@ -1823,6 +1823,148 @@ namespace provisioner {
             callback(resp);
         });
 
+        // Device key status endpoint (GET) - reports whether this host can
+        // encrypt secrets at rest at all, and if not, whether an operator can
+        // fix it. Drives the warning banner and the provisioning control.
+        //
+        // This is the question postinst's bootstrap was supposed to have
+        // settled at install time. It cannot have, for any host built from an
+        // image (postinst runs in the build chroot, where the firmware crypto
+        // service is unreachable) or installed with `make install` (postinst
+        // never runs at all), so the UI asks it directly.
+        app.registerHandler(OPTIONS_PATH + "/device-key-status", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
+            LOG_INFO << "Options::device-key-status";
+
+            AuditLog::logHandlerAccess(req, "/options/device-key-status");
+
+            const auto status = keywrap::deviceKeyStatus();
+
+            Json::Value jsonResponse;
+            jsonResponse["available"] = status.state == keywrap::DeviceKeyState::Ok;
+            jsonResponse["state"] = keywrap::stateName(status.state);
+            // Only a blank slot can be programmed; every other failure is a
+            // property of the host that no action here would change.
+            jsonResponse["can_provision"] = status.state == keywrap::DeviceKeyState::Blank;
+            jsonResponse["device_unique"] = status.deviceUnique;
+            if (status.keyId >= 0) jsonResponse["key_id"] = status.keyId;
+            if (!status.reason.empty()) jsonResponse["reason"] = status.reason;
+            if (!status.remedy.empty()) jsonResponse["remedy"] = status.remedy;
+
+            auto resp = HttpResponse::newHttpResponse();
+            resp->setStatusCode(k200OK);
+            resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+            resp->setBody(Json::FastWriter().write(jsonResponse));
+            callback(resp);
+        });
+
+        // Device key provisioning endpoint (POST) - generates this host's OTP
+        // key, ONLY on explicit user consent from the UI.
+        //
+        // THIS BURNS OTP AND CANNOT BE UNDONE. On a BCM2712 there is exactly one
+        // key slot and it is the device-unique slot, so there is no scratch slot
+        // to prefer and no way back. It is deliberately a separate, explicit
+        // action rather than a repair attempted from the paths that need a key:
+        // no secret upload should ever quietly write silicon as a side effect.
+        app.registerHandler(OPTIONS_PATH + "/provision-device-key", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
+            LOG_INFO << "Options::provision-device-key";
+
+            AuditLog::logHandlerAccess(req, "/options/provision-device-key");
+
+            // SECURITY: Restrict to POST method only
+            if (req->getMethod() != HttpMethod::Post) {
+                LOG_WARN << "SECURITY: Rejected non-POST request to /options/provision-device-key from " << AuditLog::getClientIP(req);
+                auto resp = provisioner::utils::createErrorResponse(
+                    req, "This endpoint only accepts POST requests",
+                    drogon::k405MethodNotAllowed, "Method Not Allowed", "METHOD_NOT_ALLOWED");
+                callback(resp);
+                return;
+            }
+
+            // SECURITY: Validate CSRF token for browser requests
+            if (!req->getHeader("X-CSRF-Token").empty()) {
+                if (!utils::validateCsrfToken(req)) {
+                    LOG_WARN << "SECURITY: CSRF validation failed for /options/provision-device-key from " << AuditLog::getClientIP(req);
+                    auto resp = provisioner::utils::createErrorResponse(
+                        req, "Invalid or expired security token. Please refresh the page and try again.",
+                        drogon::k403Forbidden, "Security Error", "CSRF_VALIDATION_FAILED");
+                    callback(resp);
+                    return;
+                }
+            }
+
+            // Require the caller to have named the irreversible thing it is
+            // asking for. A bare POST -- a stray retry, a replayed request --
+            // must not be enough to write OTP.
+            auto jsonBody = req->getJsonObject();
+            const std::string confirm = (jsonBody && jsonBody->isMember("confirm"))
+                                        ? (*jsonBody)["confirm"].asString() : "";
+            if (confirm != "BURN OTP") {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Generating a device key writes to OTP and cannot be undone. "
+                    "Confirm the operation to proceed.",
+                    drogon::k400BadRequest, "Confirmation Required", "CONFIRMATION_REQUIRED");
+                callback(resp);
+                return;
+            }
+
+            const auto before = keywrap::deviceKeyStatus();
+            if (before.state == keywrap::DeviceKeyState::Ok) {
+                // Already done, by us or by anything else that programmed the
+                // slot. Idempotent success rather than an error.
+                Json::Value jsonResponse;
+                jsonResponse["provisioned"] = false;
+                jsonResponse["available"] = true;
+                jsonResponse["state"] = keywrap::stateName(before.state);
+                jsonResponse["message"] = "This host already has a device key.";
+                auto resp = HttpResponse::newHttpResponse();
+                resp->setStatusCode(k200OK);
+                resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+                resp->setBody(Json::FastWriter().write(jsonResponse));
+                callback(resp);
+                return;
+            }
+
+            if (before.state != keywrap::DeviceKeyState::Blank) {
+                LOG_ERROR << "Refusing to provision device key: " << before.reason;
+                callback(provisioner::utils::createDeviceKeyErrorResponse(
+                    req, "generate a device key", before));
+                return;
+            }
+
+            LOG_WARN << "Provisioning device key in OTP slot " << before.keyId
+                     << " on explicit operator consent; this is irreversible";
+            AuditLog::logFileSystemAccess("PROVISION_DEVICE_KEY",
+                                          "otp:key-" + std::to_string(before.keyId),
+                                          true, "", "operator-confirmed OTP write");
+
+            keywrap::DeviceKeyStatus after;
+            const bool ok = keywrap::provisionDeviceKey(after);
+            if (!ok) {
+                LOG_ERROR << "Device key provisioning failed: " << after.reason;
+                AuditLog::logFileSystemAccess("PROVISION_DEVICE_KEY",
+                                              "otp:key-" + std::to_string(before.keyId),
+                                              false, "", after.reason);
+                callback(provisioner::utils::createDeviceKeyErrorResponse(
+                    req, "generate a device key", after));
+                return;
+            }
+
+            LOG_INFO << "Device key provisioned; secrets can now be encrypted at rest";
+
+            Json::Value jsonResponse;
+            jsonResponse["provisioned"] = true;
+            jsonResponse["available"] = true;
+            jsonResponse["state"] = keywrap::stateName(after.state);
+            jsonResponse["key_id"] = after.keyId;
+            jsonResponse["message"] = "Device key generated. Secrets are now encrypted at rest.";
+            auto resp = HttpResponse::newHttpResponse();
+            resp->setStatusCode(k200OK);
+            resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+            resp->setBody(Json::FastWriter().write(jsonResponse));
+            callback(resp);
+        });
+
         // Encryption-at-rest status endpoint (GET) - reports, per secret,
         // whether it is configured and whether it is device-wrapped at rest.
         // Drives the site-wide migration banner and the per-secret controls.
