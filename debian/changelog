@@ -135,6 +135,18 @@ rpi-sb-provisioner (2.3.3) unstable; urgency=medium
     separate GEN_LOCKED flag, so a locked-but-blank slot can still be
     provisioned.
 
+  * Record why the device refused a fastboot command during IDP
+    provisioning. fastboot reports a device-side refusal as FAILED (remote:
+    '...'), but timeout_fatal_secs ran each command bare, so that line
+    reached the journal while provisioner.log -- the per-device log the
+    Devices page renders -- recorded only that a command had started.
+    die() echoes rather than logs, so not even the exit code landed there.
+    The output is now captured as well as streamed, the remote message
+    extracted and logged, and carried into the failure message, so the
+    recorded failure names its cause. Where there is no remote message the
+    last lines of output are logged instead. Streaming is unchanged, so
+    flash progress still appears as it happens.
+
  -- Tom Dewey <tom.dewey@raspberrypi.com>  Tue, 18 Aug 2026 16:55:56 +0100
 
 rpi-sb-provisioner (2.3.2) unstable; urgency=medium
