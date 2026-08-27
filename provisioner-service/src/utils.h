@@ -4,6 +4,7 @@
 #include <drogon/HttpTypes.h>
 #include <openssl/evp.h>
 #include "pkcs11_common.h"
+#include "keywrap.h"
 #include <string>
 #include <sstream>
 #include <iomanip>
@@ -413,6 +414,37 @@ namespace provisioner {
                 resp->setStatusCode(statusCode);
                 return resp;
             }
+        }
+
+        /**
+         * Error response for an operation that cannot proceed because this host
+         * has no usable device key to encrypt the secret at rest.
+         *
+         * The error code distinguishes the one state an operator can fix --
+         * a blank OTP slot, which can be programmed -- from the states that are
+         * properties of the host, so the UI can offer the remedy only where
+         * there is one. The remedy travels as the details field.
+         *
+         * @param req The original HTTP request
+         * @param what What could not be done, e.g. "store the uploaded key"
+         * @param status The classification from keywrap::deviceKeyStatus()
+         * @return HttpResponsePtr carrying 409 and the reason
+         */
+        inline drogon::HttpResponsePtr createDeviceKeyErrorResponse(
+            const drogon::HttpRequestPtr& req,
+            const std::string& what,
+            const provisioner::keywrap::DeviceKeyStatus& status)
+        {
+            const bool fixable = status.state == provisioner::keywrap::DeviceKeyState::Blank;
+            return createErrorResponse(
+                req,
+                "Cannot " + what + " because secrets cannot be encrypted at rest on "
+                "this host. " + status.reason,
+                drogon::k409Conflict,
+                "No Device Key",
+                fixable ? "DEVICE_KEY_BLANK" : "DEVICE_KEY_UNAVAILABLE",
+                status.remedy
+            );
         }
 
         /**

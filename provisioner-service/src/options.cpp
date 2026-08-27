@@ -1264,6 +1264,24 @@ namespace provisioner {
                 kin.close();
 
                 if (!raw.empty() && !provisioner::keywrap::isWrapped(raw)) {
+                    // Ask whether this host can wrap at all before trying, so a
+                    // station whose OTP key was never programmed is told that --
+                    // and told it can be fixed -- instead of receiving a bare
+                    // 500 with the reason only in the journal. The check belongs
+                    // here rather than only in postinst because an image-built
+                    // or `make install`ed host never ran postinst on hardware.
+                    const auto deviceKey = provisioner::keywrap::deviceKeyStatus();
+                    if (deviceKey.state != provisioner::keywrap::DeviceKeyState::Ok) {
+                        if (!raw.empty()) OPENSSL_cleanse(&raw[0], raw.size());
+                        std::filesystem::remove(destPath);
+                        LOG_ERROR << "Rejecting key upload: " << deviceKey.reason;
+                        AuditLog::logFileSystemAccess("WRAP_KEY", destPath, false, "",
+                                                      "no usable device key");
+                        callback(provisioner::utils::createDeviceKeyErrorResponse(
+                            req, "store the uploaded signing key", deviceKey));
+                        return;
+                    }
+
                     std::string wrapped;
                     if (provisioner::keywrap::wrap(raw, wrapped)) {
                         std::ofstream kout(destPath, std::ios::binary | std::ios::trunc);

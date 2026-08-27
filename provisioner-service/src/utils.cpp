@@ -859,6 +859,18 @@ namespace provisioner {
             // Wrap the PIN with the device-bound key before it touches disk.
             // On this Pi-only deployment wrapping must succeed; refuse rather
             // than silently fall back to storing the PIN in plaintext.
+            //
+            // Check the device key at the point of use, not just at install
+            // time: postinst's bootstrap does not run for a host built from an
+            // image or installed with `make install`, so this may be the first
+            // moment anything has asked whether the host can keep a secret.
+            const auto deviceKey = keywrap::deviceKeyStatus();
+            if (deviceKey.state != keywrap::DeviceKeyState::Ok) {
+                LOG_ERROR << "Cannot store PKCS#11 PIN: " << deviceKey.reason;
+                if (!deviceKey.remedy.empty()) LOG_ERROR << "Remedy: " << deviceKey.remedy;
+                return false;
+            }
+
             std::string blob;
             if (!keywrap::wrap(pin, blob)) {
                 LOG_ERROR << "Failed to device-wrap PKCS#11 PIN; refusing to store it";
@@ -938,6 +950,14 @@ namespace provisioner {
             }
             if (keywrap::isWrapped(raw)) {
                 return true; // already migrated; nothing to do
+            }
+
+            const auto deviceKey = keywrap::deviceKeyStatus();
+            if (deviceKey.state != keywrap::DeviceKeyState::Ok) {
+                if (!raw.empty()) OPENSSL_cleanse(&raw[0], raw.size());
+                LOG_ERROR << "Migration: cannot wrap " << path << ": " << deviceKey.reason;
+                if (!deviceKey.remedy.empty()) LOG_ERROR << "Remedy: " << deviceKey.remedy;
+                return false;
             }
 
             std::string blob;
