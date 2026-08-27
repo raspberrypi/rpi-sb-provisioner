@@ -97,6 +97,44 @@ rpi-sb-provisioner (2.3.3) unstable; urgency=medium
     not opened to answer this, so a configured URI still reports a key
     present while its token is unplugged.
 
+  * Check for a usable device key where secrets are stored, not at install
+    time. Uploading a signing key to a station whose OTP key slot had never
+    been programmed failed with a bare HTTP 500, the reason ("Failed to
+    device-wrap uploaded key") reaching only the journal. The 2.3.x
+    bootstrap that was supposed to prevent this ran solely from postinst,
+    which for any host built from an image executes in the build chroot
+    where the firmware crypto service is unreachable -- so it reported
+    "firmware crypto service unavailable; skipping key setup", exited 0,
+    and never ran again on the hardware. A host installed straight from a
+    build tree never ran it at all.
+
+    The service now classifies the device key at startup and again at every
+    point it is asked to store a secret -- the PIN, an uploaded PEM key,
+    and the plaintext migration path -- so the check cannot be bypassed by
+    how the software arrived. The probe ends in an actual HMAC rather than
+    a public key read, because a slot that has never been programmed
+    answers for its status while holding all zeros, which is exactly the
+    case being detected. GET /options/device-key-status reports the
+    classification and the Options page explains it in place of the
+    signing key controls; the paths that store secrets refuse with 409
+    DEVICE_KEY_BLANK or DEVICE_KEY_UNAVAILABLE, naming the remedy where
+    there is one.
+
+  * Stop generating a device key during package installation. The previous
+    bootstrap did this on the premise that the key would land in a spare,
+    non-DEVICE slot and so cost nothing. That is not true on BCM2712: there
+    is exactly one key slot, id 1, and it is the device-unique slot, so
+    what the postinst performed was an irreversible OTP write as a silent
+    side effect of apt. It now only reports. Where the slot is blank the
+    Options page offers to generate one through a new POST
+    /options/provision-device-key, which requires an explicit confirmation
+    token in the body and is refused for any state other than blank -- a
+    host that already has a key returns idempotent success with no write
+    attempted. Note that config.txt's lock_device_private_key=1 sets
+    READ_LOCKED, which does not prevent generation; that is gated by the
+    separate GEN_LOCKED flag, so a locked-but-blank slot can still be
+    provisioned.
+
  -- Tom Dewey <tom.dewey@raspberrypi.com>  Tue, 18 Aug 2026 16:55:56 +0100
 
 rpi-sb-provisioner (2.3.2) unstable; urgency=medium
