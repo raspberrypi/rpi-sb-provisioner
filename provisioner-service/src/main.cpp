@@ -26,6 +26,7 @@
 #include "manufacturing.h"
 #include "include/scantool.h"
 #include "include/audit.h"
+#include "keywrap.h"
 
 using namespace drogon;
 
@@ -464,6 +465,24 @@ int main(int argc, char* argv[])
     g_hasNewerVersion = versionInfo.has_newer;
     g_releaseUrl = versionInfo.release_url;
     
+    // Report at startup whether this host can encrypt secrets at rest, so an
+    // unusable station says so in the journal on boot rather than at the moment
+    // an operator first tries to save a key. Not fatal: a host with no device
+    // key still provisions with an already-configured key, and the paths that
+    // need one refuse individually.
+    {
+        const auto deviceKey = provisioner::keywrap::deviceKeyStatus();
+        if (deviceKey.state == provisioner::keywrap::DeviceKeyState::Ok) {
+            LOG_INFO << "Device key present (OTP slot " << deviceKey.keyId
+                     << "); secrets will be encrypted at rest";
+        } else {
+            LOG_WARN << "No usable device key (" << provisioner::keywrap::stateName(deviceKey.state)
+                     << "): " << deviceKey.reason;
+            if (!deviceKey.remedy.empty()) LOG_WARN << "Remedy: " << deviceKey.remedy;
+            LOG_WARN << "Storing signing keys or HSM PINs will be refused until this is resolved";
+        }
+    }
+
     // Set listener address for security warning in UI
     g_listenerAddress = listenerAddress;
     // Check if binding to a non-localhost address (potential security risk)
