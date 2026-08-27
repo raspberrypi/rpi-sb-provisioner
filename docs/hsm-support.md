@@ -162,6 +162,12 @@ If the token requires a PIN, store it through the WebUI
   provisioning Raspberry Pi's firmware crypto device key, so a stolen disk image
   or backup yields only ciphertext. It is stored at
   `/etc/rpi-sb-provisioner/keys/pkcs11.pin`.
+- This requires the host to **have** a device key. It is not programmed at the
+  factory, so a station that has only ever been imaged for provisioning may not
+  have one, and saving a PIN will be refused until it does. The Options page
+  reports this and offers to generate one; see
+  [the host device key](architecture.md#the-host-device-key). Generating writes
+  OTP permanently.
 - At both key-validation and provisioning-time signing, the PIN is **unwrapped
   in process memory** and handed to the `pkcs11-provider` via OpenSSL's
   passphrase callback (inside `rpi-sb-keyhelper`). It **never** appears on a

@@ -356,6 +356,34 @@ Simple key-value file format:
 
 PEM signing keys uploaded through the WebUI and stored HSM PINs are device-wrapped at rest using a key derived from the provisioning Raspberry Pi firmware crypto device key. PKCS#11/HSM keys are referenced by URI and used through OpenSSL `pkcs11-provider`.
 
+#### The host device key
+
+Wrapping is not optional: with no usable device key the service **refuses** to
+store a signing key or an HSM PIN, rather than falling back to plaintext. That
+makes the device key a precondition for configuring a provisioning station at
+all, so the service checks for one at startup, and again at each point it is
+asked to store a secret — not once at install time.
+
+The distinction matters because the key is **not programmed at the factory**. On
+BCM2712 there is exactly one OTP key slot, id 1, and it is the device-unique
+slot; a station that has never had a key programmed reads it back as all zeros.
+Raspberry Pi Connect programs it as a side effect of registration, which is why
+many hosts have one already, but a jig imaged for provisioning and nothing else
+will not. Such a host reports `no_signing_key`-style refusals from every
+secret-storing path until a key exists.
+
+Where the slot is blank, the Options page offers to generate one. This writes
+OTP permanently and is deliberately a separate, confirmed action: it is never
+attempted as a silent repair from a path that merely needed a key, and package
+installation no longer does it either. `GET /options/device-key-status` reports
+the classification; `POST /options/provision-device-key` performs the write and
+requires an explicit confirmation token in the body.
+
+Note that `config.txt`'s `lock_device_private_key=1` sets `READ_LOCKED` on the
+slot, which prevents reading the private key but does **not** prevent generating
+one — generation is gated by the separate `GEN_LOCKED` flag. A locked-but-blank
+slot can still be provisioned.
+
 ### Signing Helpers
 
 Secure-boot signing can use either a PEM key or a PKCS#11 URI. Both wrappers
