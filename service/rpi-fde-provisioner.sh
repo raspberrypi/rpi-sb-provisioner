@@ -143,13 +143,6 @@ get_cryptroot() {
     fi
 }
 
-get_fastboot_gadget() {
-    if [ -f /etc/rpi-sb-provisioner/fastboot-gadget.img ]; then
-        echo "/etc/rpi-sb-provisioner/fastboot-gadget.img"
-    else
-        echo "/var/lib/rpi-sb-provisioner/fastboot-gadget.img"
-    fi
-}
 
 get_fastboot_config_file() {
     if [ -f /etc/rpi-sb-provisioner/boot_ramdisk_config.txt ]; then
