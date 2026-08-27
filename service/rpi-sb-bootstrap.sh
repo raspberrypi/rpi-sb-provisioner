@@ -107,9 +107,16 @@ cleanup() {
         systemd-notify --status="Provisioning failed" STOPPING=1
     fi
     
-    if [ "${returnvalue}" -ne 0 ]; then
-        # A `set -e` death never reaches die(), so without this the
-        # device stays recorded in its last transitional state for ever.
+    if [ "${returnvalue}" -ne 0 ] && [ "${BOOTSTRAP_SKIP_FAILURE_HOOK:-0}" -ne 1 ]; then
+        # A `set -e` death never reaches die(), so without this the device
+        # stays recorded in its last transitional state for ever.
+        #
+        # Gated on the same flag as the failure hook above. A device that
+        # produces multiple matching descriptors loses the lock race and dies
+        # here as a matter of course, which is why that path sets the flag and
+        # says not to record state for it -- recording it would put ABORTED on
+        # the Devices page for a device whose other descriptor is bootstrapping
+        # perfectly well, moments before it reports BOOTSTRAP-FINISHED.
         record_abort_once "${TARGET_DEVICE_SERIAL}" "${TARGET_USB_PATH}"
     fi
 
