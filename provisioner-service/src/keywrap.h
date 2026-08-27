@@ -23,11 +23,55 @@ namespace provisioner {
         // the standalone signing helper (rpi-sb-keyhelper). It does not log;
         // callers decide how to report failures.
 
-        // True if device-bound wrapping is usable on this host: rpi-fw-crypto is
-        // present and a populated OTP key slot was found (any slot - not just
-        // the factory DEVICE-flagged key; the provisioner generates one in
-        // postinst when a host has none). Result is cached.
-        bool available();
+        // How the firmware crypto service answers when asked for a wrapping key.
+        // Ordered from "nothing to be done here" to "usable", so callers can
+        // test for Ok as the single state in which wrapping can succeed.
+        //
+        // The distinction that matters operationally is Blank vs the rest: a
+        // blank slot is the one failure an operator can fix on the spot, by
+        // generating a key. Everything else is a property of the host.
+        // Ordered by how close the host is to being usable, so that when
+        // several slots fail differently the most informative - and most
+        // actionable - answer is the one reported.
+        enum class DeviceKeyState {
+            NoService,   // service unreachable: build chroot, non-Pi, no /dev/vcio
+            NoSlot,      // service reachable, but the SoC exposes no usable key slot
+            Locked,      // slot present and unprogrammed, and generation is locked out
+            Blank,       // slot present and unprogrammed - generation would fix it
+            Ok,          // a key is present and an HMAC over it succeeds
+        };
+
+        struct DeviceKeyStatus {
+            DeviceKeyState state = DeviceKeyState::NoService;
+            int keyId = -1;             // the slot examined, -1 if none was found
+            bool deviceUnique = false;  // slot carries the DEVICE flag
+            std::string reason;         // what is wrong, in UI-presentable prose
+            std::string remedy;         // what would fix it; empty when nothing can
+        };
+
+        // Stable lowercase name for a state, for JSON payloads and logs.
+        const char* stateName(DeviceKeyState state);
+
+        // Classify this host's wrapping key. Cached; provisionDeviceKey()
+        // invalidates the cache.
+        //
+        // The probe ends in an actual HMAC, not a public key read, because that
+        // is the operation wrap() performs and the two do not always agree: a
+        // slot can report a status yet hold all zeros, which is exactly how a
+        // never-programmed device key presents.
+        DeviceKeyStatus deviceKeyStatus();
+
+
+        // Generate a key in the blank slot found by deviceKeyStatus().
+        //
+        // THIS BURNS OTP AND CANNOT BE UNDONE. The slot on a BCM2712 is the
+        // device-unique key slot - there is no scratch slot to prefer - so this
+        // must only ever run on explicit operator consent, never as a silent
+        // repair on a write path. Refuses unless the state is Blank.
+        //
+        // On success the cache is invalidated and outStatus reports the new
+        // state; on failure outStatus carries the reason.
+        bool provisionDeviceKey(DeviceKeyStatus& outStatus);
 
         // Wrap plaintext into a versioned blob. Returns false on any failure
         // (no usable device key, RNG failure, cipher failure).

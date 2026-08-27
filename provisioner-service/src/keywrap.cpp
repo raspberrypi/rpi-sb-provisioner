@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <cstring>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -34,30 +35,125 @@ namespace {
     // length - assert the firmware contract matches the buffer we hand it.
     static_assert(KEY_LEN == 32, "HMAC-SHA256 / AES-256 key length must be 32");
 
-    // Locate a usable OTP key id via the firmware crypto library.
-    // Cached across calls: -2 = not yet probed, -1 = none found, >=0 = id.
+    // Probe message for the liveness HMAC. Only whether the firmware will
+    // compute over it matters, never the result, but it must stay stable so the
+    // probe never puts anything derived from a secret on the wire.
     //
-    // We take the first slot that holds a key (its public key reads back),
-    // regardless of the ARM_CRYPTO_KEY_STATUS_TYPE_DEVICE_PRIVATE_KEY flag:
-    // that flag only marks the factory device-unique key, but any populated
-    // slot serves for HMAC-based wrapping. The provisioner generates a key in
-    // postinst (rpi-fw-crypto genkey) when a host has none, and a generated
-    // key is not DEVICE-flagged. A blank/missing slot fails get_pubkey, so this
-    // probe also distinguishes presence from absence. get_num_otp_keys does not
-    // bound the key-id space directly, so probe a small fixed range.
-    int wrappingKeyId() {
-        static int cached = -2;
-        if (cached != -2) return cached;
-        cached = -1;
-        for (uint32_t id = 0; id < 16; ++id) {
-            uint8_t pub[RPI_FW_CRYPTO_PUBLIC_KEY_MAX_SIZE];
-            size_t pubLen = 0;
-            if (rpi_fw_crypto_get_pubkey(0, id, pub, sizeof(pub), &pubLen) == 0 && pubLen > 0) {
-                cached = static_cast<int>(id);
-                break;
+    // A man is not dead while his name is still spoken.
+    constexpr char PROBE_MSG[] = "GNU TERRY PRATCHETT";
+
+    // get_num_otp_keys() reports how many keys the SoC has, not which ids are
+    // valid, so the id space is probed directly. On BCM2712 exactly one slot
+    // exists and it is id 1; the range is kept wider than that in case a future
+    // SoC exposes more.
+    constexpr uint32_t MAX_KEY_ID = 16;
+
+    std::mutex g_statusMutex;
+    bool g_statusCached = false;
+    DeviceKeyStatus g_status;
+
+    // Classify one slot by asking the firmware to HMAC with it. Returns true
+    // only when the slot is genuinely usable for wrapping.
+    //
+    // A key that has never been programmed reads back as all zeros and the
+    // firmware reports KEY_NOT_SET rather than KEY_NOT_FOUND, which is the
+    // difference between "this host has no such slot" and "this host has the
+    // slot but nobody ever put a key in it" - the second being the one an
+    // operator can fix.
+    bool probeSlot(uint32_t id, DeviceKeyStatus& out) {
+        uint32_t slotStatus = 0;
+        if (rpi_fw_crypto_get_key_status(id, &slotStatus) != 0) {
+            return false; // no such slot on this SoC
+        }
+
+        out.keyId = static_cast<int>(id);
+        out.deviceUnique = (slotStatus & ARM_CRYPTO_KEY_STATUS_TYPE_DEVICE_PRIVATE_KEY) != 0;
+
+        unsigned char digest[KEY_LEN];
+        if (rpi_fw_crypto_hmac_sha256(0, id,
+                                      reinterpret_cast<const uint8_t*>(PROBE_MSG),
+                                      sizeof(PROBE_MSG) - 1, digest) == 0) {
+            OPENSSL_cleanse(digest, sizeof(digest));
+            out.state = DeviceKeyState::Ok;
+            return true;
+        }
+
+        switch (rpi_fw_crypto_get_last_error()) {
+        case RPI_FW_CRYPTO_KEY_NOT_SET:
+            // The slot exists but holds all zeros. Generation is gated by
+            // GEN_LOCKED specifically - READ_LOCKED, which config.txt's
+            // lock_device_private_key=1 sets on every boot, does not prevent it.
+            if (slotStatus & ARM_CRYPTO_KEY_STATUS_GEN_LOCKED) {
+                out.state = DeviceKeyState::Locked;
+                out.reason = "This host's OTP key slot has never been programmed, "
+                             "and key generation is locked out.";
+                out.remedy = "Key generation is locked until the next reboot. Reboot "
+                             "and try again; if it persists, the slot cannot be "
+                             "programmed on this host.";
+            } else {
+                out.state = DeviceKeyState::Blank;
+                out.reason = "This host's OTP key slot has never been programmed, so "
+                             "there is no device key to protect stored secrets with.";
+                out.remedy = "Generate a device key for this host. This writes to OTP "
+                             "and cannot be undone.";
+            }
+            return false;
+
+        case RPI_FW_CRYPTO_KEY_LOCKED:
+            out.state = DeviceKeyState::Locked;
+            out.reason = "This host's OTP key slot has HMAC operations locked out.";
+            out.remedy = "The lock persists until the next reboot. Reboot and try again.";
+            return false;
+
+        default:
+            // The slot answered get_key_status but will not HMAC for a reason
+            // that is not a lock or a blank key. Report it verbatim rather than
+            // guessing, and keep looking in case another slot serves.
+            out.state = DeviceKeyState::NoSlot;
+            out.reason = std::string("This host's OTP key slot is unusable: ")
+                       + rpi_fw_crypto_strerror(rpi_fw_crypto_get_last_error()) + ".";
+            out.remedy.clear();
+            return false;
+        }
+    }
+
+    DeviceKeyStatus probeDeviceKey() {
+        DeviceKeyStatus status;
+
+        if (rpi_fw_crypto_get_num_otp_keys() < 0) {
+            status.state = DeviceKeyState::NoService;
+            status.reason = "The Raspberry Pi firmware crypto service is not available "
+                            "on this host, so secrets cannot be encrypted at rest.";
+            status.remedy = "This is expected in a build chroot or on non-Pi hardware. "
+                            "On a provisioning station, check that /dev/vcio exists and "
+                            "the firmware is up to date.";
+            return status;
+        }
+
+        // First usable slot wins. A slot that is merely blank is remembered as
+        // the best answer so far, so the reported reason describes a fixable
+        // host rather than whichever id happened to be probed last.
+        DeviceKeyStatus best;
+        best.state = DeviceKeyState::NoSlot;
+        best.reason = "This host exposes no OTP key slot, so secrets cannot be "
+                      "encrypted at rest.";
+
+        for (uint32_t id = 0; id < MAX_KEY_ID; ++id) {
+            DeviceKeyStatus probe;
+            if (probeSlot(id, probe)) {
+                return probe;
+            }
+            if (probe.state > best.state) {
+                best = probe;
             }
         }
-        return cached;
+        return best;
+    }
+
+    // The slot wrap()/unwrap() derive from, or -1 when there is none.
+    int wrappingKeyId() {
+        const DeviceKeyStatus status = deviceKeyStatus();
+        return status.state == DeviceKeyState::Ok ? status.keyId : -1;
     }
 
     // wrapping key = HMAC-SHA256(OTP key, salt), computed inside the firmware
@@ -135,8 +231,53 @@ bool isWrapped(const std::string& blob) {
     return blob.size() >= MAGIC_LEN && std::memcmp(blob.data(), MAGIC, MAGIC_LEN) == 0;
 }
 
-bool available() {
-    return wrappingKeyId() >= 0;
+const char* stateName(DeviceKeyState state) {
+    switch (state) {
+    case DeviceKeyState::NoService: return "no_service";
+    case DeviceKeyState::NoSlot:    return "no_slot";
+    case DeviceKeyState::Locked:    return "locked";
+    case DeviceKeyState::Blank:     return "blank";
+    case DeviceKeyState::Ok:        return "ok";
+    }
+    return "unknown";
+}
+
+DeviceKeyStatus deviceKeyStatus() {
+    std::lock_guard<std::mutex> lock(g_statusMutex);
+    if (!g_statusCached) {
+        g_status = probeDeviceKey();
+        g_statusCached = true;
+    }
+    return g_status;
+}
+
+
+bool provisionDeviceKey(DeviceKeyStatus& outStatus) {
+    outStatus = deviceKeyStatus();
+
+    // Only a blank slot may be written. Every other state either needs no key
+    // (Ok) or would not be helped by one, and gen_ecdsa_key on a populated slot
+    // is refused by the firmware anyway - but refusing here keeps the
+    // irreversible call off any path that did not deliberately ask for it.
+    if (outStatus.state != DeviceKeyState::Blank || outStatus.keyId < 0) {
+        return false;
+    }
+
+    if (rpi_fw_crypto_gen_ecdsa_key(0, static_cast<uint32_t>(outStatus.keyId)) != 0) {
+        outStatus.reason = std::string("Generating a device key failed: ")
+                         + rpi_fw_crypto_strerror(rpi_fw_crypto_get_last_error()) + ".";
+        outStatus.remedy.clear();
+        return false;
+    }
+
+    // Re-probe rather than assume success wrote something usable: the point of
+    // the HMAC probe is that a slot's status and its contents can disagree.
+    {
+        std::lock_guard<std::mutex> lock(g_statusMutex);
+        g_statusCached = false;
+    }
+    outStatus = deviceKeyStatus();
+    return outStatus.state == DeviceKeyState::Ok;
 }
 
 bool wrap(const std::string& plaintext, std::string& wrappedOut) {
