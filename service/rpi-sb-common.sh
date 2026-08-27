@@ -1634,3 +1634,68 @@ record_usb_port_exclusion() {
     record_state "${_upe_serial}" "${PORT_EXCLUDED}" "${_upe_stage}"
     return 1
 }
+
+# =============================================================================
+# Fastboot gadget selection
+# =============================================================================
+
+# Which pi-gen-micro device family this run is for, or empty if it cannot be
+# told from here.
+#
+# TARGET_DEVICE_FAMILY is the rpiboot USB product ID, read from udev, so it
+# describes the board actually in the socket. It is only set in
+# rpi-sb-bootstrap.sh. The provisioner scripts run later and have the operator's
+# configured RPI_DEVICE_FAMILY instead, which rpi-sb-bootstrap.sh has already
+# refused to proceed on if it disagreed with the connected device -- so by the
+# time they run, the two agree.
+get_device_family_slug() {
+    case "${TARGET_DEVICE_FAMILY}" in
+        2712)        echo "pi5-family" ; return 0 ;;
+        2711)        echo "pi4-family" ; return 0 ;;
+        2710 | 2764) echo "pi3-family" ; return 0 ;;
+    esac
+
+    case "${RPI_DEVICE_FAMILY}" in
+        5)  echo "pi5-family" ; return 0 ;;
+        4)  echo "pi4-family" ; return 0 ;;
+        2W) echo "pi3-family" ; return 0 ;;
+    esac
+
+    echo ""
+}
+
+# The fastboot gadget image to stage for this device.
+#
+# A station may carry one gadget per family, built by `pi-gen-micro fastboot
+# pi5-family` and so on. Each contains only the device trees and firmware its
+# family can load, which is most of the image: an all-devices gadget is ~35MB
+# where a pi5-family one is ~27MB, and none of the difference is loadable on a
+# BCM2712 board. The whole image is signed, cached and then pushed over USB to
+# every device, so the excess is paid per board.
+#
+# Order of preference:
+#   1. An unsuffixed image under /etc -- an explicit operator override, which
+#      has always meant "use exactly this" and still does.
+#   2. This family's image, under /etc then /var/lib.
+#   3. The unsuffixed image under /var/lib, which is what a station with a
+#      single all-devices gadget has. Installs that predate per-family images
+#      therefore behave exactly as before.
+get_fastboot_gadget() {
+    _gfg_family="$(get_device_family_slug)"
+
+    if [ -f /etc/rpi-sb-provisioner/fastboot-gadget.img ]; then
+        echo "/etc/rpi-sb-provisioner/fastboot-gadget.img"
+        return 0
+    fi
+
+    if [ -n "${_gfg_family}" ]; then
+        for _gfg_dir in /etc/rpi-sb-provisioner /var/lib/rpi-sb-provisioner; do
+            if [ -f "${_gfg_dir}/fastboot-gadget-${_gfg_family}.img" ]; then
+                echo "${_gfg_dir}/fastboot-gadget-${_gfg_family}.img"
+                return 0
+            fi
+        done
+    fi
+
+    echo "/var/lib/rpi-sb-provisioner/fastboot-gadget.img"
+}

@@ -276,13 +276,6 @@ else
     die "Bootstrap already in progress for ${TARGET_DEVICE_SERIAL}"
 fi
 
-get_fastboot_gadget() {
-    if [ -f /etc/rpi-sb-provisioner/fastboot-gadget.img ]; then
-        echo "/etc/rpi-sb-provisioner/fastboot-gadget.img"
-    else
-        echo "/var/lib/rpi-sb-provisioner/fastboot-gadget.img"
-    fi
-}
 
 get_fastboot_gadget_2710() {
     if [ -f /etc/rpi-sb-provisioner/fastboot-gadget.2710-bootfiles-bin ]; then
