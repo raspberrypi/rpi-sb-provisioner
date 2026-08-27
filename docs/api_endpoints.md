@@ -144,6 +144,10 @@ Manage system configuration options, firmware selection for different device fam
 
 - `POST /options/set-pkcs11-pin` - Store or remove an HSM PIN
 
+- `GET /options/device-key-status` - Report whether this host can encrypt secrets at rest
+
+- `POST /options/provision-device-key` - Generate this host's OTP device key (irreversible)
+
 - `GET /options/encryption-status` - Report device-wrapped secret status
 
 - `POST /options/migrate-secrets` - Device-wrap previously plaintext stored secrets

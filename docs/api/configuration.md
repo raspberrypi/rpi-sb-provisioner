@@ -492,6 +492,67 @@ An empty `pin` removes the stored PIN.
 
 - The PIN is never returned by the API
 
+## /options/device-key-status
+
+**HTTP Method:** GET
+
+**Description:** Reports whether this host has a usable firmware crypto device
+key, and so whether it can store signing keys and HSM PINs at all. Without one
+those operations are refused rather than falling back to plaintext.
+
+`state` is one of `ok`, `blank`, `locked`, `no_slot` or `no_service`.
+`can_provision` is true only for `blank` — the one state an operator can fix,
+by generating a key.
+
+**Response Format:**
+
+``` json
+{
+  "available": false,
+  "state": "blank",
+  "can_provision": true,
+  "device_unique": true,
+  "key_id": 1,
+  "reason": "This host's OTP key slot has never been programmed, so there is no device key to protect stored secrets with.",
+  "remedy": "Generate a device key for this host. This writes to OTP and cannot be undone."
+}
+```
+
+## /options/provision-device-key
+
+**HTTP Method:** POST
+
+**Description:** Generates this host's device key in OTP.
+
+**This writes to OTP permanently and cannot be undone.** On BCM2712 there is a
+single key slot and it is the device-unique slot, so there is no spare to use
+instead. The request must carry the confirmation token; a bare POST is rejected
+with `CONFIRMATION_REQUIRED`. Refused unless `/options/device-key-status`
+reports `can_provision`.
+
+**Request Format:**
+
+``` json
+{
+  "confirm": "BURN OTP"
+}
+```
+
+**Response Format:**
+
+``` json
+{
+  "provisioned": true,
+  "available": true,
+  "state": "ok",
+  "key_id": 1,
+  "message": "Device key generated. Secrets are now encrypted at rest."
+}
+```
+
+A host that already has a key returns `provisioned: false` with
+`available: true` — idempotent success, with no OTP write attempted.
+
 ## /options/encryption-status
 
 **HTTP Method:** GET
