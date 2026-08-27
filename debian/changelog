@@ -147,6 +147,24 @@ rpi-sb-provisioner (2.3.3) unstable; urgency=medium
     last lines of output are logged instead. Streaming is unchanged, so
     flash progress still appears as it happens.
 
+  * Validate IDP image descriptions against the schema rpi-image-gen
+    publishes, rather than a hand-written approximation of it. The embedded
+    kImageJsonSchema required only IGversion and layout -- IGmeta,
+    attributes, partitiontable and provisionmap were all optional, and
+    image-size and image-palign-bytes accepted any type at all -- so a
+    description missing every block the device needs was accepted at
+    upload and refused on the bench as "IDP:invalid description". The
+    schemas are now generated at configure time from a pinned
+    rpi-image-gen (RPI_IMAGE_GEN_TAG, v2.7.0), so an update to them
+    arrives as a reviewable diff instead of a failed provisioning run.
+
+  * Check the parts of a description a JSON schema cannot express, matching
+    what the device checks: image-palign-bytes must read as a genimage size
+    and be a whole number of mebibytes (no schema can tell 1M from 1MB),
+    IGversion must name major version 2, and every partition reference in
+    the provisionmap must name an entry in partitionimages. Verified
+    against a real rpi-image-gen artefact, which validates unchanged.
+
  -- Tom Dewey <tom.dewey@raspberrypi.com>  Tue, 18 Aug 2026 16:55:56 +0100
 
 rpi-sb-provisioner (2.3.2) unstable; urgency=medium
