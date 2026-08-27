@@ -129,20 +129,59 @@ timeout_fatal_secs() {
     command="$*"
     set +e
     log "Running command with ${timeout_seconds}s timeout: \"${command}\""
+
+    # Capture the command's output as well as streaming it. When a fastboot
+    # command is refused by the device, the sentence that says why arrives only
+    # in fastboot's own stderr, as FAILED (remote: '...'). Running the command
+    # bare sent that to this script's stderr -- the journal -- and never to the
+    # per-device provisioner.log the UI reads, so an operator was shown an exit
+    # code and nothing that explained it.
+    #
+    # Streaming is preserved through tee: fastboot reports flash progress as it
+    # goes, and buffering it until the command finished would make a long write
+    # look like a hang. The exit status travels via a file because this is
+    # POSIX sh, where the status of a pipeline is the last stage's.
+    _tfs_out="$(mktemp)"
+    _tfs_rc="$(mktemp)"
     # shellcheck disable=SC2086
-    timeout "${timeout_seconds}" ${command}
-    command_exit_status=$?
+    { timeout "${timeout_seconds}" ${command} 2>&1; echo $? > "${_tfs_rc}"; } | tee "${_tfs_out}"
+    command_exit_status="$(cat "${_tfs_rc}" 2>/dev/null)"
+    [ -n "${command_exit_status}" ] || command_exit_status=1
+    rm -f "${_tfs_rc}"
+
+    # The device's own words, where it gave any. fastboot prints one such line
+    # per refusal; take the last, which is the one that stopped the command.
+    _tfs_remote="$(sed -n "s/.*FAILED (remote: '\(.*\)').*/\1/p" "${_tfs_out}" 2>/dev/null | tail -n 1)"
 
     case ${command_exit_status} in
         0)
+            rm -f "${_tfs_out}"
             log "\"$command\" succeeded with exit code 0."
             ;;
         124)
+            log "\"${command}\" FAILED: Timed out after ${timeout_seconds} seconds."
+            log "Last output before the timeout:"
+            tail -n 20 "${_tfs_out}" 2>/dev/null | while IFS= read -r _tfs_line; do
+                log "  ${_tfs_line}"
+            done
+            rm -f "${_tfs_out}"
             record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "${TARGET_USB_PATH}"
             die "\"${command}\" FAILED: Timed out after ${timeout_seconds} seconds (exit code 124)."
             ;;
         *)
+            if [ -n "${_tfs_remote}" ]; then
+                log "\"${command}\" FAILED: the device refused it: ${_tfs_remote}"
+            else
+                log "\"${command}\" FAILED with exit code ${command_exit_status}. Output:"
+                tail -n 20 "${_tfs_out}" 2>/dev/null | while IFS= read -r _tfs_line; do
+                    log "  ${_tfs_line}"
+                done
+            fi
+            rm -f "${_tfs_out}"
             record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "${TARGET_USB_PATH}"
+            if [ -n "${_tfs_remote}" ]; then
+                die "\"${command}\" FAILED: ${_tfs_remote}"
+            fi
             die "\"${command}\" FAILED: Command returned exit code ${command_exit_status}."
             ;;
     esac
