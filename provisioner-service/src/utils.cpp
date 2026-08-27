@@ -993,7 +993,51 @@ namespace provisioner {
             }
             return false;
         }
-        
+
+        SigningStatus describeSigningMaterial() {
+            SigningStatus status;
+
+            // Read without auditing: this is polled by the UI to decide what to
+            // draw, and every page render would otherwise add two config-access
+            // entries to the audit log for a question about nothing secret.
+            const auto pkcs11Uri = getConfigValue("CUSTOMER_KEY_PKCS11_NAME", false);
+            const auto pemPath = getConfigValue("CUSTOMER_KEY_FILE_PEM", false);
+            const bool hasPkcs11 = pkcs11Uri && !pkcs11Uri->empty();
+            const bool hasPem = pemPath && !pemPath->empty();
+
+            // init_signing_context() refuses to guess between two key sources
+            // and exits, so this configuration signs nothing despite looking
+            // populated. Report it as its own mode rather than silently
+            // preferring one, or the UI would offer an action that always fails.
+            if (hasPkcs11 && hasPem) {
+                status.mode = "conflict";
+                status.reason = "Both a PEM key and a PKCS#11 key are configured. "
+                                "Signing requires exactly one - make one of them active.";
+                return status;
+            }
+
+            if (hasPkcs11) {
+                status.available = true;
+                status.mode = "pkcs11";
+                return status;
+            }
+
+            if (hasPem) {
+                if (!std::filesystem::exists(*pemPath)) {
+                    status.mode = "none";
+                    status.reason = "The configured PEM signing key is missing from disk.";
+                    return status;
+                }
+                status.available = true;
+                status.mode = isFileDeviceWrapped(*pemPath) ? "pem-wrapped" : "pem";
+                return status;
+            }
+
+            status.mode = "none";
+            status.reason = "No signing key is configured.";
+            return status;
+        }
+
         // ===== CSRF Token Implementation =====
         
         CsrfTokenManager& CsrfTokenManager::getInstance() {
