@@ -1303,6 +1303,16 @@ namespace provisioner {
             BootPackageWebSocketController::broadcastUpdate(imageName, false, "", "unsupported");
             return;
         }
+
+        // Generating a boot package signs boot.img, so without signing material
+        // rpi-sb-image-bootimg-generator.sh logs "No signing key configured" and
+        // exits 0. Say so here rather than letting the UI report the resulting
+        // absence of a package as "not generated yet".
+        if (!provisioner::utils::describeSigningMaterial().available) {
+            LOG_INFO << "Boot package unavailable: no signing material configured";
+            BootPackageWebSocketController::broadcastUpdate(imageName, false, "", "no_signing_key");
+            return;
+        }
         
         // Remove file extension from image name to get base name
         std::string imageBaseName = imageName;
@@ -2697,6 +2707,22 @@ namespace provisioner {
                 callback(resp);
                 return;
             }
+
+            // Boot packages are signed, so report a missing signing key as its
+            // own state. Otherwise the absent package is indistinguishable from
+            // one that simply has not been generated yet, and the UI invites the
+            // user to generate it -- which silently does nothing.
+            const auto signing = provisioner::utils::describeSigningMaterial();
+            if (!signing.available) {
+                Json::Value result;
+                result["exists"] = false;
+                result["image_name"] = imageName;
+                result["status"] = "no_signing_key";
+                result["reason"] = signing.reason;
+                auto resp = drogon::HttpResponse::newHttpJsonResponse(result);
+                callback(resp);
+                return;
+            }
             
             // Remove file extension from image name to get base name
             std::string imageBaseName = imageName;
@@ -2767,6 +2793,24 @@ namespace provisioner {
                     drogon::k400BadRequest,
                     "Bad Request",
                     "UNSUPPORTED_PROVISIONING_STYLE"
+                );
+                callback(resp);
+                return;
+            }
+
+            // The UI withholds this control when no signing key is configured,
+            // but hiding a button is not enforcement: refuse here too. The
+            // generator would otherwise be started, log "No signing key
+            // configured. Skipping boot.img generation." and exit 0, leaving the
+            // caller polling for a package that will never appear.
+            const auto signing = provisioner::utils::describeSigningMaterial();
+            if (!signing.available) {
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Boot package generation requires a signing key. " + signing.reason,
+                    drogon::k409Conflict,
+                    "No Signing Key",
+                    "NO_SIGNING_KEY"
                 );
                 callback(resp);
                 return;
