@@ -543,8 +543,8 @@
                     }
                 }, 2000);
             } else {
-                const error = await response.json().catch(() => ({}));
-                showError(error.message || 'Failed to start boot package generation');
+                const errorData = await response.json().catch(() => ({}));
+                showError(apiErrorMessage(errorData, 'Failed to start boot package generation'));
                 if (btn) {
                     btn.disabled = false;
                     btn.style.opacity = '1';
