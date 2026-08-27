@@ -165,6 +165,20 @@ rpi-sb-provisioner (2.3.3) unstable; urgency=medium
     the provisionmap must name an entry in partitionimages. Verified
     against a real rpi-image-gen artefact, which validates unchanged.
 
+  * Select the fastboot gadget for the connected device's family. A station
+    may now carry one gadget per family -- fastboot-gadget-pi5-family.img
+    and so on, built by pi-gen-micro's matching target -- and the gadget is
+    chosen at stage time from the rpiboot USB product ID, falling back to
+    the configured RPI_DEVICE_FAMILY. This matters because the gadget is
+    signed, cached and then pushed over USB to every board, so anything in
+    it the board cannot load is paid for per device: an all-devices gadget
+    is ~35MB against ~27MB for pi5-family, and none of the difference is
+    loadable on a BCM2712 part, which takes its firmware from EEPROM.
+    Backward compatible -- an unsuffixed image under /etc still overrides
+    everything, and a station carrying only the unsuffixed image behaves
+    exactly as before. Three byte-identical copies of get_fastboot_gadget()
+    are collapsed into rpi-sb-common.sh; two of them were never called.
+
  -- Tom Dewey <tom.dewey@raspberrypi.com>  Tue, 18 Aug 2026 16:55:56 +0100
 
 rpi-sb-provisioner (2.3.2) unstable; urgency=medium
