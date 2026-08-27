@@ -201,8 +201,82 @@
     let imageList = [];
     let currentImageSelection = document.getElementById('GOLD_MASTER_OS_FILE')?.value || '';
     
+    // What the provisioning scripts would find when they look for a signing
+    // key, as reported by /options/signing-status. Boot packages are signed, so
+    // the controls that produce one are withheld until there is something to
+    // sign with: offering them otherwise starts a generator that logs "No
+    // signing key configured", exits 0, and leaves the page waiting for a
+    // package that will never appear. null until the first read resolves, and
+    // treated as unavailable meanwhile so the control is never offered on a
+    // guess.
+    let signingStatus = null;
+
     // Load images on page load
     document.addEventListener('DOMContentLoaded', loadImageList);
+    document.addEventListener('DOMContentLoaded', refreshSigningStatus);
+
+    function signingMaterialAvailable() {
+        return !!(signingStatus && signingStatus.available);
+    }
+
+    // Re-read the signing status. Called at load, and by the Options page
+    // whenever the signing key registry changes, so adding or removing a key
+    // takes effect without a reload.
+    async function refreshSigningStatus() {
+        const wasAvailable = signingMaterialAvailable();
+        try {
+            const response = await fetch('/options/signing-status', { headers: { 'Accept': 'application/json' } });
+            if (response.ok) {
+                signingStatus = await response.json();
+            }
+        } catch (error) {
+            console.error('Error reading signing status:', error);
+        }
+
+        // Redrawing the details pane tears down any in-flight generation UI it
+        // holds, so only do it when the answer the controls key off has
+        // actually changed.
+        if (currentViewingImage && signingMaterialAvailable() !== wasAvailable) {
+            viewImage(currentViewingImage);
+        }
+    }
+
+    // Explain an absent boot package that no button can produce, in place of the
+    // status the row would otherwise carry.
+    function buildNoSigningKeyNotice(reason) {
+        const wrap = document.createElement('span');
+
+        const head = document.createElement('span');
+        head.style.color = '#888';
+        head.textContent = 'Needs a signing key';
+        wrap.appendChild(head);
+
+        const detail = document.createElement('div');
+        detail.style.cssText = 'font-size: 0.85rem; color: #666; margin-top: 4px;';
+        detail.textContent = reason || 'No signing key is configured.';
+        wrap.appendChild(detail);
+
+        // Only offer the jump when the signing key controls are on screen: they
+        // are hidden for provisioning styles that do not sign, and scrolling to
+        // a hidden element explains nothing.
+        const keyGroup = document.getElementById('key-config-group');
+        if (keyGroup && keyGroup.style.display !== 'none') {
+            const linkWrap = document.createElement('div');
+            linkWrap.style.marginTop = '4px';
+            const link = document.createElement('a');
+            link.href = '#key-config-group';
+            link.style.fontSize = '0.85rem';
+            link.textContent = 'Configure a signing key';
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                keyGroup.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            });
+            linkWrap.appendChild(link);
+            wrap.appendChild(linkWrap);
+        }
+
+        return wrap;
+    }
     
     async function loadImageList() {
         const listEl = document.getElementById('image-list');
@@ -419,14 +493,19 @@
         }
         
         if (!img.is_idp) {
-            const generateBootBtn = document.createElement('button');
-            generateBootBtn.type = 'button';
-            generateBootBtn.id = 'generate-boot-btn-' + img.name.replace(/[^a-zA-Z0-9]/g, '_');
-            generateBootBtn.style.cssText = 'padding: 8px 12px; background: #17a2b8; color: white; border: none; border-radius: 4px; cursor: pointer;';
-            generateBootBtn.textContent = 'Generate Boot Package';
-            generateBootBtn.onclick = () => generateBootPackage(img.name);
-            actions.appendChild(generateBootBtn);
-            
+            // Withheld without signing material: the package is signed, so this
+            // could only start a generator run that produces nothing. The Boot
+            // Package row above says why, rather than leaving a dead control.
+            if (signingMaterialAvailable()) {
+                const generateBootBtn = document.createElement('button');
+                generateBootBtn.type = 'button';
+                generateBootBtn.id = 'generate-boot-btn-' + img.name.replace(/[^a-zA-Z0-9]/g, '_');
+                generateBootBtn.style.cssText = 'padding: 8px 12px; background: #17a2b8; color: white; border: none; border-radius: 4px; cursor: pointer;';
+                generateBootBtn.textContent = 'Generate Boot Package';
+                generateBootBtn.onclick = () => generateBootPackage(img.name);
+                actions.appendChild(generateBootBtn);
+            }
+
             const clearCacheBtn = document.createElement('button');
             clearCacheBtn.type = 'button';
             clearCacheBtn.style.cssText = 'padding: 8px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;';
@@ -459,6 +538,14 @@
                     if (data.version) {
                         statusEl.innerHTML += '<br><span style="font-size: 0.85rem; color: #666;">Version: ' + data.version + '</span>';
                     }
+                } else if (data.status === 'no_signing_key') {
+                    statusEl.innerHTML = '';
+                    statusEl.appendChild(buildNoSigningKeyNotice(data.reason));
+                    // The server just told us signing is unavailable; make the
+                    // rest of the page agree if it still thinks otherwise.
+                    if (signingMaterialAvailable()) refreshSigningStatus();
+                } else if (data.status === 'unsupported') {
+                    statusEl.innerHTML = '<span style="color: #888;">Not applicable for this provisioning style</span>';
                 } else if (data.generating) {
                     statusEl.innerHTML = '<span style="color: #ffc107;">Generating…</span>';
                     // Poll for updates
@@ -552,6 +639,11 @@
                 }
                 if (statusEl) {
                     statusEl.innerHTML = '<span style="color: #dc3545;">Generation failed</span>';
+                }
+                // The key went away between this pane being drawn and the click
+                // -- another tab, or another operator. Redraw against the truth.
+                if (errorData.error_code === 'NO_SIGNING_KEY') {
+                    refreshSigningStatus();
                 }
             }
         } catch (error) {
