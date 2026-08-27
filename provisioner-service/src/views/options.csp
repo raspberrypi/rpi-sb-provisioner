@@ -1925,6 +1925,10 @@
                 if (!response.ok) return;
                 signingKeyRegistry = await response.json();
                 renderSigningKeyLists();
+                // Adding, activating or removing a key changes what the
+                // provisioning scripts would sign with, which decides whether
+                // the image browser offers boot package generation at all.
+                if (typeof refreshSigningStatus === 'function') refreshSigningStatus();
             } catch (error) {
                 console.error('Failed to load signing key registry:', error);
             }
