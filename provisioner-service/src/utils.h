@@ -229,6 +229,34 @@ namespace provisioner {
          */
         bool hasUnwrappedSecretsAtRest();
 
+        // ===== Signing Material =====
+
+        /**
+         * What the provisioning scripts would find when they look for a signing
+         * key, classified exactly as init_signing_context() in
+         * rpi-sb-common.sh classifies it.
+         */
+        struct SigningStatus {
+            bool available = false;     // signing_available() would return true
+            std::string mode;           // "pem" | "pem-wrapped" | "pkcs11" | "none" | "conflict"
+            std::string reason;         // Why not, in UI-presentable prose; empty when available
+        };
+
+        /**
+         * Classify the configured signing material.
+         *
+         * The config file is the authority here, not the key registry: the
+         * scripts read CUSTOMER_KEY_FILE_PEM and CUSTOMER_KEY_PKCS11_NAME and
+         * nothing else, so a registry entry whose PEM file has since been
+         * deleted must not read as usable. Deliberately does NOT open the token
+         * for a PKCS#11 URI - that costs an HSM round trip and can block, and
+         * the UI has /options/pkcs11-status for liveness. A configured URI
+         * therefore reports available even if the token is currently absent.
+         *
+         * @return The classification, with a reason whenever it is unusable
+         */
+        SigningStatus describeSigningMaterial();
+
         /**
          * Scan the firmware directory for available firmware versions
          * 

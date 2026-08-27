@@ -1780,6 +1780,31 @@ namespace provisioner {
             callback(resp);
         });
 
+        // Signing material status endpoint (GET) - reports whether the
+        // provisioning scripts would find a usable signing key, so the UI can
+        // withhold controls that cannot succeed without one (boot package
+        // generation signs boot.img). Never returns any key material.
+        app.registerHandler(OPTIONS_PATH + "/signing-status", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
+            LOG_INFO << "Options::signing-status";
+
+            AuditLog::logHandlerAccess(req, "/options/signing-status");
+
+            const auto signing = utils::describeSigningMaterial();
+
+            Json::Value jsonResponse;
+            jsonResponse["available"] = signing.available;
+            jsonResponse["mode"] = signing.mode;
+            if (!signing.reason.empty()) {
+                jsonResponse["reason"] = signing.reason;
+            }
+
+            auto resp = HttpResponse::newHttpResponse();
+            resp->setStatusCode(k200OK);
+            resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+            resp->setBody(Json::FastWriter().write(jsonResponse));
+            callback(resp);
+        });
+
         // Encryption-at-rest status endpoint (GET) - reports, per secret,
         // whether it is configured and whether it is device-wrapped at rest.
         // Drives the site-wide migration banner and the per-secret controls.
