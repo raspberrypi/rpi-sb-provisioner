@@ -77,6 +77,26 @@ rpi-sb-provisioner (2.3.3) unstable; urgency=medium
     it next changes, which is the honest answer: the service cannot know the
     board still in the socket is the one those rows describe.
 
+  * Stop offering boot package generation on stations with no signing key.
+    Boot packages are signed, so without key material the button started
+    rpi-sb-image-bootimg-generator.sh, which logs "No signing key
+    configured", exits 0, and produces nothing -- leaving the page polling
+    for a package that would never appear and reporting the result as
+    "Not generated", the same wording as an image nobody had asked to
+    build. The Options page now reads the configured signing material from
+    a new GET /options/signing-status, classified exactly as
+    init_signing_context() classifies it, and withholds the control when
+    there is nothing to sign with; the Boot Package row says which of the
+    reasons applies -- no key, a PEM key naming a file that is not there,
+    or both a PEM and a PKCS#11 key configured at once, which the scripts
+    refuse to choose between -- and links to the signing key settings where
+    those are on screen. The status is re-read whenever a key is added,
+    activated or removed, so it follows the configuration without a reload.
+    /generate-boot-package refuses the request with 409 NO_SIGNING_KEY
+    rather than relying on the button being absent. The PKCS#11 token is
+    not opened to answer this, so a configured URI still reports a key
+    present while its token is unplugged.
+
  -- Tom Dewey <tom.dewey@raspberrypi.com>  Tue, 18 Aug 2026 16:55:56 +0100
 
 rpi-sb-provisioner (2.3.2) unstable; urgency=medium
