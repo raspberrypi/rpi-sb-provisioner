@@ -210,58 +210,57 @@ EOF
     fi
 fi
 
-# Ensure this host has a firmware-crypto key for device-bound wrapping of
-# secrets at rest (HSM PINs, uploaded PEM signing keys). The wrapping key is
+# Report whether this host has a firmware-crypto key for device-bound wrapping
+# of secrets at rest (HSM PINs, uploaded PEM signing keys). The wrapping key is
 # derived on-SoC from a key held in OTP and never leaves the firmware; without
-# one the service falls back to storing those secrets unwrapped.
+# one the service REFUSES to store those secrets rather than storing them in
+# plaintext, so a host without a key cannot accept a signing key at all.
 #
-# We do not require the factory DEVICE-unique key: any populated key slot works.
-# If no slot holds a key we generate one with `rpi-fw-crypto genkey` (the slot
-# number is irrelevant - keywrap probes all slots). This is best-effort and must
-# never abort installation: a build chroot or a firmware without the crypto
-# service simply has no key, and that is fine.
-ensure_fw_crypto_key() {
+# This only reports. Earlier versions generated a key here with `rpi-fw-crypto
+# genkey`, on the assumption that it would land in a spare, non-DEVICE slot and
+# so cost nothing. That is not true on BCM2712: there is exactly one key slot,
+# id 1, and it is the device-unique slot. Generating into it is an irreversible
+# OTP write, which must not happen as a silent side effect of installing a
+# package. The web UI offers it instead, on explicit operator confirmation.
+#
+# Reporting here is still worth doing, because it is the earliest point at which
+# the answer is knowable -- but it is not the only point: the service re-checks
+# at startup and again whenever it is asked to store a secret, which is what
+# covers a host installed from an image (this script runs in the build chroot,
+# where the crypto service is unreachable) or by hand from a build tree.
+report_fw_crypto_key() {
     if ! command -v rpi-fw-crypto >/dev/null 2>&1; then
-        echo "rpi-fw-crypto not installed; skipping firmware-crypto key setup"
         return 0
     fi
 
-    # Probe the service. A non-zero exit here means it is unreachable (e.g.
-    # building in a chroot, or /dev/vcio_crypto absent) - skip quietly.
+    # Probe the service. A non-zero exit means it is unreachable - which is the
+    # normal case in a build chroot, and says nothing about the target host.
     if ! rpi-fw-crypto get-num-otp-keys >/dev/null 2>&1; then
-        echo "rpi-fw-crypto: firmware crypto service unavailable; skipping key setup"
         return 0
     fi
 
-    # The exact slot count format is firmware-dependent; probe a small fixed
-    # range by return code rather than parsing it.
-    num_slots=16
+    # A slot that will HMAC is one that can wrap secrets. Test that rather than
+    # reading a public key: a slot that has never been programmed holds all
+    # zeros, and reports its status happily while refusing to compute.
+    _probe="$(mktemp)"
+    printf 'GNU TERRY PRATCHETT' > "${_probe}"
 
-    # A populated slot reads back a public key. Ignore the DEVICE status flag.
     id=0
-    while [ "$id" -lt "$num_slots" ]; do
-        if rpi-fw-crypto pubkey --key-id "$id" >/dev/null 2>&1; then
-            echo "rpi-fw-crypto: existing key found in slot $id; nothing to do"
+    while [ "$id" -lt 16 ]; do
+        if rpi-fw-crypto hmac --in "${_probe}" --key-id "$id" >/dev/null 2>&1; then
+            rm -f "${_probe}"
             return 0
         fi
         id=$((id + 1))
     done
+    rm -f "${_probe}"
 
-    # No key present: generate one. genkey requires a blank, unlocked slot, so
-    # take the first that accepts it.
-    id=0
-    while [ "$id" -lt "$num_slots" ]; do
-        if rpi-fw-crypto genkey --key-id "$id" --alg ec >/dev/null 2>&1; then
-            echo "rpi-fw-crypto: generated device key in slot $id for at-rest secret wrapping"
-            return 0
-        fi
-        id=$((id + 1))
-    done
-
-    echo "rpi-fw-crypto: could not find or create a key; secrets will be stored unwrapped at rest" >&2
+    echo "rpi-fw-crypto: this host has no usable OTP key, so signing keys and HSM" >&2
+    echo "  PINs cannot be stored. Generate one from the web UI (Options -> Bootloader" >&2
+    echo "  Signing Key), which will confirm before writing OTP permanently." >&2
     return 0
 }
 
-ensure_fw_crypto_key || true
+report_fw_crypto_key || true
 
 #DEBHELPER#
