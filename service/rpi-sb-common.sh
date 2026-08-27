@@ -1699,3 +1699,31 @@ get_fastboot_gadget() {
 
     echo "/var/lib/rpi-sb-provisioner/fastboot-gadget.img"
 }
+
+# Record that this stage aborted, unless an abort has already been recorded.
+#
+# die() records the abort itself, but a `set -e` death does not reach it: the
+# shell exits at the failing command, and nothing between there and the EXIT
+# trap runs. Every provisioning script traps cleanup() on EXIT, and cleanup ran
+# the provision-failed hook without ever writing the state -- so an unguarded
+# command that failed left the device recorded in whatever transitional state
+# record_progress() last wrote. That is what the Devices page renders, so a run
+# that died looked indistinguishable from one still going, indefinitely.
+#
+# Observed on a station whose OS image was truncated: `mount -t ext4` failed,
+# the script exited 32, and the last state written stayed IMAGE-PREPARING.
+#
+# STATE_PREFIX is set by each script, so this needs no per-script variable.
+#
+# The guard is a plain variable, so an abort recorded inside a command
+# substitution does not suppress this one and the abort is written twice. Two
+# ABORTED rows are untidy; none at all is the bug being fixed here.
+record_abort_once() {
+    _rao_serial="$1"
+    _rao_path="$2"
+
+    [ -n "${STATE_ABORT_RECORDED}" ] && return 0
+    STATE_ABORT_RECORDED=1
+
+    record_state "${_rao_serial}" "${STATE_PREFIX}-ABORTED" "${_rao_path}"
+}

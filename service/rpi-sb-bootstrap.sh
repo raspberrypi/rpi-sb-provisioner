@@ -107,6 +107,12 @@ cleanup() {
         systemd-notify --status="Provisioning failed" STOPPING=1
     fi
     
+    if [ "${returnvalue}" -ne 0 ]; then
+        # A `set -e` death never reaches die(), so without this the
+        # device stays recorded in its last transitional state for ever.
+        record_abort_once "${TARGET_DEVICE_SERIAL}" "${TARGET_USB_PATH}"
+    fi
+
     exit $returnvalue
 }
 

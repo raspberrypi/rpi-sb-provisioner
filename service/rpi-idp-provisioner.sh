@@ -29,7 +29,7 @@ export PROVISIONER_STARTED="${STATE_PREFIX}-STARTED"
 . "$(dirname "$0")/rpi-sb-common.sh"
 
 die() {
-    record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "${TARGET_USB_PATH}"
+    record_abort_once "${TARGET_DEVICE_SERIAL}" "${TARGET_USB_PATH}"
     # shellcheck disable=SC2086
     echo "$@" ${DEBUG}
     exit 1
@@ -212,6 +212,11 @@ cleanup() {
     fi
 
     if [ "${return_value}" -ne 0 ]; then
+        # A `set -e` death never reaches die(), so without this the device
+        # stays recorded in its last transitional state for ever. Recorded
+        # before the hook, so operator code that reads the state sees the
+        # abort rather than the stage it died in.
+        record_abort_once "${TARGET_DEVICE_SERIAL}" "${TARGET_USB_PATH}"
         run_provision_failed_hook "idp-provisioner" "provisioning"
     fi
 

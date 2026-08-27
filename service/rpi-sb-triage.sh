@@ -55,6 +55,16 @@ cleanup() {
            [ -n "$(find /var/lock/rpi-sb-bootstrap -mindepth 1 -maxdepth 1 -type d -print -quit 2>/dev/null)" ]; then
             log "Skipping provision-failed: bootstrap in progress (expected USB re-enumeration)"
         else
+            # Abort recorded under the same condition as the hook, and not in
+            # the churn case above: a triage that lost a race with bootstrap is
+            # expected, and writing ABORTED for it would put a failure on the
+            # Devices page for a device that is provisioning normally.
+            #
+            # A `set -e` death never reaches die(), so without this a genuine
+            # triage failure leaves the device recorded in its last
+            # transitional state for ever.
+            record_abort_once "${TARGET_DEVICE_SERIAL}" "${TARGET_USB_PATH}"
+
             PROVISIONER_NAME=$(get_configured_provisioner_name)
             if [ -n "${FASTBOOT_DEVICE_SPECIFIER:-}" ]; then
                 run_provision_failed_hook "${PROVISIONER_NAME}" "provisioning"
