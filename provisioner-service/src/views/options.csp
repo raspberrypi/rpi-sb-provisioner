@@ -1305,6 +1305,8 @@
             }
             .enc-status-box.enc-warn { background: #fff3cd; border: 1px solid #ffeeba; }
             .enc-status-box.enc-ok   { background: #e9ecef; }
+            .enc-status-box.enc-error { background: #f8d7da; border: 1px solid #f5c6cb; }
+            .enc-error .enc-status-icon { color: #dc3545; }
             .enc-status-icon { font-size: 1.5rem; flex-shrink: 0; line-height: 1; }
             .enc-warn .enc-status-icon { color: #e0a800; }
             .enc-ok   .enc-status-icon { color: #28a745; }
@@ -1436,6 +1438,7 @@
 
             <!-- Key Configuration (Secure Boot only) -->
             <div class="field-group" id="key-config-group">
+                <div id="device-key-status" class="enc-status-inline"></div>
                 <label class="field-label">Bootloader Signing Key (RSA 2048-bit)</label>
                 <div class="key-config-container">
                     <div class="key-tabs">
@@ -2305,7 +2308,101 @@
 
             await checkPkcs11PinStatus();
             loadEncryptionStatus();
+            loadDeviceKeyStatus();
         })();
+
+        // ===== Device Key =====
+        // Whether this host can encrypt secrets at rest at all. Distinct from
+        // the per-secret status above, which assumes it can: without a device
+        // key nothing can be stored, so this is a precondition for the whole
+        // signing key section rather than a property of one secret.
+        //
+        // Asked of the server on every load rather than trusted from install
+        // time, because postinst's bootstrap does not run on hardware for a
+        // host built from an image, nor at all for one installed by hand.
+        let deviceKeyStatus = null;
+
+        async function loadDeviceKeyStatus() {
+            try {
+                const resp = await fetch('/options/device-key-status', { headers: { 'Accept': 'application/json' } });
+                if (!resp.ok) return;
+                deviceKeyStatus = await resp.json();
+            } catch (e) {
+                return; // leave the notice absent rather than guessing
+            }
+            renderDeviceKeyStatus();
+        }
+
+        function renderDeviceKeyStatus() {
+            const el = document.getElementById('device-key-status');
+            if (!el) return;
+            // Silent when the host is healthy: this is a problem report, not a
+            // status line. The per-secret rows already say secrets are encrypted.
+            if (!deviceKeyStatus || deviceKeyStatus.available) { el.innerHTML = ''; return; }
+
+            const canFix = !!deviceKeyStatus.can_provision;
+            el.innerHTML =
+                '<div class="enc-status-box enc-error">' +
+                  '<span class="enc-status-icon" aria-hidden="true">&#9888;</span>' +
+                  '<div class="enc-status-info">' +
+                    '<div class="enc-status-title">This host cannot store signing keys</div>' +
+                    '<div class="enc-status-note"></div>' +
+                    '<span class="enc-row-feedback" id="device-key-feedback"></span>' +
+                  '</div>' +
+                  (canFix ? '<button type="button" class="enc-migrate-btn" id="device-key-provision-btn">Generate device key</button>' : '') +
+                '</div>';
+
+            // Set as text, not markup: the reason carries a firmware error
+            // string through from librpifwcrypto, and none of it needs to be
+            // HTML for it to be read.
+            const note = el.querySelector('.enc-status-note');
+            if (note) {
+                note.textContent = [deviceKeyStatus.reason, deviceKeyStatus.remedy]
+                    .filter(Boolean).join(' ');
+            }
+
+            const btn = document.getElementById('device-key-provision-btn');
+            if (btn) btn.addEventListener('click', function () { provisionDeviceKey(btn); });
+        }
+
+        async function provisionDeviceKey(btn) {
+            const fb = document.getElementById('device-key-feedback');
+
+            // OTP is write-once: there is no undo, no second slot to try, and a
+            // wrong click here is permanent. Make the operator say so.
+            const typed = window.prompt(
+                'Generating a device key writes permanently to this board\'s OTP memory ' +
+                'and CANNOT be undone.\n\n' +
+                'On this hardware there is a single key slot, and it is the device-unique ' +
+                'slot -- there is no spare to use instead.\n\n' +
+                'Type BURN OTP to confirm.');
+            if (typed !== 'BURN OTP') {
+                if (fb) { fb.className = 'enc-row-feedback'; fb.textContent = ' Cancelled.'; }
+                return;
+            }
+
+            if (btn) btn.disabled = true;
+            if (fb) { fb.className = 'enc-row-feedback'; fb.textContent = ' Generating…'; }
+            try {
+                const resp = await fetch('/options/provision-device-key', addCsrfHeader({
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ confirm: 'BURN OTP' })
+                }));
+                const data = await resp.json().catch(function () { return {}; });
+                if (resp.ok && data.available) {
+                    // Reload: the key changes what every secret control on this
+                    // page can do, not just this box.
+                    window.location.reload();
+                } else {
+                    if (fb) { fb.className = 'enc-row-feedback error'; fb.textContent = ' ' + apiErrorMessage(data, 'Could not generate a device key.'); }
+                    if (btn) btn.disabled = false;
+                }
+            } catch (e) {
+                if (fb) { fb.className = 'enc-row-feedback error'; fb.textContent = ' Could not generate a device key.'; }
+                if (btn) btn.disabled = false;
+            }
+        }
 
         // ===== Encryption at Rest =====
         // Shows each configured secret's at-rest status inline with where the
