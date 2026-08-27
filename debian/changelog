@@ -179,6 +179,20 @@ rpi-sb-provisioner (2.3.3) unstable; urgency=medium
     exactly as before. Three byte-identical copies of get_fastboot_gadget()
     are collapsed into rpi-sb-common.sh; two of them were never called.
 
+  * Record an abort when a provisioning stage dies without reaching die().
+    die() writes the ABORTED state, but a `set -e` death exits at the
+    failing command and never reaches it, and cleanup() -- trapped on EXIT
+    in all six scripts -- ran the provision-failed hook without writing any
+    state. Any unguarded command that failed therefore left the device
+    recorded in whatever transitional state it died in, which is what the
+    Devices page shows, so a dead run looked like a running one
+    indefinitely. Observed with a truncated OS image, where a failed mount
+    left SB-PROVISIONER-IMAGE-PREPARING as the last word on the device. A
+    new record_abort_once() writes ${STATE_PREFIX}-ABORTED from every
+    cleanup(), guarded so die() and cleanup cannot record it twice. Triage
+    keeps its existing suppression: a triage that loses a race with
+    bootstrap during USB re-enumeration stays silent, as it did before.
+
  -- Tom Dewey <tom.dewey@raspberrypi.com>  Tue, 18 Aug 2026 16:55:56 +0100
 
 rpi-sb-provisioner (2.3.2) unstable; urgency=medium
