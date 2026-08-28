@@ -193,6 +193,37 @@ rpi-sb-provisioner (2.3.3) unstable; urgency=medium
     keeps its existing suppression: a triage that loses a race with
     bootstrap during USB re-enumeration stays silent, as it did before.
 
+  * Name the reason on every path that stores a secret, not just the PEM
+    upload. The device-key classification described above reached
+    /options/upload-key, but the HSM PIN, the wrap-a-saved-key action
+    and the plaintext migration all flattened the same failure into a
+    bool on the way out of utils, so each answered with a flat 500 --
+    "Failed to save PIN securely", "Could not encrypt key at rest on
+    this device", "One or more secrets could not be wrapped" -- with the
+    cause reaching only the journal. An operator configuring an HSM on a
+    jig whose OTP slot had never been programmed was told to suspect the
+    PIN, or the secrets, rather than the station. All three now classify
+    before they write and refuse with the same 409 DEVICE_KEY_BLANK or
+    DEVICE_KEY_UNAVAILABLE the upload path uses.
+
+  * Carry the remedy as far as the operator. It travels separately from
+    the reason, as the error response's details field, and the Options
+    page read only the message -- so the half of the answer saying what
+    to do about a blank device key was discarded before it was
+    displayed. The PIN controls read errorData.message, a field
+    createErrorResponse never sets (it emits error), so those two
+    replaced every server-side reason with a generic fallback outright.
+
+  * Stop a failed device-key classification sticking for the life of the
+    service. deviceKeyStatus() cached its answer permanently, so a UI
+    process that started before /dev/vcio was ready, or before anything
+    had programmed the slot, reported no device key from every secret
+    path and from the status endpoint behind the Options banner until it
+    was restarted, with no way to re-probe. A usable key is still cached
+    permanently -- it sits on the hot path of every wrap and unwrap, and
+    a slot that HMACs does not stop doing so -- but a failure is now
+    cached for five seconds only.
+
  -- Tom Dewey <tom.dewey@raspberrypi.com>  Tue, 18 Aug 2026 16:55:56 +0100
 
 rpi-sb-provisioner (2.3.2) unstable; urgency=medium
