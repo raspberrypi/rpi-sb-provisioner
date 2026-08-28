@@ -34,7 +34,7 @@ namespace provisioner {
         // several slots fail differently the most informative - and most
         // actionable - answer is the one reported.
         enum class DeviceKeyState {
-            NoService,   // service unreachable: build chroot, non-Pi, no /dev/vcio
+            NoService,   // service unreachable: build chroot, non-Pi, no /dev/vcio_crypto
             NoSlot,      // service reachable, but the SoC exposes no usable key slot
             Locked,      // slot present and unprogrammed, and generation is locked out
             Blank,       // slot present and unprogrammed - generation would fix it

@@ -150,7 +150,7 @@ namespace {
             status.reason = "The Raspberry Pi firmware crypto service is not available "
                             "on this host, so secrets cannot be encrypted at rest.";
             status.remedy = "This is expected in a build chroot or on non-Pi hardware. "
-                            "On a provisioning station, check that /dev/vcio exists and "
+                            "On a provisioning station, check that /dev/vcio_crypto exists and "
                             "the firmware is up to date.";
             return status;
         }
