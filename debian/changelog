@@ -214,15 +214,25 @@ rpi-sb-provisioner (2.3.3) unstable; urgency=medium
     createErrorResponse never sets (it emits error), so those two
     replaced every server-side reason with a generic fallback outright.
 
-  * Stop a failed device-key classification sticking for the life of the
-    service. deviceKeyStatus() cached its answer permanently, so a UI
-    process that started before /dev/vcio was ready, or before anything
-    had programmed the slot, reported no device key from every secret
-    path and from the status endpoint behind the Options banner until it
-    was restarted, with no way to re-probe. A usable key is still cached
-    permanently -- it sits on the hot path of every wrap and unwrap, and
-    a slot that HMACs does not stop doing so -- but a failure is now
-    cached for five seconds only.
+  * Stop a device-key classification sticking for the life of the service.
+    deviceKeyStatus() cached its answer permanently, so a station whose
+    slot was programmed after the UI started -- by Raspberry Pi Connect
+    registering, or genkey from the command line -- kept reporting no
+    device key from every secret path and from the status endpoint behind
+    the Options banner until it was restarted, with no way to re-probe.
+    Failures are now cached for five seconds. A usable key is still not
+    re-probed on a timer, since it sits on the hot path of every wrap and
+    unwrap, but neither is it trusted indefinitely: HMAC_LOCKED is
+    settable at runtime and persists until reboot, so a slot that refuses
+    an operation now invalidates the classification that promised it
+    would not, at the point of failure rather than at the next poll.
+
+  * Name the device the firmware crypto service actually uses. The remedy
+    offered for an unreachable service said to check that /dev/vcio
+    exists. librpifwcrypto opens /dev/vcio_crypto, a different node with
+    different ownership, so an operator following that advice would find
+    /dev/vcio present and correctly permissioned and conclude the host was
+    fine.
 
  -- Tom Dewey <tom.dewey@raspberrypi.com>  Tue, 18 Aug 2026 16:55:56 +0100
 
