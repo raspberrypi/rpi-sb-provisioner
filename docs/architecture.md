@@ -368,13 +368,18 @@ the PIN, an uploaded PEM key, wrapping a saved key, and the plaintext migration
 remedy, so the operator is never left with a bare failure whose cause reached
 only the journal.
 
-The classification is cached, but asymmetrically: a usable key is remembered for
-the life of the process, since it is on the hot path of every wrap and unwrap and
-a slot that HMACs does not stop doing so. A failure is remembered for a few
-seconds only, because the conditions behind one are the ones that change — the
-firmware service arriving after the UI started, or something else programming
-the slot while the service runs — and a station that answered "no" once should
-not keep saying so until it is restarted.
+The classification is cached, but asymmetrically. A failure is remembered for a
+few seconds only, because the conditions behind one are the ones that change —
+the slot being programmed while the service runs, by Raspberry Pi Connect
+registering or `rpi-fw-crypto genkey` from the command line — and a station that
+answered "no" once should not keep saying so until it is restarted. A usable key
+is not re-probed on a timer, since it is on the hot path of every wrap and
+unwrap; instead, an operation the firmware refuses invalidates the
+classification that said it would not, which catches `HMAC_LOCKED` being set at
+runtime sooner than a poll would.
+
+Note that the firmware crypto service is reached through `/dev/vcio_crypto`, not
+`/dev/vcio` — different nodes, with different permissions.
 
 The distinction matters because the key is **not programmed at the factory**. On
 BCM2712 there is exactly one OTP key slot, id 1, and it is the device-unique
