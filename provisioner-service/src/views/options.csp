@@ -1725,7 +1725,13 @@
         }
 
         function apiErrorMessage(errorData, fallback) {
-            return (errorData && (errorData.message || errorData.error)) || fallback;
+            const msg = (errorData && (errorData.message || errorData.error)) || fallback;
+            // The remedy travels separately from the reason, as createErrorResponse's
+            // details field. Dropping it loses the actionable half of exactly the
+            // failures an operator can do something about -- a blank device key,
+            // which is fixable on the spot, being the one that matters here.
+            const details = errorData && errorData.details;
+            return details ? msg + ' ' + details : msg;
         }
         
         // ===== Tile Selection Logic =====
@@ -2607,7 +2613,7 @@
                     const errorData = await response.json().catch(() => ({}));
                     if (feedbackDiv) {
                         feedbackDiv.className = 'field-feedback error';
-                        feedbackDiv.textContent = errorData.message || 'Failed to save PIN';
+                        feedbackDiv.textContent = apiErrorMessage(errorData, 'Failed to save PIN');
                     }
                 }
             } catch (error) {
@@ -2655,7 +2661,7 @@
                     const errorData = await response.json().catch(() => ({}));
                     if (feedbackDiv) {
                         feedbackDiv.className = 'field-feedback error';
-                        feedbackDiv.textContent = errorData.message || 'Failed to remove PIN';
+                        feedbackDiv.textContent = apiErrorMessage(errorData, 'Failed to remove PIN');
                     }
                 }
             } catch (error) {
