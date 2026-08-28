@@ -55,15 +55,27 @@ namespace {
     std::chrono::steady_clock::time_point g_statusAt;
 
     // How long a failed classification is trusted before the firmware is asked
-    // again. A usable key is cached for the life of the process: it sits on the
-    // hot path of every wrap and unwrap, and a slot that HMACs does not stop
-    // doing so. A failure must not be cached that way, because the conditions
-    // behind one are precisely the ones that change under us - the service
-    // starting before /dev/vcio is ready, or something else programming the
-    // slot while we run. Without this, a station that answered "no" once keeps
-    // saying so until it is restarted, including through the status endpoint
-    // the Options page banner reads.
+    // again. A usable key is not re-probed on a timer: it sits on the hot path
+    // of every wrap and unwrap. It can still stop answering - HMAC_LOCKED is
+    // settable at runtime and persists until reboot - but deriveWrapKey() drops
+    // the classification at the moment the firmware refuses, which catches that
+    // sooner than any poll would and costs nothing while it does not happen.
+    //
+    // A failure must not be cached that way, because the conditions behind one
+    // are precisely the ones that change under us: the slot being programmed
+    // while we run, by rpi-connect registration or genkey from the CLI, or the
+    // firmware crypto service not having been reachable when we started.
+    // Without this, a station that answered "no" once keeps saying so until it
+    // is restarted, including through the status endpoint the Options page
+    // banner reads.
     constexpr std::chrono::seconds NEGATIVE_STATUS_TTL{5};
+
+    // Drop the cached classification so the next caller re-probes. Callers must
+    // not hold g_statusMutex.
+    void invalidateStatus() {
+        std::lock_guard<std::mutex> lock(g_statusMutex);
+        g_statusCached = false;
+    }
 
     // Classify one slot by asking the firmware to HMAC with it. Returns true
     // only when the slot is genuinely usable for wrapping.
@@ -176,8 +188,18 @@ namespace {
         int id = wrappingKeyId();
         if (id < 0) return false;
         if (saltLen > RPI_FW_CRYPTO_HMAC_MSG_MAX_SIZE) return false;
-        return rpi_fw_crypto_hmac_sha256(0, static_cast<uint32_t>(id),
-                                         salt, saltLen, outKey) == 0;
+        if (rpi_fw_crypto_hmac_sha256(0, static_cast<uint32_t>(id),
+                                      salt, saltLen, outKey) == 0) {
+            return true;
+        }
+
+        // The classification promised this slot would HMAC and it has just
+        // refused, so the cached answer is now wrong in the one direction the
+        // TTL does not cover. Drop it, so the caller that reports this failure
+        // to the operator - and the banner they look at next - describe the
+        // host as it is rather than repeating the answer that just failed.
+        invalidateStatus();
+        return false;
     }
 
     bool gcmEncrypt(const unsigned char key[KEY_LEN], const unsigned char iv[IV_LEN],
@@ -291,10 +313,7 @@ bool provisionDeviceKey(DeviceKeyStatus& outStatus) {
 
     // Re-probe rather than assume success wrote something usable: the point of
     // the HMAC probe is that a slot's status and its contents can disagree.
-    {
-        std::lock_guard<std::mutex> lock(g_statusMutex);
-        g_statusCached = false;
-    }
+    invalidateStatus();
     outStatus = deviceKeyStatus();
     return outStatus.state == DeviceKeyState::Ok;
 }

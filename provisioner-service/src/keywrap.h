@@ -59,9 +59,9 @@ namespace provisioner {
         // slot can report a status yet hold all zeros, which is exactly how a
         // never-programmed device key presents.
         //
-        // A usable key is cached for the life of the process; a failure is
-        // cached only briefly, so a host that becomes usable - the firmware
-        // service arriving late, or something else programming the slot - is
+        // A usable key is cached until something using it fails; a failure is
+        // cached only briefly, so a host that becomes usable - the slot being
+        // programmed while we run, or the firmware service arriving late - is
         // picked up without a service restart. provisionDeviceKey() invalidates
         // the cache outright.
         DeviceKeyStatus deviceKeyStatus();
