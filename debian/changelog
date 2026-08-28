@@ -1,3 +1,49 @@
+rpi-sb-provisioner (2.3.4) unstable; urgency=medium
+
+  * Refresh the fastboot gadget images against rpi-fastbootd
+    14.0.0~git20260828.5ae7d5d. All five artefacts are rebuilt -- the
+    generic gadget, the three per-family images and the pre-Pi4 bootfiles
+    tarball -- so a station picks up the new daemon whichever family it is
+    pinned to. The per-family images are the ones get_fastboot_gadget()
+    actually serves once RPI_DEVICE_FAMILY is set, so refreshing only the
+    generic image would have left every pinned station on the previous
+    daemon.
+
+  * Pick up the fastbootd fix for a committed partition table the kernel
+    never adopted. oem partinit and oem partapp wrote the table and reported
+    OKAY, but nothing asked the kernel to re-read it, so /dev/<dev>pN kept
+    the previous layout's offsets and sizes and the next command acted on
+    the old geometry. On a 32GB card partitioned as 512MiB boot plus
+    remainder, oem cryptinit LUKS-formatted a stale 128MiB p2;
+    partition-size:mapper/cryptroot then reported 112MiB, this package sized
+    the rootfs filesystem to match, and mke2fs ran out of blocks part way
+    through populating it. A partition still held open elsewhere -- a stale
+    device-mapper node, a mount -- now fails the command rather than leaving
+    the old table in place.
+
+  * Pick up the fastbootd change to report the wired MAC the firmware
+    settled on, read from the device tree's ethernet node before falling
+    back to OTP. Where the MAC rows were never programmed the bootloader's
+    choice, not the blank OTP, is the address the board presents on the
+    network. Unprogrammed rows now read as an empty string rather than
+    00:00:00:00:00:00, so mac-wifi and mac-bt on a part without them are no
+    longer answered with a MAC-shaped value that downstream consumers would
+    record as real.
+
+  * Stop shipping fastboot-gadget-pi3-family.img, which nothing ever read.
+    get_fastboot_gadget() is reached only from branches guarded by
+    ALLOW_SIGNED_BOOT, which is set for device families 2712 and 2711 and
+    cleared for 2710 and 2764, so the only slugs that can reach it are
+    pi5-family and pi4-family. A Pi 3-family board takes
+    fastboot-gadget.2710-bootfiles-bin from the !ALLOW_SIGNED_BOOT path
+    instead and never asks for a boot.img at all. The image was 30MB of
+    payload in every copy of this package. The pi3-family pi-gen-micro build
+    is still needed -- it is where the 2710 bootfiles tarball comes from --
+    so only the unused boot.img goes. An existing installation has the file
+    removed on upgrade, since it is no longer in the package's file list.
+
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Fri, 28 Aug 2026 14:49:08 +0100
+
 rpi-sb-provisioner (2.3.3) unstable; urgency=medium
 
   * Fix the permanent-failure marker never reaching the provision-failed
