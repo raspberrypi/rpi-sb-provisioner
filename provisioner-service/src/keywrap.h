@@ -52,13 +52,18 @@ namespace provisioner {
         // Stable lowercase name for a state, for JSON payloads and logs.
         const char* stateName(DeviceKeyState state);
 
-        // Classify this host's wrapping key. Cached; provisionDeviceKey()
-        // invalidates the cache.
+        // Classify this host's wrapping key.
         //
         // The probe ends in an actual HMAC, not a public key read, because that
         // is the operation wrap() performs and the two do not always agree: a
         // slot can report a status yet hold all zeros, which is exactly how a
         // never-programmed device key presents.
+        //
+        // A usable key is cached for the life of the process; a failure is
+        // cached only briefly, so a host that becomes usable - the firmware
+        // service arriving late, or something else programming the slot - is
+        // picked up without a service restart. provisionDeviceKey() invalidates
+        // the cache outright.
         DeviceKeyStatus deviceKeyStatus();
 
 

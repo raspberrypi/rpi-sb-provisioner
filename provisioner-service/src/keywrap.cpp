@@ -4,6 +4,7 @@
 #include <openssl/rand.h>
 #include <openssl/crypto.h>
 
+#include <chrono>
 #include <cstdint>
 #include <cstddef>
 #include <cstring>
@@ -51,6 +52,18 @@ namespace {
     std::mutex g_statusMutex;
     bool g_statusCached = false;
     DeviceKeyStatus g_status;
+    std::chrono::steady_clock::time_point g_statusAt;
+
+    // How long a failed classification is trusted before the firmware is asked
+    // again. A usable key is cached for the life of the process: it sits on the
+    // hot path of every wrap and unwrap, and a slot that HMACs does not stop
+    // doing so. A failure must not be cached that way, because the conditions
+    // behind one are precisely the ones that change under us - the service
+    // starting before /dev/vcio is ready, or something else programming the
+    // slot while we run. Without this, a station that answered "no" once keeps
+    // saying so until it is restarted, including through the status endpoint
+    // the Options page banner reads.
+    constexpr std::chrono::seconds NEGATIVE_STATUS_TTL{5};
 
     // Classify one slot by asking the firmware to HMAC with it. Returns true
     // only when the slot is genuinely usable for wrapping.
@@ -244,8 +257,14 @@ const char* stateName(DeviceKeyState state) {
 
 DeviceKeyStatus deviceKeyStatus() {
     std::lock_guard<std::mutex> lock(g_statusMutex);
-    if (!g_statusCached) {
+    const bool fresh = g_statusCached
+                       && (g_status.state == DeviceKeyState::Ok
+                           || std::chrono::steady_clock::now() - g_statusAt < NEGATIVE_STATUS_TTL);
+    if (!fresh) {
         g_status = probeDeviceKey();
+        // Stamped after the probe, so the TTL measures from when the answer was
+        // obtained rather than from when it was asked for.
+        g_statusAt = std::chrono::steady_clock::now();
         g_statusCached = true;
     }
     return g_status;
