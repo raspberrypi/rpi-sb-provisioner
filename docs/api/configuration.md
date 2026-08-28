@@ -352,7 +352,10 @@ be removed until another key is activated.
 
 **Notes:**
 
-- Requires firmware-crypto support on the provisioning host.
+- Requires a usable device key on the provisioning host. Where there is none the
+  request is refused with `409` and `DEVICE_KEY_BLANK` (the slot can be
+  programmed) or `DEVICE_KEY_UNAVAILABLE`, carrying the reason and, where one
+  exists, the remedy in `details`.
 
 - Returns an error if the key is already wrapped or wrapping fails.
 
@@ -488,7 +491,10 @@ An empty `pin` removes the stored PIN.
 
 **Notes:**
 
-- Stored PINs are device-wrapped at rest when firmware crypto support is available
+- Stored PINs are device-wrapped at rest. Wrapping is not optional: on a host
+  with no usable device key the PIN is refused with `409` and
+  `DEVICE_KEY_BLANK` or `DEVICE_KEY_UNAVAILABLE` rather than stored in
+  plaintext, with the remedy in `details` where there is one.
 
 - The PIN is never returned by the API
 
@@ -604,6 +610,13 @@ A host that already has a key returns `provisioned: false` with
   }
 }
 ```
+
+**Notes:**
+
+- Every migration here shares one precondition. Where the host has no usable
+  device key the request is refused up front with `409` and `DEVICE_KEY_BLANK`
+  or `DEVICE_KEY_UNAVAILABLE`, rather than reporting a per-secret failure whose
+  shared cause is not named.
 
 # /options/clear-workdir
 
