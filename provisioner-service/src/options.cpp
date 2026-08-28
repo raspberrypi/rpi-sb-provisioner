@@ -1608,6 +1608,20 @@ namespace provisioner {
                 return;
             }
 
+            // Classify the host before touching the key, for the same reason
+            // as the upload path: a blank OTP slot is the one failure here an
+            // operator can fix, and it is indistinguishable from any other
+            // wrapping failure once it has been flattened into a bool.
+            const auto deviceKey = keywrap::deviceKeyStatus();
+            if (deviceKey.state != keywrap::DeviceKeyState::Ok) {
+                LOG_ERROR << "Rejecting key wrap: " << deviceKey.reason;
+                AuditLog::logFileSystemAccess("WRAP_KEY", keyOpt->path, false, "",
+                                              "no usable device key");
+                callback(provisioner::utils::createDeviceKeyErrorResponse(
+                    req, "encrypt the signing key at rest", deviceKey));
+                return;
+            }
+
             if (!utils::wrapFileInPlace(keyOpt->path)) {
                 Json::Value jsonResponse;
                 jsonResponse["success"] = false;
@@ -2034,6 +2048,18 @@ namespace provisioner {
             bool doPin = (target == "pin" || target == "all");
             bool doKey = (target == "key" || target == "all");
 
+            // Every wrap below shares one precondition, so check it once and
+            // name it. Reporting "one or more secrets could not be wrapped"
+            // when the answer is "this host has no key yet" tells the operator
+            // to suspect the secrets rather than the station.
+            const auto deviceKey = keywrap::deviceKeyStatus();
+            if (deviceKey.state != keywrap::DeviceKeyState::Ok) {
+                LOG_ERROR << "Rejecting secret migration: " << deviceKey.reason;
+                callback(provisioner::utils::createDeviceKeyErrorResponse(
+                    req, "encrypt stored secrets at rest", deviceKey));
+                return;
+            }
+
             Json::Value jsonResponse;
             bool ok = true;
 
@@ -2254,6 +2280,24 @@ namespace provisioner {
                 );
                 callback(resp);
                 return;
+            }
+
+            // Ask whether this host can wrap at all before storing, so a
+            // station whose OTP key slot was never programmed is told that --
+            // and told it can be fixed -- instead of receiving a bare 500 with
+            // the reason only in the journal. savePkcs11Pin() makes the same
+            // check and refuses on its own; this one exists to carry the reason
+            // and the remedy back to the caller, which a bool cannot.
+            {
+                const auto deviceKey = keywrap::deviceKeyStatus();
+                if (deviceKey.state != keywrap::DeviceKeyState::Ok) {
+                    LOG_ERROR << "Rejecting PIN save: " << deviceKey.reason;
+                    AuditLog::logFileSystemAccess("WRITE_PIN", utils::PKCS11_PIN_FILE,
+                                                  false, "", "no usable device key");
+                    callback(provisioner::utils::createDeviceKeyErrorResponse(
+                        req, "store the HSM PIN", deviceKey));
+                    return;
+                }
             }
 
             // Save the PIN securely
