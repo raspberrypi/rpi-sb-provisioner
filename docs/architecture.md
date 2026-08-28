@@ -362,7 +362,19 @@ Wrapping is not optional: with no usable device key the service **refuses** to
 store a signing key or an HSM PIN, rather than falling back to plaintext. That
 makes the device key a precondition for configuring a provisioning station at
 all, so the service checks for one at startup, and again at each point it is
-asked to store a secret — not once at install time.
+asked to store a secret — not once at install time. Every one of those paths —
+the PIN, an uploaded PEM key, wrapping a saved key, and the plaintext migration
+— refuses with `409` and names both the reason and, where there is one, the
+remedy, so the operator is never left with a bare failure whose cause reached
+only the journal.
+
+The classification is cached, but asymmetrically: a usable key is remembered for
+the life of the process, since it is on the hot path of every wrap and unwrap and
+a slot that HMACs does not stop doing so. A failure is remembered for a few
+seconds only, because the conditions behind one are the ones that change — the
+firmware service arriving after the UI started, or something else programming
+the slot while the service runs — and a station that answered "no" once should
+not keep saying so until it is restarted.
 
 The distinction matters because the key is **not programmed at the factory**. On
 BCM2712 there is exactly one OTP key slot, id 1, and it is the device-unique
