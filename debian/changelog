@@ -23,12 +23,54 @@ rpi-sb-provisioner (2.3.5) unstable; urgency=medium
     device tree through cm0 joining the pi3 family, and drops five
     bcm2837-* device trees nothing could load.
 
-  * Keep rpi-fastbootd at 14.0.0~git20260828.5ae7d5d, the revision 2.3.4
-    shipped. The daemon in each rebuilt image is byte-identical to the one
-    in that package, so this release changes the boot files and nothing
-    else.
+  * Report the right board on a CM4, and the right MAC addresses on every
+    part before BCM2712. rpi-fastbootd read the board revision code from
+    OTP row 32, which carries it on BCM2712 and nowhere else -- on BCM2711
+    and earlier it is row 30 -- so a CM4 answered every revision-* query
+    with a field of zero and was recorded in the manufacturing database, in
+    the Connect device description and in the BOARDNAME hook variable as
+    "Unsupported Board: 0x0", with a BCM2835 in it and Sony UK as the
+    manufacturer (#352). The MAC variables read rows 50-55, which are the
+    ethernet, Wi-Fi and Bluetooth addresses on BCM2712 alone; on BCM2711
+    that span is the SHA256 of the secure-boot RSA public key and the
+    bootloader's secure-boot flags. Unprogrammed they read as zero, which
+    is the 00:00:00:00:00:00 reported against 2.3.2, but on a signed CM4
+    they would have rendered two words of the key hash as a MAC that this
+    package would then have recorded as real. Both now come from the device
+    tree, where the firmware has already resolved which row to read, and
+    OTP is consulted only where it is known to hold what is being asked
+    for. Pi 5 and CM5 were correct throughout, which is why this stood
+    since the daemon started reading OTP in February.
 
- -- Tom Dewey <tom.dewey@raspberrypi.com>  Wed, 02 Sep 2026 13:10:55 +0100
+  * Match the board type for every model below 0x10. fastbootd formatted
+    the revision code fields without zero-padding, so revision-type came
+    back as 0xA where the table in manufacturing-data reads 0x0A, and CM1,
+    3B, Zero, CM3, Zero W, 3B+ and 3A+ would all have read as "Unsupported
+    Board" even once the OTP row was corrected. The daemon now pads to the
+    field width, and manufacturing-data normalises what it receives rather
+    than trusting the width, since the gadget image on disk is not
+    necessarily the one this package shipped.
+
+  * Fail a whole-disk flash the kernel would not re-read, rather than
+    reporting success on a partition table it never adopted. BLKRRPART is
+    refused with EBUSY whenever any partition of the disk is open, and the
+    kernel's own rescan is what creates those partitions, so each re-read
+    leaves udev probing the nodes it just produced and the next one is
+    refused through no fault of the caller. rpi-imager flashes a segmented
+    image as several whole-disk writes and then mounts p1 to apply OS
+    customisation, so it took that path repeatedly and then read the
+    result: an intermittent failure to mount the boot filesystem, several
+    steps after the command that actually went wrong. partinit and partapp
+    were given this treatment in 2.3.4; the flash path was not.
+
+  * Move rpi-fastbootd to 14.0.0~git20260902.794bee3, which carries the
+    three fixes above along with folding five partition-table re-read
+    implementations into one primitive. All four gadget artefacts are
+    rebuilt against it -- the generic image, the two per-family images and
+    the pre-Pi4 bootfiles tarball -- and each was checked to carry the same
+    daemon binary as that package.
+
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Wed, 02 Sep 2026 15:48:56 +0100
 
 rpi-sb-provisioner (2.3.4) unstable; urgency=medium
 
