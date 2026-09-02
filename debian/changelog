@@ -1,3 +1,35 @@
+rpi-sb-provisioner (2.3.5) unstable; urgency=medium
+
+  * Rebuild the fastboot gadget images with the firmware the boot ROM
+    actually asks for. The fastboot configuration sets gpu_mem=16, which
+    is the condition that selects raspi-firmware's cutdown variant, and
+    the pi-gen-micro change behind the 2.3.3 rebuild stopped copying it --
+    so every image since has asked the boot ROM for a start file it does
+    not carry. A CM4 completed bootstrap and never enumerated as a
+    fastboot gadget, so triage, which udev starts on 18d1:4e40, never ran
+    and both its logs stayed empty (#352). A Zero 2 W timed out for 60
+    seconds on start_cd.elf before failing on its device tree (#353). Pi 5
+    and CM5 were unaffected throughout, and reported working, because they
+    load their firmware from EEPROM and ask for no start file at all.
+
+  * Correct the device trees in the pre-Pi4 bootfiles tarball. Since 2.3.3
+    it comes from pi-gen-micro's pi3-family build rather than the
+    all-devices one, and that target set shipped the 32-bit name for the
+    Zero 2 W -- a name the firmware asks for only when arm_64bit is unset,
+    which this image sets. The rpiboot transcript in #353 shows the device
+    asking for the bcm2710 name, being told twice that a file is not in
+    the archive, and only then falling back. The tarball now carries the
+    bcm2710-* device trees a 64-bit image is asked for, gains the CM0
+    device tree through cm0 joining the pi3 family, and drops five
+    bcm2837-* device trees nothing could load.
+
+  * Keep rpi-fastbootd at 14.0.0~git20260828.5ae7d5d, the revision 2.3.4
+    shipped. The daemon in each rebuilt image is byte-identical to the one
+    in that package, so this release changes the boot files and nothing
+    else.
+
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Wed, 02 Sep 2026 13:10:55 +0100
+
 rpi-sb-provisioner (2.3.4) unstable; urgency=medium
 
   * Refresh the fastboot gadget images against rpi-fastbootd
