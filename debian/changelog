@@ -12,6 +12,25 @@ rpi-sb-provisioner (2.3.5) unstable; urgency=medium
     and CM5 were unaffected throughout, and reported working, because they
     load their firmware from EEPROM and ask for no start file at all.
 
+  * Ship only the firmware variant the gadget images can actually load, and
+    check it while they are built. pi-gen-micro now derives the variant from
+    the config.txt going into each image rather than from a list kept beside
+    it, and refuses to pack an image that does not carry what its own config.txt
+    asks a boot ROM for -- which is the check the 2.3.3 images went out without.
+    It also rejects an image that names a cutdown start file as start_file or
+    fixup_file, which cannot select that firmware and stops the board booting;
+    gpu_mem is the only mechanism. Because gpu_mem=16 means the plain
+    firmware can never be selected, it no longer ships: 2.3MB out of the
+    pi4-family image, 3.0MB out of the pre-Pi4 tarball and 5.5MB out of the
+    all-devices image, 10.4MB in total, every byte of which was signed, cached
+    and pushed over USB to each device for nothing. A pi5-family image is given
+    neither firmware nor a start_file to look for, which is what BCM2712 wants.
+
+  * Apply the Zero 2 W clock settings in the fastboot gadget, which had never
+    taken effect. They sat under a [02W] conditional filter, and that is not a
+    filter name the firmware recognises, so it matched no board at all. The
+    Zero 2 W filter is [pi02].
+
   * Correct the device trees in the pre-Pi4 bootfiles tarball. Since 2.3.3
     it comes from pi-gen-micro's pi3-family build rather than the
     all-devices one, and that target set shipped the 32-bit name for the
