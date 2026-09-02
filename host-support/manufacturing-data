@@ -163,6 +163,16 @@ metadata_gather() {
         *)   SECURE=""  ;;
     esac
 
+    # fastbootd zero-pads the revision-code fields, but a gadget image older
+    # than that change emits "0xA" where the labels below say "0x0A" -- printf
+    # %X does not pad. The image on disk is not necessarily the one this
+    # package shipped, so normalise to two digits before matching rather than
+    # trusting the daemon's width.
+    case ${TYPE} in
+        0x?) TYPE="0x0${TYPE#0x}" ;;
+    esac
+    TYPE=$(printf '%s' "${TYPE}" | tr '[:lower:]' '[:upper:]' | sed 's/^0X/0x/')
+
     case ${TYPE} in
         "0x06") BOARD_STR="CM1" ;;
         "0x08") BOARD_STR="3B" ;;
