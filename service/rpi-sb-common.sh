@@ -619,6 +619,65 @@ classify_gold_master_os() {
     return 1
 }
 
+# The block size libsparse uses, and so the granularity fastboot's host-side
+# sparse writer can express a hole at.
+FASTBOOT_SPARSE_BLOCK_SIZE=4096
+
+# align_image_for_fastboot ${image} ${scratch_dir}
+#
+# fastboot's sparse writer ends each chunk with a don't-care running to the
+# image's end, refuses one that is not whole 4096-byte blocks, then sends a
+# header promising the chunk it skipped, and the device rejects the image.
+# Images sized in 512-byte sectors are legal and hit this (#355), so a copy
+# is zero-padded to the next boundary, past the last partition. The
+# configured image is never padded: it may be read-only or in use.
+#
+# Sets:   FASTBOOT_FLASH_IMAGE to the path to hand to fastboot.
+# Exit:   0 when usable, 1 otherwise, with the reason in
+#         FASTBOOT_FLASH_IMAGE_ERROR.
+align_image_for_fastboot() {
+    _afb_image="$1"
+    _afb_scratch="$2"
+
+    FASTBOOT_FLASH_IMAGE="${_afb_image}"
+    FASTBOOT_FLASH_IMAGE_ERROR=""
+    export FASTBOOT_FLASH_IMAGE FASTBOOT_FLASH_IMAGE_ERROR
+
+    if ! _afb_size=$(stat -c%s "${_afb_image}" 2>/dev/null); then
+        FASTBOOT_FLASH_IMAGE_ERROR="Could not determine the size of ${_afb_image}"
+        return 1
+    fi
+
+    _afb_remainder=$((_afb_size % FASTBOOT_SPARSE_BLOCK_SIZE))
+    if [ "${_afb_remainder}" -eq 0 ]; then
+        return 0
+    fi
+    _afb_padded=$((_afb_size + FASTBOOT_SPARSE_BLOCK_SIZE - _afb_remainder))
+
+    # An image already sitting in the scratch directory is a copy this run made
+    # for itself, and can be padded where it lies.
+    case "${_afb_image}" in
+        "${_afb_scratch}"/*)
+            ;;
+        *)
+            log "OS image is ${_afb_size} bytes, which is not a multiple of ${FASTBOOT_SPARSE_BLOCK_SIZE}; copying it to pad it. Rounding the image up to a ${FASTBOOT_SPARSE_BLOCK_SIZE}-byte boundary at source would avoid this copy on every device."
+            if ! cp --reflink=auto "${_afb_image}" "${_afb_scratch}"/gold-master-aligned.img; then
+                FASTBOOT_FLASH_IMAGE_ERROR="Failed to copy ${_afb_image} into ${_afb_scratch} for padding"
+                return 1
+            fi
+            FASTBOOT_FLASH_IMAGE="${_afb_scratch}/gold-master-aligned.img"
+            ;;
+    esac
+
+    if ! truncate -s "${_afb_padded}" "${FASTBOOT_FLASH_IMAGE}"; then
+        FASTBOOT_FLASH_IMAGE_ERROR="Failed to pad ${FASTBOOT_FLASH_IMAGE} to ${_afb_padded} bytes"
+        return 1
+    fi
+
+    log "Padded the OS image from ${_afb_size} to ${_afb_padded} bytes: fastboot cannot sparse an image whose length is not a multiple of ${FASTBOOT_SPARSE_BLOCK_SIZE}"
+    return 0
+}
+
 run_provision_failed_hook() {
     PROVISIONER_NAME="$1"
     HOOK_CONTEXT="${2:-provisioning}"
