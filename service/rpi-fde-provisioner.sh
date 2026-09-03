@@ -496,7 +496,8 @@ prepare_pre_boot_auth_images_as_filesystems() {
 
         sync; sync; sync;
 
-        img2simg -s "${CRYPTROOT_BOOTFS_FILE}" "${RPI_SB_WORKDIR}"/bootfs-temporary.simg
+        make_sparse_image "${CRYPTROOT_BOOTFS_FILE}" "${RPI_SB_WORKDIR}"/bootfs-temporary.simg \
+            || die "Failed to sparse the boot image"
         rm -f "${CRYPTROOT_BOOTFS_FILE}"
         announce_stop "Boot Image partition extraction"
     fi # Slow path
@@ -622,7 +623,8 @@ prepare_pre_boot_auth_images_as_bootimg() {
 
         umount "${META_BOOTIMG_MOUNT_PATH}"
         rm -rf "${META_BOOTIMG_MOUNT_PATH}"
-        img2simg -s "${TMP_DIR}"/bootfs-temporary.img "${RPI_SB_WORKDIR}"/bootfs-temporary.simg
+        make_sparse_image "${TMP_DIR}"/bootfs-temporary.img "${RPI_SB_WORKDIR}"/bootfs-temporary.simg \
+            || die "Failed to sparse the boot image"
         rm -f "${TMP_DIR}"/bootfs-temporary.img
         announce_stop "Boot Image partition extraction"
     fi # Slow path
@@ -664,7 +666,8 @@ prepare_rootfs_image() {
     else
         mount -t ext4 "${TMP_DIR}"/rootfs-original.img "${TMP_DIR}"/rpi-rootfs-img-mount
         mke2fs -t ext4 -b 4096 -d "${TMP_DIR}"/rpi-rootfs-img-mount "${RPI_SB_WORKDIR}"/rootfs-temporary.img $((TARGET_STORAGE_ROOT_EXTENT / 4096))
-        img2simg -s "${RPI_SB_WORKDIR}"/rootfs-temporary.img "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
+        make_sparse_image "${RPI_SB_WORKDIR}"/rootfs-temporary.img "${RPI_SB_WORKDIR}"/rootfs-temporary.simg \
+            || die "Failed to sparse the rootfs image"
         umount "${TMP_DIR}"/rpi-rootfs-img-mount
         rm -f "${RPI_SB_WORKDIR}"/rootfs-temporary.img
         announce_stop "Resizing OS images: Resized to $((TARGET_STORAGE_ROOT_EXTENT))"
