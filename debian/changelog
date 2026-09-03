@@ -1,3 +1,35 @@
+rpi-sb-provisioner (2.3.6) unstable; urgency=medium
+
+  * Pad an OS image whose length is not a multiple of 4096 bytes before handing
+    it to fastboot. The naked provisioner flashes the configured image as it
+    finds it, and the fastboot client sparses whatever it is given: libsparse
+    ends every chunk with a don't-care covering the rest of the declared image
+    length, refuses to emit one that is not a whole number of 4096-byte blocks,
+    and then writes a header advertising the chunk it did not write. The device
+    rejects what arrives as "not a valid sparse image" and provisioning stops
+    at WRITING-OS. A length that is a whole number of 512-byte sectors but not
+    of 4096 bytes is legal -- partition tables are counted in sectors, not in
+    libsparse blocks -- and an Ubuntu Core image built that way is how this was
+    found (#355). The configured image is never modified: one that needs
+    padding is copied first, and the log says so, because rounding the image up
+    at source saves that copy on every device.
+
+  * Stop trusting img2simg's exit status. It reports success when libsparse
+    refused to write a chunk, so a boot or rootfs sparse could be written into
+    the cache advertising one more chunk in its header than it contained, the
+    image it was built from deleted, the partition sized from that header, and
+    every device provisioned from that cache entry sent a sparse image it
+    rejects -- with nothing in the logs pointing back at the run that produced
+    it. libsparse does say so on stderr before carrying on, so anything it
+    writes there is now treated as the failure it is, the sparse is renamed
+    into the cache only once it is known to be whole, and a source whose length
+    libsparse cannot express is refused before img2simg is asked to try. The
+    images the secure boot and FDE provisioners build are all block-aligned
+    today, so this is a guard rather than a fix, and it is the same libsparse
+    behaviour behind #355.
+
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Thu, 03 Sep 2026 16:26:50 +0100
+
 rpi-sb-provisioner (2.3.5) unstable; urgency=medium
 
   * Rebuild the fastboot gadget images with the firmware the boot ROM
