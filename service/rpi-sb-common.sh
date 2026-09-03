@@ -678,6 +678,66 @@ align_image_for_fastboot() {
     return 0
 }
 
+# make_sparse_image ${source} ${destination}
+#
+# img2simg exits 0 when libsparse refuses to write a chunk, leaving a header
+# that counts one chunk more than the file holds. Cached in RPI_SB_WORKDIR,
+# that image would go to every later device, which rejects it, with nothing
+# logged against the run that made it. libsparse does print the refusal, so
+# anything on stderr is failure, and the output is renamed into place only
+# once whole. A source length that is not whole blocks, the cause (#355),
+# is refused first.
+#
+# Exit:   0 with ${destination} written, 1 otherwise and the reason logged.
+make_sparse_image() {
+    _msi_src="$1"
+    _msi_dst="$2"
+
+    if ! _msi_size=$(stat -c%s "${_msi_src}" 2>/dev/null); then
+        log "ERROR: make_sparse_image: could not determine the size of ${_msi_src}"
+        return 1
+    fi
+
+    if [ $((_msi_size % FASTBOOT_SPARSE_BLOCK_SIZE)) -ne 0 ]; then
+        log "ERROR: make_sparse_image: ${_msi_src} is ${_msi_size} bytes, which is not a multiple of ${FASTBOOT_SPARSE_BLOCK_SIZE}; libsparse cannot express the tail of it"
+        return 1
+    fi
+
+    if ! _msi_err=$(mktemp); then
+        log "ERROR: make_sparse_image: could not create a temporary file"
+        return 1
+    fi
+
+    if img2simg -s "${_msi_src}" "${_msi_dst}.tmp" 2>"${_msi_err}"; then
+        _msi_rc=0
+    else
+        _msi_rc=$?
+    fi
+
+    # `|| [ -n ... ]` so a final line without a trailing newline is not dropped.
+    while IFS= read -r _msi_line || [ -n "${_msi_line}" ]; do
+        log "img2simg: ${_msi_line}"
+        _msi_rc=1
+    done < "${_msi_err}"
+    rm -f "${_msi_err}"
+
+    if [ "${_msi_rc}" -ne 0 ]; then
+        log "ERROR: make_sparse_image: could not sparse ${_msi_src} into ${_msi_dst}"
+        rm -f "${_msi_dst}.tmp"
+        return 1
+    fi
+
+    # Renamed only once the output is known to be whole, so a failed run cannot
+    # leave a partial sparse behind as a valid-looking cache hit.
+    if ! mv "${_msi_dst}.tmp" "${_msi_dst}"; then
+        log "ERROR: make_sparse_image: could not move ${_msi_dst}.tmp into place"
+        rm -f "${_msi_dst}.tmp"
+        return 1
+    fi
+
+    return 0
+}
+
 run_provision_failed_hook() {
     PROVISIONER_NAME="$1"
     HOOK_CONTEXT="${2:-provisioning}"
@@ -1545,11 +1605,10 @@ prepare_signed_boot_simg() {
     sync
     umount "${_out_mnt}" || _fail "umount output vfat" || return 1
 
-    # Atomic rename so a partial write never appears as a valid cache hit.
-    img2simg -s "${_out_vfat}" "${_out_sparse}.tmp" \
+    # make_sparse_image() renames only once it is satisfied the output is
+    # whole, so a partial write never appears as a valid cache hit.
+    make_sparse_image "${_out_vfat}" "${_out_sparse}" \
         || _fail "img2simg output" || return 1
-    mv "${_out_sparse}.tmp" "${_out_sparse}" \
-        || _fail "mv output into cache" || return 1
 
     rm -rf "${_work}"
     return 0
