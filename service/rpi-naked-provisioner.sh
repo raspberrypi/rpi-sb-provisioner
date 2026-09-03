@@ -199,6 +199,10 @@ check_command_exists fastboot
 
 check_command_exists blockdev
 
+# Used to pad an OS image whose length is not a multiple of libsparse's block
+# size up to the next boundary; see align_image_for_fastboot().
+check_command_exists truncate
+
 check_command_exists grep
 
 check_command_exists systemd-notify
@@ -321,6 +325,12 @@ if customisation_script_is_runnable "naked-provisioner" "bootfs-mounted" || \
     announce_stop "OS Image Customisation"
 fi
 
+# Done before the erase, so an image we cannot pad costs the operator nothing.
+if ! align_image_for_fastboot "${FLASH_IMAGE}" "${TMP_DIR}"; then
+    die "${FASTBOOT_FLASH_IMAGE_ERROR}"
+fi
+FLASH_IMAGE="${FASTBOOT_FLASH_IMAGE}"
+
 record_progress "STORAGE-ERASING"
 announce_start "Erase Device Storage"
 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" erase "${RPI_DEVICE_STORAGE_TYPE}"
@@ -341,7 +351,7 @@ fastboot -s "${FLASH_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}" "${FLASH_IMA
 # (keys, certificates, unique configs), so the modified image must not linger on disk.
 if [ "${FLASH_IMAGE}" != "${GOLD_MASTER_OS_FILE}" ]; then
     rm -f "${FLASH_IMAGE}"
-    log "Deleted per-device customised image"
+    log "Deleted the temporary image copy"
 fi
 announce_stop "Writing OS images"
 
