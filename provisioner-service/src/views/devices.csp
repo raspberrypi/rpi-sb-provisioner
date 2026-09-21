@@ -185,10 +185,25 @@
             if (cb) cb.checked = hideExcludedPorts;
         }
 
+        // Nodes the filter is currently withholding. The tile view is told
+        // these explicitly: a card on screen has to come down when the rules
+        // start covering it, and it cannot infer that from the node list alone
+        // -- an absent node there means a device that has dropped off the bus,
+        // which it deliberately holds open through a re-enumeration.
+        function excludedNodes(all, shown) {
+            if (all === shown) return [];
+            const keep = new Set(shown.map(n => String(n.id)));
+            return all.filter(n => !keep.has(String(n.id)));
+        }
+
         function rerenderFromCache() {
             const shown = filterToPermitted(lastTopologyNodes);
             try { applyTopology(shown); } catch (e) { console.error('tree re-render error:', e); }
             if (window.__d3Apply) { try { window.__d3Apply(shown); } catch (e) { console.error('D3 re-render error:', e); } }
+            if (window.__tilesApply) {
+                try { window.__tilesApply(shown, [], excludedNodes(lastTopologyNodes, shown)); }
+                catch (e) { console.error('tiles re-render error:', e); }
+            }
         }
     
         function makeNodeElement(node) {
@@ -1355,11 +1370,12 @@
                         resolveHideDefault();
                         renderPortFilterBar();
                         lastTopologyNodes = msg.nodes;
-                        applyTopology(filterToPermitted(msg.nodes));
+                        const shown = filterToPermitted(msg.nodes);
+                        applyTopology(shown);
                         // Also update D3 interactive graph if active
-                        if (window.__d3Apply) { try { window.__d3Apply(filterToPermitted(msg.nodes)); } catch(e) { console.error('D3 update error:', e); } }
+                        if (window.__d3Apply) { try { window.__d3Apply(shown); } catch(e) { console.error('D3 update error:', e); } }
                         // Update tile view
-                        if (window.__tilesApply) { try { window.__tilesApply(msg.nodes, msg.removed); } catch(e) { console.error('Tiles update error:', e); } }
+                        if (window.__tilesApply) { try { window.__tilesApply(shown, msg.removed, excludedNodes(msg.nodes, shown)); } catch(e) { console.error('Tiles update error:', e); } }
                         // Then process removals explicitly from backend
                         if (Array.isArray(msg.removed)) {
                             for (const id of msg.removed) {
