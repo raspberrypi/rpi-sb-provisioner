@@ -107,6 +107,19 @@ present as fastboot. Triage checks independently of bootstrap because an
 already-provisioned board can boot straight to fastboot without passing through
 bootstrap at all.
 
+## What the web UI shows
+
+While a restriction is in force the devices page carries a filter bar naming
+the effective rules, with a **Hide excluded ports** checkbox. It applies to all
+three views at once — device cards, topology map and port tree — so a jig
+shows only its own heads, and the host's other USB devices (a network adapter,
+a keyboard, a debug cable) stay out of the operator's way.
+
+The checkbox is ticked by default whenever rules are in force, and the choice
+is remembered per browser. Untick it to see every port again: excluded ports
+are then drawn in a muted style rather than hidden, which is how you confirm a
+board is on the port you think it is, or that a rule is not matching.
+
 > **Note**
 >
 > While a restriction is in force, a device whose USB path cannot be determined

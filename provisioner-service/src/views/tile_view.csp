@@ -56,6 +56,9 @@
     /* Device seen on a USB port excluded by the usb-ports.d rules: not a
        failure, so it is muted rather than flagged. */
     .device-tile.tile-skipped { border-color: #adb5bd; background: #f6f7f8; opacity: 0.75; }
+    /* Excluded port, on the page only because "Hide excluded ports" is
+       unticked. */
+    .device-tile.tile-port-excluded { border-style: dashed; opacity: 0.7; }
     .device-tile.tile-rebooting {
         opacity: 0.6;
         animation: tileReboot 2s ease-in-out infinite;
@@ -313,7 +316,7 @@
 <div class="tiles-container" id="tiles-root">
     <div class="tiles-empty" id="tiles-empty">
         <div class="tiles-empty-icon" aria-hidden="true">&#9881;</div>
-        <div class="tiles-empty-text">No devices connected.<br>Plug in a Raspberry Pi to begin provisioning.</div>
+        <div class="tiles-empty-text" id="tiles-empty-text">No devices connected.<br>Plug in a Raspberry Pi to begin provisioning.</div>
     </div>
 </div>
 
@@ -322,6 +325,10 @@
         const tileMap = new Map();
         const container = document.getElementById('tiles-root');
         const emptyEl = document.getElementById('tiles-empty');
+        const emptyTextEl = document.getElementById('tiles-empty-text');
+        // Tells "nothing plugged in" from "nothing permitted".
+        let hiddenByFilter = 0;
+        let emptyTextShown = '';
         const STEP_NAMES = ['Bootstrap', 'Triage', 'Provisioning', 'Complete'];
         const STEP_SHORT = ['Boot', 'Check', 'Prov', 'Done'];
         const GRACE_SHORT = 5000;
@@ -553,6 +560,7 @@
             updateStepper(el, parsed);
             updateTileState(el, parsed);
             updateMeta(el, n);
+            applyPortFilterClass(el, n);
 
             el.setAttribute('data-step', String(parsed.step));
             el.setAttribute('data-step-status', parsed.status);
@@ -564,6 +572,7 @@
                 serial: serial,
                 usbPath: usbPath,
                 graceTimer: null,
+                removeTimer: null,
                 stateSince: stateStartedAt(n.history) || new Date(),
                 historyKey: ''
             };
@@ -654,8 +663,15 @@
             // trying to tell one finished module from another.
             if (n.ethMac) html += '<div class="tile-meta-row"><span class="tile-meta-label">MAC:</span><span class="tile-meta-value">' + escapeHtml(n.ethMac) + '</span></div>';
             if (n.ip) html += '<div class="tile-meta-row"><span class="tile-meta-label">IP:</span><span class="tile-meta-value">' + escapeHtml(n.ip) + '</span></div>';
-            html += '<div class="tile-meta-row"><span class="tile-meta-label">USB path:</span><span class="tile-meta-value">' + escapeHtml(String(n.id)) + '</span></div>';
+            const portNote = n.portPermitted === false ? ' \u2014 not permitted' : '';
+            html += '<div class="tile-meta-row"><span class="tile-meta-label">USB path:</span><span class="tile-meta-value">' + escapeHtml(String(n.id) + portNote) + '</span></div>';
             meta.innerHTML = html;
+        }
+
+        // Marked, not flagged: nothing went wrong, the provisioner was
+        // never going to touch this port.
+        function applyPortFilterClass(el, n) {
+            el.classList.toggle('tile-port-excluded', n.portPermitted === false);
         }
 
         function escapeHtml(str) {
@@ -673,14 +689,23 @@
 
         function removeTile(usbPath) {
             const entry = tileMap.get(usbPath);
-            if (!entry) return;
+            if (!entry || entry.removeTimer) return;
             entry.element.classList.add('tile-removing');
-            setTimeout(() => {
+            entry.removeTimer = setTimeout(() => {
                 if (entry.element.parentNode) entry.element.parentNode.removeChild(entry.element);
                 tileMap.delete(usbPath);
                 updateEmptyState();
                 try { console.log('tiles: remove ' + usbPath); } catch(e) {}
             }, 400);
+        }
+
+        // A card on its way out can be wanted again -- the filter toggled
+        // back, the device returned -- so the fade is cancellable.
+        function cancelRemoval(entry) {
+            if (!entry.removeTimer) return;
+            clearTimeout(entry.removeTimer);
+            entry.removeTimer = null;
+            entry.element.classList.remove('tile-removing');
         }
 
         function updateEmptyState() {
@@ -689,13 +714,33 @@
                 if (!e.element.classList.contains('tile-removing')) live++;
             }
             emptyEl.style.display = live > 0 ? 'none' : '';
+            // A rule set matching nothing otherwise reads as an unpowered jig.
+            const emptyText = (live === 0 && hiddenByFilter > 0)
+                ? 'No devices on a permitted USB port.<br>Untick &ldquo;Hide excluded ports&rdquo; above to see the rest.'
+                : 'No devices connected.<br>Plug in a Raspberry Pi to begin provisioning.';
+            if (emptyText !== emptyTextShown) {
+                emptyTextEl.innerHTML = emptyText;
+                emptyTextShown = emptyText;
+            }
             // Few enough devices for every tile to carry its own log.
             container.classList.toggle('tiles-detailed', live > 0 && live <= DETAIL_TILE_LIMIT);
         }
 
-        function update(nodes, removed) {
+        // hidden: nodes the port filter is withholding. Their cards go at
+        // once, not after the grace a vanished device gets: the port did not
+        // change, the rules did.
+        function update(nodes, removed, hidden) {
             if (!Array.isArray(nodes)) return;
             const deviceNodes = nodes.filter(n => isDeviceNode(n));
+            const hiddenDevices = Array.isArray(hidden) ? hidden.filter(n => isDeviceNode(n)) : [];
+            hiddenByFilter = hiddenDevices.length;
+            for (const n of hiddenDevices) {
+                const usbPath = String(n.id);
+                const entry = tileMap.get(usbPath);
+                if (!entry) continue;
+                if (entry.graceTimer) { clearTimeout(entry.graceTimer); entry.graceTimer = null; }
+                removeTile(usbPath);
+            }
             try { console.debug('tiles: update received devices=' + deviceNodes.length + ' removed=' + (removed ? removed.length : 0)); } catch(e) {}
 
             for (const n of deviceNodes) {
@@ -703,6 +748,7 @@
                 const existing = tileMap.get(usbPath);
 
                 if (existing) {
+                    cancelRemoval(existing);
                     if (existing.graceTimer) {
                         clearTimeout(existing.graceTimer);
                         existing.graceTimer = null;
@@ -745,6 +791,7 @@
                     }
 
                     updateMeta(existing.element, n);
+                    applyPortFilterClass(existing.element, n);
 
                     if (n.model) {
                         let modelBadge = existing.element.querySelector('.tile-badge-model');
@@ -771,7 +818,7 @@
                     const usbPath = String(id);
                     const entry = tileMap.get(usbPath);
                     if (!entry) continue;
-                    if (entry.graceTimer) continue;
+                    if (entry.graceTimer || entry.removeTimer) continue;
 
                     const transitional = isTransitionalState(entry.state);
                     const graceDuration = transitional ? GRACE_REBOOT : GRACE_SHORT;
