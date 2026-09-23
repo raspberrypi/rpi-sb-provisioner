@@ -317,55 +317,6 @@ check_command_exists() {
     fi
 }
 
-timeout_fatal() {
-    command="$*"
-    timeout_seconds=60
-    set +e
-    log "Running command with ${timeout_seconds}-second timeout: \"${command}\""
-    # shellcheck disable=SC2086
-    timeout ${timeout_seconds} ${command}
-    command_exit_status=$?
-    
-    # Handle different exit codes from the timeout command
-    case ${command_exit_status} in
-        0)
-            # Command completed successfully within the time limit
-            log "\"$command\" succeeded with exit code 0."
-            ;;
-        124)
-            # Exit code 124 means the command timed out (TERM signal sent but command didn't exit)
-            record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
-            die "\"${command}\" FAILED: Timed out after ${timeout_seconds} seconds (exit code 124)."
-            ;;
-        125)
-            # Exit code 125 means the timeout command itself failed
-            record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
-            die "\"${command}\" FAILED: The timeout command itself failed (exit code 125)."
-            ;;
-        126)
-            # Exit code 126 means the command was found but could not be executed
-            record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
-            die "\"${command}\" FAILED: Command found but could not be executed (exit code 126)."
-            ;;
-        127)
-            # Exit code 127 means the command was not found
-            record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
-            die "\"${command}\" FAILED: Command not found (exit code 127)."
-            ;;
-        137)
-            # Exit code 137 (128+9) means the command was killed by SIGKILL (kill -9)
-            record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
-            die "\"${command}\" FAILED: Command was killed by SIGKILL (exit code 137)."
-            ;;
-        *)
-            # Any other non-zero exit code is a general failure
-            record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
-            die "\"${command}\" FAILED: Command returned exit code ${command_exit_status}."
-            ;;
-    esac
-    set -e
-}
-
 # NOTE: get_signing_directives() and derivePublicKey() have been moved to rpi-sb-common.sh
 # Use init_signing_context() to initialize signing, then:
 #   - get_openssl_sign_args() for OpenSSL signing
@@ -735,7 +686,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                 esac
             fi
             record_progress "EEPROM-UPDATING"
-            [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal rpiboot -j "${METADATA_DIR}" -d "${SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
+            [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal_secs 60 rpiboot -j "${METADATA_DIR}" -d "${SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
             extract_board_type
         else
             # NB: config.txt is the marker the branch above uses to decide the
@@ -883,7 +834,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                     log "Normal provisioning mode (not re-provisioning)"
                 fi
                 record_progress "EEPROM-UPDATING"
-                [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal rpiboot -j "${METADATA_DIR}" -d "${SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
+                [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal_secs 60 rpiboot -j "${METADATA_DIR}" -d "${SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
             extract_board_type
             else
                 log "No key specified, skipping eeprom update"
@@ -1052,7 +1003,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                     
                     record_progress "EEPROM-UPDATING"
                     log "Updating EEPROM to latest version"
-                    [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal rpiboot -j "${METADATA_DIR}" -d "${NON_SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
+                    [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal_secs 60 rpiboot -j "${METADATA_DIR}" -d "${NON_SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
                     extract_board_type
                     log "EEPROM update completed. Device rebooted."
                 else
@@ -1078,7 +1029,7 @@ record_state "${TARGET_DEVICE_SERIAL}" "bootstrap-firmware-updated" "${TARGET_US
 announce_start "fastboot initialisation"
 record_state "${TARGET_DEVICE_SERIAL}" "bootstrap-fastboot-initialisation-started" "${TARGET_USB_PATH}"
 
-timeout_fatal rpiboot -v -j "${METADATA_DIR}" -d "${FASTBOOT_STAGING_DIR}" -p "${TARGET_USB_PATH}"
+timeout_fatal_secs 60 rpiboot -v -j "${METADATA_DIR}" -d "${FASTBOOT_STAGING_DIR}" -p "${TARGET_USB_PATH}"
 extract_board_type
 set +e
 

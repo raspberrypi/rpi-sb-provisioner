@@ -49,96 +49,6 @@ log() {
     echo "[${timestamp}] $*" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/provisioner.log
 }
 
-timeout_nonfatal() {
-    command="$*"
-    set +e
-    log "Running command with 10-second timeout: \"${command}\""
-    # shellcheck disable=SC2086
-    timeout 10 ${command}
-    command_exit_status=$?
-    
-    # Handle different exit codes from the timeout command
-    case ${command_exit_status} in
-        0)
-            # Command completed successfully within the time limit
-            log "\"$command\" succeeded with exit code 0."
-            ;;
-        124)
-            # Exit code 124 means the command timed out (TERM signal sent but command didn't exit)
-            log "\"${command}\" FAILED: Timed out after 10 seconds (exit code 124)."
-            ;;
-        125)
-            # Exit code 125 means the timeout command itself failed
-            log "\"${command}\" FAILED: The timeout command itself failed (exit code 125)."
-            ;;
-        126)
-            # Exit code 126 means the command was found but could not be executed
-            log "\"${command}\" FAILED: Command found but could not be executed (exit code 126)."
-            ;;
-        127)
-            # Exit code 127 means the command was not found
-            log "\"${command}\" FAILED: Command not found (exit code 127)."
-            ;;
-        137)
-            # Exit code 137 (128+9) means the command was killed by SIGKILL (kill -9)
-            log "\"${command}\" FAILED: Command was killed by SIGKILL (exit code 137)."
-            ;;
-        *)
-            # Any other non-zero exit code is a general failure
-            log "\"${command}\" FAILED: Command returned exit code ${command_exit_status}."
-            ;;
-    esac
-    set -e
-    return ${command_exit_status}
-}
-
-timeout_fatal() {
-    command="$*"
-    set +e
-    log "Running command with 30-second timeout: \"${command}\""
-    # shellcheck disable=SC2086
-    timeout 30 ${command}
-    command_exit_status=$?
-    
-    # Handle different exit codes from the timeout command
-    case ${command_exit_status} in
-        0)
-            # Command completed successfully within the time limit
-            log "\"$command\" succeeded with exit code 0."
-            ;;
-        124)
-            # Exit code 124 means the command timed out (TERM signal sent but command didn't exit)
-            record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "${TARGET_USB_PATH}"
-            die "\"${command}\" FAILED: Timed out after 30 seconds (exit code 124)."
-            ;;
-        125)
-            # Exit code 125 means the timeout command itself failed
-            record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "${TARGET_USB_PATH}"
-            die "\"${command}\" FAILED: The timeout command itself failed (exit code 125)."
-            ;;
-        126)
-            # Exit code 126 means the command was found but could not be executed
-            record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "${TARGET_USB_PATH}"
-            die "\"${command}\" FAILED: Command found but could not be executed (exit code 126)."
-            ;;
-        127)
-            # Exit code 127 means the command was not found
-            record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "${TARGET_USB_PATH}"
-            die "\"${command}\" FAILED: Command not found (exit code 127)."
-            ;;
-        137)
-            # Exit code 137 (128+9) means the command was killed by SIGKILL (kill -9)
-            record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "${TARGET_USB_PATH}"
-            die "\"${command}\" FAILED: Command was killed by SIGKILL (exit code 137)."
-            ;;
-        *)
-            # Any other non-zero exit code is a general failure
-            record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "${TARGET_USB_PATH}"
-            die "\"${command}\" FAILED: Command returned exit code ${command_exit_status}."
-            ;;
-    esac
-    set -e
-}
 TMP_DIR=""
 CLEANUP_DONE=0
 
@@ -569,17 +479,17 @@ record_progress "STORAGE-ERASING"
 announce_start "Erase / Partition Device Storage"
 
 # Arbitrary sleeps to handle lack of correct synchronisation in fastbootd.
-fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" erase "${RPI_DEVICE_STORAGE_TYPE}"
+timeout_fatal_secs "${FASTBOOT_ERASE_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" erase "${RPI_DEVICE_STORAGE_TYPE}"
 sleep 2
-fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem partinit "${RPI_DEVICE_STORAGE_TYPE}" DOS
+timeout_fatal_secs "${FASTBOOT_STORAGE_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem partinit "${RPI_DEVICE_STORAGE_TYPE}" DOS
 sleep 2
-fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 0c "$(simg_expanded_size "${RPI_SB_WORKDIR}"/bootfs-temporary.simg)"
+timeout_fatal_secs "${FASTBOOT_STORAGE_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 0c "$(simg_expanded_size "${RPI_SB_WORKDIR}"/bootfs-temporary.simg)"
 sleep 2
-fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 83 # Grow to fill storage
+timeout_fatal_secs "${FASTBOOT_STORAGE_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 83 # Grow to fill storage
 sleep 2
-fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem cryptinit "${RPI_DEVICE_STORAGE_TYPE}"p2 root "${RPI_DEVICE_STORAGE_CIPHER}"
+timeout_fatal_secs "${FASTBOOT_STORAGE_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem cryptinit "${RPI_DEVICE_STORAGE_TYPE}"p2 root "${RPI_DEVICE_STORAGE_CIPHER}"
 sleep 2
-fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem cryptopen "${RPI_DEVICE_STORAGE_TYPE}"p2 cryptroot
+timeout_fatal_secs "${FASTBOOT_STORAGE_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem cryptopen "${RPI_DEVICE_STORAGE_TYPE}"p2 cryptroot
 sleep 2
 announce_stop "Erase / Partition Device Storage"
 
@@ -617,9 +527,9 @@ FLASH_SPECIFIER="${FASTBOOT_TCP_FLASH_SPECIFIER:-${FASTBOOT_DEVICE_SPECIFIER}}"
 
 announce_start "Writing OS images"
 record_progress "WRITING-BOOTFS"
-fastboot -s "${FLASH_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}"p1 "${RPI_SB_WORKDIR}"/bootfs-temporary.simg
+fastboot_flash "${FLASH_SPECIFIER}" "${RPI_DEVICE_STORAGE_TYPE}"p1 "${RPI_SB_WORKDIR}"/bootfs-temporary.simg
 record_progress "WRITING-ROOTFS"
-fastboot -s "${FLASH_SPECIFIER}" flash mapper/cryptroot "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
+fastboot_flash "${FLASH_SPECIFIER}" mapper/cryptroot "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
 announce_stop "Writing OS images"
 
 record_progress "FINALISING"
@@ -629,7 +539,7 @@ metadata_gather
 run_customisation_script "sb-provisioner" "post-flash" "${FASTBOOT_DEVICE_SPECIFIER}" "${TARGET_DEVICE_SERIAL}" "${RPI_DEVICE_STORAGE_TYPE}"
 
 announce_start "Set LED status"
-fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem led PWR 0
+timeout_nonfatal_secs "${FASTBOOT_CONTROL_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem led PWR 0 || true
 announce_stop "Set LED status"
 
 record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_FINISHED}" "${TARGET_USB_PATH}"
