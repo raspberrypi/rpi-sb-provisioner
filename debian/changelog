@@ -56,10 +56,11 @@ rpi-sb-provisioner (2.3.6) unstable; urgency=medium
     provision-failed hook never ran. Cleanup also no longer loops for
     ever on a mount that will not release.
 
-  * Ask fastbootd for deferred flash writes during IDP provisioning,
-    where it offers them, so the next chunk of a partition downloads
-    while the previous one is written. A fastbootd without the feature
-    behaves as before.
+  * Ask fastbootd for deferred flash writes in every provisioner, where
+    it offers them over USB, so the next chunk of an image downloads
+    while the previous one is written. Each flash turns them on and off
+    again, so they never reach a customisation hook's own flashes. A
+    fastbootd without the feature behaves as before.
 
  -- Tom Dewey <tom.dewey@raspberrypi.com>  Thu, 03 Sep 2026 16:26:50 +0100
 
