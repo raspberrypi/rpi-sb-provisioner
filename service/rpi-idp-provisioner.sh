@@ -411,6 +411,7 @@ announce_stop "IDP Write Partitions"
 # Prefer the TCP data-plane specifier when the daemon advertises split
 # mode (-i usb+tcp); fall back to whatever the control plane is using.
 FLASH_SPECIFIER="${FASTBOOT_TCP_FLASH_SPECIFIER:-${FASTBOOT_DEVICE_SPECIFIER}}"
+probe_flash_pipeline "${FLASH_SPECIFIER}"
 
 record_progress "WRITING-OS"
 announce_start "IDP Flash Images"
