@@ -408,26 +408,10 @@ announce_start "IDP Write Partitions"
 timeout_fatal_secs "${FASTBOOT_STORAGE_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem idpwrite
 announce_stop "IDP Write Partitions"
 
-# Deferred flash writes: fastbootd answers `flash` for a sparse chunk while it
-# is still being written, so the next chunk's download overlaps the write
-# instead of queueing behind it. Negotiated, so an older fastbootd behaves as
-# before. The board stays on its USB port throughout, so one fastbootd session,
-# and one pipeline, spans every invocation below. The TCP data plane opens a
-# session per invocation and would lose the setting.
+# Prefer the TCP data-plane specifier when the daemon advertises split
+# mode (-i usb+tcp); fall back to whatever the control plane is using.
 FLASH_SPECIFIER="${FASTBOOT_TCP_FLASH_SPECIFIER:-${FASTBOOT_DEVICE_SPECIFIER}}"
-FLASH_PIPELINE=0
-if [ "${FLASH_SPECIFIER}" != "${FASTBOOT_DEVICE_SPECIFIER}" ]; then
-    log "Deferred flash writes skipped: the TCP data plane does not keep a session"
-elif timeout_nonfatal_secs "${FASTBOOT_CONTROL_TIMEOUT}" fastboot -s "${FLASH_SPECIFIER}" getvar rpi-flash-pipeline; then
-    if timeout_nonfatal_secs "${FASTBOOT_CONTROL_TIMEOUT}" fastboot -s "${FLASH_SPECIFIER}" oem flash-pipeline on; then
-        FLASH_PIPELINE=1
-        log "Deferred flash writes enabled"
-    else
-        log "Device advertises deferred flash writes but refused them; continuing without"
-    fi
-else
-    log "Device does not support deferred flash writes; continuing without"
-fi
+probe_flash_pipeline "${FLASH_SPECIFIER}"
 
 record_progress "WRITING-OS"
 announce_start "IDP Flash Images"
@@ -491,12 +475,6 @@ while true; do
     BLOCKDEV_STATE=$(printf '%s' "${BLOCKDEV}" | tr -c 'A-Za-z0-9' '-' | tr 'a-z' 'A-Z')
     record_progress "WRITING-${BLOCKDEV_STATE}"
     fastboot_flash "${FLASH_SPECIFIER}" "${BLOCKDEV}" "${FLASH_SOURCE}"
-    if [ "${FLASH_PIPELINE}" -eq 1 ]; then
-        # Collect the last chunk's write here, so its failure names this flash
-        # rather than the idpgetblk that would otherwise collect it. At most
-        # one chunk, 256 MiB, is ever outstanding.
-        timeout_fatal_secs "$(flash_timeout_for 268435456)" fastboot -s "${FLASH_SPECIFIER}" oem flash-commit
-    fi
     FLASH_END=$(date +%s)
     FLASH_DURATION=$((FLASH_END - FLASH_START))
     log "Flashed ${SIMG} to ${BLOCKDEV} in ${FLASH_DURATION}s"

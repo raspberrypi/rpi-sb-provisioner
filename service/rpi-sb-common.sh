@@ -212,10 +212,47 @@ flash_timeout_for() {
     esac
 }
 
+# Deferred flash writes: fastbootd answers `flash` for a sparse chunk while it
+# is still being written, so the next chunk's download overlaps the write.
+# Switched on for each flash and off again after it, so it never reaches a
+# hook's own flashes and the second staging buffer is freed between flashes.
+FLASH_PIPELINE=0
+
+# Arguments: $1 = the specifier flashes will use. Sets FLASH_PIPELINE when
+# fastbootd offers deferred writes. USB only: one session spans every
+# invocation while the board stays on its port, but each network connection
+# is a new session, which would discard the setting.
+probe_flash_pipeline() {
+    FLASH_PIPELINE=0
+    case "$1" in
+        tcp:*|udp:*)
+            log "Deferred flash writes skipped: flashing over the network"
+            return 0
+            ;;
+    esac
+    if timeout_nonfatal_secs "${FASTBOOT_CONTROL_TIMEOUT}" fastboot -s "$1" getvar rpi-flash-pipeline; then
+        FLASH_PIPELINE=1
+        log "Device offers deferred flash writes"
+    else
+        log "Device does not offer deferred flash writes; continuing without"
+    fi
+}
+
 # Arguments: $1 = fastboot specifier, $2 = partition, $3 = image file.
 fastboot_flash() {
     _ff_size="$(stat -c%s "$3" 2>/dev/null || echo unknown)"
+    _ff_deferred=0
+    if [ "${FLASH_PIPELINE}" -eq 1 ] && \
+       timeout_nonfatal_secs "${FASTBOOT_CONTROL_TIMEOUT}" fastboot -s "$1" oem flash-pipeline on; then
+        _ff_deferred=1
+    fi
     timeout_fatal_secs "$(flash_timeout_for "${_ff_size}")" fastboot -s "$1" flash "$2" "$3"
+    if [ "${_ff_deferred}" -eq 1 ]; then
+        # Collect the last chunk's write here, so its failure names this flash.
+        # At most one chunk, fastbootd's 256 MiB download limit, is outstanding.
+        timeout_fatal_secs "$(flash_timeout_for 268435456)" fastboot -s "$1" oem flash-commit
+        timeout_nonfatal_secs "${FASTBOOT_CONTROL_TIMEOUT}" fastboot -s "$1" oem flash-pipeline off || true
+    fi
 }
 
 # Prints fastboot's raw getvar output for $1. A timeout is logged to stderr,
