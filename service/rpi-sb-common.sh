@@ -922,6 +922,17 @@ run_customisation_script() {
         case $- in
             *e*) ERROR_EXIT_WAS_SET=1 ;;
         esac
+        # Operator code, bounded like everything else. A hook legitimately
+        # doing long work can raise RPI_SB_HOOK_TIMEOUT; zero is not accepted,
+        # because timeout(1) reads it as no limit at all.
+        HOOK_TIMEOUT="${RPI_SB_HOOK_TIMEOUT:-1800}"
+        case "${HOOK_TIMEOUT}" in
+            ''|*[!0-9]*|0)
+                log "Ignoring RPI_SB_HOOK_TIMEOUT='${HOOK_TIMEOUT}': not a positive number of seconds"
+                HOOK_TIMEOUT=1800
+                ;;
+        esac
+
         set +e
         export_customisation_env
         if [ "${STAGE_NAME}" = "post-flash" ]; then
@@ -931,7 +942,7 @@ run_customisation_script() {
         if [ "${STAGE_NAME}" = "post-flash" ]; then
             # For post-flash stage, pass device info that can be used with fastboot.
             # TARGET_USB_PATH and TARGET_DEVICE_PATH are also exported (issue #273).
-            "${SCRIPT_PATH}" "${FASTBOOT_DEVICE_SPECIFIER}" "${TARGET_DEVICE_SERIAL}" "${RPI_DEVICE_STORAGE_TYPE}"
+            timeout -k 10 "${HOOK_TIMEOUT}" "${SCRIPT_PATH}" "${FASTBOOT_DEVICE_SPECIFIER}" "${TARGET_DEVICE_SERIAL}" "${RPI_DEVICE_STORAGE_TYPE}"
         elif [ "${STAGE_NAME}" = "provision-started" ]; then
             # For provision-started stage, forward (fastboot specifier, serial,
             # storage type) so hooks can signal programming rigs (e.g. LED).
@@ -939,12 +950,12 @@ run_customisation_script() {
             FASTBOOT_SPEC_ARG="$3"
             TARGET_SERIAL_ARG="$4"
             STORAGE_TYPE_ARG="$5"
-            "${SCRIPT_PATH}" "${FASTBOOT_SPEC_ARG}" "${TARGET_SERIAL_ARG}" "${STORAGE_TYPE_ARG}"
+            timeout -k 10 "${HOOK_TIMEOUT}" "${SCRIPT_PATH}" "${FASTBOOT_SPEC_ARG}" "${TARGET_SERIAL_ARG}" "${STORAGE_TYPE_ARG}"
         elif [ "${STAGE_NAME}" = "provision-failed" ]; then
             if [ "${PROVISION_FAILED_CONTEXT:-provisioning}" = "bootstrap" ]; then
-                "${SCRIPT_PATH}" "$3" "$4" "$5" "$6"
+                timeout -k 10 "${HOOK_TIMEOUT}" "${SCRIPT_PATH}" "$3" "$4" "$5" "$6"
             else
-                "${SCRIPT_PATH}" "$3" "$4" "$5"
+                timeout -k 10 "${HOOK_TIMEOUT}" "${SCRIPT_PATH}" "$3" "$4" "$5"
             fi
         elif [ "${STAGE_NAME}" = "bootstrap" ]; then
             # For bootstrap stage, pass device detection info
@@ -952,12 +963,12 @@ run_customisation_script() {
             TARGET_DEVICE_FAMILY_ARG="$4"
             TARGET_USB_PATH_ARG="$5"
             TARGET_DEVICE_PATH_ARG="$6"
-            "${SCRIPT_PATH}" "${TARGET_DEVICE_SERIAL_ARG}" "${TARGET_DEVICE_FAMILY_ARG}" "${TARGET_USB_PATH_ARG}" "${TARGET_DEVICE_PATH_ARG}"
+            timeout -k 10 "${HOOK_TIMEOUT}" "${SCRIPT_PATH}" "${TARGET_DEVICE_SERIAL_ARG}" "${TARGET_DEVICE_FAMILY_ARG}" "${TARGET_USB_PATH_ARG}" "${TARGET_DEVICE_PATH_ARG}"
         else
             # For filesystem mount stages, pass mount points
             BOOT_MOUNT="$3"
             ROOTFS_MOUNT="$4"
-            "${SCRIPT_PATH}" "${BOOT_MOUNT}" "${ROOTFS_MOUNT}"
+            timeout -k 10 "${HOOK_TIMEOUT}" "${SCRIPT_PATH}" "${BOOT_MOUNT}" "${ROOTFS_MOUNT}"
         fi
         # Capture exit code immediately, before restoring set -e
         SCRIPT_EXIT_CODE=$?
@@ -968,6 +979,9 @@ run_customisation_script() {
         if [ $SCRIPT_EXIT_CODE -eq 0 ]; then
             announce_stop "Customisation script ${SCRIPT_NAME} completed successfully"
         else
+            case "${SCRIPT_EXIT_CODE}" in
+                124) log "ERROR: Customisation script ${SCRIPT_NAME} did not finish within ${HOOK_TIMEOUT} seconds (RPI_SB_HOOK_TIMEOUT)" ;;
+            esac
             announce_stop "Customisation script ${SCRIPT_NAME} failed with exit code ${SCRIPT_EXIT_CODE}"
             log "ERROR: Customisation script ${SCRIPT_NAME} failed with exit code ${SCRIPT_EXIT_CODE}"
             return $SCRIPT_EXIT_CODE

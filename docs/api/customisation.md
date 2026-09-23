@@ -306,6 +306,14 @@ columns in uppercase — for example `BOARDNAME`, `ETH_MAC`, `OS_IMAGE_SHA256`,
 `CUSTOMER_KEY_FINGERPRINT`, and `CUSTOMER_KEY_LABEL`. Integer fields that
 would be SQL `NULL` are exported as empty strings.
 
+## Time limit
+
+Every hook must finish within `RPI_SB_HOOK_TIMEOUT` seconds, 1800 by default.
+A hook still running at that point is sent `SIGTERM`, then `SIGKILL` ten seconds
+later, and is reported as failed with exit code 124. Raise the limit in the
+config file if a hook legitimately needs longer. See
+[config_vars.md](../config_vars.md#rpi_sb_hook_timeout).
+
 ## provision-failed
 
 The `provision-failed` hook runs when bootstrap, triage, or provisioning exits
