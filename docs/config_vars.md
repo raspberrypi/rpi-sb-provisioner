@@ -351,6 +351,14 @@ The workdir contains signed boot images, signed bootfiles, EEPROM staging assets
 
 Persistent data such as uploaded images, manufacturing databases, state databases, logs and configuration are not stored in the workdir and are not removed by workdir cache invalidation.
 
+## RPI_SB_HOOK_TIMEOUT
+
+**Optional**
+
+The longest a customisation hook may run, in seconds. Defaults to `1800`. A hook still running at the limit is stopped and treated as failed. Set this higher if a hook legitimately takes longer, for example one that flashes further images. Zero is not accepted, because every step of provisioning must have a limit.
+
+The provisioning services also have their own overall limits: six hours for a provisioner, one hour for bootstrap and ten minutes for triage. A higher hook limit may also need a systemd drop-in raising `RuntimeMaxSec` for the service that runs the hook.
+
 # Format of the config file
 
 The config file is a simple text file, with one variable per line. Variables are specified in the format:
