@@ -1043,7 +1043,15 @@ unmount() {
         DIR=$1
     fi
 
+    # Bounded: with errexit off, as in cleanup, a busy mount spun here for ever.
+    _um_tries=0
     while mount | grep -q "$DIR"; do
+        _um_tries=$((_um_tries + 1))
+        if [ "${_um_tries}" -gt 5 ]; then
+            log "Giving up on unmounting ${DIR}: still mounted after 5 attempts"
+            return 1
+        fi
+        [ "${_um_tries}" -eq 1 ] || sleep 1
         locs=$(mount | grep "$DIR" | cut -f 3 -d ' ' | sort -r)
         for loc in $locs; do
             umount "$loc"

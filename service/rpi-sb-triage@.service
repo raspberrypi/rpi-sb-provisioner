@@ -6,3 +6,5 @@ Type=oneshot
 ExecStart=/usr/bin/rpi-sb-triage.sh %I
 EnvironmentFile=/usr/share/rpi-sb-provisioner/defaults/config
 EnvironmentFile=-/etc/rpi-sb-provisioner/config
+# A oneshot unit has no start timeout by default, so a hang here lasted for ever.
+TimeoutStartSec=10min

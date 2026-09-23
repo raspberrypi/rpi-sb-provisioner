@@ -209,7 +209,12 @@ cleanup() {
 
     exit ${returnvalue}
 }
-trap cleanup EXIT INT TERM
+# Signals exit with their own status so cleanup sees a failure. Trapped
+# directly, cleanup read the last command's status, often 0, and recorded a
+# killed run as a success.
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 ### Start the provisioner phase
 

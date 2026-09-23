@@ -6,3 +6,6 @@ Type=notify
 ExecStart=/usr/bin/rpi-naked-provisioner.sh %I
 EnvironmentFile=/usr/share/rpi-sb-provisioner/defaults/config
 EnvironmentFile=-/etc/rpi-sb-provisioner/config
+# Backstop for any hang the script's own timeouts miss. Generous, because the
+# largest flash budgets run to hours; override with a drop-in if needed.
+RuntimeMaxSec=6h

@@ -8,3 +8,5 @@ ExecStart=/usr/bin/rpi-sb-bootstrap.sh /%I
 # '/' is needed - otherwise triage does not use correct address of device
 EnvironmentFile=/usr/share/rpi-sb-provisioner/defaults/config
 EnvironmentFile=-/etc/rpi-sb-provisioner/config
+# Backstop for any hang the script's own timeouts miss; override with a drop-in.
+RuntimeMaxSec=1h
