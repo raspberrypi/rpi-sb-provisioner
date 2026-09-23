@@ -99,42 +99,6 @@ customisation_script_is_runnable() {
     [ -x "${SCRIPT_PATH}" ]
 }
 
-# TODO: Refactor these two functions to use the same logic, but with different consequences for failure.
-timeout_nonfatal() {
-    command="$*"
-    set +e
-    # shellcheck disable=SC2086
-    timeout 10 ${command}
-    command_exit_status=$?
-    if [ ${command_exit_status} -eq 124 ]; then
-        log "\"${command}\" failed, timed out."
-    elif [ ${command_exit_status} -ne 0 ]; then
-        log "\"${command}\" failed, exit status: ${command_exit_status}"
-    else
-        log "\"$command\" succeeded."
-    fi
-    set -e
-    return ${command_exit_status}
-}
-
-timeout_fatal() {
-    command="$*"
-    set +e
-    # shellcheck disable=SC2086
-    timeout 120 ${command}
-    command_exit_status=$?
-    if [ ${command_exit_status} -eq 124 ]; then
-        record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "${TARGET_USB_PATH}"
-        die "\"${command}\" failed, timed out."
-    elif [ ${command_exit_status} -ne 0 ]; then
-        record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "${TARGET_USB_PATH}"
-        die "\"$command\" failed, exit status: ${command_exit_status}"
-    else
-        log "\"$command\" succeeded."
-    fi
-    set -e
-}
-
 cleanup() {
     # Capture the exit status that triggered the trap BEFORE any other
     # command runs, otherwise $? is clobbered by the guard/assignment below
@@ -333,7 +297,7 @@ FLASH_IMAGE="${FASTBOOT_FLASH_IMAGE}"
 
 record_progress "STORAGE-ERASING"
 announce_start "Erase Device Storage"
-fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" erase "${RPI_DEVICE_STORAGE_TYPE}"
+timeout_fatal_secs "${FASTBOOT_ERASE_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" erase "${RPI_DEVICE_STORAGE_TYPE}"
 sleep 3
 announce_stop "Erase Device Storage"
 
@@ -344,7 +308,7 @@ setup_fastboot_and_id_vars "${FASTBOOT_DEVICE_SPECIFIER}"
 # mode (-i usb+tcp); fall back to whatever the control plane is using.
 FLASH_SPECIFIER="${FASTBOOT_TCP_FLASH_SPECIFIER:-${FASTBOOT_DEVICE_SPECIFIER}}"
 record_progress "WRITING-OS"
-fastboot -s "${FLASH_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}" "${FLASH_IMAGE}"
+fastboot_flash "${FLASH_SPECIFIER}" "${RPI_DEVICE_STORAGE_TYPE}" "${FLASH_IMAGE}"
 
 # If we customised the image, delete the modified copy immediately after flash.
 # The bootfs-mounted/rootfs-mounted scripts may have injected per-device material
@@ -357,7 +321,7 @@ announce_stop "Writing OS images"
 
 record_progress "FINALISING"
 announce_start "Set LED status"
-fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem led PWR 0
+timeout_nonfatal_secs "${FASTBOOT_CONTROL_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem led PWR 0 || true
 announce_stop "Set LED status"
 
 metadata_gather

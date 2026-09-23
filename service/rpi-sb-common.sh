@@ -114,6 +114,121 @@ with_lock() {
     return $?
 }
 
+# =============================================================================
+# Bounded command execution
+# =============================================================================
+# The fastboot client waits for ever for a device that has gone away, or for a
+# TCP address that never answers, so no fastboot call may run unbounded. Each
+# kind of call has its own budget; flash budgets scale with the payload.
+# =============================================================================
+: "${FASTBOOT_CONTROL_TIMEOUT:=30}"   # getvar, led, idpgetblk, stage
+: "${FASTBOOT_STORAGE_TIMEOUT:=120}"  # partition tables, LUKS format and open
+: "${FASTBOOT_ERASE_TIMEOUT:=900}"    # whole-device discard; eMMC can be slow
+BOUNDED_KILL_AFTER=10
+
+# Runs "$@" under timeout(1), streaming its output and keeping a copy. Sets
+# BOUNDED_RC, BOUNDED_OUT (the copy, which the caller removes) and
+# BOUNDED_REMOTE, the reason fastboot quotes when the device refuses a
+# command. Output is captured because that reason otherwise reaches only the
+# journal, never the per-device log the UI shows.
+run_bounded() {
+    _rb_secs="$1"
+    shift
+    case $- in *e*) _rb_errexit=1 ;; *) _rb_errexit=0 ;; esac
+    set +e
+    log "Running with ${_rb_secs}s timeout: \"$*\""
+    BOUNDED_OUT="$(mktemp)"
+    _rb_rcfile="$(mktemp)"
+    # POSIX sh reports a pipeline's last status, so the command's goes via a file.
+    { timeout -k "${BOUNDED_KILL_AFTER}" "${_rb_secs}" "$@" 2>&1; echo $? > "${_rb_rcfile}"; } | tee "${BOUNDED_OUT}"
+    BOUNDED_RC="$(cat "${_rb_rcfile}" 2>/dev/null)"
+    [ -n "${BOUNDED_RC}" ] || BOUNDED_RC=1
+    rm -f "${_rb_rcfile}"
+    BOUNDED_REMOTE="$(sed -n "s/.*FAILED (remote: '\(.*\)').*/\1/p" "${BOUNDED_OUT}" | tail -n 1)"
+    [ "${_rb_errexit}" -eq 0 ] || set -e
+}
+
+# Logs why the last run_bounded command ($1, for the message) failed, and sets
+# BOUNDED_WHY for the caller's own message.
+bounded_report() {
+    if [ -n "${BOUNDED_REMOTE}" ]; then
+        BOUNDED_WHY="the device refused it: ${BOUNDED_REMOTE}"
+    else
+        case "${BOUNDED_RC}" in
+            124) BOUNDED_WHY="timed out after ${_rb_secs} seconds" ;;
+            137) BOUNDED_WHY="killed after ignoring the ${_rb_secs}-second timeout, or killed externally" ;;
+            *)   BOUNDED_WHY="exit code ${BOUNDED_RC}" ;;
+        esac
+    fi
+    log "\"$1\" FAILED: ${BOUNDED_WHY}"
+    if [ -z "${BOUNDED_REMOTE}" ]; then
+        log "Last output:"
+        tail -n 20 "${BOUNDED_OUT}" 2>/dev/null | while IFS= read -r _br_line; do
+            log "  ${_br_line}"
+        done
+    fi
+    rm -f "${BOUNDED_OUT}"
+}
+
+# Arguments: $1 = timeout in seconds, remaining = command. Aborts on failure.
+timeout_fatal_secs() {
+    run_bounded "$@"
+    shift
+    if [ "${BOUNDED_RC}" -eq 0 ]; then
+        rm -f "${BOUNDED_OUT}"
+        log "\"$*\" succeeded"
+        return 0
+    fi
+    bounded_report "$*"
+    record_abort_once "${TARGET_DEVICE_SERIAL}" "${TARGET_USB_PATH}"
+    die "\"$*\" FAILED: ${BOUNDED_WHY}"
+}
+
+# As timeout_fatal_secs, but returns the command's status instead of aborting.
+timeout_nonfatal_secs() {
+    run_bounded "$@"
+    shift
+    if [ "${BOUNDED_RC}" -eq 0 ]; then
+        rm -f "${BOUNDED_OUT}"
+        log "\"$*\" succeeded"
+        return 0
+    fi
+    bounded_report "$*"
+    return "${BOUNDED_RC}"
+}
+
+# Budget for a flash, derived from the payload. The rate is a little over half
+# the 9.9 MiB/s measured end to end in #346, whose 600-second limit killed a
+# healthy 5.7 GiB flash at 96%. Too generous only delays noticing a wedged
+# board; too tight destroys a run that was going to succeed.
+FLASH_ASSUMED_RATE_BYTES=5767168  # 5.5 MiB/s, transfer and write together
+FLASH_TIMEOUT_BASE=120            # connection setup, sparse parse, housekeeping
+
+# Arguments: $1 = payload size in bytes. An unknown size gets an hour.
+flash_timeout_for() {
+    case "$1" in
+        ''|*[!0-9]*) echo 3600 ;;
+        *) echo $(( FLASH_TIMEOUT_BASE + $1 / FLASH_ASSUMED_RATE_BYTES )) ;;
+    esac
+}
+
+# Arguments: $1 = fastboot specifier, $2 = partition, $3 = image file.
+fastboot_flash() {
+    _ff_size="$(stat -c%s "$3" 2>/dev/null || echo unknown)"
+    timeout_fatal_secs "$(flash_timeout_for "${_ff_size}")" fastboot -s "$1" flash "$2" "$3"
+}
+
+# Prints fastboot's raw getvar output for $1. A timeout is logged to stderr,
+# because callers capture stdout as the value.
+bounded_getvar() {
+    _bg_rc=0
+    _bg_out="$(timeout -k 5 "${FASTBOOT_CONTROL_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar "$1" 2>&1)" || _bg_rc=$?
+    case "${_bg_rc}" in
+        124|137) log "getvar $1: no answer within ${FASTBOOT_CONTROL_TIMEOUT} seconds" >&2 ;;
+    esac
+    printf '%s\n' "${_bg_out}"
+}
+
 # Cleans up orphaned resources (temp dirs older than MAX_TEMP_DIR_AGE_HOURS)
 cleanup_orphans() {
     mkdir -p "$TEMP_BASE" 2>/dev/null || true
@@ -264,7 +379,7 @@ setup_fastboot_and_id_vars() {
     FASTBOOT_TCP_FLASH_SPECIFIER=""
     export FASTBOOT_TCP_FLASH_SPECIFIER
 
-    timeout_fatal fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar version
+    timeout_fatal_secs "${FASTBOOT_CONTROL_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar version
     TARGET_DEVICE_SERIAL="$(get_variable serialno)"
 
     # Returns "yes" if the device-side fastbootd is running in -i usb+tcp
@@ -276,11 +391,11 @@ setup_fastboot_and_id_vars() {
     USE_IPV4=
     USE_IPV6=
     set +e
-    IPV6_ADDRESS="$(fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar ipv6-address 2>&1 | awk '/^ipv6-address:/ {print $2}')"
-    (timeout_nonfatal fastboot -s tcp:"${IPV6_ADDRESS}" getvar version)
+    IPV6_ADDRESS="$(bounded_getvar ipv6-address | awk '/^ipv6-address:/ {print $2}')"
+    (timeout_nonfatal_secs 10 fastboot -s tcp:"${IPV6_ADDRESS}" getvar version)
     USE_IPV6=$?
-    IPV4_ADDRESS="$(fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar ipv4-address 2>&1 | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}')"
-    (timeout_nonfatal fastboot -s tcp:"${IPV4_ADDRESS}" getvar version)
+    IPV4_ADDRESS="$(bounded_getvar ipv4-address | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}')"
+    (timeout_nonfatal_secs 10 fastboot -s tcp:"${IPV4_ADDRESS}" getvar version)
     USE_IPV4=$?
     set -e
 
@@ -866,7 +981,7 @@ run_customisation_script() {
 # the first newline -- use get_variable_pem() for multi-line values such as
 # public-key/private-key, which the gadget returns as armoured PEM.
 get_variable() {
-    fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar "$1" 2>&1 | grep -oP "${1}"': \K[^\r\n]*' || true
+    bounded_getvar "$1" | grep -oP "${1}"': \K[^\r\n]*' || true
 }
 
 # Retrieve a fastboot variable whose value is an armoured PEM block, printing
@@ -882,7 +997,7 @@ get_variable() {
 # which rpi-fastbootd does at startup and again immediately after
 # `oem fwcrypto init`.
 get_variable_pem() {
-    _gvp_output=$(fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar "$1" 2>&1 | tr -d '\r') || true
+    _gvp_output=$(bounded_getvar "$1" | tr -d '\r') || true
     _gvp_pem=$(printf '%s\n' "${_gvp_output}" | \
         sed -n '/-----BEGIN /,/-----END /{
             s/^.*\(-----BEGIN \)/\1/

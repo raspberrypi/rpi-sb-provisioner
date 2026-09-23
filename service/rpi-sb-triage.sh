@@ -78,97 +78,6 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-timeout_nonfatal() {
-    command="$*"
-    set +e
-    log "Running command with 10-second timeout: \"${command}\""
-    # shellcheck disable=SC2086
-    timeout 10 ${command}
-    command_exit_status=$?
-    
-    # Handle different exit codes from the timeout command
-    case ${command_exit_status} in
-        0)
-            # Command completed successfully within the time limit
-            log "\"$command\" succeeded with exit code 0."
-            ;;
-        124)
-            # Exit code 124 means the command timed out (TERM signal sent but command didn't exit)
-            log "\"${command}\" FAILED: Timed out after 10 seconds (exit code 124)."
-            ;;
-        125)
-            # Exit code 125 means the timeout command itself failed
-            log "\"${command}\" FAILED: The timeout command itself failed (exit code 125)."
-            ;;
-        126)
-            # Exit code 126 means the command was found but could not be executed
-            log "\"${command}\" FAILED: Command found but could not be executed (exit code 126)."
-            ;;
-        127)
-            # Exit code 127 means the command was not found
-            log "\"${command}\" FAILED: Command not found (exit code 127)."
-            ;;
-        137)
-            # Exit code 137 (128+9) means the command was killed by SIGKILL (kill -9)
-            log "\"${command}\" FAILED: Command was killed by SIGKILL (exit code 137)."
-            ;;
-        *)
-            # Any other non-zero exit code is a general failure
-            log "\"${command}\" FAILED: Command returned exit code ${command_exit_status}."
-            ;;
-    esac
-    set -e
-    return ${command_exit_status}
-}
-
-timeout_fatal() {
-    command="$*"
-    set +e
-    log "Running command with 30-second timeout: \"${command}\""
-    # shellcheck disable=SC2086
-    timeout 30 ${command}
-    command_exit_status=$?
-    
-    # Handle different exit codes from the timeout command
-    case ${command_exit_status} in
-        0)
-            # Command completed successfully within the time limit
-            log "\"$command\" succeeded with exit code 0."
-            ;;
-        124)
-            # Exit code 124 means the command timed out (TERM signal sent but command didn't exit)
-            record_state "${TARGET_DEVICE_SERIAL}" "${TRIAGE_ABORTED}" "${TARGET_USB_PATH}"
-            die "\"${command}\" FAILED: Timed out after 30 seconds (exit code 124)."
-            ;;
-        125)
-            # Exit code 125 means the timeout command itself failed
-            record_state "${TARGET_DEVICE_SERIAL}" "${TRIAGE_ABORTED}" "${TARGET_USB_PATH}"
-            die "\"${command}\" FAILED: The timeout command itself failed (exit code 125)."
-            ;;
-        126)
-            # Exit code 126 means the command was found but could not be executed
-            record_state "${TARGET_DEVICE_SERIAL}" "${TRIAGE_ABORTED}" "${TARGET_USB_PATH}"
-            die "\"${command}\" FAILED: Command found but could not be executed (exit code 126)."
-            ;;
-        127)
-            # Exit code 127 means the command was not found
-            record_state "${TARGET_DEVICE_SERIAL}" "${TRIAGE_ABORTED}" "${TARGET_USB_PATH}"
-            die "\"${command}\" FAILED: Command not found (exit code 127)."
-            ;;
-        137)
-            # Exit code 137 (128+9) means the command was killed by SIGKILL (kill -9)
-            record_state "${TARGET_DEVICE_SERIAL}" "${TRIAGE_ABORTED}" "${TARGET_USB_PATH}"
-            die "\"${command}\" FAILED: Command was killed by SIGKILL (exit code 137)."
-            ;;
-        *)
-            # Any other non-zero exit code is a general failure
-            record_state "${TARGET_DEVICE_SERIAL}" "${TRIAGE_ABORTED}" "${TARGET_USB_PATH}"
-            die "\"${command}\" FAILED: Command returned exit code ${command_exit_status}."
-            ;;
-    esac
-    set -e
-}
-
 # Load config early so the image summary is populated before any
 # record_state call -- otherwise the device-details page shows an empty
 # image for the lifetime of triage and only fills in later, which looks
@@ -226,7 +135,7 @@ setup_fastboot_and_id_vars "${TARGET_DEVICE_SERIAL}"
 # already exists", so we can rely on the exit status alone.
 record_progress "DEVICE-KEY-CHECKING"
 log "Ensuring device firmware crypto key is provisioned"
-timeout_fatal fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem fwcrypto init
+timeout_fatal_secs "${FASTBOOT_CONTROL_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem fwcrypto init
 
 KEYPAIR_DIR="${LOG_DIRECTORY}/${TARGET_DEVICE_SERIAL}"/keypair
 if [ -d "${RPI_DEVICE_RETRIEVE_KEYPAIR}" ]; then
