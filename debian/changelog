@@ -165,6 +165,56 @@ rpi-sb-provisioner (2.3.6) unstable; urgency=medium
     directory unchecked, so a crafted request could delete or read any path
     on the host as root.
 
+  * Refuse out-of-range and malformed input instead of misbehaving:
+    - The code scanner reported a blank code as a device in the
+      manufacturing database whenever a record had no DUID.
+    - A device address containing a NUL byte showed another device's page,
+      because the lookup stopped at the NUL. Device addresses must now look
+      like a serial or a USB path.
+    - Settings sent as a list or object, or as a body that is not a JSON
+      object, and API token labels that were blank or not text, failed with
+      a server error or were accepted. They are now refused.
+    - Uploads with a bad name or type, and deleting a hook with no script,
+      now report the operator's mistake (400 or 404) rather than a server
+      error.
+    - The manufacturing API ignored an offset given without a limit.
+
+  * Save, upload, enable, disable and delete customisation scripts only at
+    the provisioners' hook points. Saving and uploading wrote any name into
+    the scripts directory, and deleting a name that was not a hook failed
+    with a server error rather than saying why.
+
+  * Make the provisioning scripts' state-change notifications reach the web
+    UI. The handler was registered by reference to a variable that no longer
+    existed, so every notification was refused and the UI only noticed
+    changes on its periodic rescan. It failed the same way in 2.3.5.
+
+  * Show the audit log when it is first opened. With no limit chosen the
+    query asked SQLite for LIMIT '', which matched nothing, so the log
+    looked empty until a limit was picked from the filter. This dates from
+    the audit log's introduction.
+
+  * Filter the audit log by the times chosen. The start and end were
+    compared as text against a differently written timestamp, so a start
+    time dropped its whole day and an end time took in all of its day.
+
+  * Let the code scanner use cameras below 720p. It demanded at least
+    1280x720, so a basic webcam failed with an empty "Error initializing
+    camera" message.
+
+  * Return from a device's page to the devices view that was in use. The
+    back link read the view from a setting the devices page no longer
+    writes, so it always went back to the device cards.
+
+  * Start the web UI promptly without the internet. Its check for a newer
+    release ran before it began serving, with no time limit, so behind a
+    proxy or firewall that swallows connections the UI never came up. The
+    check now gives up after 10 seconds.
+
+  * Remove the fetch-repo-package-list and rpi-package-download units. They
+    were never enabled, nothing used them, they could not work on current
+    systemd, and they did not verify what they downloaded.
+
   * Pad an OS image whose length is not a multiple of 4096 bytes before handing
     it to fastboot. The naked provisioner flashes the configured image as it
     finds it, and the fastboot client sparses whatever it is given: libsparse
