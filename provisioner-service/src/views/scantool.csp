@@ -330,11 +330,12 @@
                     hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, formats);
                     hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
                     
-                    // Set up high-resolution constraints with preference for rear camera
+                    // Prefer a high-resolution rear camera, but take what there is:
+                    // a minimum refused every camera below 720p outright.
                     const constraints = {
                         video: {
-                            width: { min: 1280, ideal: 1920 },
-                            height: { min: 720, ideal: 1080 },
+                            width: { ideal: 1920 },
+                            height: { ideal: 1080 },
                             facingMode: { ideal: 'environment' } // Prefer rear camera
                         }
                     };
@@ -389,7 +390,7 @@
                     })
                     .catch(err => {
                         console.error('Error initializing camera:', err);
-                        showError('Error initializing camera: ' + err.message);
+                        showError('Error initializing camera: ' + (err.message || err.name || err));
                     });
                 })
                 .catch((err) => {
