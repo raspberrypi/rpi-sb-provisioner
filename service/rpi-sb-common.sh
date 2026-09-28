@@ -125,6 +125,7 @@ with_lock() {
 : "${FASTBOOT_STORAGE_TIMEOUT:=120}"  # partition tables, LUKS format and open
 : "${FASTBOOT_ERASE_TIMEOUT:=900}"    # whole-device discard; eMMC can be slow
 BOUNDED_KILL_AFTER=10
+: "${FASTBOOT_PRESENCE_TIMEOUT:=10}"  # is the board there, before a long call
 
 # Runs "$@" under timeout(1), streaming its output and keeping a copy. Sets
 # BOUNDED_RC, BOUNDED_OUT (the copy, which the caller removes) and
@@ -138,6 +139,18 @@ run_bounded() {
     set +e
     log "Running with ${_rb_secs}s timeout: \"$*\""
     BOUNDED_OUT="$(mktemp)"
+    BOUNDED_ABSENT=0
+    # A budget is sized for the work, not for a board that has gone: the
+    # client waits out all of it, fifteen minutes for an erase and an hour
+    # for a large flash. So a long call first asks whether anybody is there.
+    if [ "$1" = fastboot ] && [ "$2" = -s ] && [ "${_rb_secs}" -gt "${FASTBOOT_PRESENCE_TIMEOUT}" ] &&
+       ! timeout -k 5 "${FASTBOOT_PRESENCE_TIMEOUT}" fastboot -s "$3" getvar version > /dev/null 2>&1; then
+        echo "the board did not answer within ${FASTBOOT_PRESENCE_TIMEOUT} seconds" > "${BOUNDED_OUT}"
+        BOUNDED_RC=124 BOUNDED_REMOTE="" BOUNDED_ABSENT=1
+        _rb_secs=${FASTBOOT_PRESENCE_TIMEOUT}
+        [ "${_rb_errexit}" -eq 0 ] || set -e
+        return 0
+    fi
     _rb_rcfile="$(mktemp)"
     # POSIX sh reports a pipeline's last status, so the command's goes via a file.
     { timeout -k "${BOUNDED_KILL_AFTER}" "${_rb_secs}" "$@" 2>&1; echo $? > "${_rb_rcfile}"; } | tee "${BOUNDED_OUT}"
@@ -155,7 +168,11 @@ bounded_report() {
         BOUNDED_WHY="the device refused it: ${BOUNDED_REMOTE}"
     else
         case "${BOUNDED_RC}" in
-            124) BOUNDED_WHY="timed out after ${_rb_secs} seconds" ;;
+            124) if [ "${BOUNDED_ABSENT:-0}" -eq 1 ]; then
+                     BOUNDED_WHY="the board did not answer within ${_rb_secs} seconds, so it was not started"
+                 else
+                     BOUNDED_WHY="timed out after ${_rb_secs} seconds"
+                 fi ;;
             137) BOUNDED_WHY="killed after ignoring the ${_rb_secs}-second timeout, or killed externally" ;;
             *)   BOUNDED_WHY="exit code ${BOUNDED_RC}" ;;
         esac
