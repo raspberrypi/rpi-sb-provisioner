@@ -2,6 +2,13 @@
 
 Every endpoint requires an operator: a system account in the `rpi-sb-provisioner` group. The service runs as root, so operator access is root-equivalent; grant it as you would `sudo`.
 
+The exceptions, unless `RPI_SB_PROVISIONER_PUBLIC_DASHBOARD` is turned off, are these `GET` requests, which anyone may make:
+
+- `/` and `/devices`, and `/ws/devices` for live updates;
+- `/devices/<serial>` or `/devices/<usb-path>`, which then omits the device's logs and per-device overrides;
+- `/scantool` and `GET /api/v2/verify-qrcode`;
+- `/auth/session`, which reports an empty user.
+
 ## In a browser
 
 Open <http://localhost:3142> and sign in with your system username and password. A session lasts 12 hours, or 2 hours without use, and ends within a minute if the account leaves the group.
