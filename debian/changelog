@@ -71,6 +71,35 @@ rpi-sb-provisioner (2.3.6) unstable; urgency=medium
     keypair, as documented, rather than one directory deeper, where the
     device key API could not find them. Existing pairs are moved on upgrade.
 
+  * SECURITY: Escape what others control before the web UI shows it. The
+    audit log wrote user agents, addresses and paths into the page as markup,
+    and anyone who can reach the sign-in page chooses those; journal lines,
+    error messages and an uploaded image's metadata were written the same
+    way. Script planted there ran with the operator's session.
+
+  * SECURITY: Escape the device detail page, its logs and the USB topology
+    tooltip as well, which devices can write into, and keep the Connect API
+    key out of the journal when the configuration is read. Refuse sign-in
+    redirects that browsers would send to another site, and throttle
+    sign-in per address, so one client cannot lock out the rest. Found by an
+    independent review of this release.
+
+  * Refuse to be shown in a frame, so no other page can steer an operator's
+    clicks, and bound the size of requests made before signing in.
+
+  * SECURITY: Load nothing from other sites. The script editor fetched
+    jQuery, the Ace editor and Font Awesome from public CDNs, so a station
+    off the internet had no editor, and code from those sites ran with the
+    operator's session, which can write hooks that run as root. Ace 1.44.0
+    now ships in the package (checked against the npm registry), jQuery and
+    Font Awesome are gone, and the editor falls back to a plain text box if
+    Ace cannot start.
+
+  * Record the real client address in the audit log. X-Forwarded-For was
+    believed from anyone, so a client could name any address it liked; it is
+    now used only from a local reverse proxy. The test-mode header, whose
+    secret value was in the public source, is gone.
+
   * Pad an OS image whose length is not a multiple of 4096 bytes before handing
     it to fastboot. The naked provisioner flashes the configured image as it
     finds it, and the fastboot client sparses whatever it is given: libsparse
