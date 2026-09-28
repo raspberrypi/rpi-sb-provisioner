@@ -129,10 +129,12 @@ class Browser:
 
     # --- sessions --------------------------------------------------------
 
-    def sign_in(self, user=None, password=None, next_path=None):
+    def sign_in(self, user=None, password=None, next_path=None, here=False):
+        """Signs in. here: use the sign-in form already open, keeping its next."""
         user = USER if user is None else user
         password = PASSWORD if password is None else password
-        self.get("/login" + (f"?next={next_path}" if next_path else ""), settle=False)
+        if not here:
+            self.get("/login" + (f"?next={next_path}" if next_path else ""), settle=False)
         self.el("#username").clear()
         self.el("#username").send_keys(user)
         # Chromium can restore a form's earlier contents; typing onto them
@@ -163,7 +165,8 @@ class Browser:
     def signed_in(self):
         return self.d.execute_async_script(
             "const done = arguments[0];"
-            "fetch('/auth/session').then(r => r.ok ? r.json() : null).then(done, () => done(null));")
+            "fetch('/auth/session').then(r => r.ok ? r.json() : null)"
+            ".then(s => done(s && s.user ? s : null), () => done(null));")
 
     def cookie(self, name):
         return self.d.get_cookie(name)
