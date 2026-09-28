@@ -12,6 +12,8 @@
 #include <sstream>
 #include <filesystem>
 #include <sqlite3.h>
+#include <algorithm>
+#include <regex>
 
 #include "include/audit.h"
 #include "auth.h"
@@ -327,9 +329,26 @@ namespace provisioner {
             
             // Get query parameters for filtering
             std::string eventType = req->getParameter("event_type");
-            std::string startDate = req->getParameter("start_date");
-            std::string endDate = req->getParameter("end_date");
-            std::string limit = req->getParameter("limit");  // Default to 100 entries
+            // The browser sends datetime-local, "YYYY-MM-DDTHH:MM", but entries
+            // are stored as "YYYY-MM-DD HH:MM:SS". Compared as they were, 'T'
+            // sorts after ' ', so a start dropped its whole day and an end
+            // took all of its day. Anything else is not a date: ignored.
+            const auto asStoredTime = [](std::string v) -> std::string {
+                static const std::regex shape(R"((\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(:\d{2})?)");
+                std::smatch m;
+                if (!std::regex_match(v, m, shape)) return "";
+                return m[1].str() + " " + m[2].str() + (m[3].matched ? m[3].str() : ":00");
+            };
+            std::string startDate = asStoredTime(req->getParameter("start_date"));
+            std::string endDate = asStoredTime(req->getParameter("end_date"));
+            // Bound as an integer: an empty string bound as LIMIT matched
+            // nothing, so the log looked empty unless a limit was picked.
+            int limit = 100;
+            try {
+                const std::string limitParam = req->getParameter("limit");
+                if (!limitParam.empty()) limit = std::clamp(std::stoi(limitParam), 1, 1000);
+            } catch (const std::exception &) {
+            }
             
             // Open the audit database
             sqlite3* db;
@@ -402,8 +421,7 @@ namespace provisioner {
                 sqlite3_bind_text(stmt, bindIndex++, endDate.c_str(), -1, SQLITE_STATIC);
             }
             
-            // Always bind the limit parameter
-            sqlite3_bind_text(stmt, bindIndex, limit.c_str(), -1, SQLITE_STATIC);
+            sqlite3_bind_int(stmt, bindIndex, limit);
             
             // Process query results
             std::vector<std::map<std::string, std::string>> auditEntries;
@@ -454,9 +472,10 @@ namespace provisioner {
                 viewData.insert("audit_entries", auditEntries);
                 viewData.insert("currentPage", std::string("auditlog"));
                 viewData.insert("event_type", eventType);
-                viewData.insert("start_date", startDate);
-                viewData.insert("end_date", endDate);
-                viewData.insert("limit", limit);
+                // Back in the form as the browser sent them, for datetime-local.
+                viewData.insert("start_date", startDate.empty() ? std::string() : req->getParameter("start_date"));
+                viewData.insert("end_date", endDate.empty() ? std::string() : req->getParameter("end_date"));
+                viewData.insert("limit", std::to_string(limit));
                 
                 auto resp = HttpResponse::newHttpViewResponse("auditlog.csp", viewData);
                 callback(resp);
