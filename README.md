@@ -170,6 +170,8 @@ Sign in with your usual account on the provisioning computer. Only accounts in t
 
     sudo adduser <username> rpi-sb-provisioner
 
+The devices page and the code scanner can be viewed without signing in, so a screen on the production line can show progress. Everything else, including a device's logs, needs an operator. To require signing in for everything, turn off **Show devices and the code scanner without signing in** under Options, or set `RPI_SB_PROVISIONER_PUBLIC_DASHBOARD` empty.
+
 Treat membership like `sudo` access: the web interface runs as root, and an operator can do anything the provisioner can, including running customisation scripts as root.
 
 The web interface only accepts requests addressed to this computer (`localhost`, its host name, or one of its IP addresses). If you put it behind a reverse proxy with its own name, start `rpi-provisioner-ui` with `--allowed-host <name>`.

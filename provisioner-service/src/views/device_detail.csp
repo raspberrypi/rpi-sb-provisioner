@@ -427,6 +427,7 @@
         <%c++ } %>
     </div>
 
+    <%c++ if (!@@.get<bool>("anonymous")) { %>
     <div class="flags-section">
         <h2>Per-device Overrides</h2>
         <p class="section-description">
@@ -499,6 +500,12 @@
         <h2>Triage Log</h2>
         <div class="log-content"><%c++ $$ << HttpViewData::htmlTranslate(@@.get<std::string>("triage_log")); %></div>
     </div>
+    <%c++ } else { %>
+    <div class="signin-prompt" style="background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 24px; margin-bottom: 24px;">
+        <a id="signin-for-more" href="/login?next=<%c++ $$ << HttpViewData::htmlTranslate(drogon::utils::urlEncodeComponent("/devices/" + @@.get<std::string>("device.serial"))); %>">Sign in</a>
+        to see this device's logs and per-device overrides.
+    </div>
+    <%c++ } %>
     </main>
 
     <script>

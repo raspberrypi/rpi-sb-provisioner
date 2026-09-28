@@ -25,6 +25,7 @@
 #include <sys/stat.h>
 #include <fnmatch.h>
 #include "utils.h"
+#include "auth.h"
 #include "include/audit.h"
 
 using namespace drogon;
@@ -104,7 +105,9 @@ namespace provisioner { std::string getTopologySnapshotString(); }
 class DevicesWebSocketController : public drogon::WebSocketController<DevicesWebSocketController> {
 public:
     static std::vector<drogon::WebSocketConnectionPtr> subscribers;
+    static std::vector<drogon::WebSocketConnectionPtr> anonymous;
     static std::mutex subscribersMutex;
+    static constexpr size_t kMaxAnonymous = 32;
 
     static void broadcast(const std::string &message) {
         std::lock_guard<std::mutex> lock(subscribersMutex);
@@ -125,10 +128,22 @@ public:
     }
 
     void handleNewConnection(const drogon::HttpRequestPtr& req, const drogon::WebSocketConnectionPtr& wsConnPtr) override {
-        (void)req;
+        bool refused = false;
         {
             std::lock_guard<std::mutex> lock(subscribersMutex);
-            subscribers.push_back(wsConnPtr);
+            // Viewers who have not signed in share a cap, so they cannot
+            // hold open enough sockets to starve the UI.
+            if (provisioner::auth::username(req).empty()) {
+                refused = anonymous.size() >= kMaxAnonymous;
+                if (!refused) anonymous.push_back(wsConnPtr);
+            }
+            if (!refused) subscribers.push_back(wsConnPtr);
+        }
+        if (refused) {
+            // Outside the lock: closing calls handleConnectionClosed at once,
+            // which takes it again.
+            wsConnPtr->forceClose();
+            return;
         }
         // Send initial snapshot
         wsConnPtr->send(provisioner::getTopologySnapshotString());
@@ -137,6 +152,7 @@ public:
     void handleConnectionClosed(const drogon::WebSocketConnectionPtr& wsConnPtr) override {
         std::lock_guard<std::mutex> lock(subscribersMutex);
         subscribers.erase(std::remove(subscribers.begin(), subscribers.end(), wsConnPtr), subscribers.end());
+        anonymous.erase(std::remove(anonymous.begin(), anonymous.end(), wsConnPtr), anonymous.end());
     }
 
     WS_PATH_LIST_BEGIN
@@ -145,6 +161,7 @@ public:
 };
 
 std::vector<drogon::WebSocketConnectionPtr> DevicesWebSocketController::subscribers;
+std::vector<drogon::WebSocketConnectionPtr> DevicesWebSocketController::anonymous;
 std::mutex DevicesWebSocketController::subscribersMutex;
 
 // (removed incorrect forward declaration of anonymous-namespace function)
@@ -1678,6 +1695,7 @@ namespace provisioner {
                 }
                 viewData.insert("devices", devicesList);
                 viewData.insert("currentPage", std::string("devices"));
+                viewData.insert("anonymous", auth::username(req).empty());
                 resp = HttpResponse::newHttpViewResponse("devices.csp", viewData);
             } else {
                 // JSON response for API clients
@@ -1882,9 +1900,14 @@ namespace provisioner {
                     return {};
                 };
                 
-                provisioner_log = tryReadLog(serialDir, endpointDir, "provisioner.log");
-                bootstrap_log = tryReadLog(serialDir, endpointDir, "bootstrap.log");
-                triage_log = tryReadLog(serialDir, endpointDir, "triage.log");
+                // Logs can hold whatever a hook prints, and flags change what
+                // the next run does: a viewer who has not signed in sees neither.
+                const bool signedIn = !auth::username(req).empty();
+                if (signedIn) {
+                    provisioner_log = tryReadLog(serialDir, endpointDir, "provisioner.log");
+                    bootstrap_log = tryReadLog(serialDir, endpointDir, "bootstrap.log");
+                    triage_log = tryReadLog(serialDir, endpointDir, "triage.log");
+                }
 
                 // Query last 10 state changes for this device.
                 // When the device was looked up by endpoint (USB path), query
@@ -1923,7 +1946,8 @@ namespace provisioner {
                 // lowercased 8-char truncation, so findSpecialFlagFile probes
                 // both forms.
                 std::vector<std::map<std::string, std::string>> flagsList;
-                for (const auto &fd : specialFlagCatalogue()) {
+                static const std::vector<SpecialFlagInfo> noFlags;
+                for (const auto &fd : signedIn ? specialFlagCatalogue() : noFlags) {
                     std::map<std::string, std::string> flagMap;
                     flagMap["id"] = fd.id;
                     flagMap["label"] = fd.label;
@@ -1958,6 +1982,7 @@ namespace provisioner {
                 viewData.insert("flags", flagsList);
                 viewData.insert("stateHistory", stateHistory);
                 viewData.insert("currentPage", std::string("devices"));
+                viewData.insert("anonymous", !signedIn);
                 resp = HttpResponse::newHttpViewResponse("device_detail.csp", viewData);
             } else {
                 Json::Value root;
