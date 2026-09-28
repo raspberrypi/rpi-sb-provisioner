@@ -166,6 +166,14 @@ This tool has a simple web interface for configuration. Open it in your browser:
 
     xdg-open http://localhost:3142
 
+Sign in with your usual account on the provisioning computer. Only accounts in the `rpi-sb-provisioner` group can sign in. Installing the package adds the first user (the account created when Raspberry Pi OS was set up) to this group. To let someone else in, run:
+
+    sudo adduser <username> rpi-sb-provisioner
+
+Treat membership like `sudo` access: the web interface runs as root, and an operator can do anything the provisioner can, including running customisation scripts as root.
+
+The web interface only accepts requests addressed to this computer (`localhost`, its host name, or one of its IP addresses). If you put it behind a reverse proxy with its own name, start `rpi-provisioner-ui` with `--allowed-host <name>`.
+
 You will see a web page with several tabs. Click the **Options** tab to configure your provisioning settings.
 
 ## Step 3: Configure Options

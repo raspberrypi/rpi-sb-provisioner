@@ -583,7 +583,7 @@
         
         try {
             const response = await fetch('/generate-boot-package?name=' + encodeURIComponent(name), {
-                method: 'GET'
+                method: 'POST'
             });
             
             if (response.ok) {

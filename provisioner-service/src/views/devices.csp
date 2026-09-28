@@ -1580,7 +1580,7 @@
         async function injectTestScenario(scenario) {
             try {
                 testStatus.textContent = 'Loading ' + scenario + '\u2026';
-                const resp = await fetch('/devices/_test/' + scenario);
+                const resp = await fetch('/devices/_test/' + scenario, { method: 'POST' });
                 if (resp.ok) {
                     const data = await resp.json();
                     testModeActive = data.testMode;

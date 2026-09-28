@@ -87,6 +87,25 @@ nav.rpi-navbar {
     color: white;
 }
 
+.rpi-signout-form {
+    display: inline;
+    margin: 0 8px 0 0;
+}
+
+.rpi-signout-button {
+    background: transparent;
+    color: white;
+    border: 1px solid #777;
+    border-radius: 3px;
+    padding: 8px 12px;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.rpi-signout-button:hover {
+    background-color: #0066cc;
+}
+
 /* Responsive adjustments */
 @media (max-width: 1200px) {
     .rpi-navbar a {
@@ -125,7 +144,7 @@ nav.rpi-navbar {
         <div class="warning-title">Security Warning: Public Network Binding Detected</div>
         <div class="warning-text">
             This provisioner is bound to <strong><%c++ $$ << g_listenerAddress; %></strong> and may be accessible from external networks.
-            This service is intended for local use only. Consider binding to 127.0.0.1 or implementing authentication.
+            Anyone who can reach it can try to sign in. Bind to 127.0.0.1 unless remote access is needed, and sign in remotely only over HTTPS.
         </div>
     </div>
 </div>
@@ -179,6 +198,77 @@ nav.rpi-navbar {
             <%c++ } %>
         </span>
         <a href="https://github.com/raspberrypi/rpi-sb-provisioner" target="_blank" class="rpi-github-link">GitHub</a>
+        <span class="rpi-version-info" id="rpi-signed-in-user"></span>
+        <form method="post" action="/logout" class="rpi-signout-form">
+            <button type="submit" class="rpi-signout-button">Sign out</button>
+        </form>
     </div>
 </nav>
+<script>
+// Every state-changing request must carry the session's CSRF token. Attach it
+// here, once, so no page can forget: fetch, XMLHttpRequest and plain forms.
+(function () {
+    if (window.__rpiCsrfInstalled) return;
+    window.__rpiCsrfInstalled = true;
+
+    function token() {
+        var m = document.cookie.match(/(?:^|;\s*)rpi_sb_csrf=([^;]*)/);
+        return m ? decodeURIComponent(m[1]) : '';
+    }
+    function sameOrigin(url) {
+        try { return new URL(url, location.href).origin === location.origin; } catch (e) { return false; }
+    }
+    function changesState(method) {
+        method = (method || 'GET').toUpperCase();
+        return method !== 'GET' && method !== 'HEAD';
+    }
+
+    var originalFetch = window.fetch;
+    window.fetch = function (input, init) {
+        var url = input instanceof Request ? input.url : String(input);
+        var method = (init && init.method) || (input instanceof Request ? input.method : 'GET');
+        if (changesState(method) && sameOrigin(url)) {
+            init = Object.assign({}, init);
+            var headers = new Headers(init.headers || (input instanceof Request ? input.headers : undefined));
+            if (!headers.has('X-CSRF-Token')) headers.set('X-CSRF-Token', token());
+            init.headers = headers;
+        }
+        return originalFetch.call(this, input, init);
+    };
+
+    var open = XMLHttpRequest.prototype.open;
+    var setHeader = XMLHttpRequest.prototype.setRequestHeader;
+    var send = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.open = function (method, url) {
+        this.__rpiNeedsCsrf = changesState(method) && sameOrigin(url);
+        return open.apply(this, arguments);
+    };
+    XMLHttpRequest.prototype.setRequestHeader = function (name, value) {
+        if (String(name).toLowerCase() === 'x-csrf-token') this.__rpiNeedsCsrf = false;
+        return setHeader.apply(this, arguments);
+    };
+    XMLHttpRequest.prototype.send = function () {
+        if (this.__rpiNeedsCsrf) setHeader.call(this, 'X-CSRF-Token', token());
+        return send.apply(this, arguments);
+    };
+
+    // A multipart body is not visible to the server's gate, so forms carry the
+    // token in the query string instead.
+    document.addEventListener('submit', function (event) {
+        var form = event.target;
+        if (!(form instanceof HTMLFormElement) || !changesState(form.method) || !sameOrigin(form.action)) return;
+        var url = new URL(form.action, location.href);
+        url.searchParams.set('_csrf_token', token());
+        form.action = url.toString();
+    }, true);
+
+    fetch('/auth/session', { headers: { 'Accept': 'application/json' } })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (s) {
+            var el = document.getElementById('rpi-signed-in-user');
+            if (s && s.user && el) el.textContent = s.user;
+        })
+        .catch(function () {});
+})();
+</script>
 <%view-end%> 

@@ -2675,7 +2675,7 @@ namespace provisioner {
             );
 
             stream->setStreamReader(std::move(reader));
-        });
+        }, {Post});
 
         app.registerHandler("/get-boot-package-info", [](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
             LOG_INFO << "Images::getBootPackageInfo";
@@ -2861,7 +2861,7 @@ namespace provisioner {
             auto resp = drogon::HttpResponse::newHttpJsonResponse(result);
             resp->setStatusCode(drogon::k200OK);
             callback(resp);
-        });
+        }, {Post});
 
         app.registerHandler("/download-boot-package", [](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
             LOG_INFO << "Images::downloadBootPackage";
@@ -3120,6 +3120,6 @@ namespace provisioner {
                 callback(resp);
                 return;
             }
-        });
+        }, {Post});
     }
 } // namespace provisioner

@@ -278,7 +278,7 @@ std::string currentPage = "customisation";
                           
                           <button onclick="deleteScript('<%c++ $$ << hookFilename; %>')" class="cust-btn cust-btn-danger cust-btn-sm" aria-label="Delete <%c++ $$ << hookFilename; %> script">Delete</button>
                         <%c++ } else { %>
-                          <a href="/customisation/create-script?script=<%c++ $$ << hookFilename; %>" class="cust-btn cust-btn-success cust-btn-sm" aria-label="Create <%c++ $$ << hookFilename; %> script">Create Script</a>
+                          <form method="post" action="/customisation/create-script?script=<%c++ $$ << hookFilename; %>" style="display: inline;"><button type="submit" class="cust-btn cust-btn-success cust-btn-sm" aria-label="Create <%c++ $$ << hookFilename; %> script">Create Script</button></form>
                         <%c++ } %>
                       </div>
                     </div>
@@ -464,7 +464,7 @@ function disableScript(filename) {
   
   // Use GET method since that's what the server expects
   fetch('/customisation/disable-script?script=' + encodeURIComponent(baseScriptName), {
-    method: 'GET'
+    method: 'POST'
   })
   .then(response => {
     console.log(`Disable script response status: ${response.status}`);
@@ -578,7 +578,7 @@ function enableScript(filename) {
   
   // Use GET method since that's what the server expects
   fetch('/customisation/enable-script?script=' + encodeURIComponent(baseScriptName), {
-    method: 'GET'
+    method: 'POST'
   })
   .then(response => {
     console.log(`Enable script response status: ${response.status}`);
@@ -681,7 +681,7 @@ function deleteScript(filename) {
     console.log(`Using script base name: ${baseScriptName}`);
     
     fetch('/customisation/delete-script?script=' + encodeURIComponent(baseScriptName), {
-      method: 'GET'
+      method: 'POST'
     })
     .then(response => {
       console.log(`Delete script response status: ${response.status}`);
@@ -716,7 +716,7 @@ function deleteScript(filename) {
         if (actionsDiv) {
           // Replace with a single "Create Script" button
           actionsDiv.innerHTML = `
-            <a href="/customisation/create-script?script=${encodeURIComponent(filename)}" class="cust-btn cust-btn-success cust-btn-sm" aria-label="Create ${filename} script">Create Script</a>
+            <form method="post" action="/customisation/create-script?script=${encodeURIComponent(filename)}" style="display: inline;"><button type="submit" class="cust-btn cust-btn-success cust-btn-sm" aria-label="Create ${filename} script">Create Script</button></form>
           `;
         }
       } else {

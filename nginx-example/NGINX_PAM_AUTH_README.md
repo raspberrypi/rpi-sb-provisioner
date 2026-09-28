@@ -2,6 +2,13 @@
 
 This configuration sets up nginx as a reverse proxy for services on ports 3142 (HTTP) and 3143 (HTTPS) with HTTP Basic Authentication verified against system PAM accounts.
 
+## The web UI now has its own sign-in
+
+Since 2.3.6, `rpi-provisioner-ui` asks for a system account in the `rpi-sb-provisioner` group itself, so this proxy is no longer what keeps people out. It is still useful for serving the UI under a proper name and certificate. Two things are needed:
+
+- Start `rpi-provisioner-ui` with `--allowed-host your-domain.com`, or it will refuse requests addressed to the proxy's name (HTTP 421).
+- Keep `proxy_set_header Host $host;`. The UI checks that the browser's `Origin` matches `Host`, so rewriting `Host` to `localhost` breaks every save.
+
 ## Files Included
 
 - **nginx-reverse-proxy.conf** - Main nginx configuration with PAM authentication
