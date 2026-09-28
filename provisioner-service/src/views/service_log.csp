@@ -57,7 +57,7 @@
         }
         .pagination-button {
             padding: 8px 16px;
-            background-color: #007bff;
+            background-color: #0062cc;
             color: white;
             border: none;
             border-radius: 3px;

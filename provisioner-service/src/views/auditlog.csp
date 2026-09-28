@@ -134,12 +134,12 @@
         
         .event-type-file {
             background-color: #fff7e6;
-            color: #fa8c16;
+            color: #ad4e00;
         }
         
         .event-type-systemd {
             background-color: #f6ffed;
-            color: #52c41a;
+            color: #237804;
         }
         
         .success-true {
@@ -147,7 +147,7 @@
         }
         
         .success-false {
-            color: red;
+            color: #c0392b;
         }
         
         .success-unknown {

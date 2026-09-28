@@ -167,7 +167,7 @@
         }
 
         .flag-feedback.success {
-            color: #28a745;
+            color: #1e7e34;
         }
 
         .flag-feedback.error {
@@ -209,8 +209,8 @@
             z-index: 1;
         }
         .detail-step.step-complete .detail-step-circle {
-            background: #28a745;
-            border-color: #28a745;
+            background: #1e7e34;
+            border-color: #1e7e34;
             color: #fff;
         }
         .detail-step.step-active .detail-step-circle {
@@ -235,7 +235,7 @@
             margin-top: 6px;
             white-space: nowrap;
         }
-        .detail-step.step-complete .detail-step-label { color: #28a745; }
+        .detail-step.step-complete .detail-step-label { color: #1e7e34; }
         .detail-step.step-active .detail-step-label { color: #e0a800; font-weight: 700; }
         .detail-step.step-error .detail-step-label { color: #dc3545; }
         .detail-step-line {
@@ -256,7 +256,7 @@
             background: #ccc;
             z-index: 0;
         }
-        .detail-step.step-complete .detail-step-line { background: #28a745; }
+        .detail-step.step-complete .detail-step-line { background: #1e7e34; }
 
         @media (max-width: 600px) {
             .detail-progress { padding: 14px 12px 10px; }
@@ -280,7 +280,7 @@
             align-items: center;
             gap: 6px;
             font-size: 0.8rem;
-            color: #888;
+            color: #595959;
             float: right;
             margin-top: 4px;
         }
@@ -289,7 +289,7 @@
             border-radius: 50%;
             background: #ccc;
         }
-        .ws-dot.connected { background: #28a745; }
+        .ws-dot.connected { background: #1e7e34; }
         .ws-dot.reconnecting { background: #ffc107; animation: wsPulse 1s ease-in-out infinite; }
         @keyframes wsPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
 
@@ -336,7 +336,7 @@
                 font-size: 0.75rem;
                 text-transform: uppercase;
                 letter-spacing: 0.5px;
-                color: #888;
+                color: #595959;
             }
         }
     </style>
@@ -393,7 +393,7 @@
             auto historyData = @@.get<std::vector<std::map<std::string, std::string>>>("stateHistory");
             if (historyData.empty()) {
         %>
-        <p style="color: #888; font-style: italic; text-align: center; padding: 12px 0;">No state history recorded.</p>
+        <p style="color: #595959; font-style: italic; text-align: center; padding: 12px 0;">No state history recorded.</p>
         <%c++ } else { %>
         <table style="width: 100%; border-collapse: collapse;">
             <thead>
@@ -408,10 +408,10 @@
                 std::string hState = entry.at("state");
                 std::string hTimestamp = entry.at("timestamp");
 
-                std::string badgeColor = "#6c757d";
-                if (hState == "complete") badgeColor = "#28a745";
+                std::string badgeColor = "#5c636a";
+                if (hState == "complete") badgeColor = "#1e7e34";
                 else if (hState == "error") badgeColor = "#dc3545";
-                else if (hState == "provisioning") badgeColor = "#007bff";
+                else if (hState == "provisioning") badgeColor = "#0062cc";
                 else if (hState == "bootstrap") badgeColor = "#17a2b8";
                 else if (hState == "triage") badgeColor = "#e0a800";
             %>
@@ -567,7 +567,7 @@
                 }
                 html += '<div class="' + cls + '">';
                 if (i > 0) {
-                    var leftColor = (i - 1 < parsed.step) || (i - 1 === parsed.step && parsed.status === 'complete') ? '#28a745' : '#ccc';
+                    var leftColor = (i - 1 < parsed.step) || (i - 1 === parsed.step && parsed.status === 'complete') ? '#1e7e34' : '#ccc';
                     html += '<div class="detail-step-line-left" style="background:' + leftColor + '"></div>';
                 }
                 if (i < STEPS.length - 1) {

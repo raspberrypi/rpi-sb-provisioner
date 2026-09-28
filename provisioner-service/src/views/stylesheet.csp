@@ -312,8 +312,8 @@ button:hover, .upload-button:hover, .submit-button:hover {
 /* Button Colors - Primary (Blue) */
 .btn-primary, .cust-btn-primary {
     color: #fff;
-    background-color: #007bff;
-    border-color: #007bff;
+    background-color: #0062cc;
+    border-color: #0062cc;
 }
 
 .btn-primary:hover, .cust-btn-primary:hover {
@@ -325,8 +325,8 @@ button:hover, .upload-button:hover, .submit-button:hover {
 /* Button Colors - Success (Green) */
 .btn-success, .cust-btn-success {
     color: #fff;
-    background-color: #28a745;
-    border-color: #28a745;
+    background-color: #1e7e34;
+    border-color: #1e7e34;
 }
 
 .btn-success:hover, .cust-btn-success:hover {
@@ -364,8 +364,8 @@ button:hover, .upload-button:hover, .submit-button:hover {
 /* Button Colors - Secondary (Gray) */
 .btn-secondary, .cust-btn-secondary {
     color: #fff;
-    background-color: #6c757d;
-    border-color: #6c757d;
+    background-color: #5c636a;
+    border-color: #5c636a;
 }
 
 .btn-secondary:hover, .cust-btn-secondary:hover {
@@ -647,13 +647,12 @@ pre {
     position: absolute;
     right: 10px;
     bottom: 10px;
-    background-color: rgba(0,0,0,0.6);
+    background-color: rgba(0,0,0,0.75);
     color: white;
     padding: 4px 8px;
     border-radius: 4px;
     font-size: 12px;
     z-index: 100;
-    opacity: 0.8;
 }
 
 /* Page Header Layout */
@@ -665,7 +664,7 @@ pre {
 
 /* Export Button */
 .export-btn {
-    background-color: #4CAF50;
+    background-color: #2e7d32;
     color: white;
     padding: 8px 15px;
     border: none;
@@ -806,7 +805,7 @@ input:checked + .toggle-slider:before {
 }
 
 .security-enabled {
-    color: #28a745;
+    color: #1e7e34;
     font-size: 14px;
 }
 
@@ -816,7 +815,7 @@ input:checked + .toggle-slider:before {
 }
 
 .security-unknown {
-    color: #6c757d;
+    color: #5c636a;
     font-size: 14px;
 }
 

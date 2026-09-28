@@ -140,7 +140,7 @@ std::string currentPage = "customisation";
    resting state for most hooks, not something that needs attention. */
 .hook-missing {
   background-color: #e9ecef;
-  color: #6c757d;
+  color: #5c636a;
 }
 
 .provisioner-id {
@@ -151,7 +151,7 @@ std::string currentPage = "customisation";
 
 .hook-filename {
   font-size: 12px;
-  color: #777;
+  color: #595959;
   margin-bottom: 10px;
 }
 
