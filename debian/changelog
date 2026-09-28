@@ -1,5 +1,41 @@
 rpi-sb-provisioner (2.3.6) unstable; urgency=medium
 
+  * SECURITY: Require operators to sign in to the web UI. It runs as root and
+    asked for no credentials at all, so any local user -- or any web page open
+    in a browser on the provisioning host -- could save a customisation hook,
+    mark it executable, and have it run as root on the next device, as well as
+    upload keys, burn OTP or read the manufacturing database. Operators now
+    sign in with a system account, checked through PAM (/etc/pam.d/
+    rpi-provisioner-ui), that is a member of the new rpi-sb-provisioner group.
+    Installing adds the first user (UID 1000) when the group is created; an
+    image built before that user exists must add its operator by hand.
+    Every state-changing request needs the session's CSRF token, and every
+    state-changing route is now POST-only. Requests addressed to a host name
+    the UI does not answer to are refused, closing DNS rebinding, and a
+    reverse proxy's name must be given with --allowed-host. The permissive
+    CORS headers are gone, WebSocket handshakes from other origins are
+    refused, and signing in to a non-loopback binding needs HTTPS. The UI's
+    TLS key moves out of /tmp, where local users could read it. Scripts use
+    an API token instead of a password: an operator creates one under API
+    tokens, and the script sends it as "Authorization: Bearer". A token acts
+    as its creator, only its hash is stored, and it cannot mint more tokens.
+
+  * Refuse a sign-in that a proxy on this machine forwarded over plain HTTP
+    from another machine, since the password crossed the network
+    unencrypted to reach it. Behind an HTTPS proxy that sends
+    X-Forwarded-Proto, the session cookie is now marked Secure.
+
+  * Replace the nginx example. It checked HTTP Basic credentials against
+    PAM, which let any account on the host through, added www-data to the
+    shadow group so nginx could read every password hash, and proxied plain
+    HTTP. It now only provides HTTPS; the web interface signs operators in
+    itself. nginx-example/README.md says how to undo the old setup.
+
+  * Keep the web UI's HTTPS certificate across restarts, give it the host's
+    names and a random serial, and log its SHA-256 fingerprint so it can be
+    checked. A new certificate at every start meant a new browser warning
+    every time.
+
   * Pad an OS image whose length is not a multiple of 4096 bytes before handing
     it to fastboot. The naked provisioner flashes the configured image as it
     finds it, and the fastboot client sparses whatever it is given: libsparse
