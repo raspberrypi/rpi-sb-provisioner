@@ -351,6 +351,10 @@ The workdir contains signed boot images, signed bootfiles, EEPROM staging assets
 
 Persistent data such as uploaded images, manufacturing databases, state databases, logs and configuration are not stored in the workdir and are not removed by workdir cache invalidation.
 
+Give the workdir a directory of its own. Its contents are deleted when the cache is invalidated, so a workdir that is, or holds, the images directory, the manufacturing database, signing keys, logs, a home directory or a system directory is never cleared.
+
+The workdir must be owned by root and writable only by root, for example `install -d -m 0755 -o root -g root /srv/rpi-sb-provisioner/workdir`. Its contents are flashed to devices, so anything else that could write there could replace them. A workdir that others can write to is not used, and each run works in a fresh temporary directory instead. Upgrading to 2.3.6 fixes a dedicated workdir's ownership and empties it; it reports a symlinked workdir with the real path to use instead.
+
 ## RPI_SB_HOOK_TIMEOUT
 
 **Optional**
