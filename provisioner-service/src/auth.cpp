@@ -55,6 +55,9 @@ namespace {
     constexpr int kMaxPendingLogins = 16;
     constexpr int kMaxPendingPerPeer = 2;
 
+    // Largest body accepted before a client has authenticated.
+    constexpr unsigned long kMaxPublicBody = 64 * 1024;
+
     struct Session {
         std::string user;
         std::string csrf;
@@ -546,6 +549,30 @@ namespace {
             }
 
             const std::string &path = req->path();
+
+            // Paths anyone may reach get a small body. Drogon reserves the
+            // declared Content-Length before a non-streaming handler runs, and
+            // the body limit is lifted for image uploads, so an unauthenticated
+            // client could otherwise make the UI reserve or buffer any amount.
+            // Uploads come later, from an operator the gate has already let in.
+            const bool publicPath = path == "/login" || path.rfind("/static/", 0) == 0 ||
+                                    path.rfind("/internal/", 0) == 0;
+            if (publicPath) {
+                if (!req->getHeader("Transfer-Encoding").empty()) {
+                    auto resp = HttpResponse::newHttpResponse();
+                    resp->setStatusCode(k411LengthRequired);
+                    stop(resp);
+                    return;
+                }
+                const std::string declared = req->getHeader("Content-Length");
+                if (!declared.empty() &&
+                    (declared.size() > 6 || std::strtoul(declared.c_str(), nullptr, 10) > kMaxPublicBody)) {
+                    auto resp = HttpResponse::newHttpResponse();
+                    resp->setStatusCode(k413RequestEntityTooLarge);
+                    stop(resp);
+                    return;
+                }
+            }
 
             // Called by the provisioning scripts, which authenticate with the
             // root-only token in /run/rpi-sb-provisioner instead.
