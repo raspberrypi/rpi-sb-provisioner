@@ -243,20 +243,24 @@ class AuditLog(UITest):
                 self.b.settle()
                 self.assertEqual(int(limit), len(self.rows()))
 
+    # A day nothing else writes to, so other tests' entries cannot crowd the
+    # planted one out of the page.
+    DAY = "2020-06-15"
+
     def test_end_date_is_a_time_not_a_day(self):
-        today = self.station.sh("date '+%Y-%m-%d'").strip()
         self.station.sql(AUDIT, f"INSERT INTO audit_log (timestamp, event_type, handler_path) "
-                                f"VALUES ('{today} 12:00:00', 'HANDLER_ACCESS', '/uitest/noon');")
-        self.b.get(f"/auditlog?end_date={today}T11:00&limit=1000")
+                                f"VALUES ('{self.DAY} 12:00:00', 'HANDLER_ACCESS', '/uitest/noon');")
+        self.b.get(f"/auditlog?start_date={self.DAY}T00:00&end_date={self.DAY}T11:00&limit=1000")
         self.assertNotIn("/uitest/noon", self.b.text(), "an entry at 12:00 is after an end of 11:00")
-        self.b.get(f"/auditlog?end_date={today}T13:00&limit=1000")
+        self.b.get(f"/auditlog?start_date={self.DAY}T00:00&end_date={self.DAY}T13:00&limit=1000")
         self.assertIn("/uitest/noon", self.b.text())
 
     def test_start_date_is_a_time_not_a_day(self):
-        today = self.station.sh("date '+%Y-%m-%d'").strip()
         self.station.sql(AUDIT, f"INSERT INTO audit_log (timestamp, event_type, handler_path) "
-                                f"VALUES ('{today} 12:00:00', 'HANDLER_ACCESS', '/uitest/midday');")
-        self.b.get(f"/auditlog?start_date={today}T11:00&end_date={today}T13:00&limit=1000")
+                                f"VALUES ('{self.DAY} 12:00:00', 'HANDLER_ACCESS', '/uitest/midday');")
+        self.b.get(f"/auditlog?start_date={self.DAY}T13:00&end_date={self.DAY}T23:00&limit=1000")
+        self.assertNotIn("/uitest/midday", self.b.text(), "12:00 is before a start of 13:00")
+        self.b.get(f"/auditlog?start_date={self.DAY}T11:00&end_date={self.DAY}T13:00&limit=1000")
         self.assertIn("/uitest/midday", self.b.text(), "12:00 is between 11:00 and 13:00")
 
 
