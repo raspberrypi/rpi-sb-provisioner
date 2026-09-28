@@ -47,6 +47,17 @@
 #include "utils.h"
 #include "include/audit.h"
 
+// An image name becomes a path under IMAGES_PATH, and the client
+// chooses it. Only a bare name is accepted: path::operator/= replaces
+// the base outright when given an absolute path, so "/home" would name
+// /home itself. A leading dot would collide with the ".extracting"
+// directories.
+static bool isPlainImageName(const std::string& name) {
+    return !name.empty() && name[0] != '.' &&
+           name.find_first_of("/\\") == std::string::npos &&
+           name.find("..") == std::string::npos;
+}
+
 // WebSocket controller for SHA256 calculations
 // Defined outside the provisioner namespace to avoid registration issues
 class SHA256WebSocketController : public drogon::WebSocketController<SHA256WebSocketController> {
@@ -124,6 +135,13 @@ public:
             if (request.isMember("action") && request["action"].asString() == "get_sha256" && 
                 request.isMember("image_name")) {
                 std::string imageName = request["image_name"].asString();
+                if (!isPlainImageName(imageName)) {
+                    Json::Value response;
+                    response["status"] = "error";
+                    response["error"] = "The image name must be a plain name, without directories";
+                    wsConnPtr->send(response.toStyledString());
+                    return;
+                }
                 // Refuse sidecar requests up-front
                 try {
                     if (std::filesystem::path(imageName).extension() == ".sha256") {
@@ -311,6 +329,13 @@ public:
             if (request.isMember("action") && request["action"].asString() == "check_boot_package" && 
                 request.isMember("image_name")) {
                 std::string imageName = request["image_name"].asString();
+                if (!isPlainImageName(imageName)) {
+                    Json::Value response;
+                    response["status"] = "error";
+                    response["error"] = "The image name must be a plain name, without directories";
+                    wsConnPtr->send(response.toStyledString());
+                    return;
+                }
                 
                 // Register this connection as interested in this image
                 {
@@ -1494,6 +1519,12 @@ namespace provisioner {
             
             // Get the image name from the request
             std::string imageName = req->getParameter("name");
+            if (!imageName.empty() && !isPlainImageName(imageName)) {
+                callback(provisioner::utils::createErrorResponse(
+                    req, "The image name must be a plain name, without directories",
+                    drogon::k400BadRequest, "Invalid Request", "INVALID_IMAGE_NAME"));
+                return;
+            }
             if (imageName.empty()) {
                 auto resp = provisioner::utils::createErrorResponse(
                     req,
@@ -1736,6 +1767,12 @@ namespace provisioner {
 
             // Get the image name from the request
             std::string imageName = req->getParameter("name");
+            if (!imageName.empty() && !isPlainImageName(imageName)) {
+                callback(provisioner::utils::createErrorResponse(
+                    req, "The image name must be a plain name, without directories",
+                    drogon::k400BadRequest, "Invalid Request", "INVALID_IMAGE_NAME"));
+                return;
+            }
             if (imageName.empty()) {
                 auto resp = provisioner::utils::createErrorResponse(
                     req,
@@ -1942,6 +1979,12 @@ namespace provisioner {
                 }
                 const auto& file = parser.getFiles()[0];
                 std::string originalFilename = file.getFileName();
+                if (!isPlainImageName(originalFilename)) {
+                    callback(provisioner::utils::createErrorResponse(
+                        req, "The file name must be a plain name, without directories",
+                        drogon::k400BadRequest, "Invalid Request", "INVALID_UPLOAD_NAME"));
+                    return;
+                }
                 std::string finalFilename = generateUniqueFilename(originalFilename, IMAGES_PATH);
                 std::filesystem::path targetPath = std::filesystem::path(IMAGES_PATH) / finalFilename;
 
@@ -2087,6 +2130,11 @@ namespace provisioner {
 
                     ctx->originalFilename = header.filename;
                     if (ctx->originalFilename.empty()) return;
+                    if (!isPlainImageName(ctx->originalFilename)) {
+                        ctx->hadError = true;
+                        ctx->errorMessage = "The file name must be a plain name, without directories";
+                        return;
+                    }
 
                     std::string lowerFilename = ctx->originalFilename;
                     std::transform(lowerFilename.begin(), lowerFilename.end(), lowerFilename.begin(), ::tolower);
@@ -2692,6 +2740,12 @@ namespace provisioner {
             AuditLog::logHandlerAccess(req, "/get-boot-package-info");
             
             std::string imageName = req->getParameter("name");
+            if (!imageName.empty() && !isPlainImageName(imageName)) {
+                callback(provisioner::utils::createErrorResponse(
+                    req, "The image name must be a plain name, without directories",
+                    drogon::k400BadRequest, "Invalid Request", "INVALID_IMAGE_NAME"));
+                return;
+            }
             if (imageName.empty()) {
                 auto resp = provisioner::utils::createErrorResponse(
                     req,
@@ -2825,6 +2879,12 @@ namespace provisioner {
             }
             
             std::string imageName = req->getParameter("name");
+            if (!imageName.empty() && !isPlainImageName(imageName)) {
+                callback(provisioner::utils::createErrorResponse(
+                    req, "The image name must be a plain name, without directories",
+                    drogon::k400BadRequest, "Invalid Request", "INVALID_IMAGE_NAME"));
+                return;
+            }
             if (imageName.empty()) {
                 auto resp = provisioner::utils::createErrorResponse(
                     req,
@@ -2878,6 +2938,12 @@ namespace provisioner {
             AuditLog::logHandlerAccess(req, "/download-boot-package");
             
             std::string imageName = req->getParameter("name");
+            if (!imageName.empty() && !isPlainImageName(imageName)) {
+                callback(provisioner::utils::createErrorResponse(
+                    req, "The image name must be a plain name, without directories",
+                    drogon::k400BadRequest, "Invalid Request", "INVALID_IMAGE_NAME"));
+                return;
+            }
             if (imageName.empty()) {
                 auto resp = provisioner::utils::createErrorResponse(
                     req,
@@ -2961,6 +3027,12 @@ namespace provisioner {
             AuditLog::logHandlerAccess(req, "/analyze-image");
 
             std::string imageName = req->getParameter("name");
+            if (!imageName.empty() && !isPlainImageName(imageName)) {
+                callback(provisioner::utils::createErrorResponse(
+                    req, "The image name must be a plain name, without directories",
+                    drogon::k400BadRequest, "Invalid Request", "INVALID_IMAGE_NAME"));
+                return;
+            }
             if (imageName.empty()) {
                 auto resp = provisioner::utils::createErrorResponse(
                     req,
@@ -3028,6 +3100,12 @@ namespace provisioner {
 
             // Get the image name from the request
             std::string imageName = req->getParameter("name");
+            if (!imageName.empty() && !isPlainImageName(imageName)) {
+                callback(provisioner::utils::createErrorResponse(
+                    req, "The image name must be a plain name, without directories",
+                    drogon::k400BadRequest, "Invalid Request", "INVALID_IMAGE_NAME"));
+                return;
+            }
             if (imageName.empty()) {
                 auto resp = provisioner::utils::createErrorResponse(
                     req,
