@@ -10,6 +10,7 @@
 #include <drogon/HttpAppFramework.h>
 #include "utils.h"
 #include "include/audit.h"
+#include "include/auth.h"
 #include "include/schema_validator.h"
 #include "keywrap.h"
 #include "keyregistry.h"
@@ -49,26 +50,6 @@ namespace provisioner {
             } else {
                 LOG_WARN << "RPI_SB_WORKDIR path does not exist or is not a directory: " << workdir;
             }
-        }
-
-        bool validateCsrfForMutation(const HttpRequestPtr& req,
-                                     std::function<void(const HttpResponsePtr&)>& callback) {
-            if (req->getHeader("X-CSRF-Token").empty()) {
-                return true;
-            }
-            if (utils::validateCsrfToken(req)) {
-                return true;
-            }
-            LOG_WARN << "SECURITY: CSRF validation failed from " << AuditLog::getClientIP(req);
-            auto resp = provisioner::utils::createErrorResponse(
-                req,
-                "Invalid or expired security token. Please refresh the page and try again.",
-                drogon::k403Forbidden,
-                "Security Error",
-                "CSRF_VALIDATION_FAILED"
-            );
-            callback(resp);
-            return false;
         }
     }
 
@@ -485,23 +466,6 @@ namespace provisioner {
             // Add audit log entry for handler access
             AuditLog::logHandlerAccess(req, "/options/set");
 
-            // SECURITY: Validate CSRF token for browser requests
-            // Only enforce if the X-CSRF-Token header is present (gradual rollout)
-            if (!req->getHeader("X-CSRF-Token").empty()) {
-                if (!utils::validateCsrfToken(req)) {
-                    LOG_WARN << "SECURITY: CSRF validation failed for /options/set from " << AuditLog::getClientIP(req);
-                    auto resp = provisioner::utils::createErrorResponse(
-                        req,
-                        "Invalid or expired security token. Please refresh the page and try again.",
-                        drogon::k403Forbidden,
-                        "Security Error",
-                        "CSRF_VALIDATION_FAILED"
-                    );
-                    callback(resp);
-                    return;
-                }
-            }
-
             auto body = req->getJsonObject();
             if (!body) {
                 LOG_ERROR << "Options::set: Invalid JSON body";
@@ -609,7 +573,7 @@ namespace provisioner {
             auto resp = HttpResponse::newHttpResponse();
             resp->setStatusCode(k200OK);
             callback(resp);
-        });
+        }, {Post});
 
         // Add a new endpoint to clear the workdir contents when an image is selected
         app.registerHandler(OPTIONS_PATH + "/clear-workdir", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
@@ -651,17 +615,14 @@ namespace provisioner {
             auto resp = HttpResponse::newHttpResponse();
             resp->setStatusCode(k200OK);
             callback(resp);
-        });
+        }, {Post});
 
-        // CSRF token endpoint - generates a new token for the session
+        // CSRF token endpoint - returns the token bound to the signed-in session
         app.registerHandler(OPTIONS_PATH + "/csrf-token", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
             LOG_INFO << "Options::csrf-token";
             
-            std::string sessionId = utils::getSessionIdFromRequest(req);
-            std::string token = utils::CsrfTokenManager::getInstance().generateToken(sessionId);
-            
             Json::Value response;
-            response["token"] = token;
+            response["token"] = auth::csrfToken(req);
             
             auto resp = HttpResponse::newHttpJsonResponse(response);
             resp->setStatusCode(k200OK);
@@ -753,22 +714,6 @@ namespace provisioner {
                 );
                 callback(resp);
                 return;
-            }
-
-            // SECURITY: Validate CSRF token for browser requests
-            if (!req->getHeader("X-CSRF-Token").empty()) {
-                if (!utils::validateCsrfToken(req)) {
-                    LOG_WARN << "SECURITY: CSRF validation failed for /options/firmware/set from " << AuditLog::getClientIP(req);
-                    auto resp = provisioner::utils::createErrorResponse(
-                        req,
-                        "Invalid or expired security token. Please refresh the page and try again.",
-                        drogon::k403Forbidden,
-                        "Security Error",
-                        "CSRF_VALIDATION_FAILED"
-                    );
-                    callback(resp);
-                    return;
-                }
             }
 
             auto body = req->getJsonObject();
@@ -1066,22 +1011,6 @@ namespace provisioner {
                 );
                 callback(resp);
                 return;
-            }
-
-            // SECURITY: Validate CSRF token for browser requests
-            if (!req->getHeader("X-CSRF-Token").empty()) {
-                if (!utils::validateCsrfToken(req)) {
-                    LOG_WARN << "SECURITY: CSRF validation failed for /options/upload-key from " << AuditLog::getClientIP(req);
-                    auto resp = provisioner::utils::createErrorResponse(
-                        req,
-                        "Invalid or expired security token. Please refresh the page and try again.",
-                        drogon::k403Forbidden,
-                        "Security Error",
-                        "CSRF_VALIDATION_FAILED"
-                    );
-                    callback(resp);
-                    return;
-                }
             }
 
             // Get the uploaded file
@@ -1407,7 +1336,6 @@ namespace provisioner {
                 callback(resp);
                 return;
             }
-            if (!validateCsrfForMutation(req, callback)) return;
 
             auto jsonBody = req->getJsonObject();
             if (!jsonBody || !jsonBody->isMember("id")) {
@@ -1454,7 +1382,6 @@ namespace provisioner {
                 callback(resp);
                 return;
             }
-            if (!validateCsrfForMutation(req, callback)) return;
 
             auto jsonBody = req->getJsonObject();
             if (!jsonBody || !jsonBody->isMember("id")) {
@@ -1494,7 +1421,6 @@ namespace provisioner {
                 callback(resp);
                 return;
             }
-            if (!validateCsrfForMutation(req, callback)) return;
 
             auto jsonBody = req->getJsonObject();
             if (!jsonBody || !jsonBody->isMember("uri")) {
@@ -1578,7 +1504,6 @@ namespace provisioner {
                 callback(resp);
                 return;
             }
-            if (!validateCsrfForMutation(req, callback)) return;
 
             auto jsonBody = req->getJsonObject();
             if (!jsonBody || !jsonBody->isMember("id")) {
@@ -1664,22 +1589,6 @@ namespace provisioner {
                 );
                 callback(resp);
                 return;
-            }
-
-            // SECURITY: Validate CSRF token for browser requests
-            if (!req->getHeader("X-CSRF-Token").empty()) {
-                if (!utils::validateCsrfToken(req)) {
-                    LOG_WARN << "SECURITY: CSRF validation failed for /options/validate-key from " << AuditLog::getClientIP(req);
-                    auto resp = provisioner::utils::createErrorResponse(
-                        req,
-                        "Invalid or expired security token. Please refresh the page and try again.",
-                        drogon::k403Forbidden,
-                        "Security Error",
-                        "CSRF_VALIDATION_FAILED"
-                    );
-                    callback(resp);
-                    return;
-                }
             }
 
             // Parse JSON body
@@ -1894,18 +1803,6 @@ namespace provisioner {
                 return;
             }
 
-            // SECURITY: Validate CSRF token for browser requests
-            if (!req->getHeader("X-CSRF-Token").empty()) {
-                if (!utils::validateCsrfToken(req)) {
-                    LOG_WARN << "SECURITY: CSRF validation failed for /options/provision-device-key from " << AuditLog::getClientIP(req);
-                    auto resp = provisioner::utils::createErrorResponse(
-                        req, "Invalid or expired security token. Please refresh the page and try again.",
-                        drogon::k403Forbidden, "Security Error", "CSRF_VALIDATION_FAILED");
-                    callback(resp);
-                    return;
-                }
-            }
-
             // Require the caller to have named the irreversible thing it is
             // asking for. A bare POST -- a stray retry, a replayed request --
             // must not be enough to write OTP.
@@ -2030,18 +1927,6 @@ namespace provisioner {
                 return;
             }
 
-            // SECURITY: Validate CSRF token for browser requests
-            if (!req->getHeader("X-CSRF-Token").empty()) {
-                if (!utils::validateCsrfToken(req)) {
-                    LOG_WARN << "SECURITY: CSRF validation failed for /options/migrate-secrets from " << AuditLog::getClientIP(req);
-                    auto resp = provisioner::utils::createErrorResponse(
-                        req, "Invalid or expired security token. Please refresh the page and try again.",
-                        drogon::k403Forbidden, "Security Error", "CSRF_VALIDATION_FAILED");
-                    callback(resp);
-                    return;
-                }
-            }
-
             auto jsonBody = req->getJsonObject();
             std::string target = (jsonBody && jsonBody->isMember("target"))
                                  ? (*jsonBody)["target"].asString() : "all";
@@ -2129,22 +2014,6 @@ namespace provisioner {
                 return;
             }
 
-            // SECURITY: Validate CSRF token for browser requests
-            if (!req->getHeader("X-CSRF-Token").empty()) {
-                if (!utils::validateCsrfToken(req)) {
-                    LOG_WARN << "SECURITY: CSRF validation failed for /options/pkcs11-discover from " << AuditLog::getClientIP(req);
-                    auto resp = provisioner::utils::createErrorResponse(
-                        req,
-                        "Invalid or expired security token. Please refresh the page and try again.",
-                        drogon::k403Forbidden,
-                        "Security Error",
-                        "CSRF_VALIDATION_FAILED"
-                    );
-                    callback(resp);
-                    return;
-                }
-            }
-
             // Optional PIN (some tokens require login to list private objects).
             // Body is optional; absence just means "use the stored PIN if any".
             std::string pin;
@@ -2196,22 +2065,6 @@ namespace provisioner {
                 );
                 callback(resp);
                 return;
-            }
-
-            // SECURITY: Validate CSRF token for browser requests
-            if (!req->getHeader("X-CSRF-Token").empty()) {
-                if (!utils::validateCsrfToken(req)) {
-                    LOG_WARN << "SECURITY: CSRF validation failed for /options/set-pkcs11-pin from " << AuditLog::getClientIP(req);
-                    auto resp = provisioner::utils::createErrorResponse(
-                        req,
-                        "Invalid or expired security token. Please refresh the page and try again.",
-                        drogon::k403Forbidden,
-                        "Security Error",
-                        "CSRF_VALIDATION_FAILED"
-                    );
-                    callback(resp);
-                    return;
-                }
             }
 
             // Parse JSON body

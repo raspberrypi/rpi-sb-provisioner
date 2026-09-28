@@ -25,6 +25,11 @@ namespace provisioner {
                                        bool success, const std::string &username = "",
                                        const std::string &additional_info = "");
         
+        // Log a sign-in or sign-out, successful or not
+        static void logAuthentication(const HttpRequestPtr &req, const std::string &username,
+                                      const std::string &operation, bool success,
+                                      const std::string &detail);
+
         // Log systemd log access
         static void logSystemdAccess(const std::string &service, const std::string &username = "");
         

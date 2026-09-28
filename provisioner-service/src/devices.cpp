@@ -2271,7 +2271,7 @@ namespace provisioner {
             resp->setContentTypeCode(CT_APPLICATION_JSON);
             resp->setBody(writer.write(result));
             callback(resp);
-        }); // devices/_test/{scenario} handler
+        }, {Post}); // devices/_test/{scenario} handler
 
         // ===== Special Flags Management =====
         // Flag labels and descriptions come from specialFlagCatalogue(), which

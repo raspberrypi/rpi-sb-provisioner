@@ -14,6 +14,7 @@
 #include <sqlite3.h>
 
 #include "include/audit.h"
+#include "auth.h"
 #include "utils.h"
 
 namespace provisioner {
@@ -140,8 +141,8 @@ namespace provisioner {
         std::string userAgent = req->getHeader("User-Agent");
         
         const char* insert_sql = 
-            "INSERT INTO audit_log (timestamp, event_type, client_ip, user_agent, handler_path) "
-            "VALUES (?, 'HANDLER_ACCESS', ?, ?, ?);";
+            "INSERT INTO audit_log (timestamp, event_type, client_ip, user_agent, handler_path, username) "
+            "VALUES (?, 'HANDLER_ACCESS', ?, ?, ?, ?);";
             
         sqlite3_stmt* stmt;
         rc = sqlite3_prepare_v2(db, insert_sql, -1, &stmt, nullptr);
@@ -157,6 +158,8 @@ namespace provisioner {
         sqlite3_bind_text(stmt, 2, clientIP.c_str(), clientIP.length(), SQLITE_TRANSIENT);
         sqlite3_bind_text(stmt, 3, userAgent.c_str(), userAgent.length(), SQLITE_TRANSIENT);
         sqlite3_bind_text(stmt, 4, handlerPath.c_str(), handlerPath.length(), SQLITE_TRANSIENT);
+        const std::string user = auth::username(req);
+        sqlite3_bind_text(stmt, 5, user.c_str(), user.length(), SQLITE_TRANSIENT);
         
         rc = sqlite3_step(stmt);
         if (rc != SQLITE_DONE) {
@@ -220,6 +223,53 @@ namespace provisioner {
         sqlite3_close(db);
     }
     
+    void AuditLog::logAuthentication(const HttpRequestPtr &req, const std::string &username,
+                                     const std::string &operation, bool success,
+                                     const std::string &detail) {
+        std::lock_guard<std::mutex> lock(dbMutex);
+
+        sqlite3* db;
+        if (sqlite3_open(AUDIT_DB_PATH.c_str(), &db) != SQLITE_OK) {
+            LOG_ERROR << "Failed to open audit database for authentication logging: " << sqlite3_errmsg(db);
+            sqlite3_close(db);
+            return;
+        }
+        sqlite3_busy_timeout(db, 5000);
+
+        auto time_t_now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+        std::tm tm_now;
+        localtime_r(&time_t_now, &tm_now);
+        std::stringstream timestamp;
+        timestamp << std::put_time(&tm_now, "%Y-%m-%d %H:%M:%S");
+
+        const char* insert_sql =
+            "INSERT INTO audit_log (timestamp, event_type, client_ip, user_agent, operation, success, username, additional_info) "
+            "VALUES (?, 'AUTHENTICATION', ?, ?, ?, ?, ?, ?);";
+        sqlite3_stmt* stmt;
+        if (sqlite3_prepare_v2(db, insert_sql, -1, &stmt, nullptr) != SQLITE_OK) {
+            LOG_ERROR << "Failed to prepare audit log statement: " << sqlite3_errmsg(db);
+            sqlite3_close(db);
+            return;
+        }
+
+        const std::string timestampStr = timestamp.str();
+        const std::string clientIP = getClientIP(req);
+        const std::string userAgent = req->getHeader("User-Agent");
+        sqlite3_bind_text(stmt, 1, timestampStr.c_str(), timestampStr.length(), SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 2, clientIP.c_str(), clientIP.length(), SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 3, userAgent.c_str(), userAgent.length(), SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 4, operation.c_str(), operation.length(), SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 5, success ? 1 : 0);
+        sqlite3_bind_text(stmt, 6, username.c_str(), username.length(), SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 7, detail.c_str(), detail.length(), SQLITE_TRANSIENT);
+
+        if (sqlite3_step(stmt) != SQLITE_DONE) {
+            LOG_ERROR << "Failed to insert authentication audit log entry: " << sqlite3_errmsg(db);
+        }
+        sqlite3_finalize(stmt);
+        sqlite3_close(db);
+    }
+
     void AuditLog::logSystemdAccess(const std::string &service, const std::string &username) {
         std::lock_guard<std::mutex> lock(dbMutex);
         
