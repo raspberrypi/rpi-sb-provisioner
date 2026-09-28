@@ -10,8 +10,9 @@ RestartSec=10
 
 # The UI stays root, because it writes the configuration and hooks that the
 # provisioners run as root, but it is network-facing, so it gets nothing else.
-# Every file it touches is root-owned, so it needs no capabilities at all.
-CapabilityBoundingSet=
+# Every file it touches is root-owned. CAP_DAC_OVERRIDE is kept as a margin
+# for secret files kept at 0400, which some paths may still rewrite in place.
+CapabilityBoundingSet=CAP_DAC_OVERRIDE
 AmbientCapabilities=
 NoNewPrivileges=yes
 

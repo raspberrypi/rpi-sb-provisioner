@@ -1212,13 +1212,8 @@ namespace provisioner {
                     }
 
                     std::string wrapped;
-                    if (provisioner::keywrap::wrap(raw, wrapped)) {
-                        std::ofstream kout(destPath, std::ios::binary | std::ios::trunc);
-                        kout.write(wrapped.data(), static_cast<std::streamsize>(wrapped.size()));
-                        kout.close();
-                        std::filesystem::permissions(destPath,
-                            std::filesystem::perms::owner_read,
-                            std::filesystem::perm_options::replace);
+                    if (provisioner::keywrap::wrap(raw, wrapped) &&
+                        utils::writeSecretFile(destPath, wrapped)) {
                         if (!raw.empty()) OPENSSL_cleanse(&raw[0], raw.size());
                         AuditLog::logFileSystemAccess("WRAP_KEY", destPath, true);
                         LOG_INFO << "Customer PEM key wrapped at rest";
