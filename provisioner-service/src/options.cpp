@@ -37,6 +37,60 @@ namespace provisioner {
             }
         }
 
+        // The workdir is emptied as root on every save, so a mistyped path
+        // such as /srv/rpi-sb-provisioner would take the images and the
+        // manufacturing database with it. Refuse any directory that is, or
+        // holds, something that matters.
+        bool workdirSafeToClear(const std::string& workdir, std::string& why) {
+            namespace fs = std::filesystem;
+            std::error_code ec;
+            const fs::path dir = fs::canonical(workdir, ec);
+            if (ec || !fs::path(workdir).is_absolute()) {
+                why = "RPI_SB_WORKDIR must be an existing absolute path";
+                return false;
+            }
+
+            std::vector<std::string> kept = {
+                "/", "/bin", "/boot", "/dev", "/etc", "/home", "/lib", "/media", "/mnt",
+                "/opt", "/proc", "/root", "/run", "/sbin", "/srv", "/sys", "/tmp", "/usr", "/var",
+                "/srv/rpi-sb-provisioner/images", "/etc/rpi-sb-provisioner",
+                "/var/log/rpi-sb-provisioner", "/var/lib/rpi-sb-provisioner",
+            };
+            for (const char *key : {"RPI_SB_PROVISIONER_MANUFACTURING_DB", "CUSTOMER_KEY_FILE_PEM",
+                                    "CUSTOMER_KEY_STORAGE_DIR", "GOLD_MASTER_OS_FILE"}) {
+                if (auto v = utils::getConfigValue(key); v && !v->empty()) kept.push_back(*v);
+            }
+            std::ifstream passwd("/etc/passwd");
+            for (std::string line; std::getline(passwd, line);) {
+                std::vector<std::string> f;
+                std::stringstream ss(line);
+                for (std::string part; std::getline(ss, part, ':');) f.push_back(part);
+                if (f.size() >= 6 && !f[5].empty()) kept.push_back(f[5]);
+            }
+
+            for (const auto &k : kept) {
+                const fs::path p = fs::weakly_canonical(k, ec);
+                if (ec) continue;
+                auto [d, q] = std::mismatch(dir.begin(), dir.end(), p.begin(), p.end());
+                if (d == dir.end()) {
+                    why = "RPI_SB_WORKDIR " + dir.string() + " holds " + p.string();
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        bool clearWorkdirContents(const std::string& workdir) {
+            std::string why;
+            if (!workdirSafeToClear(workdir, why)) {
+                LOG_ERROR << "Not clearing the workdir: " << why;
+                AuditLog::logFileSystemAccess("DELETE_CONTENTS", workdir, false, "", why);
+                return false;
+            }
+            removeDirectoryContents(workdir);
+            return true;
+        }
+
         void invalidateWorkdirCache(const std::string& reason) {
             auto workdirValue = utils::getConfigValue("RPI_SB_WORKDIR");
             std::string workdir = workdirValue ? *workdirValue : "";
@@ -46,7 +100,7 @@ namespace provisioner {
             if (std::filesystem::exists(workdir) && std::filesystem::is_directory(workdir)) {
                 LOG_INFO << "Customer key changed - removing contents of RPI_SB_WORKDIR at " << workdir;
                 AuditLog::logFileSystemAccess("DELETE_CONTENTS", workdir, true, "", reason);
-                removeDirectoryContents(workdir);
+                clearWorkdirContents(workdir);
             } else {
                 LOG_WARN << "RPI_SB_WORKDIR path does not exist or is not a directory: " << workdir;
             }
@@ -482,7 +536,15 @@ namespace provisioner {
             std::map<std::string, std::string> updates;
             for (const auto &key : body->getMemberNames()) {
                 const std::string value = body->get(key, "").asString();
-                LOG_INFO << "Options::set: " << key << " = " << value;
+                std::string why;
+                if (!utils::isWritableConfigEntry(key, value, why)) {
+                    callback(provisioner::utils::createErrorResponse(
+                        req, "Refused: " + why, drogon::k400BadRequest,
+                        "Invalid Setting", "INVALID_CONFIG_ENTRY"));
+                    return;
+                }
+                // Keys only: values include the Connect API key.
+                LOG_INFO << "Options::set: " << key;
                 updates[key] = value;
             }
 
@@ -510,7 +572,7 @@ namespace provisioner {
             if (!workdir.empty()) {
                 if (std::filesystem::exists(workdir) && std::filesystem::is_directory(workdir)) {
                     LOG_INFO << "Removing contents of RPI_SB_WORKDIR at " << workdir;
-                    removeDirectoryContents(workdir);
+                    clearWorkdirContents(workdir);
                 } else {
                     LOG_WARN << "RPI_SB_WORKDIR path does not exist or is not a directory: " << workdir;
                 }
@@ -600,8 +662,14 @@ namespace provisioner {
                 if (std::filesystem::is_directory(workdir)) {
                     // Log directory deletion to audit log
                     AuditLog::logFileSystemAccess("DELETE_CONTENTS", workdir, true);
-                    
-                    removeDirectoryContents(workdir);
+
+                    if (!clearWorkdirContents(workdir)) {
+                        callback(provisioner::utils::createErrorResponse(
+                            req, "Not clearing RPI_SB_WORKDIR: it holds files the provisioner "
+                            "needs. Point it at a directory of its own.",
+                            drogon::k409Conflict, "Workdir Not Cleared", "WORKDIR_UNSAFE"));
+                        return;
+                    }
                 } else {
                     LOG_WARN << "RPI_SB_WORKDIR exists but is not a directory: " << workdir;
                 }
@@ -851,7 +919,7 @@ namespace provisioner {
                     if (std::filesystem::exists(workdir) && std::filesystem::is_directory(workdir)) {
                         LOG_INFO << "Firmware changed - removing contents of RPI_SB_WORKDIR at " << workdir;
                         AuditLog::logFileSystemAccess("DELETE_CONTENTS", workdir, true, "", "firmware selection changed");
-                        removeDirectoryContents(workdir);
+                        clearWorkdirContents(workdir);
                     } else {
                         LOG_WARN << "RPI_SB_WORKDIR path does not exist or is not a directory: " << workdir;
                     }
