@@ -143,7 +143,9 @@ TARGET_DEVICE_FAMILY="$(udevadm info --name="$TARGET_DEVICE_PATH" --query=proper
 # TARGET_DEVICE_SERIAL is best-effort, not all rpiboot devices have it set (some only show 32-bits)
 TARGET_DEVICE_SERIAL="$(udevadm info --name="$TARGET_DEVICE_PATH" --query=property --property=ID_SERIAL_SHORT --value)"
 # If TARGET_DEVICE_SERIAL is empty or equals "Broadcom", use TARGET_DEVICE_PATH instead
-if [ -z "${TARGET_DEVICE_SERIAL}" ] || [ "${TARGET_DEVICE_SERIAL}" = "Broadcom" ]; then
+# A serial that is not plain alphanumerics is treated as absent: the device
+# chose it, and it becomes part of a path.
+if [ -z "${TARGET_DEVICE_SERIAL}" ] || [ "${TARGET_DEVICE_SERIAL}" = "Broadcom" ] || ! serial_is_safe "${TARGET_DEVICE_SERIAL}"; then
     TARGET_DEVICE_SERIAL="${TARGET_DEVICE_PATH}"
     log "Using device path as serial: ${TARGET_DEVICE_SERIAL}"
 else

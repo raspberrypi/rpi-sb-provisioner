@@ -603,6 +603,14 @@ announce_start "Resizing rootfs image"
 # https://dl.google.com/android/repository/platform-tools-latest-darwin.zip
 # https://dl.google.com/android/repository/platform-tools-latest-windows.zip
 TARGET_STORAGE_ROOT_EXTENT="$(get_variable partition-size:mapper/cryptroot)"
+# Device-reported, and it sizes the shared rootfs cache: digits only, and no
+# more than 4 TiB.
+case "${TARGET_STORAGE_ROOT_EXTENT}" in
+    ""|*[!0-9]*) die "Device reported an invalid root partition size: '${TARGET_STORAGE_ROOT_EXTENT}'" ;;
+esac
+if [ "${#TARGET_STORAGE_ROOT_EXTENT}" -gt 13 ] || [ "${TARGET_STORAGE_ROOT_EXTENT}" -gt 4398046511104 ]; then
+    die "Device reported an implausible root partition size: ${TARGET_STORAGE_ROOT_EXTENT}"
+fi
 with_lock "${LOCK_BASE}/rootfs-image.lock" 600 prepare_rootfs_image
 announce_stop "Resizing rootfs image"
 
