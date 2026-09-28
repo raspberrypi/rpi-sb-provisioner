@@ -674,6 +674,20 @@ int main(int argc, char* argv[])
         LOG_INFO << "HTTPS listener enabled on " << listenerAddress << ":" << httpsPort;
     }
     
+    // Drogon's own 404 page declares no language, so screen readers guess.
+    {
+        auto notFound = HttpResponse::newHttpResponse();
+        notFound->setContentTypeCode(CT_TEXT_HTML);
+        notFound->setBody(
+            "<!DOCTYPE html>\n<html lang=\"en\">\n<head><meta charset=\"utf-8\">"
+            "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+            "<title>404: Page not found</title></head>\n"
+            "<body style=\"font-family: sans-serif; margin: 2rem; color: #212529;\"><main>"
+            "<h1>Page not found</h1><p>There is nothing at this address.</p>"
+            "<p><a href=\"/devices\">Go to the devices page</a></p></main></body>\n</html>\n");
+        app.setCustom404Page(notFound);
+    }
+
     // Run the application
     app.run();
     
