@@ -16,6 +16,22 @@ fi
 
 # Create necessary directories
 mkdir -p /etc/rpi-sb-provisioner
+# Earlier releases put key pairs in <serial>/<serial>/keypair, where neither
+# the documentation nor the key API looks. Move them up, unless one is there.
+for nested in /var/log/rpi-sb-provisioner/*/*/keypair; do
+    [ -d "$nested" ] || continue
+    serial_dir="$(dirname "$(dirname "$nested")")"
+    [ "$(basename "$(dirname "$nested")")" = "$(basename "$serial_dir")" ] || continue
+    [ -e "$serial_dir/keypair" ] && continue
+    mv "$nested" "$serial_dir/keypair"
+    rmdir "$(dirname "$nested")" 2>/dev/null || true
+done
+
+# Device key pairs captured by earlier releases were left world-readable in
+# the log tree, private keys included.
+find /var/log/rpi-sb-provisioner -type d -name keypair -exec chmod 0700 {} + 2>/dev/null || true
+find /var/log/rpi-sb-provisioner -path '*/keypair/*' -type f -exec chmod 0600 {} + 2>/dev/null || true
+
 # The configuration can hold credentials (RPI_CONNECT_API_KEY), and only root
 # reads it. Earlier releases left it world-readable.
 if [ -f /etc/rpi-sb-provisioner/config ]; then
