@@ -1,57 +1,49 @@
-# Nginx Reverse Proxy Example Configuration
+# nginx reverse proxy example
 
-This directory contains **example configuration files** for setting up nginx as a reverse proxy with PAM authentication for the provisioner services. These files are **not included in the Debian package** and are provided as optional reference material for users who want to expose the provisioner services to the network.
+An example of putting nginx in front of the provisioner's web interface, so that it can be reached from other machines over HTTPS. These files are not included in the Debian package.
 
-## Contents
+You don't need this if you only use the web interface on the provisioning machine itself.
 
-- **nginx-reverse-proxy.conf** - Complete nginx configuration with PAM authentication
-- **pam.d-nginx** - PAM service configuration file
-- **setup-nginx-pam-auth.sh** - Automated setup script
-- **NGINX_PAM_AUTH_README.md** - Detailed documentation
+## How it works
 
-## Purpose
+The web interface does its own sign-in. Operators use a system account that is a member of the `rpi-sb-provisioner` group, and scripts use API tokens (see [docs/api/authentication.md](../docs/api/authentication.md)). nginx adds nothing to that; it only provides HTTPS, so that passwords and session cookies never cross the network unencrypted.
 
-The rpi-sb-provisioner services run on localhost ports 3142 and 3143. This nginx configuration allows you to:
+The web interface keeps listening on `127.0.0.1` only, and nginx is the one thing that talks to it.
 
-1. **Expose services to the network** - Make them accessible from other machines
-2. **Add authentication** - Require system user credentials via HTTP Basic Auth
-3. **Provide HTTPS** - Encrypt traffic with SSL/TLS
-4. **Centralized access control** - Manage who can access the provisioner UI
+## Setting it up
 
-## Quick Start
+1. Install nginx:
 
-```bash
-cd nginx-example
-sudo ./setup-nginx-pam-auth.sh
-```
+       sudo apt install nginx
 
-For detailed instructions, see [NGINX_PAM_AUTH_README.md](NGINX_PAM_AUTH_README.md).
+2. Copy [nginx-reverse-proxy.conf](nginx-reverse-proxy.conf) to `/etc/nginx/sites-available/rpi-provisioner-ui`. Replace `provisioner.example.com` with the name people will use, and point `ssl_certificate` and `ssl_certificate_key` at a certificate for that name. Then enable it:
 
-## Important Notes
+       sudo ln -s /etc/nginx/sites-available/rpi-provisioner-ui /etc/nginx/sites-enabled/
+       sudo nginx -t && sudo systemctl reload nginx
 
-- **Not required** - The provisioner works perfectly without nginx (localhost access only)
-- **Security consideration** - Only expose the provisioner to trusted networks
-- **Customization required** - You must edit the configuration with your domains/IPs and SSL certificates
-- **Not packaged** - These files are examples only and are not installed by the .deb package
+3. Tell the web interface to answer to that name. It refuses requests addressed to names it doesn't know, which stops other websites reaching it through DNS rebinding:
 
-## When to Use This
+       sudo systemctl edit rpi-provisioner-ui
 
-Use this configuration if you need to:
-- Access the provisioner UI from multiple machines
-- Provide centralized authentication
-- Add SSL/TLS encryption
-- Control access via system user accounts
+   and add:
 
-## When NOT to Use This
+       [Service]
+       ExecStart=
+       ExecStart=/usr/bin/rpi-provisioner-ui --allowed-host provisioner.example.com
 
-Don't use this if:
-- You only access the provisioner from localhost
-- You're in a development/testing environment
-- You don't want to expose services to the network
+   Then restart it:
 
-## Support
+       sudo systemctl restart rpi-provisioner-ui
 
-This is example/reference material. The nginx configuration is not officially supported as part of the rpi-sb-provisioner package, but is provided as a convenience for common deployment scenarios.
+4. Browse to `https://provisioner.example.com` and sign in.
 
-For questions about the provisioner itself, see the main [README](../README.md).
+## Things to avoid
 
+- **Plain HTTP.** The example redirects port 80 to HTTPS. Don't proxy port 80 through to the web interface: it would accept sign-ins sent unencrypted, because every request reaches it from nginx on loopback.
+- **Authentication in nginx.** Earlier versions of this example put HTTP Basic authentication in nginx, checked against PAM, and added `www-data` to the `shadow` group. That let any account on the machine through and let nginx read every password hash. If you set that up, undo it:
+
+      sudo gpasswd -d www-data shadow
+      sudo rm /etc/pam.d/nginx
+
+  Then remove the `auth_pam` lines from your nginx site.
+- **Listening on the network directly.** Running the web interface with `--address 0.0.0.0` bypasses this proxy.
