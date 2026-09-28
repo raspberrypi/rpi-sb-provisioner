@@ -191,6 +191,27 @@ workdir_is_private() {
     esac
 }
 
+# The device names its own network address, so the answer there need not be
+# this device: another board on the network would be flashed with this one's
+# image. A route is used only if it reports the serial seen over USB. That
+# catches a misrouted board, not an attacker on the network, who can learn a
+# serial and answer with it; an untrusted network needs flashing kept to USB.
+# A split-mode data plane will not answer serialno, so there the route need
+# only be reachable, and a misrouted board goes uncaught.
+tcp_route_is_this_device() {
+    [ -n "$1" ] || return 1
+    if [ "${TCP_DATA_PLANE_ONLY}" = "yes" ]; then
+        timeout -k 5 10 fastboot -s "tcp:$1" getvar version >/dev/null 2>&1
+        return
+    fi
+    _tr_out="$(timeout -k 5 10 fastboot -s "tcp:$1" getvar serialno 2>&1)" || return 1
+    _tr_serial="$(printf '%s\n' "${_tr_out}" | sed -n 's/^serialno: *//p' | tr -d '\r' | head -n 1)"
+    if [ -z "${_tr_serial}" ] || [ "${_tr_serial}" != "${TARGET_DEVICE_SERIAL}" ]; then
+        log "Not using tcp:$1: it answers as '${_tr_serial}', not ${TARGET_DEVICE_SERIAL}"
+        return 1
+    fi
+}
+
 # Arguments: $1 = timeout in seconds, remaining = command. Aborts on failure.
 timeout_fatal_secs() {
     run_bounded "$@"
@@ -478,10 +499,11 @@ setup_fastboot_and_id_vars() {
     USE_IPV6=
     set +e
     IPV6_ADDRESS="$(bounded_getvar ipv6-address | awk '/^ipv6-address:/ {print $2}')"
-    (timeout_nonfatal_secs 10 fastboot -s tcp:"${IPV6_ADDRESS}" getvar version)
+    printf '%s' "${IPV6_ADDRESS}" | grep -Eqx '[0-9A-Fa-f.]*:[0-9A-Fa-f.]*:[0-9A-Fa-f:.]*(%[A-Za-z0-9_.-]+)?' || IPV6_ADDRESS=""
+    tcp_route_is_this_device "${IPV6_ADDRESS}"
     USE_IPV6=$?
-    IPV4_ADDRESS="$(bounded_getvar ipv4-address | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}')"
-    (timeout_nonfatal_secs 10 fastboot -s tcp:"${IPV4_ADDRESS}" getvar version)
+    IPV4_ADDRESS="$(bounded_getvar ipv4-address | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -n 1)"
+    tcp_route_is_this_device "${IPV4_ADDRESS}"
     USE_IPV4=$?
     set -e
 
