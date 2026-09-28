@@ -6,7 +6,7 @@
     <%view stylesheet %>
     <script src="/static/js/d3.min.js"></script>
     <style>
-        .topology-container { padding: 10px; }
+        .topology-container { padding: 10px; overflow-x: auto; }
         .node { border: 1px solid #ccc; border-radius: 6px; padding: 8px 10px; margin: 6px; background: #fafafa; display: inline-block; min-width: 160px; }
         .hub { background: #eef6ff; border-color: #9ec9ff; }
         .device { background: #f7fff0; border-color: #bde6a1; }

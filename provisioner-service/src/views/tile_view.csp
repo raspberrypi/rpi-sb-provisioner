@@ -78,14 +78,12 @@
         font-weight: 600;
         font-size: 1.05rem;
         color: #333;
-        overflow: hidden;
+        flex-wrap: wrap;
     }
     /* Wrap rather than truncate: the operator needs the whole serial. */
     .tile-serial {
-        flex: 1;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        flex: 1 1 auto;
+        overflow-wrap: anywhere;
         font-family: monospace;
         font-size: 1rem;
     }
@@ -98,6 +96,7 @@
         border-radius: 10px;
         color: #fff;
         flex-shrink: 0;
+        white-space: nowrap;
     }
     .tile-badge-gen { background: #d32f2f; }
     .tile-badge-model { background: #5c6bc0; }
