@@ -120,6 +120,51 @@ rpi-sb-provisioner (2.3.6) unstable; urgency=medium
     stations keep their cache. A symlinked workdir is reported with the
     path to use instead.
 
+  * SECURITY: Treat what a device reports as untrusted. The serial number and
+    board details a device returns went, as root, straight into database
+    queries and the serial into log paths, so a faulty or hostile device
+    could corrupt the manufacturing records or have a log written outside
+    /var/log/rpi-sb-provisioner. Serials must now be plain alphanumerics,
+    board details are checked against their expected form, and every
+    database value is escaped.
+
+  * Refuse a device whose reported serial differs from the one it was
+    started for, so a board cannot have its neighbour on a multi-head jig
+    provisioned instead, and bound other values devices report.
+
+  * Find a device's USB port only among Raspberry Pis in rpiboot or fastboot
+    mode, and refuse when two carry the same serial. Any USB device matching
+    the serial was taken, so the USB port allowlist could check the wrong
+    port.
+
+  * Flash over the network only to the device that is connected over USB. A
+    device reports its own address, so one could name another board on the
+    network and have that one flashed instead. With a daemon that takes
+    every command over the network, that route must now report the same
+    serial number. A split-mode daemon's network side will not say, so
+    there the route is checked only for reachability, as before.
+
+  * SECURITY: Flash an IDP artefact's images only. The device's reply named
+    the file to send it, so a board could ask for any file root can read,
+    including the configuration and signing keys, and an artefact could name
+    images outside itself.
+
+  * SECURITY: Build boot packages only from a real FAT boot partition. An
+    uploaded image with an ext4 boot partition could use symlinks to put
+    host files into a boot image signed with the customer key.
+
+  * SECURITY: Keep uploaded IDP archives inside the images directory. They
+    are extracted as root, and a symlink or hardlink entry in one could
+    write anywhere on the host or pull host files, keys included, into the
+    image. Links must now stay within the archive, and device nodes and
+    FIFOs are refused. An upload's own file name must now be
+    a plain name, too.
+
+  * SECURITY: Accept only a plain image name when deleting, analysing,
+    hashing or packaging an image. The name was joined to the images
+    directory unchecked, so a crafted request could delete or read any path
+    on the host as root.
+
   * Pad an OS image whose length is not a multiple of 4096 bytes before handing
     it to fastboot. The naked provisioner flashes the configured image as it
     finds it, and the fastboot client sparses whatever it is given: libsparse
