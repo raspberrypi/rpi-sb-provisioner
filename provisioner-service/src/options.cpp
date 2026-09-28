@@ -503,6 +503,11 @@ namespace provisioner {
                         jsonResponse["error"] = "Management API access token must not contain whitespace";
                     }
                 }
+            } else if (fieldName == "RPI_SB_PROVISIONER_PUBLIC_DASHBOARD") {
+                if (fieldValue != "" && fieldValue != "1") {
+                    jsonResponse["valid"] = false;
+                    jsonResponse["error"] = "Must be on (1) or off (empty)";
+                }
             } else if (fieldName == "RPI_CONNECT_DESCRIPTION") {
                 // Any non-empty string is valid; empty is fine (auto-generated description used)
             }

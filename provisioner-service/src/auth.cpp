@@ -1,6 +1,7 @@
 #include "auth.h"
 #include "api_tokens.h"
 #include "audit.h"
+#include "utils.h"
 
 #include <drogon/drogon.h>
 #include <openssl/crypto.h>
@@ -527,6 +528,40 @@ namespace {
         return req->attributes()->get<std::string>("auth.csrf");
     }
 
+    // Whether the dashboard and scanner may be viewed without signing in.
+    // Read at most every few seconds, so a change on the options page takes
+    // effect without a restart and without a file read per request.
+    bool publicDashboard() {
+        static std::mutex m;
+        static bool cached = true;
+        static Clock::time_point read{};
+        std::lock_guard<std::mutex> lock(m);
+        if (Clock::now() - read > std::chrono::seconds(5)) {
+            const auto v = utils::getConfigValue("RPI_SB_PROVISIONER_PUBLIC_DASHBOARD", false);
+            cached = !v || (*v != "" && *v != "0");
+            read = Clock::now();
+        }
+        return cached;
+    }
+
+    // What a viewer who has not signed in may read, when that is enabled:
+    // the device dashboard and one device's page, its live updates, and the
+    // code scanner. A device's logs, keys and flags are longer paths, so
+    // they stay behind sign-in.
+    bool isPublicRead(const HttpRequestPtr &req) {
+        const auto method = req->getMethod();
+        if (method != Get && method != Head) return false;
+        const std::string &path = req->path();
+        if (path == "/" || path == "/devices" || path == "/ws/devices" || path == "/scantool" ||
+            path == "/api/v2/verify-qrcode" || path == "/auth/session") {
+            return true;
+        }
+        const std::string prefix = "/devices/";
+        return path.rfind(prefix, 0) == 0 && path.size() > prefix.size() &&
+               path.find('/', prefix.size()) == std::string::npos &&
+               path.compare(prefix.size(), 1, "_") != 0;
+    }
+
     std::string username(const HttpRequestPtr &req) {
         return req->attributes()->get<std::string>("auth.user");
     }
@@ -556,7 +591,8 @@ namespace {
             // client could otherwise make the UI reserve or buffer any amount.
             // Uploads come later, from an operator the gate has already let in.
             const bool publicPath = path == "/login" || path.rfind("/static/", 0) == 0 ||
-                                    path.rfind("/internal/", 0) == 0;
+                                    path.rfind("/internal/", 0) == 0 ||
+                                    (isPublicRead(req) && publicDashboard());
             if (publicPath) {
                 if (!req->getHeader("Transfer-Encoding").empty()) {
                     auto resp = HttpResponse::newHttpResponse();
@@ -611,6 +647,10 @@ namespace {
             }
 
             auto session = lookupSession(req);
+            if (!session && isPublicRead(req) && publicDashboard()) {
+                pass();  // as a viewer who has not signed in: no auth.user
+                return;
+            }
             if (!session) {
                 if (!isStateChanging(req) && wantsHtml(req)) {
                     std::string next = path;

@@ -1036,6 +1036,10 @@
     std::string mfgDb = options.count("RPI_SB_PROVISIONER_MANUFACTURING_DB") ? options["RPI_SB_PROVISIONER_MANUFACTURING_DB"] : "";
     std::string keypairDir = options.count("RPI_DEVICE_RETRIEVE_KEYPAIR") ? options["RPI_DEVICE_RETRIEVE_KEYPAIR"] : "";
     bool lockJtag = options.count("RPI_DEVICE_LOCK_JTAG") && !options["RPI_DEVICE_LOCK_JTAG"].empty();
+    // On unless set to empty or 0, as the sign-in gate reads it.
+    bool publicDashboard = !options.count("RPI_SB_PROVISIONER_PUBLIC_DASHBOARD") ||
+                           (!options["RPI_SB_PROVISIONER_PUBLIC_DASHBOARD"].empty() &&
+                            options["RPI_SB_PROVISIONER_PUBLIC_DASHBOARD"] != "0");
     bool eepromWp = options.count("RPI_DEVICE_EEPROM_WP_SET") && !options["RPI_DEVICE_EEPROM_WP_SET"].empty();
     // Boot-order matching is on by default: absent key -> on; only an empty or
     // falsey value turns it off (mirrors boot_order_match_storage_enabled() in
@@ -1638,6 +1642,28 @@
                     <span class="inline-help-icon">&#9432;</span>
                     <span>Optional prefix for the device identity description sent to Connect. The board type and serial number are always appended.</span>
                 </div>
+            </div>
+        </div>
+
+        <div class="config-section" id="section-web-interface">
+            <div class="section-header">
+                <h2 class="section-title">
+                    <span class="section-title-icon">&#128421;</span>
+                    Web Interface
+                </h2>
+                <p class="section-description">Who can see this interface without signing in. Changing settings always needs an operator.</p>
+            </div>
+
+            <div class="toggle-group">
+                <label class="toggle-switch">
+                    <input type="checkbox" id="RPI_SB_PROVISIONER_PUBLIC_DASHBOARD" name="RPI_SB_PROVISIONER_PUBLIC_DASHBOARD" <%c++ if(publicDashboard) $$ << "checked"; %> onchange="validateAndSaveField('RPI_SB_PROVISIONER_PUBLIC_DASHBOARD')">
+                    <span class="toggle-slider"></span>
+                </label>
+                <div class="toggle-content">
+                    <div class="toggle-title">Show devices and the code scanner without signing in</div>
+                    <div class="toggle-description">Anyone who can reach this interface can watch the devices page, open a device's page and check a scanned code. They see serial numbers, USB ports, addresses and progress, but not logs, overrides, settings or records. Turn this off to require signing in for everything.</div>
+                </div>
+                <div id="feedback-RPI_SB_PROVISIONER_PUBLIC_DASHBOARD" class="field-feedback"></div>
             </div>
         </div>
 

@@ -355,6 +355,14 @@ Give the workdir a directory of its own. Its contents are deleted when the cache
 
 The workdir must be owned by root and writable only by root, for example `install -d -m 0755 -o root -g root /srv/rpi-sb-provisioner/workdir`. Its contents are flashed to devices, so anything else that could write there could replace them. A workdir that others can write to is not used, and each run works in a fresh temporary directory instead. Upgrading to 2.3.6 fixes a dedicated workdir's ownership and empties it; it reports a symlinked workdir with the real path to use instead.
 
+## RPI_SB_PROVISIONER_PUBLIC_DASHBOARD
+
+**Optional**
+
+Whether the devices page, a device's own page and the code scanner can be viewed without signing in. Defaults to `1` (on); set it empty to require signing in for everything.
+
+Viewers who have not signed in see serial numbers, USB ports, addresses, states and image names. They never see a device's logs or per-device overrides, settings, customisation scripts, images, the manufacturing database or the audit log, and they cannot change anything. With the default loopback binding, that means other accounts on this computer; behind a reverse proxy, anyone who can reach it.
+
 ## RPI_SB_HOOK_TIMEOUT
 
 **Optional**
