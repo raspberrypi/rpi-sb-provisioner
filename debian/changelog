@@ -20,6 +20,15 @@ rpi-sb-provisioner (2.3.6) unstable; urgency=medium
     tokens, and the script sends it as "Authorization: Bearer". A token acts
     as its creator, only its hash is stored, and it cannot mint more tokens.
 
+  * Let the devices page, a device's own page and the code scanner be seen
+    without signing in, so a screen on the production line can show progress
+    again. Viewers who have not signed in see serial numbers, USB ports,
+    addresses and progress, but never logs, per-device overrides, settings or
+    records, and cannot change anything. Turn it off under Options, or with
+    RPI_SB_PROVISIONER_PUBLIC_DASHBOARD. The scanner now looks codes up with
+    a GET, and a code cut short by a NUL byte no longer matches every record
+    without a DUID.
+
   * Refuse a sign-in that a proxy on this machine forwarded over plain HTTP
     from another machine, since the password crossed the network
     unencrypted to reach it. Behind an HTTPS proxy that sends
