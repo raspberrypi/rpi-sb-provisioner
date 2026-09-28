@@ -754,11 +754,6 @@ namespace provisioner {
             return static_cast<std::uintmax_t>(stat.f_bavail) * stat.f_frsize;
         }
 
-        // Run an external command and return exit code
-        int runCommand(const std::string& cmd) {
-            return std::system(cmd.c_str());
-        }
-
     } // namespace anonymous
     
     // In-memory cache for SHA256 results
