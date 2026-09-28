@@ -4,6 +4,8 @@ One station serves every module in a run: it is opened, checked for the
 opt-in marker and snapshotted on first use, and restored when the run ends.
 """
 import atexit
+import signal
+import sys
 import unittest
 
 from .browser import Browser, USER, PASSWORD
@@ -22,6 +24,9 @@ def station():
         s.check_opted_in()
         s.snapshot()
         atexit.register(_finish, s)
+        # atexit does not run on SIGTERM: make it an ordinary exit, so a
+        # stopped run still puts the station back.
+        signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
         _station = s
     return _station
 
