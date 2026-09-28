@@ -2660,10 +2660,14 @@ namespace provisioner {
             resp->setStatusCode(k204NoContent);
             callback(resp);
         };
+        // Each gets its own copy. registerHandler takes a forwarding reference,
+        // so passing the named lambda stored a reference to this local, which is
+        // gone when registerHandlers returns: every notification read a
+        // destroyed token and was refused.
         // Paired with record_state() in host-support/state-recording.
-        app.registerHandler("/internal/state-changed", internalNotify, {Post});
+        app.registerHandler("/internal/state-changed", decltype(internalNotify)(internalNotify), {Post});
         // Paired with the manufacturing.db INSERT in host-support/manufacturing-data.
-        app.registerHandler("/internal/manufacturing-recorded", internalNotify, {Post});
+        app.registerHandler("/internal/manufacturing-recorded", decltype(internalNotify)(internalNotify), {Post});
     }
 
 
