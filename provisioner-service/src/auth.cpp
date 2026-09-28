@@ -614,6 +614,16 @@ namespace {
             pass();
         });
 
+        // No page of this UI belongs in a frame. Cross-site frames already get
+        // no session, but a page on another port of this host is same-site,
+        // and could frame a signed-in UI to steer the operator's clicks.
+        app.registerPreSendingAdvice([](const HttpRequestPtr &, const HttpResponsePtr &resp) {
+            resp->addHeader("X-Frame-Options", "DENY");
+            resp->addHeader("Content-Security-Policy", "frame-ancestors 'none'");
+            resp->addHeader("X-Content-Type-Options", "nosniff");
+            resp->addHeader("Referrer-Policy", "same-origin");
+        });
+
         app.registerHandler("/login", &handleLogin, {Get, Post});
         app.registerHandler("/logout", &handleLogout, {Post});
         app.registerHandler("/auth/session", [](const HttpRequestPtr &req,
