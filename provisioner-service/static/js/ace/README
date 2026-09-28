@@ -1,0 +1,16 @@
+Ace 1.44.0 (ace-builds, src-min-noconflict), BSD-3-Clause; see LICENSE.
+
+Vendored rather than fetched from a CDN: a station is often off the
+internet, and code from elsewhere would run with the operator's session.
+Only what the hook editor uses: the core, shell mode, the Monokai theme,
+and the search box Ace loads on Ctrl+F.
+
+Taken from https://registry.npmjs.org/ace-builds/-/ace-builds-1.44.0.tgz,
+checked against the registry's integrity before copying:
+  sha512-PFNMSYqFdEUkul2Ntud0HvA09AgY+F1ag0UYdpMH60wNI/qOA8cB8tlTgoALMEwIdUPJK2CjrIQ7OnbiSS/ugQ==
+
+SHA-256 of each file as copied:
+072d13e53d11e2ceccfffe1a0fa7f15cf69c5435d897df53d98c71be1c4a2e7f  ace.js
+427ec52caf01e02536f8429adeb2baee82cdd122f2c25cf01663959734019773  ext-searchbox.js
+0812522a4816737d29a89b601db7f8d603ad1809fd34cd25a31f00d3b731aa54  mode-sh.js
+418b51182005d851256bdc39a7095a1202afb9fdd2100aa4f9075b9623fb1c15  theme-monokai.js
