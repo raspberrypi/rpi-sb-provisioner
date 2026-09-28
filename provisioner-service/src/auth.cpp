@@ -1,4 +1,5 @@
 #include "auth.h"
+#include "api_tokens.h"
 #include "audit.h"
 
 #include <drogon/drogon.h>
@@ -565,6 +566,23 @@ namespace {
                 return;
             }
 
+            // Scripted clients. A browser never attaches this header by itself,
+            // so a bearer request needs no CSRF token.
+            const std::string authorization = req->getHeader("Authorization");
+            if (authorization.rfind("Bearer ", 0) == 0) {
+                const auto owner = tokens::ownerOf(authorization.substr(7));
+                if (!owner || !inOperatorGroup(*owner)) {
+                    LOG_WARN << "SECURITY: refused API token for " << req->getMethodString() << " " << path
+                             << " from " << AuditLog::getClientIP(req);
+                    stop(jsonError(k401Unauthorized, "INVALID_TOKEN", "The API token is not valid."));
+                    return;
+                }
+                req->attributes()->insert("auth.user", *owner);
+                req->attributes()->insert("auth.via", std::string("token"));
+                pass();
+                return;
+            }
+
             auto session = lookupSession(req);
             if (!session) {
                 if (!isStateChanging(req) && wantsHtml(req)) {
@@ -592,6 +610,7 @@ namespace {
 
             req->attributes()->insert("auth.user", session->user);
             req->attributes()->insert("auth.csrf", session->csrf);
+            req->attributes()->insert("auth.via", std::string("session"));
             pass();
         });
 
@@ -606,6 +625,77 @@ namespace {
             resp->addHeader("Cache-Control", "no-store");
             callback(resp);
         }, {Get});
+
+        // Token management needs a signed-in browser, so a leaked token cannot
+        // be used to mint more of them or to hide its own revocation.
+        auto sessionOnly = [](const HttpRequestPtr &req,
+                              std::function<void(const HttpResponsePtr &)> &callback) {
+            if (req->attributes()->get<std::string>("auth.via") == "session") return true;
+            callback(jsonError(k403Forbidden, "SESSION_REQUIRED",
+                               "API tokens can only be managed from a signed-in browser."));
+            return false;
+        };
+
+        app.registerHandler("/auth/tokens", [](const HttpRequestPtr &req,
+                                               std::function<void(const HttpResponsePtr &)> &&callback) {
+            HttpViewData data;
+            data.insert("currentPage", std::string("tokens"));
+            callback(HttpResponse::newHttpViewResponse("tokens.csp", data));
+        }, {Get});
+
+        app.registerHandler("/api/v2/tokens", [sessionOnly](const HttpRequestPtr &req,
+                                                  std::function<void(const HttpResponsePtr &)> &&callback) {
+            if (!sessionOnly(req, callback)) return;
+            if (req->method() == Get) {
+                Json::Value body(Json::arrayValue);
+                for (const auto &t : tokens::list()) {
+                    Json::Value row;
+                    row["id"] = t.id;
+                    row["user"] = t.user;
+                    row["label"] = t.label;
+                    row["created"] = t.created;
+                    body.append(row);
+                }
+                callback(HttpResponse::newHttpJsonResponse(body));
+                return;
+            }
+            auto json = req->getJsonObject();
+            const std::string label = json ? (*json)["label"].asString() : "";
+            if (label.empty() || label.size() > 100) {
+                callback(jsonError(k400BadRequest, "INVALID_LABEL", "Give the token a label of up to 100 characters."));
+                return;
+            }
+            std::string error;
+            const auto created = tokens::create(username(req), label, error);
+            AuditLog::logAuthentication(req, username(req), "TOKEN_CREATE", created.has_value(),
+                                        created ? created->info.id + " " + label : error);
+            if (!created) {
+                callback(jsonError(k500InternalServerError, "TOKEN_CREATE_FAILED", error));
+                return;
+            }
+            Json::Value body;
+            body["id"] = created->info.id;
+            body["token"] = created->secret;
+            auto resp = HttpResponse::newHttpJsonResponse(body);
+            resp->addHeader("Cache-Control", "no-store");
+            callback(resp);
+        }, {Get, Post});
+
+        app.registerHandler("/api/v2/tokens/{id}/revoke", [sessionOnly](const HttpRequestPtr &req,
+                                                  std::function<void(const HttpResponsePtr &)> &&callback,
+                                                  const std::string &id) {
+            if (!sessionOnly(req, callback)) return;
+            std::string owner;
+            const bool ok = tokens::revoke(id, owner);
+            AuditLog::logAuthentication(req, username(req), "TOKEN_REVOKE", ok, id + (ok ? " owned by " + owner : ""));
+            if (!ok) {
+                callback(jsonError(k404NotFound, "TOKEN_NOT_FOUND", "No such API token."));
+                return;
+            }
+            auto resp = HttpResponse::newHttpResponse();
+            resp->setStatusCode(k204NoContent);
+            callback(resp);
+        }, {Post});
     }
 
 } // namespace auth
