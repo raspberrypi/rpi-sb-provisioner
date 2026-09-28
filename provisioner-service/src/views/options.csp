@@ -1173,7 +1173,7 @@
             <div class="field-group">
                 <label class="field-label" for="RPI_DEVICE_BOOTLOADER_CONFIG_FILE">Bootloader Configuration <span class="optional-badge">Optional</span></label>
                 <input type="text" class="field-input" id="RPI_DEVICE_BOOTLOADER_CONFIG_FILE" name="RPI_DEVICE_BOOTLOADER_CONFIG_FILE"
-                       value="<%c++ $$ << bootloaderConfig; %>"
+                       value="<%c++ $$ << HttpViewData::htmlTranslate(bootloaderConfig); %>"
                        placeholder="Leave blank to use default"
                        onblur="validateAndSaveField('RPI_DEVICE_BOOTLOADER_CONFIG_FILE')">
                 <div id="feedback-RPI_DEVICE_BOOTLOADER_CONFIG_FILE" class="field-feedback"></div>
@@ -1461,7 +1461,7 @@
                         </label>
                         <div id="pem-key-list" class="signing-key-list" aria-live="polite"></div>
                         <div id="pem-key-empty" class="signing-key-empty">No PEM keys saved yet.</div>
-                        <input type="hidden" name="CUSTOMER_KEY_FILE_PEM" id="CUSTOMER_KEY_FILE_PEM" value="<%c++ $$ << keyFilePem; %>">
+                        <input type="hidden" name="CUSTOMER_KEY_FILE_PEM" id="CUSTOMER_KEY_FILE_PEM" value="<%c++ $$ << HttpViewData::htmlTranslate(keyFilePem); %>">
 
                         <div class="inline-warning">
                             <span class="inline-warning-icon">&#9888;</span>
@@ -1498,7 +1498,7 @@
                                 <code id="pkcs11-uri">pkcs11:object=<em>&lt;alias&gt;</em>;type=private</code>
                             </div>
 
-                            <input type="hidden" name="CUSTOMER_KEY_PKCS11_NAME" id="CUSTOMER_KEY_PKCS11_NAME" value="<%c++ $$ << keyPkcs11; %>">
+                            <input type="hidden" name="CUSTOMER_KEY_PKCS11_NAME" id="CUSTOMER_KEY_PKCS11_NAME" value="<%c++ $$ << HttpViewData::htmlTranslate(keyPkcs11); %>">
                         </div>
 
                         <!-- PKCS#11 PIN Input -->
@@ -1555,7 +1555,7 @@
             <div class="field-group">
                 <label class="field-label" for="RPI_SB_WORKDIR">Work Directory <span class="optional-badge">Optional &mdash; recommended</span></label>
                 <input type="text" class="field-input" id="RPI_SB_WORKDIR" name="RPI_SB_WORKDIR" 
-                       value="<%c++ $$ << workDir; %>" 
+                       value="<%c++ $$ << HttpViewData::htmlTranslate(workDir); %>" 
                        placeholder="/srv/rpi-sb-provisioner/workdir"
                        onblur="validateAndSaveField('RPI_SB_WORKDIR')">
                 <div id="feedback-RPI_SB_WORKDIR" class="field-feedback"></div>
@@ -1570,7 +1570,7 @@
             <div class="field-group">
                 <label class="field-label" for="RPI_SB_PROVISIONER_MANUFACTURING_DB">Manufacturing Database <span class="optional-badge">Optional</span></label>
                 <input type="text" class="field-input" id="RPI_SB_PROVISIONER_MANUFACTURING_DB" name="RPI_SB_PROVISIONER_MANUFACTURING_DB" 
-                       value="<%c++ $$ << mfgDb; %>" 
+                       value="<%c++ $$ << HttpViewData::htmlTranslate(mfgDb); %>" 
                        placeholder="/srv/rpi-sb-provisioner/manufacturing.db"
                        onblur="validateAndSaveField('RPI_SB_PROVISIONER_MANUFACTURING_DB')">
                 <div id="feedback-RPI_SB_PROVISIONER_MANUFACTURING_DB" class="field-feedback"></div>
@@ -1585,7 +1585,7 @@
             <div class="field-group">
                 <label class="field-label" for="RPI_DEVICE_RETRIEVE_KEYPAIR">Keypair Storage Directory <span class="optional-badge">Optional</span></label>
                 <input type="text" class="field-input" id="RPI_DEVICE_RETRIEVE_KEYPAIR" name="RPI_DEVICE_RETRIEVE_KEYPAIR" 
-                       value="<%c++ $$ << keypairDir; %>" 
+                       value="<%c++ $$ << HttpViewData::htmlTranslate(keypairDir); %>" 
                        placeholder="Leave blank to store with logs"
                        onblur="validateAndSaveField('RPI_DEVICE_RETRIEVE_KEYPAIR')">
                 <div id="feedback-RPI_DEVICE_RETRIEVE_KEYPAIR" class="field-feedback"></div>
@@ -1612,7 +1612,7 @@
                 <label class="field-label" for="RPI_CONNECT_API_KEY">Connect Management API Access Token <span class="optional-badge">Optional</span></label>
                 <div class="pin-input-wrapper">
                     <input type="password" class="field-input" id="RPI_CONNECT_API_KEY" name="RPI_CONNECT_API_KEY"
-                           value="<%c++ $$ << connectApiKey; %>"
+                           value="<%c++ $$ << HttpViewData::htmlTranslate(connectApiKey); %>"
                            placeholder="rporg_..."
                            onblur="validateAndSaveField('RPI_CONNECT_API_KEY')">
                     <button type="button" class="pin-toggle-visibility" onclick="toggleConnectKeyVisibility()" aria-label="Toggle access token visibility">&#128065;</button>
@@ -1629,7 +1629,7 @@
             <div class="field-group">
                 <label class="field-label" for="RPI_CONNECT_DESCRIPTION">Description Prefix <span class="optional-badge">Optional</span></label>
                 <input type="text" class="field-input" id="RPI_CONNECT_DESCRIPTION" name="RPI_CONNECT_DESCRIPTION"
-                       value="<%c++ $$ << connectDescription; %>"
+                       value="<%c++ $$ << HttpViewData::htmlTranslate(connectDescription); %>"
                        placeholder="e.g. Factory-A &mdash; board type and serial are added after this"
                        onblur="validateAndSaveField('RPI_CONNECT_DESCRIPTION')">
                 <div id="feedback-RPI_CONNECT_DESCRIPTION" class="field-feedback"></div>

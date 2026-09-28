@@ -280,7 +280,7 @@ try {
     <div class="container mt-4">
         <div class="container script-editor-container">
             <a href="/customisation/list-scripts" class="mb-3 d-inline-block"><i class="fas fa-arrow-left"></i> Back to Scripts</a>
-            <h2>Script Editor - <span id="script-filename"><%c++ $$ << script_name; %></span></h2>
+            <h2>Script Editor - <span id="script-filename"><%c++ $$ << HttpViewData::htmlTranslate(script_name); %></span></h2>
             
             <div class="row mb-3">
                 <div class="col-md-auto">
@@ -290,7 +290,7 @@ try {
                 </div>
             </div>
 
-            <div id="editor" style="height: 500px; width: 100%; border: 1px solid #ddd;"><%c++ $$ << script_content; %></div>
+            <div id="editor" style="height: 500px; width: 100%; border: 1px solid #ddd;"><%c++ $$ << HttpViewData::htmlTranslate(script_content); %></div>
 
             <div class="mt-3 d-flex justify-content-between">
                 <button id="save-btn" class="btn btn-success">Save</button>
@@ -303,9 +303,9 @@ try {
                         <div id="copy-from-menu" class="copy-from-menu">
                             <%c++ for (Json::ArrayIndex i = 0; i < copy_sources.size(); i++) { %>
                             <a href="#" class="copy-from-item"
-                               data-source="<%c++ $$ << copy_sources[i]["filename"].asString(); %>"
-                               data-provisioner="<%c++ $$ << copy_sources[i]["provisioner"].asString(); %>">
-                                <%c++ $$ << copy_sources[i]["provisioner"].asString(); %>
+                               data-source="<%c++ $$ << HttpViewData::htmlTranslate(copy_sources[i]["filename"].asString()); %>"
+                               data-provisioner="<%c++ $$ << HttpViewData::htmlTranslate(copy_sources[i]["provisioner"].asString()); %>">
+                                <%c++ $$ << HttpViewData::htmlTranslate(copy_sources[i]["provisioner"].asString()); %>
                             </a>
                             <%c++ } %>
                         </div>

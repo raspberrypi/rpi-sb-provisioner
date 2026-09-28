@@ -184,12 +184,12 @@
                 
                 <div class="form-group">
                     <label for="start_date">Start Date:</label>
-                    <input type="datetime-local" id="start_date" name="start_date" value="<%c++ $$ << @@.get<std::string>("start_date"); %>">
+                    <input type="datetime-local" id="start_date" name="start_date" value="<%c++ $$ << HttpViewData::htmlTranslate(@@.get<std::string>("start_date")); %>">
                 </div>
                 
                 <div class="form-group">
                     <label for="end_date">End Date:</label>
-                    <input type="datetime-local" id="end_date" name="end_date" value="<%c++ $$ << @@.get<std::string>("end_date"); %>">
+                    <input type="datetime-local" id="end_date" name="end_date" value="<%c++ $$ << HttpViewData::htmlTranslate(@@.get<std::string>("end_date")); %>">
                 </div>
                 
                 <div class="form-group">
@@ -254,27 +254,27 @@
                     <tr>
                         <td><%c++ 
                             if (entry.find("timestamp") != entry.end() && !entry.at("timestamp").empty()) {
-                                $$ << entry.at("timestamp");
+                                $$ << HttpViewData::htmlTranslate(entry.at("timestamp"));
                             } else {
                                 $$ << "<span class='success-unknown'>Not recorded</span>";
                             }
                         %></td>
-                        <td><span class="event-type <%c++ $$ << eventTypeClass; %>"><%c++ $$ << displayEventType; %></span></td>
+                        <td><span class="event-type <%c++ $$ << eventTypeClass; %>"><%c++ $$ << HttpViewData::htmlTranslate(displayEventType); %></span></td>
                         <td><%c++ 
                             if (entry.find("client_ip") != entry.end()) {
-                                $$ << entry.at("client_ip");
+                                $$ << HttpViewData::htmlTranslate(entry.at("client_ip"));
                             }
                         %></td>
                         <td><%c++ 
                             if (entry.find("handler_path") != entry.end() && !entry.at("handler_path").empty()) {
-                                $$ << entry.at("handler_path");
+                                $$ << HttpViewData::htmlTranslate(entry.at("handler_path"));
                             } else if (entry.find("operation") != entry.end() && !entry.at("operation").empty()) {
-                                $$ << entry.at("operation");
+                                $$ << HttpViewData::htmlTranslate(entry.at("operation"));
                             }
                         %></td>
                         <td><%c++ 
                             if (entry.find("target_path") != entry.end() && !entry.at("target_path").empty()) {
-                                $$ << entry.at("target_path");
+                                $$ << HttpViewData::htmlTranslate(entry.at("target_path"));
                             }
                         %></td>
                         <td><%c++ 
@@ -295,9 +295,9 @@
                         %></td>
                         <td><%c++ 
                             if (entry.find("additional_info") != entry.end() && !entry.at("additional_info").empty()) {
-                                $$ << entry.at("additional_info");
+                                $$ << HttpViewData::htmlTranslate(entry.at("additional_info"));
                             } else if (entry.find("user_agent") != entry.end() && !entry.at("user_agent").empty()) {
-                                $$ << entry.at("user_agent");
+                                $$ << HttpViewData::htmlTranslate(entry.at("user_agent"));
                             }
                         %></td>
                     </tr>

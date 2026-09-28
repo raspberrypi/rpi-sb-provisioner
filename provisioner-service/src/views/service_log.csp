@@ -79,7 +79,7 @@
     <%view navbar %>
 
     <main id="main-content">
-    <h1>Service Log: <%c++ $$ << @@.get<std::string>("service_name"); %></h1>
+    <h1>Service Log: <%c++ $$ << HttpViewData::htmlTranslate(@@.get<std::string>("service_name")); %></h1>
     
     <a href="/services" class="back-link">← Back to Services</a>
     
@@ -122,7 +122,7 @@
     if(logEntries.size() > 0) {
         for(const auto& entry : logEntries) {
     %>
-        <div class="log-entry"><%c++ $$ << entry; %></div>
+        <div class="log-entry"><%c++ $$ << HttpViewData::htmlTranslate(entry); %></div>
     <%c++ 
         }
     } else {

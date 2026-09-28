@@ -1,8 +1,9 @@
+<%inc #include <cstdio> %>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Device Details - [[device.serial]]</title>
+    <title>Device Details - <%c++ $$ << HttpViewData::htmlTranslate(@@.get<std::string>("device.serial")); %></title>
     <%view stylesheet %>
     <style>
         /* Special Flags Section */
@@ -360,23 +361,23 @@
     <div class="device-info">
         <div class="info-row">
             <span class="info-label">Serial Number:</span>
-            <span id="info-serial" data-field="serial">[[device.serial]]</span>
+            <span id="info-serial" data-field="serial"><%c++ $$ << HttpViewData::htmlTranslate(@@.get<std::string>("device.serial")); %></span>
         </div>
         <div class="info-row">
             <span class="info-label">USB path:</span>
-            <span id="info-port" data-field="port">[[device.port]]</span>
+            <span id="info-port" data-field="port"><%c++ $$ << HttpViewData::htmlTranslate(@@.get<std::string>("device.port")); %></span>
         </div>
         <div class="info-row">
             <span class="info-label">IP Address:</span>
-            <span id="info-ip" data-field="ip_address">[[device.ip_address]]</span>
+            <span id="info-ip" data-field="ip_address"><%c++ $$ << HttpViewData::htmlTranslate(@@.get<std::string>("device.ip_address")); %></span>
         </div>
         <div class="info-row">
             <span class="info-label">State:</span>
-            <span id="info-state" data-field="state">[[device.state]]</span>
+            <span id="info-state" data-field="state"><%c++ $$ << HttpViewData::htmlTranslate(@@.get<std::string>("device.state")); %></span>
         </div>
         <div class="info-row">
             <span class="info-label">Image:</span>
-            <span id="info-image" data-field="image">[[device.image]]</span>
+            <span id="info-image" data-field="image"><%c++ $$ << HttpViewData::htmlTranslate(@@.get<std::string>("device.image")); %></span>
         </div>
     </div>
 
@@ -415,9 +416,9 @@
                 else if (hState == "triage") badgeColor = "#e0a800";
             %>
                 <tr style="border-bottom: 1px solid #f0f0f0;">
-                    <td style="padding: 10px 12px; font-family: monospace; font-size: 0.9rem; color: #444;"><%c++ $$<<hTimestamp; %></td>
+                    <td style="padding: 10px 12px; font-family: monospace; font-size: 0.9rem; color: #444;"><%c++ $$ << HttpViewData::htmlTranslate(hTimestamp); %></td>
                     <td style="padding: 10px 12px;">
-                        <span style="display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: 500; color: #fff; background-color: <%c++ $$<<badgeColor; %>;"><%c++ $$<<hState; %></span>
+                        <span style="display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: 500; color: #fff; background-color: <%c++ $$ << HttpViewData::htmlTranslate(badgeColor); %>;"><%c++ $$ << HttpViewData::htmlTranslate(hState); %></span>
                     </td>
                 </tr>
             <%c++ } %>
@@ -449,36 +450,36 @@
                 if (fMode == "persistent") cardClass += " flag-active";
                 else if (fMode == "once") cardClass += " flag-active-once";
         %>
-        <div class="<%c++ $$<<cardClass; %>" id="flag-card-<%c++ $$<<fId; %>" data-flag-id="<%c++ $$<<fId; %>">
+        <div class="<%c++ $$ << HttpViewData::htmlTranslate(cardClass); %>" id="flag-card-<%c++ $$ << HttpViewData::htmlTranslate(fId); %>" data-flag-id="<%c++ $$ << HttpViewData::htmlTranslate(fId); %>">
             <div class="flag-header">
-                <span class="flag-title"><%c++ $$<<fLabel; %></span>
+                <span class="flag-title"><%c++ $$ << HttpViewData::htmlTranslate(fLabel); %></span>
                 <%c++ if (!fConstraint.empty()) { %>
-                <span class="flag-constraint"><%c++ $$<<fConstraint; %></span>
+                <span class="flag-constraint"><%c++ $$ << HttpViewData::htmlTranslate(fConstraint); %></span>
                 <%c++ } %>
             </div>
-            <div class="flag-description"><%c++ $$<<fDesc; %></div>
+            <div class="flag-description"><%c++ $$ << HttpViewData::htmlTranslate(fDesc); %></div>
             <div class="flag-controls">
-                <div class="flag-mode-group" role="radiogroup" aria-label="Flag mode for <%c++ $$<<fLabel; %>">
-                    <label class="<%c++ if (fMode == "off") $$<<"mode-active-off"; %>" id="label-<%c++ $$<<fId; %>-off">
-                        <input type="radio" name="flag-<%c++ $$<<fId; %>" value="off"
+                <div class="flag-mode-group" role="radiogroup" aria-label="Flag mode for <%c++ $$ << HttpViewData::htmlTranslate(fLabel); %>">
+                    <label class="<%c++ if (fMode == "off") $$<<"mode-active-off"; %>" id="label-<%c++ $$ << HttpViewData::htmlTranslate(fId); %>-off">
+                        <input type="radio" name="flag-<%c++ $$ << HttpViewData::htmlTranslate(fId); %>" value="off"
                                <%c++ if (fMode == "off") $$<<"checked"; %>
-                               onchange="setFlag('<%c++ $$<<fId; %>', 'off')">
+                               onchange="setFlag('<%c++ $$ << HttpViewData::htmlTranslate(fId); %>', 'off')">
                         <span>Off</span>
                     </label>
-                    <label class="<%c++ if (fMode == "once") $$<<"mode-active-once"; %>" id="label-<%c++ $$<<fId; %>-once">
-                        <input type="radio" name="flag-<%c++ $$<<fId; %>" value="once"
+                    <label class="<%c++ if (fMode == "once") $$<<"mode-active-once"; %>" id="label-<%c++ $$ << HttpViewData::htmlTranslate(fId); %>-once">
+                        <input type="radio" name="flag-<%c++ $$ << HttpViewData::htmlTranslate(fId); %>" value="once"
                                <%c++ if (fMode == "once") $$<<"checked"; %>
-                               onchange="setFlag('<%c++ $$<<fId; %>', 'once')">
+                               onchange="setFlag('<%c++ $$ << HttpViewData::htmlTranslate(fId); %>', 'once')">
                         <span>One-time</span>
                     </label>
-                    <label class="<%c++ if (fMode == "persistent") $$<<"mode-active-persistent"; %>" id="label-<%c++ $$<<fId; %>-persistent">
-                        <input type="radio" name="flag-<%c++ $$<<fId; %>" value="persistent"
+                    <label class="<%c++ if (fMode == "persistent") $$<<"mode-active-persistent"; %>" id="label-<%c++ $$ << HttpViewData::htmlTranslate(fId); %>-persistent">
+                        <input type="radio" name="flag-<%c++ $$ << HttpViewData::htmlTranslate(fId); %>" value="persistent"
                                <%c++ if (fMode == "persistent") $$<<"checked"; %>
-                               onchange="setFlag('<%c++ $$<<fId; %>', 'persistent')">
+                               onchange="setFlag('<%c++ $$ << HttpViewData::htmlTranslate(fId); %>', 'persistent')">
                         <span>Persistent</span>
                     </label>
                 </div>
-                <span class="flag-feedback" id="flag-feedback-<%c++ $$<<fId; %>"></span>
+                <span class="flag-feedback" id="flag-feedback-<%c++ $$ << HttpViewData::htmlTranslate(fId); %>"></span>
             </div>
         </div>
         <%c++ } %>
@@ -486,22 +487,37 @@
 
     <div class="log-section">
         <h2>Provisioner Log</h2>
-        <div class="log-content">[[provisioner_log]]</div>
+        <div class="log-content"><%c++ $$ << HttpViewData::htmlTranslate(@@.get<std::string>("provisioner_log")); %></div>
     </div>
 
     <div class="log-section">
         <h2>Bootstrap Log</h2>
-        <div class="log-content">[[bootstrap_log]]</div>
+        <div class="log-content"><%c++ $$ << HttpViewData::htmlTranslate(@@.get<std::string>("bootstrap_log")); %></div>
     </div>
 
     <div class="log-section">
         <h2>Triage Log</h2>
-        <div class="log-content">[[triage_log]]</div>
+        <div class="log-content"><%c++ $$ << HttpViewData::htmlTranslate(@@.get<std::string>("triage_log")); %></div>
     </div>
     </main>
 
     <script>
-    var deviceSerial = '[[device.serial]]';
+    var deviceSerial = <%c++ {
+        // A JavaScript string literal: anything that could end the string or
+        // the script element is written as a \u escape.
+        std::string q = "\"";
+        for (unsigned char c : @@.get<std::string>("device.serial")) {
+            if (c < 0x20 || c == '"' || c == '\\' || c == '\'' || c == '<' || c == '>' || c == '&') {
+                char escaped[8];
+                std::snprintf(escaped, sizeof(escaped), "\\u%04x", c);
+                q += escaped;
+            } else {
+                q += static_cast<char>(c);
+            }
+        }
+        q += "\"";
+        $$ << q;
+    } %>;
 
     // Provisioning progress stepper
     var ProgressStepper = (function() {

@@ -21,7 +21,7 @@
     if (hasWarning) { 
     %>
     <div class="warning-block" role="alert">
-        <%c++ $$ << warningMessage; %>
+        <%c++ $$ << HttpViewData::htmlTranslate(warningMessage); %>
     </div>
     <%c++ } %>
 

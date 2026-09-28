@@ -576,20 +576,26 @@
                 return '';
             }
             
+            // Serials, models and states come from the devices themselves:
+            // a USB product string can say anything.
+            function escapeTopologyText(value) {
+                return String(value).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+            }
+
             function tooltipText(n) {
                 const parts = [];
-                parts.push(`<strong>${labelForNode(n)}</strong>`);
-                if (n.id && n.id !== 'server') parts.push(`ID: ${n.id}`);
+                parts.push(`<strong>${escapeTopologyText(labelForNode(n))}</strong>`);
+                if (n.id && n.id !== 'server') parts.push(`ID: ${escapeTopologyText(n.id)}`);
                 if (usbPortRestrictionActive && typeof n.portPermitted === 'boolean'
                     && !n.isTier && !n.isRootPort && n.id !== 'server') {
                     parts.push(n.portPermitted
                         ? 'USB filter: permitted'
                         : 'USB filter: excluded (will not be provisioned)');
                 }
-                if (n.model) parts.push(`Model: ${n.model}`);
-                if (n.state) parts.push(`State: ${n.state}`);
-                if (n.ip) parts.push(`IP: ${n.ip}`);
-                if (n.image) parts.push(`Image: ${n.image}`);
+                if (n.model) parts.push(`Model: ${escapeTopologyText(n.model)}`);
+                if (n.state) parts.push(`State: ${escapeTopologyText(n.state)}`);
+                if (n.ip) parts.push(`IP: ${escapeTopologyText(n.ip)}`);
+                if (n.image) parts.push(`Image: ${escapeTopologyText(n.image)}`);
                 return parts.join('<br/>');
             }
 
