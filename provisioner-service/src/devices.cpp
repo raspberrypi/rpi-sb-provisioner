@@ -2234,13 +2234,12 @@ namespace provisioner {
         app.registerHandler("/devices/_test/{scenario}", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback, const std::string &scenario) {
             auto resp = HttpResponse::newHttpResponse();
             
-            // Security: Only allow from localhost or with secret header
+            // Only from this machine. There used to be a header that let
+            // anyone else in too, but its value is in the public source.
             std::string clientIP = AuditLog::getClientIP(req);
-            std::string secretHeader = req->getHeader("X-Test-Secret");
-            bool isLocalhost = (clientIP == "127.0.0.1" || clientIP == "::1" || clientIP.find("localhost") != std::string::npos);
-            bool hasSecret = (secretHeader == "rpi-provisioner-test-2024");
+            bool isLocalhost = (clientIP == "127.0.0.1" || clientIP == "::1" || clientIP == "::ffff:127.0.0.1");
             
-            if (!isLocalhost && !hasSecret) {
+            if (!isLocalhost) {
                 resp->setStatusCode(k404NotFound);
                 resp->setBody("Not Found");
                 callback(resp);
@@ -2486,13 +2485,12 @@ namespace provisioner {
         app.registerHandler("/devices/_test", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
             auto resp = HttpResponse::newHttpResponse();
             
-            // Security: Only allow from localhost or with secret header
+            // Only from this machine. There used to be a header that let
+            // anyone else in too, but its value is in the public source.
             std::string clientIP = AuditLog::getClientIP(req);
-            std::string secretHeader = req->getHeader("X-Test-Secret");
-            bool isLocalhost = (clientIP == "127.0.0.1" || clientIP == "::1" || clientIP.find("localhost") != std::string::npos);
-            bool hasSecret = (secretHeader == "rpi-provisioner-test-2024");
+            bool isLocalhost = (clientIP == "127.0.0.1" || clientIP == "::1" || clientIP == "::ffff:127.0.0.1");
             
-            if (!isLocalhost && !hasSecret) {
+            if (!isLocalhost) {
                 resp->setStatusCode(k404NotFound);
                 resp->setBody("Not Found");
                 callback(resp);
@@ -2596,7 +2594,6 @@ namespace provisioner {
                                      peerIp == "::ffff:127.0.0.1");
             if (!isLoopback) {
                 resp->setStatusCode(k404NotFound);
-                resp->setBody("debug: non-loopback peer=" + peerIp);
                 callback(resp);
                 return;
             }
@@ -2604,9 +2601,6 @@ namespace provisioner {
             const std::string presented = req->getHeader("X-Internal-Token");
             if (presented.empty() || !tokensEqual(presented, internalToken)) {
                 resp->setStatusCode(k404NotFound);
-                resp->setBody("debug: token mismatch presented_len=" +
-                              std::to_string(presented.size()) +
-                              " expected_len=" + std::to_string(internalToken.size()));
                 callback(resp);
                 return;
             }
