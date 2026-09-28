@@ -99,21 +99,21 @@ namespace provisioner {
     }
     
     std::string AuditLog::getClientIP(const HttpRequestPtr &req) {
-        std::string clientIP = req->getPeerAddr().toIp();
-        
-        // Check for X-Forwarded-For header (if behind a proxy)
-        auto xff = req->getHeader("X-Forwarded-For");
-        if (!xff.empty()) {
-            // Extract the original client IP (first in the list)
-            size_t commaPos = xff.find(',');
-            if (commaPos != std::string::npos) {
-                clientIP = xff.substr(0, commaPos);
-            } else {
-                clientIP = xff;
-            }
+        const std::string peer = req->getPeerAddr().toIp();
+
+        // X-Forwarded-For is only evidence when a local reverse proxy sent
+        // it; from anyone else it is whatever they chose to write. Even then
+        // only the last entry is the proxy's own: the ones before it arrived
+        // from the client.
+        const bool fromLocalProxy = peer == "127.0.0.1" || peer == "::1" || peer == "::ffff:127.0.0.1";
+        const std::string xff = req->getHeader("X-Forwarded-For");
+        if (!fromLocalProxy || xff.empty()) {
+            return peer;
         }
-        
-        return clientIP;
+        std::string last = xff.substr(xff.rfind(',') == std::string::npos ? 0 : xff.rfind(',') + 1);
+        last.erase(0, last.find_first_not_of(" \t"));
+        last.erase(last.find_last_not_of(" \t") + 1);
+        return last.empty() ? peer : last;
     }
     
     void AuditLog::logHandlerAccess(const HttpRequestPtr &req, const std::string &handlerPath) {
