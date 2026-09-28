@@ -181,6 +181,23 @@ record_progress() {
     record_state "${TARGET_DEVICE_SERIAL}" "${STATE_PREFIX}-$1" "${TARGET_USB_PATH}"
 }
 
+# Only the devices the provisioner drives: a Raspberry Pi in rpiboot mode, or
+# the fastboot gadget. Any USB device can claim any serial, so a match is
+# accepted only when exactly one such device carries it.
+provisionable_usb_id() {
+    case "$1:$2" in
+        0a5c:2764|0a5c:2711|0a5c:2712|18d1:4e40) return 0 ;;
+    esac
+    return 1
+}
+
+usb_match_udev() {
+    _umu_props=$(udevadm info --name="$1" --query=property 2>/dev/null) || return 1
+    [ "$(printf '%s\n' "$_umu_props" | sed -n 's/^ID_SERIAL_SHORT=//p')" = "$2" ] || return 1
+    provisionable_usb_id "$(printf '%s\n' "$_umu_props" | sed -n 's/^ID_VENDOR_ID=//p')" \
+        "$(printf '%s\n' "$_umu_props" | sed -n 's/^ID_MODEL_ID=//p')"
+}
+
 # get_usb_path_for_serial() - Finds the USB path for a device with a specific serial number
 #
 # Parameters:
@@ -195,17 +212,16 @@ record_progress() {
 #
 # Return codes:
 #   0 - Success, USB path was found and output to stdout
-#   1 - Failure, no matching device was found
+#   1 - Failure, no matching device, or more than one
 #
 # The function first searches in /sys/bus/usb/devices/ and falls back to using
 # udevadm if the first method fails.
 get_usb_path_for_serial() {
     serial="$1"
     usb_path=""
-    
-    # Find all USB devices
+    matches=0
+
     for device_path in /sys/bus/usb/devices/*; do
-        # Skip if not a directory or doesn't match the pattern we're looking for
         base_name=$(basename "$device_path")
         case "$base_name" in
             [0-9]*-[0-9]*|\
@@ -219,29 +235,32 @@ get_usb_path_for_serial() {
                 continue
                 ;;
         esac
-        
-        # Check if this device has the serial number we're looking for
-        if [ -f "$device_path/serial" ] && [ "$(cat "$device_path/serial")" = "$serial" ]; then
-            usb_path="$(basename "$device_path")"
-            echo "$usb_path"
-            return 0
-        fi
+
+        [ -f "$device_path/serial" ] && [ "$(cat "$device_path/serial")" = "$serial" ] || continue
+        provisionable_usb_id "$(cat "$device_path/idVendor" 2>/dev/null)" \
+            "$(cat "$device_path/idProduct" 2>/dev/null)" || continue
+        usb_path="$base_name"
+        matches=$((matches + 1))
     done
+    if [ "$matches" -eq 1 ]; then
+        echo "$usb_path"
+        return 0
+    fi
+    [ "$matches" -eq 0 ] || return 1
 
     # Fallback to using udevadm to find the device if available
     if command -v udevadm >/dev/null 2>&1; then
         for device in /dev/bus/usb/*/*; do
-            device_serial=$(udevadm info --name="$device" --query=property --property=ID_SERIAL_SHORT --value 2>/dev/null)
-            if [ "$device_serial" = "$serial" ]; then
-                # Separate assignment from export to avoid masking return values
-                usb_path="$(udevadm info "$device" | grep -oP '^P: \K.*' | grep -oE '[0-9]+-[0-9]+(\.[0-9]+)*$')"
-                echo "$usb_path"
-                return 0
-            fi
+            usb_match_udev "$device" "$serial" || continue
+            usb_path="$(udevadm info "$device" | grep -oP '^P: \K.*' | grep -oE '[0-9]+-[0-9]+(\.[0-9]+)*$')"
+            matches=$((matches + 1))
         done
+        if [ "$matches" -eq 1 ]; then
+            echo "$usb_path"
+            return 0
+        fi
     fi
-    
-    # If we get here, we didn't find a matching device
+
     return 1
 }
 
@@ -255,19 +274,17 @@ get_usb_path_for_serial() {
 #
 # Return codes:
 #   0 - Success, device path was found and output to stdout
-#   1 - Failure, no matching device was found
+#   1 - Failure, no matching device, or more than one
 get_device_path_for_serial() {
     serial="$1"
+    found=""
 
-    if command -v udevadm >/dev/null 2>&1; then
-        for device in /dev/bus/usb/*/*; do
-            device_serial=$(udevadm info --name="$device" --query=property --property=ID_SERIAL_SHORT --value 2>/dev/null)
-            if [ "$device_serial" = "$serial" ]; then
-                echo "$device"
-                return 0
-            fi
-        done
-    fi
-
-    return 1
+    command -v udevadm >/dev/null 2>&1 || return 1
+    for device in /dev/bus/usb/*/*; do
+        usb_match_udev "$device" "$serial" || continue
+        [ -z "$found" ] || return 1
+        found="$device"
+    done
+    [ -n "$found" ] || return 1
+    echo "$found"
 }
