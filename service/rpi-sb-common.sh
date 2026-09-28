@@ -1414,11 +1414,30 @@ prepare_signed_boot_simg() {
     mount -o loop,ro -t vfat "${_src_img}" "${_src_mnt}" \
         || _fail "mount source vfat" || return 1
 
-    # Bundle every file in the boot VFAT (firmware, kernel, dtbs, cmdline.txt,
-    # config.txt) into a single FIT-style boot.img the EEPROM will accept.
-    rpi-make-boot-image -b "pi${RPI_DEVICE_FAMILY}" -a 64 \
-        -d "${_src_mnt}" -o "${_boot_img}" \
-        || { umount "${_src_mnt}" 2>/dev/null; _fail "rpi-make-boot-image"; return 1; }
+    if [ -f "${_src_mnt}/boot.img" ]; then
+        # The slot already holds a prepared boot image - boot.img, boot.sig and a
+        # config.txt setting boot_ramdisk=1 - as rpi-image-gen's image-rota layout
+        # produces. Bundling it again nests one boot.img inside another: the EEPROM
+        # verifies and mounts the outer image, and finds the real one sitting inside
+        # it as payload, with no device tree at the top level:
+        #
+        #   rsa-verify pass (0x0)
+        #   Read config.txt bytes          15
+        #   Device-tree file "bcm2712-rpi-5-b.dtb" not found.
+        #
+        # Sign the image as it stands instead. It is re-signed below with the
+        # configured key - the one whose hash is in the device's OTP - so an image
+        # signed by any other key is still replaced.
+        log "Boot slot already contains boot.img; signing it rather than rebundling"
+        cp "${_src_mnt}/boot.img" "${_boot_img}" \
+            || { umount "${_src_mnt}" 2>/dev/null; _fail "cp existing boot.img"; return 1; }
+    else
+        # Bundle every file in the boot VFAT (firmware, kernel, dtbs, cmdline.txt,
+        # config.txt) into a single FIT-style boot.img the EEPROM will accept.
+        rpi-make-boot-image -b "pi${RPI_DEVICE_FAMILY}" -a 64 \
+            -d "${_src_mnt}" -o "${_boot_img}" \
+            || { umount "${_src_mnt}" 2>/dev/null; _fail "rpi-make-boot-image"; return 1; }
+    fi
 
     # Sidecar signature in the same format rpi-sb-provisioner.sh produces.
     sha256sum "${_boot_img}" | awk '{print $1}' > "${_boot_sig}" \
