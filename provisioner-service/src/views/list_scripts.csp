@@ -193,7 +193,7 @@ std::string currentPage = "customisation";
           <div class="tabs">
             <div class="tab-buttons" role="tablist" aria-label="Provisioner script categories">
               <%c++ for (const auto& [provisioner, stages] : provisioner_stages) { %>
-                <button class="tab-button" onclick="openTab(event, '<%c++ $$ << provisioner; %>')" id="<%c++ $$ << provisioner; %>-tab" role="tab" aria-selected="false" aria-controls="<%c++ $$ << provisioner; %>">
+                <button class="tab-button" onclick="openTab(event, '<%c++ $$ << HttpViewData::htmlTranslate(provisioner); %>')" id="<%c++ $$ << HttpViewData::htmlTranslate(provisioner); %>-tab" role="tab" aria-selected="false" aria-controls="<%c++ $$ << HttpViewData::htmlTranslate(provisioner); %>">
                   <%c++ {
                       auto lit = provisioner_labels.find(provisioner);
                       $$ << (lit != provisioner_labels.end() ? lit->second : provisioner);
@@ -203,12 +203,12 @@ std::string currentPage = "customisation";
             </div>
             
             <%c++ for (const auto& [provisioner, validStages] : provisioner_stages) { %>
-              <div id="<%c++ $$ << provisioner; %>" class="tab-content" role="tabpanel" aria-labelledby="<%c++ $$ << provisioner; %>-tab">
+              <div id="<%c++ $$ << HttpViewData::htmlTranslate(provisioner); %>" class="tab-content" role="tabpanel" aria-labelledby="<%c++ $$ << HttpViewData::htmlTranslate(provisioner); %>-tab">
                 <h3><%c++ {
                       auto lit = provisioner_labels.find(provisioner);
                       $$ << (lit != provisioner_labels.end() ? lit->second : provisioner);
                   } %> scripts</h3>
-                <p class="provisioner-id">Scripts named <code><%c++ $$ << provisioner; %>-&lt;stage&gt;.sh</code></p>
+                <p class="provisioner-id">Scripts named <code><%c++ $$ << HttpViewData::htmlTranslate(provisioner); %>-&lt;stage&gt;.sh</code></p>
                 
                 <div class="hook-grid">
                   <%c++ for (const auto& stage : validStages) { %>
@@ -246,7 +246,7 @@ std::string currentPage = "customisation";
                       }
                     %>
                     
-                    <div class="hook-card" data-filename="<%c++ $$ << hookFilename; %>">
+                    <div class="hook-card" data-filename="<%c++ $$ << HttpViewData::htmlTranslate(hookFilename); %>">
                       <h4>
                         <%c++ {
                             auto slit = stage_labels.find(stage);
@@ -260,25 +260,25 @@ std::string currentPage = "customisation";
                           <span class="hook-status hook-missing">Not set up</span>
                         <%c++ } %>
                       </h4>
-                      <div class="hook-filename"><code><%c++ $$ << hookFilename; %>.sh</code></div>
+                      <div class="hook-filename"><code><%c++ $$ << HttpViewData::htmlTranslate(hookFilename); %>.sh</code></div>
                       
                       <div class="hook-description">
-                        <%c++ $$ << hookDescription; %>
+                        <%c++ $$ << HttpViewData::htmlTranslate(hookDescription); %>
                       </div>
                       
                       <div class="hook-actions">
                         <%c++ if (hookExists) { %>
-                          <a href="/customisation/get-script?script=<%c++ $$ << hookFilename; %>" class="cust-btn cust-btn-primary cust-btn-sm" aria-label="Edit <%c++ $$ << hookFilename; %> script">Edit</a>
+                          <a href="/customisation/get-script?script=<%c++ $$ << HttpViewData::htmlTranslate(hookFilename); %>" class="cust-btn cust-btn-primary cust-btn-sm" aria-label="Edit <%c++ $$ << HttpViewData::htmlTranslate(hookFilename); %> script">Edit</a>
                           
                           <%c++ if (hookEnabled) { %>
-                            <button onclick="disableScript('<%c++ $$ << hookFilename; %>')" class="cust-btn cust-btn-warning cust-btn-sm" aria-label="Disable <%c++ $$ << hookFilename; %> script">Disable</button>
+                            <button onclick="disableScript('<%c++ $$ << HttpViewData::htmlTranslate(hookFilename); %>')" class="cust-btn cust-btn-warning cust-btn-sm" aria-label="Disable <%c++ $$ << HttpViewData::htmlTranslate(hookFilename); %> script">Disable</button>
                           <%c++ } else { %>
-                            <button onclick="enableScript('<%c++ $$ << hookFilename; %>')" class="cust-btn cust-btn-success cust-btn-sm" aria-label="Enable <%c++ $$ << hookFilename; %> script">Enable</button>
+                            <button onclick="enableScript('<%c++ $$ << HttpViewData::htmlTranslate(hookFilename); %>')" class="cust-btn cust-btn-success cust-btn-sm" aria-label="Enable <%c++ $$ << HttpViewData::htmlTranslate(hookFilename); %> script">Enable</button>
                           <%c++ } %>
                           
-                          <button onclick="deleteScript('<%c++ $$ << hookFilename; %>')" class="cust-btn cust-btn-danger cust-btn-sm" aria-label="Delete <%c++ $$ << hookFilename; %> script">Delete</button>
+                          <button onclick="deleteScript('<%c++ $$ << HttpViewData::htmlTranslate(hookFilename); %>')" class="cust-btn cust-btn-danger cust-btn-sm" aria-label="Delete <%c++ $$ << HttpViewData::htmlTranslate(hookFilename); %> script">Delete</button>
                         <%c++ } else { %>
-                          <form method="post" action="/customisation/create-script?script=<%c++ $$ << hookFilename; %>" style="display: inline;"><button type="submit" class="cust-btn cust-btn-success cust-btn-sm" aria-label="Create <%c++ $$ << hookFilename; %> script">Create Script</button></form>
+                          <form method="post" action="/customisation/create-script?script=<%c++ $$ << HttpViewData::htmlTranslate(hookFilename); %>" style="display: inline;"><button type="submit" class="cust-btn cust-btn-success cust-btn-sm" aria-label="Create <%c++ $$ << HttpViewData::htmlTranslate(hookFilename); %> script">Create Script</button></form>
                         <%c++ } %>
                       </div>
                     </div>
@@ -321,7 +321,7 @@ std::string currentPage = "customisation";
   
   // Populate debug data
   document.addEventListener('DOMContentLoaded', function() {
-    var scriptsData = <%c++ $$ << scripts.toStyledString(); %>;
+    var scriptsData = <%c++ { std::string json = scripts.toStyledString(); drogon::utils::replaceAll(json, "</", "<\\/"); $$ << json; } %>;
     document.getElementById('scriptsData').textContent = JSON.stringify(scriptsData, null, 2);
     
     // Add a section to verify script enabled states

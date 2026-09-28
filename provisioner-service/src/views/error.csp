@@ -15,20 +15,20 @@
         <div class="error-box">
             <%c++ auto errorTitle = @@.get<std::string>("error_title"); %>
             <%c++ if(!errorTitle.empty()) { %>
-                <h2><%c++ $$ << errorTitle; %></h2>
+                <h2><%c++ $$ << HttpViewData::htmlTranslate(errorTitle); %></h2>
             <%c++ } %>
             <p class="error-message-text">
-                <%c++ $$ << @@.get<std::string>("error_message"); %>
+                <%c++ $$ << HttpViewData::htmlTranslate(@@.get<std::string>("error_message")); %>
             </p>
             <%c++ auto errorCode = @@.get<std::string>("error_code"); %>
             <%c++ if(!errorCode.empty()) { %>
-                <p class="error-code">Error code: <%c++ $$ << errorCode; %></p>
+                <p class="error-code">Error code: <%c++ $$ << HttpViewData::htmlTranslate(errorCode); %></p>
             <%c++ } %>
             <%c++ auto errorDetails = @@.get<std::string>("error_details"); %>
             <%c++ if(!errorDetails.empty()) { %>
                 <div class="error-details">
                     <h3>Technical Details</h3>
-                    <pre><%c++ $$ << errorDetails; %></pre>
+                    <pre><%c++ $$ << HttpViewData::htmlTranslate(errorDetails); %></pre>
                 </div>
             <%c++ } %>
         </div>

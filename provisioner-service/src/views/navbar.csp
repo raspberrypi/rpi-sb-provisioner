@@ -143,7 +143,7 @@ nav.rpi-navbar {
     <div class="warning-content">
         <div class="warning-title">Security Warning: Public Network Binding Detected</div>
         <div class="warning-text">
-            This provisioner is bound to <strong><%c++ $$ << g_listenerAddress; %></strong> and may be accessible from external networks.
+            This provisioner is bound to <strong><%c++ $$ << HttpViewData::htmlTranslate(g_listenerAddress); %></strong> and may be accessible from external networks.
             Anyone who can reach it can try to sign in. Bind to 127.0.0.1 unless remote access is needed, and sign in remotely only over HTTPS.
         </div>
     </div>
@@ -189,12 +189,12 @@ nav.rpi-navbar {
             <%c++ extern std::string g_releaseUrl; %>
             
             <%c++ if(g_hasNewerVersion && !g_releaseUrl.empty()) { %>
-                <a href="<%c++ $$ << g_releaseUrl; %>" target="_blank" class="rpi-version-link">
-                    v<%c++ $$ << g_packageVersion; %>
+                <a href="<%c++ $$ << HttpViewData::htmlTranslate(g_releaseUrl); %>" target="_blank" class="rpi-version-link">
+                    v<%c++ $$ << HttpViewData::htmlTranslate(g_packageVersion); %>
                     <span class="rpi-version-warning" aria-label="Update available">⚠</span>
                 </a>
             <%c++ } else { %>
-                v<%c++ $$ << g_packageVersion; %>
+                v<%c++ $$ << HttpViewData::htmlTranslate(g_packageVersion); %>
             <%c++ } %>
         </span>
         <a href="https://github.com/raspberrypi/rpi-sb-provisioner" target="_blank" class="rpi-github-link">GitHub</a>

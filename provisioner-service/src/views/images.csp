@@ -141,7 +141,7 @@
 <%c++ auto goldMasterFile = @@.get<std::map<std::string, std::string>>("options").count("GOLD_MASTER_OS_FILE") ? @@.get<std::map<std::string, std::string>>("options").at("GOLD_MASTER_OS_FILE") : std::string(); %>
 <div class="field-group">
     <label class="field-label">OS Image</label>
-    <input type="hidden" name="GOLD_MASTER_OS_FILE" id="GOLD_MASTER_OS_FILE" value="<%c++ $$ << goldMasterFile; %>">
+    <input type="hidden" name="GOLD_MASTER_OS_FILE" id="GOLD_MASTER_OS_FILE" value="<%c++ $$ << HttpViewData::htmlTranslate(goldMasterFile); %>">
     
     <!-- Image Browser -->
     <div class="image-browser-container">
@@ -197,6 +197,12 @@
 </div>
 
 <script>
+    // Everything here comes from an uploaded image's own metadata, which
+    // whoever built the image chose.
+    function escapeImageText(value) {
+        return String(value).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+    }
+
     // ===== Image Browser Functions =====
     let imageList = [];
     let currentImageSelection = document.getElementById('GOLD_MASTER_OS_FILE')?.value || '';
@@ -426,17 +432,17 @@
                 .then(r => r.json())
                 .then(data => {
                     if (data.error) {
-                        idpSection.innerHTML = '<span style="color: #dc3545;">Error: ' + data.error + '</span>';
+                        idpSection.innerHTML = '<span style="color: #dc3545;">Error: ' + escapeImageText(data.error) + '</span>';
                         return;
                     }
                     let html = '<h4 style="margin: 0 0 8px 0; color: #0c5460;">IDP Metadata</h4><dl style="margin:0; font-size: 0.9rem;">';
-                    if (data.image_name) html += '<dt style="font-weight:600; margin-top:8px; color:#555;">Image Name</dt><dd style="margin:4px 0 0 0;">' + data.image_name + '</dd>';
-                    if (data.image_version) html += '<dt style="font-weight:600; margin-top:8px; color:#555;">Version</dt><dd style="margin:4px 0 0 0;">' + data.image_version + '</dd>';
-                    if (data.device_class) html += '<dt style="font-weight:600; margin-top:8px; color:#555;">Device Family</dt><dd style="margin:4px 0 0 0;">' + data.device_class + ' <span style="color:#888;">(from ' + (data.device_class_raw || '?') + ')</span></dd>';
-                    if (data.storage_type) html += '<dt style="font-weight:600; margin-top:8px; color:#555;">Storage Type</dt><dd style="margin:4px 0 0 0;">' + data.storage_type + '</dd>';
+                    if (data.image_name) html += '<dt style="font-weight:600; margin-top:8px; color:#555;">Image Name</dt><dd style="margin:4px 0 0 0;">' + escapeImageText(data.image_name) + '</dd>';
+                    if (data.image_version) html += '<dt style="font-weight:600; margin-top:8px; color:#555;">Version</dt><dd style="margin:4px 0 0 0;">' + escapeImageText(data.image_version) + '</dd>';
+                    if (data.device_class) html += '<dt style="font-weight:600; margin-top:8px; color:#555;">Device Family</dt><dd style="margin:4px 0 0 0;">' + escapeImageText(data.device_class) + ' <span style="color:#888;">(from ' + escapeImageText((data.device_class_raw || '?')) + ')</span></dd>';
+                    if (data.storage_type) html += '<dt style="font-weight:600; margin-top:8px; color:#555;">Storage Type</dt><dd style="margin:4px 0 0 0;">' + escapeImageText(data.storage_type) + '</dd>';
                     html += '<dt style="font-weight:600; margin-top:8px; color:#555;">Encryption</dt><dd style="margin:4px 0 0 0;">' + (data.encryption ? 'Yes' : 'No') + '</dd>';
-                    if (data.cipher) html += '<dt style="font-weight:600; margin-top:8px; color:#555;">Cipher</dt><dd style="margin:4px 0 0 0;">' + data.cipher + '</dd>';
-                    if (data.partition_count !== undefined) html += '<dt style="font-weight:600; margin-top:8px; color:#555;">Partitions</dt><dd style="margin:4px 0 0 0;">' + data.partition_count + '</dd>';
+                    if (data.cipher) html += '<dt style="font-weight:600; margin-top:8px; color:#555;">Cipher</dt><dd style="margin:4px 0 0 0;">' + escapeImageText(data.cipher) + '</dd>';
+                    if (data.partition_count !== undefined) html += '<dt style="font-weight:600; margin-top:8px; color:#555;">Partitions</dt><dd style="margin:4px 0 0 0;">' + escapeImageText(data.partition_count) + '</dd>';
                     html += '</dl>';
                     idpSection.innerHTML = html;
                 })
@@ -536,7 +542,7 @@
                 if (data.exists) {
                     statusEl.innerHTML = '<span style="color: #28a745;">&#10003; Available</span>';
                     if (data.version) {
-                        statusEl.innerHTML += '<br><span style="font-size: 0.85rem; color: #666;">Version: ' + data.version + '</span>';
+                        statusEl.innerHTML += '<br><span style="font-size: 0.85rem; color: #666;">Version: ' + escapeImageText(data.version) + '</span>';
                     }
                 } else if (data.status === 'no_signing_key') {
                     statusEl.innerHTML = '';
