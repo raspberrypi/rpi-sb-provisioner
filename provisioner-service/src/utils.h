@@ -444,6 +444,16 @@ namespace provisioner {
         bool setConfigValue(const std::string& key, const std::string& value);
 
         /**
+         * Whether a key and value may be written to the config, which root
+         * sources as shell. Keys are written bare, so they must be one of the
+         * provisioner's own variable names, never PATH, IFS or LD_PRELOAD.
+         * Values are read back line by line, so they may not span lines.
+         *
+         * @param why Set to the reason when the entry is refused
+         */
+        bool isWritableConfigEntry(const std::string& key, const std::string& value, std::string& why);
+
+        /**
          * Quote a value for safe inclusion in the shell-sourced config file.
          *
          * The config file is written by this service but sourced by the signing

@@ -1244,8 +1244,29 @@ namespace provisioner {
             return m;
         }
 
+        bool isWritableConfigEntry(const std::string& key, const std::string& value, std::string& why) {
+            static const std::regex name("(RPI|GOLD_MASTER|PROVISIONING|CUSTOMER|PKCS11)_[A-Z0-9_]+");
+            if (!std::regex_match(key, name)) {
+                why = "not a provisioner setting: " + key.substr(0, 64);
+                return false;
+            }
+            if (value.find_first_of(std::string("\r\n\0", 3)) != std::string::npos) {
+                why = key + " may not contain a line break";
+                return false;
+            }
+            return true;
+        }
+
         std::optional<std::map<std::string, std::string>> setConfigValues(
             const std::map<std::string, std::string>& updates) {
+            for (const auto& [k, v] : updates) {
+                std::string why;
+                if (!isWritableConfigEntry(k, v, why)) {
+                    LOG_ERROR << "Refusing config update: " << why;
+                    return std::nullopt;
+                }
+            }
+
             std::lock_guard<std::mutex> lock(configWriteMutex());
 
             // Start from the full merged config so we never drop existing keys,
