@@ -18,6 +18,10 @@ Files: provisioner-service/static/js/zxing.js
 Copyright: ZXing authors
 License: Apache-2.0
 
+Files: test/ui/vendor/axe/*
+Copyright: 2015-2026 Deque Systems, Inc.
+License: MPL-2.0
+
 License: Apache-2.0
  Licensed under the Apache License, Version 2.0 (the "License");
  you may not use this file except in compliance with the License.
@@ -69,3 +73,11 @@ License: ISC
  WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
  ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+License: MPL-2.0
+ This Source Code Form is subject to the terms of the Mozilla Public
+ License, v. 2.0. If a copy of the MPL was not distributed with this
+ file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ .
+ On Debian systems, the complete text of the Mozilla Public License,
+ version 2.0 can be found in "/usr/share/common-licenses/MPL-2.0".

@@ -36,5 +36,7 @@ Modules run one after another: they share the one station.
 - `harness/browser.py`: the signed-in browser, in-page requests, and the checks every page must pass (no JavaScript errors, no planted markup run, no alerts).
 - `harness/case.py`: the base class the tests share.
 - `test_*.py`: one module per area of the interface.
+- `harness/legibility.py`: contrast and WCAG AA through axe-core, sideways scrolling, clipped text, covered controls, small text, and keyboard reach. `test_legibility.py` holds every page to all of them; `legibility_survey.py` reports them without failing, for looking into a new finding.
+- `vendor/axe/`: axe-core, kept here because stations are often offline. See its README for where it came from.
 
 Some tests need more of the station and skip without it. The hostile USB device in `test_escaping.py` needs a spare gadget controller, such as `dummy_hcd` loaded with `num=2`.
