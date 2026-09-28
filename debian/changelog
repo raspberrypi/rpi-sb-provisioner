@@ -283,6 +283,13 @@ rpi-sb-provisioner (2.3.6) unstable; urgency=medium
     96% (#346), and the reason a device gives for refusing a command now
     reaches the per-device log rather than only the journal.
 
+  * Give up within 10 seconds on a board that has gone, instead of waiting
+    out a long step's whole budget: up to 15 minutes for an erase, or over
+    an hour for a large flash. Each long fastboot command first checks that
+    the board answers, for FASTBOOT_PRESENCE_TIMEOUT seconds. The fastboot
+    calls made while registering with Raspberry Pi Connect now have a time
+    limit too.
+
   * Allow up to 15 minutes to erase the device before IDP provisioning,
     rather than 30 seconds, so an erase that discards the whole device
     has time to finish on slow eMMC.
