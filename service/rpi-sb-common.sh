@@ -170,6 +170,17 @@ bounded_report() {
     rm -f "${BOUNDED_OUT}"
 }
 
+# The workdir's contents are reused, flashed and written through as root, so
+# anyone else able to write there could supply their own boot image or plant
+# a symlink. It is used only when root alone can change it.
+workdir_is_private() {
+    [ -d "$1" ] && [ ! -L "$1" ] || return 1
+    [ "$(stat -c %u "$1")" = 0 ] || return 1
+    case "$(stat -c %A "$1")" in
+        ?????w*|????????w*) return 1 ;;
+    esac
+}
+
 # Arguments: $1 = timeout in seconds, remaining = command. Aborts on failure.
 timeout_fatal_secs() {
     run_bounded "$@"
