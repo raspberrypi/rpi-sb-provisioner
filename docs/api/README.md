@@ -6,6 +6,7 @@ This directory contains the modular API documentation for the rpi-sb-provisioner
 
 The API documentation is split into logical sections for maintainability:
 
+- [authentication.md](authentication.md) — Signing in, API tokens for scripts, and refused requests
 - [manufacturing.md](manufacturing.md) — Manufacturing Database API endpoints
 - [devices.md](devices.md) — Device management and monitoring endpoints
 - [customisation.md](customisation.md) — Customisation script management (CRUD operations)

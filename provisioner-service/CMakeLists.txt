@@ -351,6 +351,7 @@ target_sources(rpi-provisioner-ui
     src/scantool.cpp
     src/audit.cpp
     src/auth.cpp
+    src/api_tokens.cpp
     src/utils.cpp
     src/keywrap.cpp
     src/keyregistry.cpp

@@ -113,13 +113,13 @@ The endpoint returns a JSON object with log entries and pagination metadata:
 To retrieve the first page with default settings (50 newest entries):
 
 ``` bash
-curl http://localhost:3142/api/v2/service-log/rpi-sb-provisioner@10000000abcdef.service
+curl -H "Authorization: Bearer $RPI_SB_TOKEN" http://localhost:3142/api/v2/service-log/rpi-sb-provisioner@10000000abcdef.service
 ```
 
 To retrieve page 2 with 100 entries per page, oldest first:
 
 ``` bash
-curl "http://localhost:3142/api/v2/service-log/rpi-sb-provisioner@10000000abcdef.service?page=2&page_size=100&order=asc"
+curl -H "Authorization: Bearer $RPI_SB_TOKEN" "http://localhost:3142/api/v2/service-log/rpi-sb-provisioner@10000000abcdef.service?page=2&page_size=100&order=asc"
 ```
 
 **Error Responses:**
