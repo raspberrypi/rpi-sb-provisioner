@@ -105,7 +105,9 @@ namespace provisioner {
             // Parse JSON body
             try {
                 auto json = req->getJsonObject();
-                if (!json || !json->isMember("qrcode") || !(*json)["qrcode"].isString()) {
+                // A blank code would match every record with no DUID.
+                if (!json || !json->isMember("qrcode") || !(*json)["qrcode"].isString() ||
+                    (*json)["qrcode"].asString().find_first_not_of(" \t\r\n") == std::string::npos) {
                     auto errorResp = provisioner::utils::createErrorResponse(
                         req,
                         "Missing or invalid 'qrcode' parameter in request body",

@@ -697,8 +697,9 @@ namespace {
                 return;
             }
             auto json = req->getJsonObject();
-            const std::string label = json ? (*json)["label"].asString() : "";
-            if (label.empty() || label.size() > 100) {
+            const bool isText = json && json->isObject() && (*json)["label"].isString();
+            const std::string label = isText ? (*json)["label"].asString() : "";
+            if (label.find_first_not_of(" \t\r\n") == std::string::npos || label.size() > 100) {
                 callback(jsonError(k400BadRequest, "INVALID_LABEL", "Give the token a label of up to 100 characters."));
                 return;
             }

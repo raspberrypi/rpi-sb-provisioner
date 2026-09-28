@@ -533,9 +533,22 @@ namespace provisioner {
                 callback(resp);
                 return;
             }
+            if (!body->isObject()) {
+                callback(provisioner::utils::createErrorResponse(
+                    req, "Send the settings as a JSON object", drogon::k400BadRequest,
+                    "Invalid Request", "INVALID_JSON"));
+                return;
+            }
             std::map<std::string, std::string> updates;
             for (const auto &key : body->getMemberNames()) {
-                const std::string value = body->get(key, "").asString();
+                const Json::Value &raw = (*body)[key];
+                if (!raw.isString()) {
+                    callback(provisioner::utils::createErrorResponse(
+                        req, "Refused: " + key.substr(0, 64) + " must be a string", drogon::k400BadRequest,
+                        "Invalid Setting", "INVALID_CONFIG_ENTRY"));
+                    return;
+                }
+                const std::string value = raw.asString();
                 std::string why;
                 if (!utils::isWritableConfigEntry(key, value, why)) {
                     callback(provisioner::utils::createErrorResponse(
