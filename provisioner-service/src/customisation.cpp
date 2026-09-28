@@ -658,7 +658,7 @@ namespace provisioner {
             resp->setStatusCode(k200OK);
             resp->setBody("Script deleted successfully");
             callback(resp);
-        });
+        }, {Post});
 
         /**
          * @brief Disables a script file in the customisation directory
@@ -736,7 +736,7 @@ namespace provisioner {
             resp->setStatusCode(k200OK);
             resp->setBody("Script disabled successfully");
             callback(resp);
-        });
+        }, {Post});
 
         /**
          * @brief Enables a script file in the customisation directory
@@ -815,7 +815,7 @@ namespace provisioner {
             resp->setStatusCode(k200OK);
             resp->setBody("Script enabled successfully");
             callback(resp);
-        });
+        }, {Post});
 
         /**
          * @brief Saves or creates a script file in the customisation directory
@@ -972,7 +972,7 @@ namespace provisioner {
             resp->setContentTypeCode(CT_APPLICATION_JSON);
             resp->setBody(Json::FastWriter().write(scriptMetadata));
             callback(resp);
-        });
+        }, {Post});
 
         /**
          * @brief Uploads a script file to the customisation directory
@@ -1320,6 +1320,6 @@ namespace provisioner {
                 resp->setBody(Json::FastWriter().write(response));
                 callback(resp);
             }
-        });
+        }, {Post});
     }
 } // namespace provisioner

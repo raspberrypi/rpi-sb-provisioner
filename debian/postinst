@@ -1,6 +1,19 @@
 #!/bin/sh
 set -e
 
+# Operators sign in to the web UI with a system account in this group. The
+# first user (UID 1000, the account Raspberry Pi OS creates) is added only when
+# the group is created, so an administrator who later removes them is not
+# overruled on upgrade. An image built before its first user exists will have
+# an empty group; add the operator with `adduser <user> rpi-sb-provisioner`.
+if [ "$1" = "configure" ] && ! getent group rpi-sb-provisioner >/dev/null; then
+    addgroup --system rpi-sb-provisioner
+    FIRST_USER="$(getent passwd 1000 | cut -d: -f1)"
+    if [ -n "$FIRST_USER" ]; then
+        adduser "$FIRST_USER" rpi-sb-provisioner
+    fi
+fi
+
 # Create necessary directories
 mkdir -p /etc/rpi-sb-provisioner
 # Drop-in directory for local USB port restriction rules. Left empty, so the

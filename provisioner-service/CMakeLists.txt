@@ -298,6 +298,9 @@ find_package(OpenSSL REQUIRED)
 # derive the device-bound key-wrapping key from the on-SoC OTP key.
 find_library(RPIFWCRYPTO_LIBRARY NAMES rpifwcrypto REQUIRED)
 
+# PAM, for operator sign-in to the web UI (libpam0g-dev).
+find_library(PAM_LIBRARY NAMES pam REQUIRED)
+
 # Define the views directory and output directory for compiled templates
 set(VIEWS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/views)
 set(CSP_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/views_output)
@@ -347,6 +350,7 @@ target_sources(rpi-provisioner-ui
     src/manufacturing.cpp
     src/scantool.cpp
     src/audit.cpp
+    src/auth.cpp
     src/utils.cpp
     src/keywrap.cpp
     src/keyregistry.cpp
@@ -376,6 +380,7 @@ target_link_libraries(rpi-provisioner-ui
     OpenSSL::SSL
     OpenSSL::Crypto
     ${RPIFWCRYPTO_LIBRARY}
+    ${PAM_LIBRARY}
     ${LibArchive_LIBRARIES}
     ${ZSTD_LIBRARIES}
     ${LIBLZMA_LIBRARIES}

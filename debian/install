@@ -41,3 +41,5 @@ host-support/usb-ports.d/example.conf.sample        /usr/share/rpi-sb-provisione
 
 host-support/config                                 /usr/share/rpi-sb-provisioner/defaults
 host-support/bootimg-package-config                 /usr/share/rpi-sb-provisioner/defaults
+
+service/pam/rpi-provisioner-ui                  /etc/pam.d

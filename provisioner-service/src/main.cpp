@@ -27,6 +27,7 @@
 #include "include/scantool.h"
 #include "include/audit.h"
 #include "keywrap.h"
+#include "auth.h"
 
 using namespace drogon;
 
@@ -202,6 +203,13 @@ void printHelp(const char* programName) {
               << "  -d, --disable-https        Disable HTTPS\n"
               << "  -l, --log-level <level>    Set log level (trace, debug, info, warn, error, fatal)\n"
               << "                             Default: trace\n"
+              << "  -H, --allowed-host <name>  Accept requests addressed to this host name, such as\n"
+              << "                             a reverse proxy's. May be repeated.\n"
+              << std::endl;
+
+    std::cout << "Access:\n"
+              << "  Operators sign in with their system account, which must be a member of\n"
+              << "  the " << provisioner::auth::kOperatorGroup << " group.\n"
               << std::endl;
     
     std::cout << "HTTPS Support:\n"
@@ -350,6 +358,7 @@ int main(int argc, char* argv[])
     int httpsPort = 3143; // Default HTTPS port
     bool enableHttps = true; // Enable HTTPS by default
     trantor::Logger::LogLevel logLevel = trantor::Logger::kTrace;
+    std::vector<std::string> allowedHosts;
 
     // Parse command line options
     static struct option long_options[] = {
@@ -360,11 +369,12 @@ int main(int argc, char* argv[])
         {"https-port", required_argument, 0, 's'},
         {"disable-https", no_argument, 0, 'd'},
         {"log-level", required_argument, 0, 'l'},
+        {"allowed-host", required_argument, 0, 'H'},
         {0, 0, 0, 0}
     };
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "hva:p:s:dl:", long_options, nullptr)) != -1) {
+    while ((opt = getopt_long(argc, argv, "hva:p:s:dl:H:", long_options, nullptr)) != -1) {
         switch (opt) {
             case 'h':
                 printHelp(argv[0]);
@@ -404,6 +414,9 @@ int main(int argc, char* argv[])
                 break;
             case 'l':
                 logLevel = parseLogLevel(optarg);
+                break;
+            case 'H':
+                allowedHosts.emplace_back(optarg);
                 break;
             default:
                 printHelp(argv[0]);
@@ -490,29 +503,10 @@ int main(int argc, char* argv[])
                          listenerAddress != "localhost" && 
                          listenerAddress != "::1");
 
-    // Add CORS support for all responses
-    app.registerPostHandlingAdvice([](const drogon::HttpRequestPtr &req, const drogon::HttpResponsePtr &resp) {
-        // Add CORS headers to allow cross-origin requests
-        resp->addHeader("Access-Control-Allow-Origin", "*");
-        resp->addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-        resp->addHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
-        resp->addHeader("Access-Control-Max-Age", "86400"); // 24 hours
-    });
-
-    // Handle preflight OPTIONS requests
-    app.registerPreRoutingAdvice([](const drogon::HttpRequestPtr &req, drogon::FilterCallback &&stop, drogon::FilterChainCallback &&pass) {
-        if (req->method() == drogon::Options) {
-            auto resp = drogon::HttpResponse::newHttpResponse();
-            resp->setStatusCode(drogon::k200OK);
-            resp->addHeader("Access-Control-Allow-Origin", "*");
-            resp->addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-            resp->addHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
-            resp->addHeader("Access-Control-Max-Age", "86400"); // 24 hours
-            stop(resp);
-            return;
-        }
-        pass();
-    });
+    // Every request passes the sign-in gate first. There are deliberately no
+    // CORS headers: no other origin has any business reading these responses.
+    provisioner::auth::install(app, provisioner::auth::Config{
+        listenerAddress, allowedHosts, g_isPublicBinding});
 
     imageHandlers.registerHandlers(app);
     deviceHandlers.registerHandlers(app);
