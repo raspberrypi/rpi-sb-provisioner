@@ -18,6 +18,12 @@ export TRIAGE_STARTED="${STATE_PREFIX}-STARTED"
 . /var/lib/rpi-sb-provisioner/state-recording
 
 TARGET_DEVICE_SERIAL="${1}"
+# Taken from the device's USB descriptor. Checked before log() builds a path
+# from it.
+if ! serial_is_safe "${TARGET_DEVICE_SERIAL}"; then
+    echo "Refusing to triage a device with a malformed serial number" >&2
+    exit 1
+fi
 TARGET_DEVICE_SERIAL32=$(echo "${TARGET_DEVICE_SERIAL}" | cut -c $((${#TARGET_DEVICE_SERIAL}/2+1))-)
 LOG_DIRECTORY="/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}"
 

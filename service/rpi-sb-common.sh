@@ -170,6 +170,16 @@ bounded_report() {
     rm -f "${BOUNDED_OUT}"
 }
 
+# A device serial names log directories, unit instances and database rows,
+# and the device reports it itself, so it can be anything. Accept plain
+# alphanumerics only: no separators, no dots, nothing a path or query can use.
+serial_is_safe() {
+    case "$1" in
+        ""|*[!0-9A-Za-z]*) return 1 ;;
+    esac
+    [ "${#1}" -le 64 ]
+}
+
 # The workdir's contents are reused, flashed and written through as root, so
 # anyone else able to write there could supply their own boot image or plant
 # a symlink. It is used only when root alone can change it.
@@ -440,6 +450,23 @@ setup_fastboot_and_id_vars() {
 
     timeout_fatal_secs "${FASTBOOT_CONTROL_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar version
     TARGET_DEVICE_SERIAL="$(get_variable serialno)"
+    if ! serial_is_safe "${TARGET_DEVICE_SERIAL}"; then
+        # Not logged through log(), whose path is built from this value.
+        echo "Refusing device ${FASTBOOT_DEVICE_SPECIFIER}: malformed serial number reported" >&2
+        exit 1
+    fi
+    # Commands later go to the serial the device reports, so a board could
+    # claim its neighbour's and have that one erased and flashed. Over USB the
+    # two must agree; a tcp: route was checked against the serial when chosen.
+    case "${FASTBOOT_DEVICE_SPECIFIER}" in
+        tcp:*) ;;
+        *)
+            if [ "${TARGET_DEVICE_SERIAL}" != "${FASTBOOT_DEVICE_SPECIFIER}" ]; then
+                echo "Refusing device ${FASTBOOT_DEVICE_SPECIFIER}: it reports serial ${TARGET_DEVICE_SERIAL}" >&2
+                exit 1
+            fi
+            ;;
+    esac
 
     # Returns "yes" if the device-side fastbootd is running in -i usb+tcp
     # split mode. Empty/missing/"no" means legacy behaviour (TCP, when
