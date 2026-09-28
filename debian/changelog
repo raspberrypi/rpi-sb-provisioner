@@ -56,6 +56,17 @@ rpi-sb-provisioner (2.3.6) unstable; urgency=medium
     write was never checked. Secrets are now replaced atomically and any
     failure rejects the upload.
 
+  * Depend on p11-kit-modules. OpenSSL's pkcs11-provider reaches every HSM
+    through the p11-kit proxy module it ships, so on a station without it
+    every PKCS#11 key failed with "Module initialization failed", although
+    p11tool listed the token.
+
+  * Check an HSM setup by signing, with a time limit on every command. The
+    documented check exported the public key with openssl pkey, which hangs
+    on a YubiHSM 2 although signing and provisioning work, so users took
+    PKCS#11 to be unusable. The SoftHSM2 steps now also run as root, as its
+    token store needs.
+
   * SECURITY: Make /etc/rpi-sb-provisioner/config readable by root only. It
     can hold RPI_CONNECT_API_KEY and was world-readable, so any local user
     could read it. Rotate the Raspberry Pi Connect key if others have

@@ -61,7 +61,10 @@ Host-side software (already declared as package dependencies):
 
 - **`pkcs11-provider`** — the OpenSSL 3 provider. Without it, the provisioner
   reports *"PKCS#11 provider not installed"* and PKCS#11 signing is unavailable.
-- **`p11-kit`** (`libp11-kit`) — module discovery.
+- **`p11-kit-modules`** — the p11-kit proxy module, through which
+  `pkcs11-provider` reaches every registered token. Without it the provider
+  reports *"Module initialization failed"* and no token is found. Releases
+  before 2.3.6 did not depend on it; `sudo apt install p11-kit-modules`.
 - **`gnutls-bin`** — provides `p11tool`, used below to inspect tokens.
 
 ---
@@ -75,6 +78,11 @@ illustrative, not a certification:
 
 - **SoftHSM2** — software token, ideal for testing (see the [smoke test](#validating-a-setup-softhsm2-smoke-test)).
 - **YubiKey / Nitrokey** (PIV applet) — note the PIV slot must hold an RSA-2048 key.
+- **YubiHSM 2** — confirmed with firmware 2.41 and `yubihsm_pkcs11` 2.80,
+  including secure boot and the OTP key burn. Yubico's module takes the
+  authentication key's four-digit hexadecimal ID and its password together as
+  the PIN, for example `0001password`. Its `openssl pkey -pubout` hangs; see
+  the [smoke test](#validating-a-setup-softhsm2-smoke-test).
 - **Network / enterprise HSMs** — Thales Luna, Entrust nShield, Utimaco, and similar.
 - **Cloud HSMs via their PKCS#11 module** — e.g. AWS CloudHSM, Google Cloud HSM
   (`libkmsp11`). See the caveat on [credential-based modules](#what-is-not-supported).
@@ -193,7 +201,9 @@ the provider uses whatever the URI or token provides.
 
 Before provisioning real devices, confirm the whole chain end to end. SoftHSM2
 is a pure-software PKCS#11 token that behaves like a real one and is perfect for
-this. Run these on the provisioning Raspberry Pi.
+this. Run these on the provisioning Raspberry Pi, as root: SoftHSM2 keeps its
+tokens in a root-only store, and the provisioner, which runs as root, must see
+the token.
 
 > This creates a throwaway token and key for testing. Do not use the test key to
 > sign production images.
@@ -207,13 +217,13 @@ sudo apt-get install -y softhsm2
 dpkg -L softhsm2 | grep libsofthsm2.so
 
 # 2. Initialise a token with a user PIN
-softhsm2-util --init-token --slot 0 --label testtoken \
+sudo softhsm2-util --init-token --slot 0 --label testtoken \
     --so-pin 3737 --pin 1234
 
 # 3. Generate an RSA-2048 key ON the token (never leaves it)
 #    (pkcs11-tool comes from the opensc package)
 sudo apt-get install -y opensc
-pkcs11-tool --module /usr/lib/softhsm/libsofthsm2.so \
+sudo pkcs11-tool --module /usr/lib/softhsm/libsofthsm2.so \
     --login --pin 1234 \
     --keypairgen --key-type rsa:2048 \
     --label signkey --id 01
@@ -223,37 +233,48 @@ echo 'module: /usr/lib/softhsm/libsofthsm2.so' | \
     sudo tee /usr/share/p11-kit/modules/softhsm2.module
 
 # 5. Confirm discovery and find the object alias
-p11tool --list-tokens
-p11tool --login --list-all 'pkcs11:token=testtoken'
+sudo p11tool --list-tokens
+sudo p11tool --login --list-all 'pkcs11:token=testtoken'
 ```
 
 Then confirm signing works through the exact provider stack the provisioner
-uses. This mirrors what `rpi-sb-keyhelper` does internally:
+uses. A signature is the check that matters, because it is what provisioning
+does. Each command runs under `timeout`, so one that hangs reports exit status
+124 instead of waiting for ever:
 
 ```sh
 # A test payload to sign
 echo "rpi-sb-provisioner hsm smoke test" > /tmp/hsm-test.bin
 
-# Public-key export must succeed (this is the step that fails on a
-# login-required token if the PIN is wrong or absent)
-OPENSSL_CONF=/dev/null openssl pkey -provider pkcs11 -provider default \
-    -in 'pkcs11:token=testtoken;object=signkey;type=private;pin-value=1234' \
-    -pubout
-
-# Signing must produce an RSA-2048 (256-byte) signature
-OPENSSL_CONF=/dev/null openssl dgst -sha256 -provider pkcs11 -provider default \
+# Signing through OpenSSL's pkcs11-provider must produce an RSA-2048
+# (256-byte) signature
+sudo timeout 60 env OPENSSL_CONF=/dev/null openssl dgst -sha256 \
+    -provider pkcs11 -provider default \
     -sign 'pkcs11:token=testtoken;object=signkey;type=private;pin-value=1234' \
     /tmp/hsm-test.bin | wc -c   # expect 256
 ```
 
-If both commands succeed, set in `/etc/rpi-sb-provisioner/config`:
+Do not judge a setup by `openssl pkey ... -pubout`. On some tokens, such as a
+YubiHSM 2, it hangs although signing and provisioning work. The provisioner
+never uses it: it exports the public key with its own helper, below.
+
+If signing succeeds, set in `/etc/rpi-sb-provisioner/config`:
 
 ```
 CUSTOMER_KEY_PKCS11_NAME='pkcs11:token=testtoken;object=signkey;type=private'
 ```
 
 store the PIN through the WebUI (**Save PIN & Validate**), and the WebUI should
-report the key as **valid for secure boot**. You can then provision a test
+report the key as **valid for secure boot**. Then check the provisioner's own
+helper, which uses the saved PIN exactly as provisioning will:
+
+```sh
+URI='pkcs11:token=testtoken;object=signkey;type=private'
+sudo timeout 60 rpi-sb-keyhelper sign --pkcs11-uri "$URI" --in /tmp/hsm-test.bin | wc -c   # expect 512
+sudo timeout 60 rpi-sb-keyhelper pubkey --pkcs11-uri "$URI"   # prints the public key
+```
+
+ You can then provision a test
 device (the `naked` provisioning style is a safe way to exercise signing without
 writing an OS image).
 
@@ -266,12 +287,14 @@ messages and their causes:
 
 | Message | Likely cause | What to check |
 | --- | --- | --- |
+| `Module initialization failed` from `pkcs11:p11prov_ctx_status` | `p11-kit-modules` missing, so the provider cannot load p11-kit's proxy | `ls /usr/lib/*/p11-kit-proxy.so`; `sudo apt install p11-kit-modules`. |
 | `PKCS#11 provider not installed` / provider not available | `pkcs11-provider` package missing | `dpkg -l pkcs11-provider`; reinstall the provisioner's dependencies. |
 | `Cannot access PKCS#11 key` (during bootstrap) | Token not visible, wrong URI, or login failed | `p11tool --list-tokens` sees the token? Does the `object=` alias match `p11tool --login --list-all`? Is the PIN stored/correct? |
 | `Invalid PIN` / `PIN incorrect or not provided` | Wrong PIN, or none supplied to a login-required token | Re-enter the PIN in the WebUI; confirm the token's user PIN, not the SO PIN. |
 | `Key not found on HSM` | The `object=` label does not exist on the token | Compare the alias against `p11tool --login --list-all 'pkcs11:token=<label>'`. |
 | `Cannot access HSM - check connection` | Token/slot not present or module can't reach the device | Is the HSM connected/authenticated? Is the module path in the `.module` file correct? |
 | Key reported *not fit for purpose* | Key is not RSA-2048 | Generate/import an RSA-2048 key; EC and other RSA sizes are unsupported for Pi secure boot. |
+| A check hangs, such as `openssl pkey ... -pubout` | Some tokens, including a YubiHSM 2, hang in OpenSSL's command-line key export | Check signing instead, as above; the provisioner does not use that command. |
 | `type=private` disappears from the URI | Legacy unquoted config truncated at the first `;` | Re-save the value through the WebUI (it now quotes automatically), or manually single-quote it in the config. |
 
 General checks:
