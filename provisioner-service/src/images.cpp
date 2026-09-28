@@ -6,6 +6,7 @@
 #include <drogon/HttpSimpleController.h>
 #include <drogon/HttpTypes.h>
 #include <drogon/WebSocketController.h>
+#include "archive_policy.h"
 #include <drogon/RequestStream.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
@@ -2124,8 +2125,17 @@ namespace provisioner {
                             return;
                         }
 
-                        // Spawn worker thread for libarchive extraction
-                        std::string tempDirStr = ctx->tempDir.string();
+                        // Spawn worker thread for libarchive extraction. Canonical,
+                        // because SECURE_SYMLINKS refuses a symlink anywhere in the
+                        // path, and /srv/rpi-sb-provisioner is often one.
+                        std::string tempDirStr;
+                        try {
+                            tempDirStr = std::filesystem::canonical(ctx->tempDir).string();
+                        } catch (const std::exception& e) {
+                            ctx->hadError = true;
+                            ctx->errorMessage = "Failed to resolve extraction directory: " + std::string(e.what());
+                            return;
+                        }
                         ctx->extractionThread = std::thread([ctx, archiveReadCb, tempDirStr]() {
                             struct archive *a = archive_read_new();
                             archive_read_support_filter_xz(a);
@@ -2139,8 +2149,7 @@ namespace provisioner {
                             }
 
                             struct archive *ext = archive_write_disk_new();
-                            archive_write_disk_set_options(ext,
-                                ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM | ARCHIVE_EXTRACT_NO_OVERWRITE);
+                            archive_write_disk_set_options(ext, archive_policy::kExtractFlags);
                             archive_write_disk_set_standard_lookup(ext);
 
                             struct archive_entry *entry;
@@ -2148,14 +2157,13 @@ namespace provisioner {
                             size_t archiveBytesWritten = 0;
                             auto lastPublish = std::chrono::steady_clock::now() - std::chrono::seconds(1);
                             while ((r = archive_read_next_header(a, &entry)) == ARCHIVE_OK) {
-                                std::string entryPath = archive_entry_pathname(entry);
-                                if (!isArchivePathSafe(entryPath)) {
-                                    ctx->extractionError = "Archive contains unsafe path: " + entryPath;
+                                const char *rawEntryPath = archive_entry_pathname(entry);
+                                std::string entryPath = rawEntryPath ? rawEntryPath : "";
+                                std::string rejected;
+                                if (!archive_policy::admit(entry, tempDirStr, rejected)) {
+                                    ctx->extractionError = "Archive refused: " + rejected;
                                     break;
                                 }
-
-                                std::string fullPath = tempDirStr + "/" + entryPath;
-                                archive_entry_set_pathname(entry, fullPath.c_str());
 
                                 r = archive_write_header(ext, entry);
                                 if (r != ARCHIVE_OK) {
