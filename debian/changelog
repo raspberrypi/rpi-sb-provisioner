@@ -215,6 +215,14 @@ rpi-sb-provisioner (2.3.6) unstable; urgency=medium
     were never enabled, nothing used them, they could not work on current
     systemd, and they did not verify what they downloaded.
 
+  * Take from the provisioning, triage and boot image services the privileges
+    they never use: loading kernel modules, rebooting, setting the clock,
+    tracing other processes and similar capabilities, and gaining privileges
+    through setuid programs. The boot image generator, which runs no
+    customisation hooks, is confined further, and the web UI can now open
+    only the devices it needs: the firmware crypto service, and USB or HID
+    security tokens.
+
   * Pad an OS image whose length is not a multiple of 4096 bytes before handing
     it to fastboot. The naked provisioner flashes the configured image as it
     finds it, and the fastboot client sparses whatever it is given: libsparse
