@@ -237,7 +237,7 @@
 <%c++ auto firmwareFile = @@.get<std::map<std::string, std::string>>("options").count("RPI_DEVICE_FIRMWARE_FILE") ? @@.get<std::map<std::string, std::string>>("options").at("RPI_DEVICE_FIRMWARE_FILE") : std::string(); %>
 <div class="field-group">
     <label class="field-label">Device Firmware <span class="optional-badge">Optional</span></label>
-    <input type="hidden" id="RPI_DEVICE_FIRMWARE_FILE" name="RPI_DEVICE_FIRMWARE_FILE" value="<%c++ $$ << firmwareFile; %>">
+    <input type="hidden" id="RPI_DEVICE_FIRMWARE_FILE" name="RPI_DEVICE_FIRMWARE_FILE" value="<%c++ $$ << HttpViewData::htmlTranslate(firmwareFile); %>">
     
     <!-- Expand/Collapse Button -->
     <button type="button" class="firmware-expand-btn" id="firmware-expand-btn" onclick="toggleFirmwareBrowser()">
