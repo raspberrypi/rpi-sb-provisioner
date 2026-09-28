@@ -2133,6 +2133,7 @@ namespace provisioner {
                     if (!isPlainImageName(ctx->originalFilename)) {
                         ctx->hadError = true;
                         ctx->errorMessage = "The file name must be a plain name, without directories";
+                        ctx->errorCode = drogon::k400BadRequest;
                         return;
                     }
 
@@ -2142,6 +2143,7 @@ namespace provisioner {
                     if (!isSupportedUpload(lowerFilename)) {
                         ctx->hadError = true;
                         ctx->errorMessage = "Unsupported file type. Accepted formats: .img, .img.xz, .img.zst, .tar.xz, .tar.zst";
+                        ctx->errorCode = drogon::k400BadRequest;
                         return;
                     }
 

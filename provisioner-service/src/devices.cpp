@@ -1464,9 +1464,19 @@ namespace provisioner {
     // Special flags are keyed by real serial only — bootstrap.sh looks them
     // up via TARGET_DEVICE_SERIAL — so this resolution is required to keep
     // flag writes and reads aligned with what the bootstrap script honours.
+    // A serial or a USB path. Anything else, such as a NUL that would end
+    // the string early for SQLite, identifies no device.
+    static bool isDeviceIdentifier(const std::string &identifier)
+    {
+        static const std::string allowed =
+            "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:";
+        return !identifier.empty() && identifier.size() <= 64 &&
+               identifier.find_first_not_of(allowed) == std::string::npos;
+    }
+
     static std::string resolveDeviceSerial(const std::string &identifier)
     {
-        if (identifier.empty()) return {};
+        if (!isDeviceIdentifier(identifier)) return {};
 
         sqlite3* db = nullptr;
         if (sqlite3_open("/srv/rpi-sb-provisioner/state.db", &db) != SQLITE_OK) {
@@ -1484,7 +1494,7 @@ namespace provisioner {
                 if (stmt) sqlite3_finalize(stmt);
                 continue;
             }
-            sqlite3_bind_text(stmt, 1, identifier.c_str(), -1, SQLITE_STATIC);
+            sqlite3_bind_text(stmt, 1, identifier.data(), static_cast<int>(identifier.size()), SQLITE_STATIC);
             if (sqlite3_step(stmt) == SQLITE_ROW) {
                 const unsigned char* s = sqlite3_column_text(stmt, 0);
                 if (s && *s) {
@@ -1703,6 +1713,13 @@ namespace provisioner {
             // Add audit log entry for handler access
             AuditLog::logHandlerAccess(req, "/devices/" + serialno);
             
+            if (!serialno.empty() && !isDeviceIdentifier(serialno)) {
+                callback(provisioner::utils::createErrorResponse(
+                    req, "Device not found in database", drogon::k400BadRequest,
+                    "Device Not Found", "DEVICE_NOT_FOUND"));
+                return;
+            }
+
             if (serialno.empty()) {
                 LOG_ERROR << "Empty serial number in request";
                 auto resp = provisioner::utils::createErrorResponse(
@@ -1965,6 +1982,13 @@ namespace provisioner {
             // Add audit log entry for handler access
             AuditLog::logHandlerAccess(req, "/devices/" + serialno + "/log/provisioner");
             
+            if (!serialno.empty() && !isDeviceIdentifier(serialno)) {
+                callback(provisioner::utils::createErrorResponse(
+                    req, "Device not found in database", drogon::k400BadRequest,
+                    "Device Not Found", "DEVICE_NOT_FOUND"));
+                return;
+            }
+
             if (serialno.empty()) {
                 LOG_ERROR << "Empty serial number in request";
                 auto resp = provisioner::utils::createErrorResponse(
@@ -2015,6 +2039,13 @@ namespace provisioner {
             auto resp = HttpResponse::newHttpResponse();
             LOG_INFO << "Bootstrap log request for serial: '" << serialno << "'";
             
+            if (!serialno.empty() && !isDeviceIdentifier(serialno)) {
+                callback(provisioner::utils::createErrorResponse(
+                    req, "Device not found in database", drogon::k400BadRequest,
+                    "Device Not Found", "DEVICE_NOT_FOUND"));
+                return;
+            }
+
             if (serialno.empty()) {
                 LOG_ERROR << "Empty serial number in request";
                 auto resp = provisioner::utils::createErrorResponse(
@@ -2059,6 +2090,13 @@ namespace provisioner {
             auto resp = HttpResponse::newHttpResponse();
             LOG_INFO << "Triage log request for serial: '" << serialno << "'";
             
+            if (!serialno.empty() && !isDeviceIdentifier(serialno)) {
+                callback(provisioner::utils::createErrorResponse(
+                    req, "Device not found in database", drogon::k400BadRequest,
+                    "Device Not Found", "DEVICE_NOT_FOUND"));
+                return;
+            }
+
             if (serialno.empty()) {
                 LOG_ERROR << "Empty serial number in request";
                 auto resp = provisioner::utils::createErrorResponse(
@@ -2103,6 +2141,13 @@ namespace provisioner {
             auto resp = HttpResponse::newHttpResponse();
             LOG_INFO << "Public key request for serial: '" << serialno << "'";
             
+            if (!serialno.empty() && !isDeviceIdentifier(serialno)) {
+                callback(provisioner::utils::createErrorResponse(
+                    req, "Device not found in database", drogon::k400BadRequest,
+                    "Device Not Found", "DEVICE_NOT_FOUND"));
+                return;
+            }
+
             if (serialno.empty()) {
                 LOG_ERROR << "Empty serial number in request";
                 auto resp = provisioner::utils::createErrorResponse(
@@ -2180,6 +2225,13 @@ namespace provisioner {
             // Add audit log entry for handler access
             AuditLog::logHandlerAccess(req, "/devices/" + serialno + "/key/private");
             
+            if (!serialno.empty() && !isDeviceIdentifier(serialno)) {
+                callback(provisioner::utils::createErrorResponse(
+                    req, "Device not found in database", drogon::k400BadRequest,
+                    "Device Not Found", "DEVICE_NOT_FOUND"));
+                return;
+            }
+
             if (serialno.empty()) {
                 LOG_ERROR << "Empty serial number in request";
                 auto resp = provisioner::utils::createErrorResponse(
