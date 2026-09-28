@@ -31,6 +31,17 @@ mkdir -p /srv/rpi-sb-bootstrap
 mkdir -p /var/log/rpi-sb-provisioner
 [ -d /var/lock/rpi-sb-provisioner ] || mkdir -p /var/lock/rpi-sb-provisioner
 
+# Manufacturing records, OS images, provisioning logs and customisation hooks
+# are for operators, not every account on the host. Members of the operator
+# group can still read them directly; the services all run as root.
+if getent group rpi-sb-provisioner >/dev/null; then
+    for dir in /srv/rpi-sb-provisioner /var/log/rpi-sb-provisioner /etc/rpi-sb-provisioner/scripts; do
+        mkdir -p "$dir"
+        chown root:rpi-sb-provisioner "$dir"
+        chmod 0750 "$dir"
+    done
+fi
+
 # Default manufacturing DB path
 MFG_DB_PATH="/srv/rpi-sb-provisioner/manufacturing.db"
 STATE_DB_PATH="/srv/rpi-sb-provisioner/state.db"
