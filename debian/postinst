@@ -16,6 +16,11 @@ fi
 
 # Create necessary directories
 mkdir -p /etc/rpi-sb-provisioner
+# The configuration can hold credentials (RPI_CONNECT_API_KEY), and only root
+# reads it. Earlier releases left it world-readable.
+if [ -f /etc/rpi-sb-provisioner/config ]; then
+    chmod 0600 /etc/rpi-sb-provisioner/config
+fi
 # Drop-in directory for local USB port restriction rules. Left empty, so the
 # restriction stays inactive and every port is accepted; see the README in
 # /usr/share/rpi-sb-provisioner/usb-ports.d for the file format.
