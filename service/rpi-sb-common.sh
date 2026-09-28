@@ -366,7 +366,18 @@ log_stderr() {
     return "${_ls_rc}"
 }
 
+# The configuration holds credentials such as RPI_CONNECT_API_KEY, and under
+# set -x every assignment in a sourced file is copied into the journal.
 read_config() {
+    case $- in *x*) _rc_xtrace=1 ;; *) _rc_xtrace= ;; esac
+    { set +x; } 2>/dev/null
+    _read_config
+    _rc_status=$?
+    if [ -n "${_rc_xtrace}" ]; then set -x; fi
+    return "${_rc_status}"
+}
+
+_read_config() {
     # Source package defaults first
     if [ -f /usr/share/rpi-sb-provisioner/defaults/config ]; then
         # shellcheck disable=SC1091

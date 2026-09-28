@@ -15,7 +15,18 @@ metadata_get() {
 # for inclusion in the manufacturing database INSERT.
 #
 # Non-fatal: logs warnings on failure and allows provisioning to continue.
+# The provisioners run under set -x, which copies every command, variables
+# expanded, into the journal. Tracing stays off while the API key is in use.
 connect_register_device() {
+    case $- in *x*) _connect_xtrace=1 ;; *) _connect_xtrace= ;; esac
+    { set +x; } 2>/dev/null
+    _connect_register_device
+    _connect_rc=$?
+    if [ -n "${_connect_xtrace}" ]; then set -x; fi
+    return "${_connect_rc}"
+}
+
+_connect_register_device() {
     CONNECT_REGISTERED_VALUE="NULL"
     CONNECT_DEVICE_ID_VALUE=""
 
@@ -96,17 +107,21 @@ ${_connect_body_hash}"
         return 0
     fi
 
-    # POST to Connect management API
-    # -k: allow self-signed certs for local development environments
+    # POST to Connect management API. The certificate is verified: this
+    # request carries the API key. A development server with its own CA can
+    # be trusted with CURL_CA_BUNDLE rather than by turning checks off.
+    # The key travels in a header file, not on the command line, where any
+    # local user could read it from ps.
     # -H "Accept:": suppress curl's default Accept header to avoid signature mismatch
     # --connect-timeout/--max-time: bound the request so a network issue
     #   cannot block provisioning indefinitely
-    _connect_http_code=$(curl -sk \
+    printf 'Authorization: Bearer %s\n' "${RPI_CONNECT_API_KEY}" > "${_connect_tmpdir}/auth-header"
+    _connect_http_code=$(curl -s \
         --connect-timeout 10 --max-time 30 \
         -o "${_connect_tmpdir}/response.json" \
         -w '%{http_code}' \
         -X POST "${_connect_url}" \
-        -H "Authorization: Bearer ${RPI_CONNECT_API_KEY}" \
+        -H "@${_connect_tmpdir}/auth-header" \
         -H "Content-Type: application/json" \
         -H "Accept:" \
         -H "X-Connect-Identity-Signature: ${_connect_signature}" \
