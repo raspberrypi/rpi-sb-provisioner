@@ -142,11 +142,16 @@ record_progress "DEVICE-KEY-CHECKING"
 log "Ensuring device firmware crypto key is provisioned"
 timeout_fatal_secs "${FASTBOOT_CONTROL_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem fwcrypto init
 
-KEYPAIR_DIR="${LOG_DIRECTORY}/${TARGET_DEVICE_SERIAL}"/keypair
+# LOG_DIRECTORY already ends in the serial. Adding it again put keys where
+# neither the documentation nor the key API looks.
+KEYPAIR_DIR="${LOG_DIRECTORY}/keypair"
 if [ -d "${RPI_DEVICE_RETRIEVE_KEYPAIR}" ]; then
     KEYPAIR_DIR="${RPI_DEVICE_RETRIEVE_KEYPAIR}"
 fi
+# Root-only: this can hold the device's private key, and the log tree
+# around it is world-readable.
 mkdir -p "${KEYPAIR_DIR}"
+chmod 0700 "${KEYPAIR_DIR}"
 record_progress "KEYPAIR-CAPTURING"
 log "Capturing device keypair to ${KEYPAIR_DIR}"
 
@@ -161,7 +166,7 @@ log "Capturing device keypair to ${KEYPAIR_DIR}"
 # answers "refused" rather than a PEM. That is intended: the key is meant to
 # stay in firmware. Treat the absence of a PEM as normal and keep going; the
 # public key is what we retain for device identity.
-if get_variable_pem private-key > "${KEYPAIR_DIR}/${TARGET_DEVICE_SERIAL}.der"; then
+if (umask 077; get_variable_pem private-key > "${KEYPAIR_DIR}/${TARGET_DEVICE_SERIAL}.der"); then
     log "Captured device private key"
 else
     rm -f "${KEYPAIR_DIR}/${TARGET_DEVICE_SERIAL}.der"
