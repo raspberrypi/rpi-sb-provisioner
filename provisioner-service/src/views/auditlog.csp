@@ -209,7 +209,7 @@
         </form>
     </div>
     
-    <div class="table-container">
+    <div class="table-container" tabindex="0" role="region" aria-label="Audit log entries">
         <table id="auditLogTable">
             <caption class="sr-only">Audit log entries showing system activity</caption>
             <thead>

@@ -41,7 +41,7 @@
     
     <div id="error-container" aria-live="polite"></div>
     
-    <div class="table-container" id="manu-table-container">
+    <div class="table-container" id="manu-table-container" tabindex="0" role="region" aria-label="Manufacturing records">
         <div class="loading-container">
             <div class="loading-spinner"></div>
             <p>Loading manufacturing data&hellip;</p>

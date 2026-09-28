@@ -287,6 +287,7 @@ try {
                 <div class="col-md-auto">
                     <p class="script-status-note">
                         To enable or disable this script, use the controls on the scripts list page.
+                        In the editor, press Enter to start editing and Escape to leave it.
                     </p>
                 </div>
             </div>
@@ -381,6 +382,9 @@ try {
             var ed = ace.edit('ace-editor');
             ed.setTheme('ace/theme/monokai');
             ed.session.setMode('ace/mode/sh');
+            // Otherwise Tab indents and never leaves: keyboard users could
+            // not reach Save. Enter starts editing and Escape leaves.
+            ed.setOption('enableKeyboardAccessibility', true);
             ed.setFontSize(14);
             ed.setValue(area.value, -1);
             document.getElementById('ace-editor').hidden = false;

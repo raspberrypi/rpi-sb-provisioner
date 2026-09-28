@@ -1192,11 +1192,11 @@
             <!-- Match Boot Order to Storage Toggle -->
             <div class="toggle-group">
                 <label class="toggle-switch">
-                    <input type="checkbox" id="RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE" name="RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE" <%c++ if(bootOrderMatchStorage) $$ << "checked"; %> onchange="validateAndSaveField('RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE')">
+                    <input type="checkbox" id="RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE" aria-labelledby="title-RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE" name="RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE" <%c++ if(bootOrderMatchStorage) $$ << "checked"; %> onchange="validateAndSaveField('RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE')">
                     <span class="toggle-slider"></span>
                 </label>
                 <div class="toggle-content">
-                    <div class="toggle-title">Boot selected storage first</div>
+                    <div class="toggle-title" id="title-RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE">Boot selected storage first</div>
                     <div class="toggle-description">Rewrites the bootloader BOOT_ORDER so the selected storage device is tried first, keeping the other devices as fallbacks. Enabled by default. For IDP artefacts, the storage type is taken from the artefact when not set here.</div>
                 </div>
                 <div id="feedback-RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE" class="field-feedback"></div>
@@ -1657,11 +1657,11 @@
 
             <div class="toggle-group">
                 <label class="toggle-switch">
-                    <input type="checkbox" id="RPI_SB_PROVISIONER_PUBLIC_DASHBOARD" name="RPI_SB_PROVISIONER_PUBLIC_DASHBOARD" <%c++ if(publicDashboard) $$ << "checked"; %> onchange="validateAndSaveField('RPI_SB_PROVISIONER_PUBLIC_DASHBOARD')">
+                    <input type="checkbox" id="RPI_SB_PROVISIONER_PUBLIC_DASHBOARD" aria-labelledby="title-RPI_SB_PROVISIONER_PUBLIC_DASHBOARD" name="RPI_SB_PROVISIONER_PUBLIC_DASHBOARD" <%c++ if(publicDashboard) $$ << "checked"; %> onchange="validateAndSaveField('RPI_SB_PROVISIONER_PUBLIC_DASHBOARD')">
                     <span class="toggle-slider"></span>
                 </label>
                 <div class="toggle-content">
-                    <div class="toggle-title">Show devices and the code scanner without signing in</div>
+                    <div class="toggle-title" id="title-RPI_SB_PROVISIONER_PUBLIC_DASHBOARD">Show devices and the code scanner without signing in</div>
                     <div class="toggle-description">Anyone who can reach this interface can watch the devices page, open a device's page and check a scanned code. They see serial numbers, USB ports, addresses and progress, but not logs, overrides, settings or records. Turn this off to require signing in for everything.</div>
                 </div>
                 <div id="feedback-RPI_SB_PROVISIONER_PUBLIC_DASHBOARD" class="field-feedback"></div>
@@ -1686,11 +1686,11 @@
             <!-- JTAG Lock Toggle -->
             <div class="toggle-group toggle-irreversible">
                 <label class="toggle-switch">
-                    <input type="checkbox" id="RPI_DEVICE_LOCK_JTAG" name="RPI_DEVICE_LOCK_JTAG" <%c++ if(lockJtag) $$ << "checked"; %> onchange="validateAndSaveField('RPI_DEVICE_LOCK_JTAG')">
+                    <input type="checkbox" id="RPI_DEVICE_LOCK_JTAG" aria-labelledby="title-RPI_DEVICE_LOCK_JTAG" name="RPI_DEVICE_LOCK_JTAG" <%c++ if(lockJtag) $$ << "checked"; %> onchange="validateAndSaveField('RPI_DEVICE_LOCK_JTAG')">
                     <span class="toggle-slider"></span>
                 </label>
                 <div class="toggle-content">
-                    <div class="toggle-title">Lock JTAG Access<span class="toggle-irreversible-tag">Permanent</span></div>
+                    <div class="toggle-title" id="title-RPI_DEVICE_LOCK_JTAG">Lock JTAG Access<span class="toggle-irreversible-tag">Permanent</span></div>
                     <div class="toggle-description">Permanently disables JTAG hardware debugging on the device. <strong>This also prevents Raspberry Pi engineers from assisting you with hardware debugging or failure analysis on affected devices, for the life of the device.</strong> Recorded in the manufacturing database as requested; the provisioner cannot read the lock back to confirm it applied.</div>
                 </div>
                 <div id="feedback-RPI_DEVICE_LOCK_JTAG" class="field-feedback"></div>
@@ -1699,11 +1699,11 @@
             <!-- EEPROM Write Protection Toggle -->
             <div class="toggle-group toggle-irreversible">
                 <label class="toggle-switch">
-                    <input type="checkbox" id="RPI_DEVICE_EEPROM_WP_SET" name="RPI_DEVICE_EEPROM_WP_SET" <%c++ if(eepromWp) $$ << "checked"; %> onchange="validateAndSaveField('RPI_DEVICE_EEPROM_WP_SET')">
+                    <input type="checkbox" id="RPI_DEVICE_EEPROM_WP_SET" aria-labelledby="title-RPI_DEVICE_EEPROM_WP_SET" name="RPI_DEVICE_EEPROM_WP_SET" <%c++ if(eepromWp) $$ << "checked"; %> onchange="validateAndSaveField('RPI_DEVICE_EEPROM_WP_SET')">
                     <span class="toggle-slider"></span>
                 </label>
                 <div class="toggle-content">
-                    <div class="toggle-title">Enable EEPROM Write Protection<span class="toggle-irreversible-tag">Permanent</span></div>
+                    <div class="toggle-title" id="title-RPI_DEVICE_EEPROM_WP_SET">Enable EEPROM Write Protection<span class="toggle-irreversible-tag">Permanent</span></div>
                     <div class="toggle-description">Permanently prevents modification of the device's boot EEPROM, protecting the secure boot configuration. <strong>Bootloader and EEPROM updates will no longer be possible on affected devices</strong>, including security fixes. Recorded in the manufacturing database as requested; the provisioner cannot read the lock back to confirm it applied.</div>
                 </div>
                 <div id="feedback-RPI_DEVICE_EEPROM_WP_SET" class="field-feedback"></div>

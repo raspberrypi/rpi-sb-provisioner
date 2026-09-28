@@ -119,7 +119,7 @@
         <button class="pagination-button" id="lastPageBtn">Last</button>
     </div>
     
-    <div class="log-container" id="logContainer" role="log" aria-label="Service log entries" aria-live="polite">
+    <div class="log-container" id="logContainer" role="log" aria-label="Service log entries" aria-live="polite" tabindex="0">
     <%c++ 
     auto logEntries = @@.get<std::vector<std::string>>("log_entries");
     if(logEntries.size() > 0) {
