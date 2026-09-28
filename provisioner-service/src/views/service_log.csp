@@ -51,13 +51,14 @@
         .pagination-container {
             margin-top: 15px;
             display: flex;
+            flex-wrap: wrap;
             gap: 15px;
             align-items: center;
             justify-content: center;
         }
         .pagination-button {
             padding: 8px 16px;
-            background-color: #007bff;
+            background-color: #0062cc;
             color: white;
             border: none;
             border-radius: 3px;
@@ -73,6 +74,8 @@
         .pagination-info {
             font-weight: bold;
         }
+        /* Unit names have no spaces to break at. */
+        h1 { overflow-wrap: anywhere; }
     </style>
 </head>
 <body>
@@ -116,7 +119,7 @@
         <button class="pagination-button" id="lastPageBtn">Last</button>
     </div>
     
-    <div class="log-container" id="logContainer" role="log" aria-label="Service log entries" aria-live="polite">
+    <div class="log-container" id="logContainer" role="log" aria-label="Service log entries" aria-live="polite" tabindex="0">
     <%c++ 
     auto logEntries = @@.get<std::vector<std::string>>("log_entries");
     if(logEntries.size() > 0) {

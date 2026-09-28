@@ -8,8 +8,8 @@
         .tokens-container { max-width: 900px; }
         .tokens-container table { width: 100%; border-collapse: collapse; margin: 16px 0; }
         .tokens-container th, .tokens-container td { text-align: left; padding: 8px; border-bottom: 1px solid #ddd; }
-        .tokens-create { display: flex; gap: 8px; align-items: center; margin: 16px 0; }
-        .tokens-create input { padding: 6px 8px; font-size: 14px; min-width: 260px; }
+        .tokens-create { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 16px 0; }
+        .tokens-create input { padding: 6px 8px; font-size: 14px; min-width: 0; flex: 1 1 200px; }
         .tokens-new {
             background: #eef7ee; border: 1px solid #b7dfb7; border-radius: 4px;
             padding: 10px 12px; margin: 12px 0; word-break: break-all;
@@ -41,10 +41,12 @@
         </div>
         <div id="token-error" class="tokens-error" role="alert" hidden></div>
 
+        <div tabindex="0" role="region" aria-label="API tokens" style="overflow-x: auto;">
         <table>
             <thead><tr><th>Label</th><th>Created by</th><th>Created (UTC)</th><th>ID</th><th></th></tr></thead>
             <tbody id="token-rows"></tbody>
         </table>
+        </div>
     </main>
     <script>
     (function () {

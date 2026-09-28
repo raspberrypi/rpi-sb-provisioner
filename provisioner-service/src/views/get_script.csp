@@ -215,21 +215,21 @@ try {
         }
         
         .toggle-btn.enabled {
-            background-color: #28a745;
+            background-color: #1e7e34;
             color: white;
-            border: 1px solid #28a745;
+            border: 1px solid #1e7e34;
         }
         
         .toggle-btn.disabled {
             background-color: #f8f9fa;
-            color: #6c757d;
+            color: #5c636a;
             border: 1px solid #ced4da;
         }
 
         .script-status-note {
             background-color: #f8f9fa;
             padding: 10px 15px;
-            border-left: 4px solid #6c757d;
+            border-left: 4px solid #5c636a;
             margin-bottom: 1rem;
             color: #495057;
             font-style: italic;
@@ -270,6 +270,8 @@ try {
         .copy-from-menu a:hover {
             background-color: #f0f0f0;
         }
+        /* Monokai's line numbers are too faint to read against its gutter. */
+        .ace-monokai .ace_gutter { color: #b8b9b2; }
     </style>
 </head>
 <body>
@@ -285,6 +287,7 @@ try {
                 <div class="col-md-auto">
                     <p class="script-status-note">
                         To enable or disable this script, use the controls on the scripts list page.
+                        In the editor, press Enter to start editing and Escape to leave it.
                     </p>
                 </div>
             </div>
@@ -379,6 +382,9 @@ try {
             var ed = ace.edit('ace-editor');
             ed.setTheme('ace/theme/monokai');
             ed.session.setMode('ace/mode/sh');
+            // Otherwise Tab indents and never leaves: keyboard users could
+            // not reach Save. Enter starts editing and Escape leaves.
+            ed.setOption('enableKeyboardAccessibility', true);
             ed.setFontSize(14);
             ed.setValue(area.value, -1);
             document.getElementById('ace-editor').hidden = false;

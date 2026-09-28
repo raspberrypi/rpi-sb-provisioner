@@ -30,7 +30,7 @@
     
     <%view auto_refresh_toggle %>
     
-    <div id="services-table-container">
+    <div id="services-table-container" tabindex="0" role="region" aria-label="Services" style="overflow-x: auto;">
         <%c++ 
         bool isLoading = false;
         try {

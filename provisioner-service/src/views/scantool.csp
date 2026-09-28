@@ -62,7 +62,7 @@
         button {
             padding: 10px 20px;
             margin: 0 5px;
-            background-color: #4CAF50;
+            background-color: #2e7d32;
             color: white;
             border: none;
             border-radius: 4px;
@@ -156,7 +156,7 @@
         }
         
         .log-entry.info {
-            color: #4CAF50;
+            color: #2e7d32;
         }
         
         .log-entry.warn {
