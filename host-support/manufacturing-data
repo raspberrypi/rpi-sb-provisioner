@@ -1,8 +1,30 @@
 #!/bin/sh
 
 metadata_get() {
-    fastboot -s "${TARGET_DEVICE_SERIAL}" getvar "$1" 2>&1 | grep -oP "${1}"': \K[^\r\n]*' || true
+    timeout -k 5 "${FASTBOOT_CONTROL_TIMEOUT:-30}" fastboot -s "${TARGET_DEVICE_SERIAL}" getvar "$1" 2>&1 | grep -oP "${1}"': \K[^\r\n]*' | head -n 1 || true
 }
+
+# The device answers these queries itself, so a faulty or hostile one can say
+# anything. Keep a variable only if it has the expected shape, else replace it
+# with $3. Takes the variable's name, so the warning never lands in a $(...).
+_md_nl='
+'
+metadata_expect() {
+    eval "_md_value=\${$1}"
+    case "${_md_value}" in
+        "") eval "$1=\$3"; return 0 ;;
+        *"${_md_nl}"*) ;;
+        *) printf '%s' "${_md_value}" | grep -Eqx -- "$2" && return 0 ;;
+    esac
+    log "Ignoring malformed value reported by the device for $1"
+    eval "$1=\$3"
+}
+
+# SQL literals. Every text value goes through sql_text, so a quote in any of
+# them ends nothing.
+sql_text() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/''/g")"; }
+sql_str() { if [ -z "$1" ]; then echo "NULL"; else sql_text "$1"; fi; }
+sql_int() { case "$1" in ""|*[!0-9]*) echo "NULL" ;; *) echo "$1" ;; esac; }
 
 # Register device identity with the Raspberry Pi Connect management API.
 # Requires RPI_CONNECT_API_KEY to be set in config.
@@ -96,7 +118,9 @@ ${_connect_body_hash}"
     _connect_sign_result=$(fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" \
         oem fwcrypto sign-hash "${_connect_payload_hash}" 2>&1) || true
     _connect_signature=$(printf '%s' "${_connect_sign_result}" | \
-        grep -oP '\(bootloader\) connect-signature:\K.*' || true)
+        grep -oP '\(bootloader\) connect-signature:\K.*' | head -n 1 || true)
+    # It goes into an HTTP header: one line, and nothing but base64.
+    printf '%s' "${_connect_signature}" | grep -Eqx '[A-Za-z0-9+/=_-]+' || _connect_signature=""
 
     if [ -z "${_connect_signature}" ]; then
         log "WARNING: Device-side signing failed, skipping Connect registration"
@@ -151,14 +175,17 @@ metadata_gather() {
     ETH_MAC_ADDRESS=$(metadata_get "mac-ethernet")
     WIFI_MAC_ADDRESS=$(metadata_get "mac-wifi")
     BT_MAC_ADDRESS=$(metadata_get "mac-bt")
+    metadata_expect ETH_MAC_ADDRESS '([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}' ""
+    metadata_expect WIFI_MAC_ADDRESS '([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}' ""
+    metadata_expect BT_MAC_ADDRESS '([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}' ""
     
     MMC_SECTOR_SIZE=$(metadata_get "mmc-sector-size")
-    MMC_SECTOR_SIZE=${MMC_SECTOR_SIZE:-0}
+    metadata_expect MMC_SECTOR_SIZE '[0-9]{1,18}' 0
     MMC_SECTOR_COUNT=$(metadata_get "mmc-sector-count")
-    MMC_SECTOR_COUNT=${MMC_SECTOR_COUNT:-0}
+    metadata_expect MMC_SECTOR_COUNT '[0-9]{1,18}' 0
     MMC_SIZE=$(( MMC_SECTOR_SIZE * MMC_SECTOR_COUNT ))
     MMC_CID=$(metadata_get "mmc-cid")
-    MMC_CID=${MMC_CID:-""}
+    metadata_expect MMC_CID '[0-9A-Za-z._:-]{1,64}' ""
     
     RPI_DUID=$(metadata_get "rpi-duid")
     
@@ -169,6 +196,13 @@ metadata_gather() {
     MANUFACTURER=$(metadata_get "revision-manufacturer")
     REVISION=$(metadata_get "revision-revision")
     SECURE=$(metadata_get "secure")
+    metadata_expect RPI_DUID '[0-9A-Za-z._:-]{1,64}' ""
+    metadata_expect TYPE '[0-9A-Za-z._:-]{1,64}' ""
+    metadata_expect PROCESSOR '[0-9A-Za-z._:-]{1,64}' ""
+    metadata_expect SDRAM_SIZE_BYTES '[0-9]{1,18}' ""
+    metadata_expect MEMORY '[0-9A-Za-z._:-]{1,64}' ""
+    metadata_expect MANUFACTURER '[0-9A-Za-z._:-]{1,64}' ""
+    metadata_expect REVISION '[0-9A-Za-z._:-]{1,64}' ""
     # fastboot's GetSecure returns "yes"/"no"/"error" (see
     # rpi-fastbootd variables.cpp GetSignedOtp/GetSecure); normalise
     # to the 1/0 the schema and downstream comparisons expect.
@@ -296,6 +330,10 @@ metadata_gather() {
     EEPROM_JEDEC=$(eeprom_value "eeprom-jedec")
     EEPROM_UNIQUE_ID=$(eeprom_value "eeprom-unique-id")
     BOOTLOADER_BUILD_TS=$(eeprom_value "bootloader-build-timestamp")
+    metadata_expect EEPROM_SIZE '[0-9]{1,18}' ""
+    metadata_expect EEPROM_JEDEC '[0-9A-Za-z._:-]{1,64}' ""
+    metadata_expect EEPROM_UNIQUE_ID '[0-9A-Za-z._:-]{1,64}' ""
+    metadata_expect BOOTLOADER_BUILD_TS '[0-9]{1,18}' ""
 
     OS_IMAGE_FILENAME="${IMAGE_SUMMARY:-}"
     OS_IMAGE_SHA256=""
@@ -378,21 +416,12 @@ metadata_gather() {
             sqlite3 "${RPI_SB_PROVISIONER_MANUFACTURING_DB}" "CREATE TABLE devices($EXPECTED_SCHEMA);" > /dev/null 2>&1
         fi
 
-        sql_int() { if [ -z "$1" ]; then echo "NULL"; else echo "$1"; fi; }
-        sql_str() {
-            if [ -z "$1" ]; then
-                echo "NULL"
-            else
-                printf "'%s'" "$(printf '%s' "$1" | sed "s/'/''/g")"
-            fi
-        }
         EEPROM_SIZE_SQL=$(sql_int "${EEPROM_SIZE}")
         BOOTLOADER_BUILD_TS_SQL=$(sql_int "${BOOTLOADER_BUILD_TS}")
         EEPROM_JEDEC_SQL=$(sql_str "${EEPROM_JEDEC}")
         EEPROM_UNIQUE_ID_SQL=$(sql_str "${EEPROM_UNIQUE_ID}")
         CUSTOMER_KEY_FINGERPRINT_SQL=$(sql_str "${CUSTOMER_KEY_FINGERPRINT}")
         CUSTOMER_KEY_LABEL_SQL=$(sql_str "${CUSTOMER_KEY_LABEL}")
-        OS_IMAGE_FILENAME_SQL=$(printf '%s' "${OS_IMAGE_FILENAME}" | sed "s/'/''/g")
 
         # Insert new device data
         sqlite3 "${RPI_SB_PROVISIONER_MANUFACTURING_DB}" \
@@ -426,28 +455,28 @@ metadata_gather() {
                     customer_key_fingerprint,   \
                     customer_key_label          \
                 ) VALUES (                      \
-                    '${BOARD_STR}',               \
-                    '${TARGET_DEVICE_SERIAL}',    \
-                    '${ETH_MAC_ADDRESS}',         \
-                    '${WIFI_MAC_ADDRESS}',        \
-                    '${BT_MAC_ADDRESS}',          \
-                    '${MMC_SIZE}',                \
-                    '${MMC_CID}',                 \
-                    '${RPI_DUID}',                \
-                    '${REVISION}',                \
-                    '${PROCESSOR_STR}',           \
-                    '${MEMORY_STR}',              \
-                    '${MANUFACTURER_STR}',        \
-                    '${SECURE}',                  \
+                    $(sql_text "${BOARD_STR}"),               \
+                    $(sql_text "${TARGET_DEVICE_SERIAL}"),    \
+                    $(sql_text "${ETH_MAC_ADDRESS}"),         \
+                    $(sql_text "${WIFI_MAC_ADDRESS}"),        \
+                    $(sql_text "${BT_MAC_ADDRESS}"),          \
+                    $(sql_text "${MMC_SIZE}"),                \
+                    $(sql_text "${MMC_CID}"),                 \
+                    $(sql_text "${RPI_DUID}"),                \
+                    $(sql_text "${REVISION}"),                \
+                    $(sql_text "${PROCESSOR_STR}"),           \
+                    $(sql_text "${MEMORY_STR}"),              \
+                    $(sql_text "${MANUFACTURER_STR}"),        \
+                    $(sql_text "${SECURE}"),                  \
                     ${JTAG_LOCKED_VALUE},         \
                     ${EEPROM_WP_VALUE},           \
                     ${PUBKEY_PROGRAMMED_VALUE},   \
                     ${DEVKEY_REVOKED_VALUE},      \
                     ${SIGNED_BOOT_VALUE},         \
-                    '${OS_IMAGE_FILENAME_SQL}',       \
-                    '${OS_IMAGE_SHA256}',         \
+                    $(sql_text "${OS_IMAGE_FILENAME}"),       \
+                    $(sql_text "${OS_IMAGE_SHA256}"),         \
                     ${CONNECT_REGISTERED_VALUE},  \
-                    '${CONNECT_DEVICE_ID_VALUE}', \
+                    $(sql_text "${CONNECT_DEVICE_ID_VALUE}"), \
                     ${EEPROM_SIZE_SQL},           \
                     ${EEPROM_JEDEC_SQL},          \
                     ${EEPROM_UNIQUE_ID_SQL},      \
@@ -464,12 +493,11 @@ metadata_gather() {
         # See host-support/state-recording for the token rationale.
         notify_url=${PROVISIONER_MANUFACTURING_NOTIFY_URL:-http://127.0.0.1:3142/internal/manufacturing-recorded}
         if [ -r /run/rpi-sb-provisioner/internal.token ]; then
-            internal_token=$(cat /run/rpi-sb-provisioner/internal.token 2>/dev/null || true)
-            if [ -n "${internal_token}" ]; then
-                curl --max-time 1 --connect-timeout 1 -fsS -X POST -o /dev/null \
-                    -H "X-Internal-Token: ${internal_token}" \
+            # The header is built from the file and piped to curl, so the token never
+            # appears on a command line, in ps, or in a set -x trace.
+            sed 's/^/X-Internal-Token: /' /run/rpi-sb-provisioner/internal.token 2>/dev/null \
+                | curl --max-time 1 --connect-timeout 1 -fsS -X POST -o /dev/null -H @- \
                     "${notify_url}" >/dev/null 2>&1 || true
-            fi
         fi
 
         announce_stop "Manufacturing Database Insertion"
