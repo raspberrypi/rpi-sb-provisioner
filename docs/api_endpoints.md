@@ -72,7 +72,7 @@ Verify QR codes against the manufacturing database for device validation and qua
 
 **Key Endpoints:**
 
-- `POST /api/v2/verify-qrcode` - Verify if a QR code exists in the manufacturing database
+- `GET /api/v2/verify-qrcode?code=` - Verify if a QR code exists in the manufacturing database (also `POST` with a JSON body)
 
 **Use Cases:** Barcode scanner integration, mobile app validation, quality control workflows
 

@@ -454,17 +454,12 @@
             // Function to verify QR code with the server
             async function verifyQRCode(qrcode) {
                 try {
-                    const response = await fetch('/api/v2/verify-qrcode', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({ qrcode }),
-                    });
-                    
+                    // A GET, so the scanner also works without signing in.
+                    const response = await fetch('/api/v2/verify-qrcode?code=' + encodeURIComponent(qrcode),
+                                                 { headers: { 'Accept': 'application/json' } });
                     if (!response.ok) {
-                        const errorData = await response.json();
-                        throw new Error(errorData.message || 'Server error');
+                        const errorData = await response.json().catch(() => ({}));
+                        throw new Error(errorData.error || errorData.message || 'Server error');
                     }
                     
                     return await response.json();
