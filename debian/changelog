@@ -29,6 +29,14 @@ rpi-sb-provisioner (2.3.6) unstable; urgency=medium
     a GET, and a code cut short by a NUL byte no longer matches every record
     without a DUID.
 
+  * Make the web UI readable and usable at a glance, on a phone and by
+    keyboard. Text and buttons now meet the WCAG AA contrast ratio, no text
+    is smaller than 12 px, and no page scrolls sideways at phone width. A
+    device tile shows its whole serial number rather than cutting it short.
+    Save and Help in the hook editor can be reached by keyboard: press Enter
+    to edit and Escape to leave. Scrolling tables take focus, and the
+    Options switches are named for screen readers.
+
   * Refuse a sign-in that a proxy on this machine forwarded over plain HTTP
     from another machine, since the password crossed the network
     unencrypted to reach it. Behind an HTTPS proxy that sends
