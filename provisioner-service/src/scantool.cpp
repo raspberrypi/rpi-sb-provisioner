@@ -9,6 +9,9 @@
 
 #include "include/scantool.h"
 #include "utils.h"
+#include "auth.h"
+#include "include/audit.h"
+#include <algorithm>
 
 namespace provisioner {
 
@@ -49,7 +52,7 @@ namespace provisioner {
         }
         
         // Bind the QR code value to the parameter
-        rc = sqlite3_bind_text(stmt, 1, qrCodeValue.c_str(), -1, SQLITE_STATIC);
+        rc = sqlite3_bind_text(stmt, 1, qrCodeValue.data(), static_cast<int>(qrCodeValue.size()), SQLITE_STATIC);
         if (rc != SQLITE_OK) {
             errorMessage = "Failed to bind parameter: " + std::string(sqlite3_errmsg(db));
             LOG_ERROR << errorMessage;
@@ -79,84 +82,54 @@ namespace provisioner {
             
             HttpViewData viewData;
             viewData.insert("currentPage", std::string("scantool"));
+            viewData.insert("anonymous", auth::username(req).empty());
             
             auto resp = HttpResponse::newHttpViewResponse("scantool.csp", viewData);
             callback(resp);
         });
         
-        // Register API handler for QR code verification
+        // Whether a scanned code is a DUID in the manufacturing database. A
+        // plain GET, so the scanner can be offered without signing in: the
+        // answer is only known or not. POST is kept for existing scripts.
         app.registerHandler("/api/v2/verify-qrcode", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
-            auto resp = HttpResponse::newHttpResponse();
-            resp->setContentTypeCode(CT_APPLICATION_JSON);
-            
-            // Check if it's a POST request
-            if (req->getMethod() != drogon::HttpMethod::Post) {
-                auto errorResp = provisioner::utils::createErrorResponse(
-                    req,
-                    "Only POST method is allowed",
-                    drogon::k405MethodNotAllowed,
-                    "Method Error",
-                    "METHOD_NOT_ALLOWED"
-                );
-                callback(errorResp);
+            AuditLog::logHandlerAccess(req, "/api/v2/verify-qrcode");
+            std::string code;
+            bool given = false;
+            if (req->getMethod() == drogon::HttpMethod::Get) {
+                code = req->getParameter("code");
+                given = !code.empty();
+            } else {
+                auto json = req->getJsonObject();
+                if (json && json->isObject() && (*json)["qrcode"].isString()) {
+                    code = (*json)["qrcode"].asString();
+                    given = true;
+                }
+            }
+            // A blank code, or one a NUL cuts short, would match every record
+            // without a DUID.
+            const bool printable = std::all_of(code.begin(), code.end(),
+                                               [](unsigned char c) { return c >= 0x20 && c != 0x7f; });
+            if (!given || !printable || code.size() > 256 ||
+                code.find_first_not_of(' ') == std::string::npos) {
+                callback(provisioner::utils::createErrorResponse(
+                    req, "Missing or invalid code", drogon::k400BadRequest,
+                    "Parameter Error", "INVALID_PARAMETER"));
                 return;
             }
-            
-            // Parse JSON body
-            try {
-                auto json = req->getJsonObject();
-                // A blank code would match every record with no DUID.
-                if (!json || !json->isMember("qrcode") || !(*json)["qrcode"].isString() ||
-                    (*json)["qrcode"].asString().find_first_not_of(" \t\r\n") == std::string::npos) {
-                    auto errorResp = provisioner::utils::createErrorResponse(
-                        req,
-                        "Missing or invalid 'qrcode' parameter in request body",
-                        drogon::k400BadRequest,
-                        "Parameter Error",
-                        "INVALID_PARAMETER"
-                    );
-                    callback(errorResp);
-                    return;
-                }
-                
-                std::string qrCodeValue = (*json)["qrcode"].asString();
-                std::string errorMessage;
-                
-                // Check if QR code value exists in manufacturing DB
-                bool exists = checkQRCodeInManufacturingDB(qrCodeValue, errorMessage);
-                
-                if (!errorMessage.empty()) {
-                    auto errorResp = provisioner::utils::createErrorResponse(
-                        req,
-                        errorMessage,
-                        drogon::k500InternalServerError,
-                        "Database Error",
-                        "DB_ERROR"
-                    );
-                    callback(errorResp);
-                    return;
-                }
-                
-                // Create success response
-                Json::Value result;
-                result["success"] = true;
-                result["exists"] = exists;
-                result["qrcode"] = qrCodeValue;
-                
-                resp->setStatusCode(k200OK);
-                resp->setBody(Json::FastWriter().write(result));
-                callback(resp);
-                
-            } catch (const std::exception &e) {
-                auto errorResp = provisioner::utils::createErrorResponse(
-                    req,
-                    "Error processing request: " + std::string(e.what()),
-                    drogon::k500InternalServerError,
-                    "Server Error",
-                    "SERVER_ERROR"
-                );
-                callback(errorResp);
+
+            std::string errorMessage;
+            const bool exists = checkQRCodeInManufacturingDB(code, errorMessage);
+            if (!errorMessage.empty()) {
+                callback(provisioner::utils::createErrorResponse(
+                    req, errorMessage, drogon::k500InternalServerError, "Database Error", "DB_ERROR"));
+                return;
             }
-        });
+
+            Json::Value result;
+            result["success"] = true;
+            result["exists"] = exists;
+            result["qrcode"] = code;
+            callback(HttpResponse::newHttpJsonResponse(result));
+        }, {Get, Post});
     }
 } // namespace provisioner 
