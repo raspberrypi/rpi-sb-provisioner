@@ -156,7 +156,10 @@ announce_start "Boot partition extraction"
 # Mount the boot partition
 BOOT_MOUNT="${TMP_DIR}/boot-mount"
 mkdir -p "${BOOT_MOUNT}"
-mount -o ro "${BOOT_PARTITION}" "${BOOT_MOUNT}"
+# The image is uploaded, and whatever this partition holds ends up in a boot
+# image signed with the customer key. A Raspberry Pi boot partition is FAT,
+# which cannot hold symlinks or device nodes; anything else is refused.
+mount -t vfat -o ro,nosuid,nodev,noexec "${BOOT_PARTITION}" "${BOOT_MOUNT}"
 
 log "Mounted boot partition at: ${BOOT_MOUNT}"
 
@@ -169,13 +172,19 @@ cp -a "${BOOT_MOUNT}"/.[!.]* "${BOOT_WORK}/" 2>/dev/null || true
 # Unmount the boot partition
 umount "${BOOT_MOUNT}"
 
+# Belt and braces: the copy must hold nothing but files and directories, or
+# mcopy and sed below would follow a link out to a host file.
+if [ -n "$(find "${BOOT_WORK}" ! -type f ! -type d -print -quit)" ]; then
+    die "Boot partition contains links or special files; refusing to build a boot image from it"
+fi
+
 announce_stop "Boot partition extraction"
 
 announce_start "Pre-boot authentication setup"
 
 # Insert cryptroot initramfs
 log "Copying cryptroot initramfs"
-cp "$(get_cryptroot)" "${BOOT_WORK}/initramfs8"
+cp --remove-destination "$(get_cryptroot)" "${BOOT_WORK}/initramfs8"
 
 # Modify cmdline.txt for secure boot
 if [ -f "${BOOT_WORK}/cmdline.txt" ]; then
