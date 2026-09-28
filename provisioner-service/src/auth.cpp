@@ -134,6 +134,17 @@ namespace {
         return ip == "127.0.0.1" || ip == "::1" || ip == "::ffff:127.0.0.1";
     }
 
+    // The scheme the browser itself used. Behind a proxy our connection is
+    // plain loopback HTTP, so a proxy on this machine may say otherwise in
+    // X-Forwarded-Proto; no one else is believed.
+    std::string forwardedProto(const HttpRequestPtr &req) {
+        return isLoopbackPeer(req) ? toLower(req->getHeader("X-Forwarded-Proto")) : "";
+    }
+
+    bool clientUsedHttps(const HttpRequestPtr &req) {
+        return req->isOnSecureConnection() || forwardedProto(req) == "https";
+    }
+
     // Addresses currently assigned to this machine. An IP literal cannot be
     // rebound by DNS, so any of ours is as safe a Host as "localhost".
     std::set<std::string> localAddresses() {
@@ -355,7 +366,7 @@ namespace {
         Cookie cookie(name, value);
         cookie.setPath("/");
         cookie.setHttpOnly(httpOnly);
-        cookie.setSecure(req->isOnSecureConnection());
+        cookie.setSecure(clientUsedHttps(req));
         cookie.setSameSite(Cookie::SameSite::kStrict);
         if (expire) cookie.setMaxAge(0);
         return cookie;
@@ -426,7 +437,14 @@ namespace {
             return;
         }
 
-        if (g_config.requireTlsForRemoteLogin && !req->isOnSecureConnection() && !isLoopbackPeer(req)) {
+        // A proxy forwarding plain HTTP from another machine is refused even
+        // when we listen on loopback: the password crossed the network in the
+        // clear to reach it.
+        const std::string clientIp = AuditLog::getClientIP(req);
+        const bool proxiedFromNetwork = forwardedProto(req) == "http" && clientIp != "127.0.0.1" &&
+                                        clientIp != "::1" && clientIp != "::ffff:127.0.0.1";
+        if ((g_config.requireTlsForRemoteLogin && !clientUsedHttps(req) && !isLoopbackPeer(req)) ||
+            proxiedFromNetwork) {
             callback(loginPage(next, "Sign in over HTTPS: this connection is not encrypted.", k403Forbidden));
             return;
         }
