@@ -100,6 +100,26 @@ rpi-sb-provisioner (2.3.6) unstable; urgency=medium
     now used only from a local reverse proxy. The test-mode header, whose
     secret value was in the public source, is gone.
 
+  * Accept only the provisioner's own settings when saving options. The
+    config is run as shell by root, and a setting's name was written
+    unchecked, so a saved name could run commands or change PATH for the
+    provisioning scripts. Values may no longer span lines, and a saved
+    Raspberry Pi Connect key no longer reaches the journal.
+
+  * Never empty a workdir that holds the provisioner's images, database,
+    keys or logs, a home directory or a system directory. Every save empties
+    RPI_SB_WORKDIR, and so does every package upgrade, so pointing it at
+    /srv/rpi-sb-provisioner deleted every uploaded image and the
+    manufacturing database.
+
+  * Use RPI_SB_WORKDIR only when root alone can write to it. Its contents
+    are reused and flashed to devices, so anyone else able to write there
+    could replace a signed boot image or bootloader. Such a workdir is set
+    aside and each run uses a fresh temporary directory. Upgrading hands a
+    dedicated workdir made without sudo to root and empties it, so existing
+    stations keep their cache. A symlinked workdir is reported with the
+    path to use instead.
+
   * Pad an OS image whose length is not a multiple of 4096 bytes before handing
     it to fastboot. The naked provisioner flashes the configured image as it
     finds it, and the fastboot client sparses whatever it is given: libsparse

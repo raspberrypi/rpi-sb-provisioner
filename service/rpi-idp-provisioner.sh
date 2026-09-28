@@ -271,6 +271,10 @@ elif [ ! -d "${RPI_SB_WORKDIR}" ]; then
     RPI_SB_WORKDIR=$(make_temp_dir "rpi-sb-provisioner.XXX")
     DELETE_PRIVATE_TMPDIR="true"
     announce_stop "Finding the cache directory: Created ${RPI_SB_WORKDIR} (configured path isn't a directory)"
+elif ! workdir_is_private "${RPI_SB_WORKDIR}"; then
+    RPI_SB_WORKDIR=$(make_temp_dir "rpi-sb-provisioner.XXX")
+    DELETE_PRIVATE_TMPDIR="true"
+    announce_stop "Finding the cache directory: Created ${RPI_SB_WORKDIR} (configured path is not root's alone)"
 else
     announce_stop "Finding the cache directory: Using specified name"
 fi
