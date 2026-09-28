@@ -603,6 +603,11 @@ namespace provisioner {
                 if (!pimages[key].isMember("simage")) continue;
                 std::string name = pimages[key]["simage"].asString();
                 if (name.empty() || !seen.insert(name).second) continue;
+                // The provisioner flashes whatever this names, so it must stay
+                // inside the artefact. An absolute path would replace dirPath.
+                if (!isPlainImageName(name)) {
+                    return name + ": not a plain file name inside the artefact";
+                }
 
                 std::filesystem::path imgPath = dirPath / name;
                 if (!std::filesystem::is_regular_file(imgPath)) {
