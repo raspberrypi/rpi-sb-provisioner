@@ -8,5 +8,35 @@ ExecStart=/usr/bin/rpi-provisioner-ui
 Restart=always
 RestartSec=10
 
+# The UI stays root, because it writes the configuration and hooks that the
+# provisioners run as root, but it is network-facing, so it gets nothing else.
+# Every file it touches is root-owned, so it needs no capabilities at all.
+CapabilityBoundingSet=
+AmbientCapabilities=
+NoNewPrivileges=yes
+
+# /usr, /boot and /etc are read-only apart from its own configuration. /srv,
+# /var and /home stay writable because RPI_SB_WORKDIR may point anywhere.
+ProtectSystem=full
+ReadWritePaths=/etc/rpi-sb-provisioner
+PrivateTmp=yes
+UMask=0027
+
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectHostname=yes
+ProtectProc=invisible
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+# Netlink for the udev monitor; Unix for D-Bus and the journal.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
 [Install]
-WantedBy=multi-user.target 
+WantedBy=multi-user.target
