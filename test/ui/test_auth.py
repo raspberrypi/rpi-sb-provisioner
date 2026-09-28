@@ -10,8 +10,9 @@ from ui.harness.browser import Browser, OUTSIDER, OUTSIDER_PASSWORD
 from ui.harness.case import UITest
 
 FAILED = "Sign-in failed. Check the username and password"
-PAGES = ["/devices", "/options/get", "/customisation/list-scripts", "/services",
-         "/manu-db", "/auditlog", "/auth/tokens", "/scantool", "/images/list"]
+# The devices pages and the scanner may be public; see test_public.py.
+PAGES = ["/options/get", "/customisation/list-scripts", "/services",
+         "/manu-db", "/auditlog", "/auth/tokens", "/images/list"]
 HOOK = "/etc/rpi-sb-provisioner/scripts/naked-provisioner-post-flash.sh"
 
 
@@ -110,7 +111,7 @@ class SignIn(UITest):
         self.assertAtLogin()
         # The old cookie, replayed, is dead.
         self.b.d.add_cookie({"name": "rpi_sb_session", "value": old, "path": "/"})
-        self.b.get("/devices")
+        self.b.get("/options/get")
         self.assertAtLogin()
 
 

@@ -110,7 +110,7 @@ class Station:
             systemctl stop rpi-provisioner-ui
             rm -rf {kept}
             tar -xpf {SNAPSHOT} -C /
-            rm -f /srv/rpi-sb-provisioner/images/uitest-*
+            rm -rf /srv/rpi-sb-provisioner/images/uitest-*
             systemctl start rpi-provisioner-ui
         """)
         self.wait_for_ui()
