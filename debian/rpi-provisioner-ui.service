@@ -23,6 +23,15 @@ ReadWritePaths=/etc/rpi-sb-provisioner
 PrivateTmp=yes
 UMask=0027
 
+# Firmware crypto (librpifwcrypto opens /dev/vcio and /dev/vcio_crypto) and
+# HSMs, which a PKCS#11 module reaches over raw USB or hidraw when it does
+# not go through pcscd. Everything else, block devices included, is closed.
+DevicePolicy=closed
+DeviceAllow=/dev/vcio rw
+DeviceAllow=/dev/vcio_crypto rw
+DeviceAllow=char-usb_device rw
+DeviceAllow=char-hidraw rw
+
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectKernelLogs=yes
