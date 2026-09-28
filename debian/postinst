@@ -14,6 +14,14 @@ if [ "$1" = "configure" ] && ! getent group rpi-sb-provisioner >/dev/null; then
     fi
 fi
 
+# The package-download units were removed in 2.3.6. They were never enabled
+# by default, but an administrator may have enabled an instance by hand, which
+# would now leave a dangling symlink behind.
+if [ "$1" = "configure" ]; then
+    find /etc/systemd/system -type l \( -name 'fetch-repo-package-list@*' -o -name 'rpi-package-download@*' \) \
+        -delete 2>/dev/null || true
+fi
+
 # Create necessary directories
 mkdir -p /etc/rpi-sb-provisioner
 # Earlier releases put key pairs in <serial>/<serial>/keypair, where neither

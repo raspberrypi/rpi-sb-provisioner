@@ -63,5 +63,3 @@ override_dh_installsystemd:
 	dh_installsystemd --name=rpi-sb-bootstrap@
 	dh_installsystemd --name=rpi-sb-triage@
 	dh_installsystemd --no-enable --name=rpi-sb-image-bootimg-generator@
-	dh_installsystemd --no-enable --name=fetch-repo-package-list@
-	dh_installsystemd --no-enable --name=rpi-package-download@
