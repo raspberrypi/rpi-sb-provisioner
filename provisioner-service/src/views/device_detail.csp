@@ -760,7 +760,7 @@
         // Set back link to restore the active tab
         var backLink = document.getElementById('back-link');
         try {
-            var savedTab = localStorage.getItem('devices-active-tab');
+            var savedTab = localStorage.getItem('devices-active-tab-v2');
             if (savedTab) backLink.href = '/devices#' + savedTab;
         } catch(e) {}
 
