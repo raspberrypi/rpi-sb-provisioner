@@ -36,6 +36,41 @@ rpi-sb-provisioner (2.3.6) unstable; urgency=medium
     checked. A new certificate at every start meant a new browser warning
     every time.
 
+  * Sandbox the web UI service. It keeps running as root, because it writes
+    what the provisioners run as root, but it no longer holds any
+    capabilities, sees /usr, /boot and /etc read-only apart from
+    /etc/rpi-sb-provisioner, gets a private /tmp and runs under a system-call
+    filter. A workdir or image under /usr or /etc is no longer writable by it.
+
+  * Stop leaving uploaded signing keys in plaintext when wrapping them fails.
+    The wrapped key was written over a file already made read-only, and the
+    write was never checked. Secrets are now replaced atomically and any
+    failure rejects the upload.
+
+  * SECURITY: Make /etc/rpi-sb-provisioner/config readable by root only. It
+    can hold RPI_CONNECT_API_KEY and was world-readable, so any local user
+    could read it. Rotate the Raspberry Pi Connect key if others have
+    accounts on the provisioning host.
+
+  * SECURITY: Keep the Raspberry Pi Connect API key out of the journal and the
+    process list, and verify the Connect server's certificate. Registering a
+    device traced the key into the journal and passed it on curl's command
+    line, and curl accepted any certificate. Rotate the key if the host is
+    shared. A development server with its own CA can be named with
+    CURL_CA_BUNDLE.
+
+  * Make provisioning data readable only by the rpi-sb-provisioner group:
+    manufacturing records, OS images, logs and customisation hooks were
+    readable by every account on the host.
+
+  * SECURITY: Keep captured device key pairs readable by root only. They were
+    written into the world-readable log tree, so any local user could read a
+    device's private key where one was captured.
+
+  * Save captured device key pairs in /var/log/rpi-sb-provisioner/<serial>/
+    keypair, as documented, rather than one directory deeper, where the
+    device key API could not find them. Existing pairs are moved on upgrade.
+
   * Pad an OS image whose length is not a multiple of 4096 bytes before handing
     it to fastboot. The naked provisioner flashes the configured image as it
     finds it, and the fastboot client sparses whatever it is given: libsparse
