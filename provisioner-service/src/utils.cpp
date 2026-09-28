@@ -6,6 +6,10 @@
 #include <functional>
 #include <cstring>
 #include <cctype>
+#include <cerrno>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <drogon/drogon.h>
 #include "include/audit.h"
 #include "keywrap.h"
@@ -877,24 +881,7 @@ namespace provisioner {
                 return false;
             }
 
-            // Write the wrapped blob (binary).
-            std::ofstream pinFile(PKCS11_PIN_FILE, std::ios::binary);
-            if (!pinFile.is_open()) {
-                LOG_ERROR << "Failed to open PIN file for writing: " << PKCS11_PIN_FILE;
-                return false;
-            }
-            pinFile.write(blob.data(), static_cast<std::streamsize>(blob.size()));
-            pinFile.close();
-            
-            // Set restrictive permissions (owner read-only)
-            try {
-                std::filesystem::permissions(PKCS11_PIN_FILE,
-                    std::filesystem::perms::owner_read,
-                    std::filesystem::perm_options::replace);
-            } catch (const std::filesystem::filesystem_error& e) {
-                LOG_ERROR << "Failed to set PIN file permissions: " << e.what();
-                // Try to remove the file if we can't set permissions
-                std::filesystem::remove(PKCS11_PIN_FILE);
+            if (!writeSecretFile(PKCS11_PIN_FILE, blob)) {
                 return false;
             }
             
@@ -929,6 +916,29 @@ namespace provisioner {
             f.read(hdr, sizeof(hdr));
             std::string head(hdr, static_cast<size_t>(f.gcount()));
             return keywrap::isWrapped(head);
+        }
+
+        bool writeSecretFile(const std::string& path, const std::string& data) {
+            const std::string tmp = path + ".tmp";
+            ::unlink(tmp.c_str());
+            const int fd = ::open(tmp.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0400);
+            if (fd < 0) {
+                LOG_ERROR << "Cannot create " << tmp << ": " << std::strerror(errno);
+                return false;
+            }
+            bool ok = ::fchmod(fd, 0400) == 0;
+            for (size_t done = 0; ok && done < data.size();) {
+                const ssize_t n = ::write(fd, data.data() + done, data.size() - done);
+                if (n <= 0) ok = false; else done += static_cast<size_t>(n);
+            }
+            ok = ok && ::fsync(fd) == 0;
+            ok = (::close(fd) == 0) && ok;
+            if (!ok || ::rename(tmp.c_str(), path.c_str()) != 0) {
+                LOG_ERROR << "Cannot write " << path << ": " << std::strerror(errno);
+                ::unlink(tmp.c_str());
+                return false;
+            }
+            return true;
         }
 
         bool wrapFileInPlace(const std::string& path) {
@@ -968,20 +978,8 @@ namespace provisioner {
             }
             if (!raw.empty()) OPENSSL_cleanse(&raw[0], raw.size());
 
-            std::ofstream out(path, std::ios::binary | std::ios::trunc);
-            if (!out.is_open()) {
+            if (!writeSecretFile(path, blob)) {
                 LOG_ERROR << "Migration: cannot write wrapped secret: " << path;
-                return false;
-            }
-            out.write(blob.data(), static_cast<std::streamsize>(blob.size()));
-            out.close();
-
-            try {
-                std::filesystem::permissions(path,
-                    std::filesystem::perms::owner_read,
-                    std::filesystem::perm_options::replace);
-            } catch (const std::filesystem::filesystem_error& e) {
-                LOG_ERROR << "Migration: failed to set permissions on " << path << ": " << e.what();
                 return false;
             }
 
@@ -1291,17 +1289,17 @@ namespace provisioner {
                 }
             } // ofstream closed here, before the rename
 
-            // An in-place truncate (the pattern this replaces) preserved the
-            // existing file's mode; copy it onto the replacement so we don't
-            // silently relax permissions on the config to the umask default.
+            // Root-only: the config holds credentials such as
+            // RPI_CONNECT_API_KEY, and only root reads it.
             std::error_code ec;
-            if (std::filesystem::exists(target)) {
-                auto perms = std::filesystem::status(target).permissions();
-                std::filesystem::permissions(tmp, perms, ec);
-                if (ec) {
-                    LOG_WARN << "Could not copy config permissions onto temp file: " << ec.message();
-                    ec.clear();
-                }
+            std::filesystem::permissions(tmp, std::filesystem::perms::owner_read |
+                                         std::filesystem::perms::owner_write,
+                                         std::filesystem::perm_options::replace, ec);
+            if (ec) {
+                LOG_ERROR << "Could not restrict permissions on temp config file: " << ec.message();
+                std::error_code rmec;
+                std::filesystem::remove(tmp, rmec);
+                return std::nullopt;
             }
 
             std::filesystem::rename(tmp, target, ec);

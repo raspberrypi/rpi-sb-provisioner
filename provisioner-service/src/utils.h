@@ -223,6 +223,14 @@ namespace provisioner {
         bool wrapFileInPlace(const std::string& path);
 
         /**
+         * Replace a secret file atomically: a fresh owner-read-only file is
+         * written, synced and renamed over the target. Rewriting a 0400 file
+         * in place only works with CAP_DAC_OVERRIDE, and a failure there used
+         * to go unnoticed, leaving the plaintext behind.
+         */
+        bool writeSecretFile(const std::string& path, const std::string& data);
+
+        /**
          * True if any configured secret (the PKCS#11 PIN or the customer PEM
          * key) is currently stored as legacy plaintext rather than wrapped at
          * rest. Evaluated fresh (cheap header reads) so it reflects the live
