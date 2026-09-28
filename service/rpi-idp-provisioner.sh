@@ -204,9 +204,25 @@ log "IDP device class: ${IDP_DEVICE_CLASS}"
 log "IDP storage type: ${IDP_STORAGE_TYPE}"
 log "IDP encryption: ${IDP_HAS_ENCRYPTION}"
 
+# A sparse image is named by the artefact and, later, by the device. Either
+# could name a host file instead, which the flash loop would then send to the
+# device, so only a plain name inside the artefact is accepted.
+idp_plain_name() {
+    case "$1" in
+        ""|.*|*/*|*..*) return 1 ;;
+    esac
+    printf '%s' "$1" | grep -Eqx '[A-Za-z0-9._+-]+'
+}
+
 # Verify all referenced .simg files exist
 MISSING_IMAGES=""
+ARTEFACT_SIMGS=""
 for SIMG_NAME in $(jq -r '.layout.partitionimages | to_entries[] | .value.simage // empty' < "${IDP_JSON}"); do
+    if ! idp_plain_name "${SIMG_NAME}"; then
+        die "IDP artefact names an image outside itself: ${SIMG_NAME}"
+    fi
+    ARTEFACT_SIMGS="${ARTEFACT_SIMGS}${SIMG_NAME}
+"
     if [ ! -f "${IDP_DIR}/${SIMG_NAME}" ]; then
         MISSING_IMAGES="${MISSING_IMAGES} ${SIMG_NAME}"
     fi
@@ -454,6 +470,14 @@ while true; do
 
     if [ -z "${BLOCKDEV}" ] || [ -z "${SIMG}" ]; then
         die "Malformed idpgetblk response: '${INFO_LINE}' (full response: ${RESPONSE})"
+    fi
+    # The device chose both. The image must be one the artefact lists, and the
+    # block device must not be mistaken for an option by fastboot.
+    if ! idp_plain_name "${SIMG}" || ! printf '%s' "${ARTEFACT_SIMGS}" | grep -Fqx -- "${SIMG}"; then
+        die "Device asked for an image the artefact does not contain: '${SIMG}'"
+    fi
+    if ! printf '%s' "${BLOCKDEV}" | grep -Eqx '[A-Za-z0-9][A-Za-z0-9/_-]*'; then
+        die "Device named an invalid block device: '${BLOCKDEV}'"
     fi
 
     FLASH_SOURCE=$(resolve_flash_source "${SIMG}")
