@@ -144,7 +144,14 @@ VersionInfo checkForNewerRelease(const std::string& current_version) {
         curl_easy_setopt(curl, CURLOPT_URL, "https://api.github.com/repos/raspberrypi/rpi-sb-provisioner/releases/latest");
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
-        curl_easy_setopt(curl, CURLOPT_USERAGENT, "rpi-sb-provisioner/" + current_version + " libcurl-agent/1.0");
+        const std::string userAgent = "rpi-sb-provisioner/" + current_version + " libcurl-agent/1.0";
+        curl_easy_setopt(curl, CURLOPT_USERAGENT, userAgent.c_str());
+        // This runs before the UI listens. Stations are often offline, or
+        // behind a firewall that drops rather than refuses, and libcurl's
+        // defaults would then hold start-up for minutes.
+        curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 5L);
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+        curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
         
         res = curl_easy_perform(curl);
         curl_easy_cleanup(curl);
