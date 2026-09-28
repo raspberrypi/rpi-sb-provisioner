@@ -1,7 +1,10 @@
 #!/bin/sh
 
+# Through the specifier the run settled on: by bare serial it asked over
+# USB only, which a board reached only over the network does not answer.
 metadata_get() {
-    timeout -k 5 "${FASTBOOT_CONTROL_TIMEOUT:-30}" fastboot -s "${TARGET_DEVICE_SERIAL}" getvar "$1" 2>&1 | grep -oP "${1}"': \K[^\r\n]*' | head -n 1 || true
+    timeout -k 5 "${FASTBOOT_CONTROL_TIMEOUT:-30}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER:-${TARGET_DEVICE_SERIAL}}" \
+        getvar "$1" 2>&1 | grep -oP "${1}"': \K[^\r\n]*' | head -n 1 || true
 }
 
 # The device answers these queries itself, so a faulty or hostile one can say
@@ -75,7 +78,7 @@ _connect_register_device() {
         log "WARNING: Could not retrieve device public key, skipping Connect registration"
         # Re-read purely for diagnostics: get_variable_pem() discards the raw
         # reply, and getvar is read-only, so a second query is harmless.
-        log "fastboot output: $(fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar public-key 2>&1 | tr -d '\r')"
+        log "fastboot output: $(timeout -k 5 "${FASTBOOT_CONTROL_TIMEOUT:-30}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar public-key 2>&1 | tr -d '\r')"
         CONNECT_REGISTERED_VALUE="0"
         rm -rf "${_connect_tmpdir}"
         announce_stop "Connect device identity registration: no public key"
@@ -115,7 +118,7 @@ ${_connect_body_hash}"
     _connect_payload_hash=$(printf '%s' "${_connect_sig_payload}" | openssl dgst -sha256 -hex)
     _connect_payload_hash="${_connect_payload_hash##* }"
 
-    _connect_sign_result=$(fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" \
+    _connect_sign_result=$(timeout -k 5 "${FASTBOOT_CONTROL_TIMEOUT:-30}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" \
         oem fwcrypto sign-hash "${_connect_payload_hash}" 2>&1) || true
     _connect_signature=$(printf '%s' "${_connect_sign_result}" | \
         grep -oP '\(bootloader\) connect-signature:\K.*' | head -n 1 || true)
