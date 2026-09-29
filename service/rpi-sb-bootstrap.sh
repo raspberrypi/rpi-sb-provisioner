@@ -491,6 +491,39 @@ FIRMWARE_RELEASE_STATUS="latest"
 # Taken from rpi-eeprom-update
 BOOTLOADER_UPDATE_IMAGE=""
 BOOTLOADER_UPDATE_VERSION=0
+# Arguments: $1 = directory rpiboot will serve, $2 = the bootcode in it.
+#
+# Current recovery.bin asks the host for mcb.bin and memory-training files that
+# rpi-eeprom does not ship, so a directory holding only the bootcode and EEPROM
+# files hung the board at "Cannot open file mcb.bin" (#338). rpiboot's
+# bootfiles.bin carries them per chip, and everything it has is served, over
+# whatever a cache from before holds. The bootcode names every memsys file of
+# every board, more than bootfiles.bin has for 2712, so only a missing mcb.bin
+# -- the one known to hang -- stops it.
+ensure_recovery_support_files() {
+    _rs_dir="$1"
+    _rs_bootcode="$2"
+    _rs_bootfiles=/usr/share/rpiboot/mass-storage-gadget64/bootfiles.bin
+    case "${TARGET_DEVICE_FAMILY}" in 2711|2712) ;; *) return 0 ;; esac
+    [ -f "${_rs_bootcode}" ] || return 0
+    # Its printable runs, one per line, as strings(1) would give without binutils.
+    _rs_named=$(tr -c '[:print:]' '\n' < "${_rs_bootcode}" | grep -xE 'mcb\.bin|memsys[0-9]{2}\.bin|bootmain' | sort -u)
+    [ -n "${_rs_named}" ] || return 0
+    tar -xf "${_rs_bootfiles}" -C "${_rs_dir}" --strip-components=1 --wildcards \
+        "${TARGET_DEVICE_FAMILY}/mcb.bin" "${TARGET_DEVICE_FAMILY}/memsys*.bin" "${TARGET_DEVICE_FAMILY}/bootmain" 2>/dev/null || true
+    _rs_absent=""
+    for _rs_name in ${_rs_named}; do
+        [ -s "${_rs_dir}/${_rs_name}" ] || _rs_absent="${_rs_absent} ${_rs_name}"
+    done
+    case " ${_rs_absent} " in
+        *" mcb.bin "*)
+            record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
+            mark_permanent_failure
+            die "$(basename "${_rs_bootcode}") asks for mcb.bin, which ${_rs_bootfiles} does not carry for ${TARGET_DEVICE_FAMILY}: rpiboot and rpi-eeprom are out of step" ;;
+    esac
+    log "Serving ${TARGET_DEVICE_FAMILY} recovery support files from rpiboot's bootfiles.bin$([ -n "${_rs_absent}" ] && echo "; named by the bootcode but not carried:${_rs_absent}")"
+}
+
 getBootloaderUpdateVersion() {
    BOOTLOADER_UPDATE_VERSION=0
    
@@ -697,6 +730,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                 esac
             fi
             record_progress "EEPROM-UPDATING"
+            ensure_recovery_support_files "${SECURE_BOOTLOADER_DIRECTORY}" "${BOOTCODE_FLASHING_NAME}"
             [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal_secs 60 rpiboot -j "${METADATA_DIR}" -d "${SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
             extract_board_type
         else
@@ -845,6 +879,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                     log "Normal provisioning mode (not re-provisioning)"
                 fi
                 record_progress "EEPROM-UPDATING"
+                ensure_recovery_support_files "${SECURE_BOOTLOADER_DIRECTORY}" "${BOOTCODE_FLASHING_NAME}"
                 [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal_secs 60 rpiboot -j "${METADATA_DIR}" -d "${SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
             extract_board_type
             else
@@ -1014,6 +1049,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                     
                     record_progress "EEPROM-UPDATING"
                     log "Updating EEPROM to latest version"
+                    ensure_recovery_support_files "${NON_SECURE_BOOTLOADER_DIRECTORY}" "${BOOTCODE_FLASHING_NAME}"
                     [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal_secs 60 rpiboot -j "${METADATA_DIR}" -d "${NON_SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
                     extract_board_type
                     log "EEPROM update completed. Device rebooted."
