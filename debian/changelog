@@ -298,6 +298,15 @@ rpi-sb-provisioner (2.3.6) unstable; urgency=medium
     calls made while registering with Raspberry Pi Connect now have a time
     limit too.
 
+  * Give up within 10 seconds, too, on a board lost part-way through a long
+    step. Over TCP the fastboot client waits for it to come back, so it
+    still ran out the step's whole budget.
+
+  * Fix IDP provisioning against a fastbootd that is not in split mode but
+    has a network address. Each command went over TCP as a session of its
+    own, so the staged descriptor was lost and idpinit failed with "No
+    data. Check description was staged".
+
   * Allow up to 15 minutes to erase the device before IDP provisioning,
     rather than 30 seconds, so an erase that discards the whole device
     has time to finish on slow eMMC.
