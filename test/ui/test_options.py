@@ -245,3 +245,19 @@ class Firmware(UITest):
         self.b.press(self.b.d.find_element(By.XPATH, "//div[@id='firmware-notes']//button[contains(., 'Use Default Firmware')]"))
         self.b.settle()
         self.assertEqual("", self.station.config().get("RPI_DEVICE_FIRMWARE_FILE", "").strip("'"))
+
+    def test_button_names_the_firmware_that_will_be_used(self):
+        if not self.items():
+            self.skipTest("no bootloader firmware installed on the station")
+        newest = self.station.sh("ls /lib/firmware/raspberrypi/bootloader-2712/latest/ | "
+                                 "grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' | sort | tail -n 1").strip()
+        self.assertIn(f"Automatic: {newest}", self.b.el("#firmware-current").text)
+        item = self.items()[-1]
+        version = item.get_attribute("data-version")
+        self.b.press(item)
+        self.b.settle()
+        self.b.press(self.b.d.find_element(By.XPATH, "//div[@id='firmware-notes']//button[contains(., 'Use This Firmware')]"))
+        self.b.settle()
+        self.assertIn(f"Selected: {version}", self.b.el("#firmware-current").text)
+        self.b.get("/options/get")
+        self.b.wait_text("#firmware-current", f"Selected: {version}")
