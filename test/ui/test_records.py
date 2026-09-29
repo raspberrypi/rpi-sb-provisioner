@@ -122,6 +122,69 @@ class ServiceLog(UITest):
         self.assertClean(error_page=True)
 
 
+class LiveUpdates(UITest):
+    """Polling pages change only what changed, hold still while text is
+    selected, and do not poll a hidden page."""
+
+    SELECT = """const range = document.createRange(); range.selectNodeContents(arguments[0]);
+                const s = getSelection(); s.removeAllRanges(); s.addRange(range); return s.toString();"""
+
+    def test_manufacturing_waits_while_text_is_selected(self):
+        self.station.sql(MFG, "delete from devices where serial='live00001';")
+        self.b.get("/manu-db")
+        # The serial: never empty, so there is always something selected.
+        cell = self.b.el("#manufacturingTable tbody tr:nth-child(2) td:nth-child(4)")
+        self.b.d.execute_script("window.__row = arguments[0].parentNode", cell)
+        chosen = self.b.d.execute_script(self.SELECT, cell)
+        self.assertTrue(chosen)
+        self.station.sql(MFG, "insert into devices(boardname,serial,eth_mac,wifi_mac,bt_mac,mmc_size,mmc_cid,rpi_duid,"
+                              "board_revision,processor,memory,manufacturer) values "
+                              "('b','live00001','d8:3a:dd:99:99:99','','',0,'','','','','','');")
+        try:
+            time.sleep(7)
+            self.assertNotIn("live00001", self.b.el("#manufacturingTable").text, "held while text is selected")
+            self.assertIn("Paused", self.b.el("#refresh-status").text)
+            self.assertEqual(chosen, self.b.d.execute_script("return getSelection().toString()"))
+            self.b.d.execute_script("getSelection().removeAllRanges()")
+            self.b.wait_text("#manufacturingTable", "live00001")
+            self.assertIn("Enabled", self.b.el("#refresh-status").text)
+            self.assertTrue(self.b.d.execute_script("return window.__row.isConnected"), "rows are updated, not rebuilt")
+        finally:
+            self.station.sql(MFG, "delete from devices where serial='live00001';")
+
+    def test_a_log_keeps_the_lines_it_shows(self):
+        unit = "rpi-sb-uitest-live"
+        self.station.sh(f"systemctl reset-failed {unit} 2>/dev/null; systemd-run --unit={unit} --collect --wait "
+                        f"sh -c 'echo uitest early line' >/dev/null")
+        self.b.get(f"/service-log/{unit}.service")
+        early = self.b.d.find_element("xpath", "//div[@class='log-entry'][contains(., 'uitest early line')]")
+        self.station.sh(f"systemd-run --unit={unit} --collect --wait sh -c 'echo uitest late line' >/dev/null")
+        self.b.wait_text("#logContainer", "uitest late line", timeout=20)
+        self.assertTrue(self.b.d.execute_script("return arguments[0].isConnected", early), "lines are added, not redrawn")
+
+    def test_services_rows_are_not_rebuilt(self):
+        self.b.get("/services")
+        row = self.b.el("#services-table-container tbody tr")
+        time.sleep(6)
+        self.assertTrue(self.b.d.execute_script("return arguments[0].isConnected", row))
+
+    def test_a_hidden_page_does_not_poll(self):
+        self.b.get("/services")
+        self.b.d.execute_script("""
+            window.__polls = 0;
+            const real = window.fetch;
+            window.fetch = function (u) { if (String(u).includes('/api/v2/services')) window.__polls++; return real.apply(this, arguments); };
+            Object.defineProperty(document, 'hidden', {configurable: true, get: () => true});
+            document.dispatchEvent(new Event('visibilitychange'));""")
+        time.sleep(11)
+        self.assertEqual(0, self.b.d.execute_script("return window.__polls"))
+        self.b.d.execute_script("""
+            Object.defineProperty(document, 'hidden', {configurable: true, get: () => false});
+            document.dispatchEvent(new Event('visibilitychange'));""")
+        time.sleep(1.5)
+        self.assertGreaterEqual(self.b.d.execute_script("return window.__polls"), 1, "shown again, it catches up at once")
+
+
 class Manufacturing(UITest):
     ROWS = 60
 

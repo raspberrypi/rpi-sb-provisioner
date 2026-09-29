@@ -6,42 +6,35 @@
         <span class="sr-only">Auto Refresh</span>
     </label>
     <span id="toggle-label" aria-hidden="true">Auto Refresh</span>
-    <span id="refresh-status" aria-live="polite">(Enabled - refreshing every 1s)</span>
+    <span id="refresh-status" aria-live="polite">(Enabled - refreshing every 5s)</span>
 </div>
 
+<script src="/static/js/live-update.js"></script>
 <script>
-    // Auto-refresh functionality
-    let refreshInterval;
+    // Every five seconds while the page is visible; the refresh function is
+    // told it is automatic, so it can hold back while text is selected.
+    let stopPolling = null;
     const refreshToggle = document.getElementById('auto-refresh');
     const refreshStatus = document.getElementById('refresh-status');
-    
-    // Function to start the refresh interval
-    function startRefresh(refreshFunction, interval = 1000) {
-        refreshInterval = setInterval(refreshFunction, interval);
-        refreshStatus.textContent = '(Enabled - refreshing every 1s)';
+
+    function startRefresh(refreshFunction, interval = 5000) {
+        if (stopPolling) stopPolling();
+        stopPolling = RpiLive.poll(function () { refreshFunction({ auto: true }); }, interval);
+        refreshStatus.textContent = '(Enabled - refreshing every ' + interval / 1000 + 's)';
     }
-    
-    // Function to stop the refresh interval
+
     function stopRefresh() {
-        clearInterval(refreshInterval);
+        if (stopPolling) stopPolling();
+        stopPolling = null;
         refreshStatus.textContent = '(Disabled)';
     }
-    
-    // Initialize auto-refresh based on toggle state
+
     function initAutoRefresh(refreshFunction) {
-        if (refreshToggle.checked) {
-            startRefresh(refreshFunction);
-        } else {
-            stopRefresh();
-        }
-        
-        // Toggle auto-refresh when the checkbox is changed
-        refreshToggle.addEventListener('change', function() {
-            if (this.checked) {
-                startRefresh(refreshFunction);
-            } else {
-                stopRefresh();
-            }
+        if (refreshToggle.checked) startRefresh(refreshFunction);
+        else stopRefresh();
+        refreshToggle.addEventListener('change', function () {
+            if (this.checked) startRefresh(refreshFunction);
+            else stopRefresh();
         });
     }
-</script> 
+</script>
