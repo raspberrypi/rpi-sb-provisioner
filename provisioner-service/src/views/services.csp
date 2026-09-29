@@ -68,7 +68,7 @@
                             <%c++ 
                             // Display base_name and instance if available
                             if (!service.at("instance").empty()) {
-                                $$ << service.at("base_name") << "@" << service.at("instance");
+                                $$ << HttpViewData::htmlTranslate(service.at("base_name") + "@" + service.at("instance"));
                             } else {
                                 $$ << HttpViewData::htmlTranslate(service.at("name"));
                             }
