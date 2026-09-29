@@ -63,7 +63,7 @@
             if(servicesList.size() > 0) {
             %>
                 <%c++ for(const auto& service : servicesList) { %>
-                    <tr>
+                    <tr data-key="<%c++ $$ << HttpViewData::htmlTranslate(service.at("full_name")); %>">
                         <td>
                             <%c++ 
                             // Display base_name and instance if available
@@ -137,7 +137,7 @@
         let lastTableHtml = null;
 
         // Function to fetch and update the services table
-        async function refreshServicesTable() {
+        async function refreshServicesTable(opts) {
             try {
                 const response = await fetch('/api/v2/services');
                 
@@ -173,7 +173,7 @@
                         const formattedTimestamp = formatTimestamp(service.timestamp);
                         
                         tableHtml += `
-                            <tr>
+                            <tr data-key="${escapeServiceText(service.full_name)}">
                                 <td>${escapeServiceText(serviceName)}</td>
                                 <td>${escapeServiceText(service.status)}</td>
                                 <td class="${activeStateToClass(service.active)}">${escapeServiceText(service.active)}</td>
@@ -197,18 +197,12 @@
                     </table>
                 `;
                 
-                // Rebuilding throws away keyboard focus, so do it only when
-                // something changed, and put focus back on the same link.
+                // Changed cells only, so focus and selection elsewhere survive;
+                // an automatic update waits while text in the table is selected.
                 if (tableHtml === lastTableHtml) return;
-                const focused = tableContainer.contains(document.activeElement) &&
-                                document.activeElement.getAttribute('href');
-                tableContainer.innerHTML = tableHtml;
-                lastTableHtml = tableHtml;
-                if (focused) {
-                    const again = [...tableContainer.querySelectorAll('a.log-link')]
-                        .find(a => a.getAttribute('href') === focused);
-                    if (again) again.focus();
-                }
+                const apply = () => { lastTableHtml = tableHtml; RpiLive.update(tableContainer, tableHtml); };
+                if (opts && opts.auto) RpiLive.whenFree(tableContainer, apply, refreshStatus);
+                else apply();
             } catch (error) {
                 console.error('Error refreshing services table:', error);
             }

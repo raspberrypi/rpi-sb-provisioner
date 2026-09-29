@@ -49,6 +49,7 @@
     </div>
     <div id="pagination-controls" class="pagination-controls" style="display:none;" aria-live="polite"></div>
 
+    <script src="/static/js/live-update.js"></script>
     <script>
         // Prevent stored XSS by escaping untrusted data before HTML insertion
         function escapeHtml(str) {
@@ -147,14 +148,12 @@
         // Show the readable size in the cell and keep the exact byte count in
         // the tooltip. The other way round hides the useful figure from touch
         // devices (no hover) and from anyone reading the rendered table.
-        function applyEmmcSizeTooltips() {
-            const emmcCells = document.querySelectorAll('.emmc-size');
-            emmcCells.forEach(cell => {
-                const sizeInBytes = parseInt(cell.getAttribute('data-size'));
-                if (isNaN(sizeInBytes)) return;
-                cell.textContent = formatBytes(sizeInBytes);
-                cell.setAttribute('title', sizeInBytes.toLocaleString() + ' bytes');
-            });
+        // Formatted in the markup, not afterwards, so an update that changes
+        // nothing leaves the cell alone.
+        function emmcSizeCell(size) {
+            const bytes = parseInt(size);
+            if (isNaN(bytes)) return `<td class="emmc-size">${escapeHtml(size)}</td>`;
+            return `<td class="emmc-size" data-size="${bytes}" title="${bytes.toLocaleString()} bytes">${escapeHtml(formatBytes(bytes))}</td>`;
         }
 
         // The bootloader build timestamp arrives as seconds since the epoch.
@@ -230,7 +229,7 @@
             if (pageData.length > 0) {
                 pageData.forEach(device => {
                     tableHtml += `
-                        <tr>
+                        <tr data-key="${escapeHtml(device.id)}">
                             <td>${escapeHtml(device.provision_ts)}</td>
                             <td>${escapeHtml(device.id)}</td>
                             <td>${escapeHtml(device.boardname)}</td>
@@ -238,7 +237,7 @@
                             <td>${escapeHtml(device.eth_mac)}</td>
                             <td>${escapeHtml(device.wifi_mac)}</td>
                             <td>${escapeHtml(device.bt_mac)}</td>
-                            <td class="emmc-size" data-size="${escapeHtml(device.mmc_size)}">${escapeHtml(device.mmc_size)}</td>
+                            ${emmcSizeCell(device.mmc_size)}
                             <td>${escapeHtml(device.mmc_cid)}</td>
                             <td>${escapeHtml(device.rpi_duid)}</td>
                             <td>${escapeHtml(device.board_revision)}</td>
@@ -282,12 +281,17 @@
             const prevScrollTop = container.scrollTop;
             const prevScrollLeft = container.scrollLeft;
             
-            container.innerHTML = tableHtml;
+            // The first render replaces the loading spinner; later ones change
+            // only the cells that differ, so a selection elsewhere survives.
+            const hint = container.querySelector('.scroll-indicator');
+            if (hint) hint.remove();
+            if (container.querySelector('#manufacturingTable')) RpiLive.update(container, tableHtml);
+            else container.innerHTML = tableHtml;
+            if (hint) container.appendChild(hint);
             
             container.scrollTop = prevScrollTop;
             container.scrollLeft = prevScrollLeft;
             
-            applyEmmcSizeTooltips();
             updateScrollIndicator();
             renderPaginationControls();
         }
@@ -338,6 +342,9 @@
             });
             html += '</select></label>';
             
+            // Rebuilt only when it changes, so a focused button keeps focus.
+            if (html === controlsEl.dataset.rendered) return;
+            controlsEl.dataset.rendered = html;
             controlsEl.innerHTML = html;
             
             // Bind events
@@ -357,7 +364,7 @@
         }
         
         // Fetch data from API and re-render
-        async function refreshManufacturingTable() {
+        async function refreshManufacturingTable(opts) {
             try {
                 const response = await fetch('/api/v2/manufacturing');
                 
@@ -366,12 +373,15 @@
                 }
                 
                 const data = await response.json();
-                allData = Array.isArray(data) ? data : [];
-                
-                // Clamp current page if the dataset shrank
-                if (currentPage > totalPages()) currentPage = totalPages();
-                
-                renderCurrentPage();
+                const apply = () => {
+                    allData = Array.isArray(data) ? data : [];
+                    // Clamp current page if the dataset shrank
+                    if (currentPage > totalPages()) currentPage = totalPages();
+                    renderCurrentPage();
+                };
+                // An automatic update waits while text in the table is selected.
+                if (opts && opts.auto) RpiLive.whenFree(document.getElementById('manu-table-container'), apply, refreshStatus);
+                else apply();
                 
                 // Clear any previous error
                 document.getElementById('error-container').innerHTML = '';
@@ -465,8 +475,8 @@
             URL.revokeObjectURL(url);
         });
 
-        // Auto-refresh functionality
-        let refreshInterval;
+        // Auto-refresh: every five seconds while the page is visible.
+        let stopPolling = null;
         const refreshToggle = document.getElementById('auto-refresh');
         const refreshStatus = document.getElementById('refresh-status');
         
@@ -483,14 +493,15 @@
         
         // Function to start the refresh interval
         function startRefresh() {
-            // Use 5 seconds refresh rate to reduce server load
-            refreshInterval = setInterval(refreshManufacturingTable, 5000);
+            if (stopPolling) stopPolling();
+            stopPolling = RpiLive.poll(() => refreshManufacturingTable({ auto: true }), 5000);
             refreshStatus.textContent = '(Enabled - refreshing every 5s)';
         }
         
         // Function to stop the refresh interval
         function stopRefresh() {
-            clearInterval(refreshInterval);
+            if (stopPolling) stopPolling();
+            stopPolling = null;
             refreshStatus.textContent = '(Disabled)';
         }
         
