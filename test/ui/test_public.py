@@ -67,6 +67,8 @@ class Public(UITest):
         self.assertEqual([], self.b.all(".rpi-signout-button"))
         self.assertEqual([], self.b.all("#rpi-signed-in-user"))
         self.assertEqual([], self.b.all(".security-warning-banner"), "admin banners are for operators")
+        # Plain HTTP to localhost is a secure context, so the camera works.
+        self.assertTrue(self.b.el("#rpi-nav-scantool").is_displayed())
 
     def test_root_goes_to_the_dashboard(self):
         self.b.get("/")
