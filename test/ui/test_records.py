@@ -10,7 +10,7 @@ import time
 from selenium.common.exceptions import StaleElementReferenceException
 from selenium.webdriver.support.ui import Select
 
-from ui.harness.browser import Browser
+from ui.harness.browser import Browser, USER
 from ui.harness.case import UITest, station
 
 MFG = "/srv/rpi-sb-provisioner/manufacturing.db"
@@ -220,7 +220,8 @@ class AuditLog(UITest):
 
     def test_filter_by_event_type(self):
         self.b.get("/auditlog")
-        for value, cls in (("FILE_ACCESS", "event-type-file"), ("HANDLER_ACCESS", "event-type-handler")):
+        for value, cls in (("FILE_ACCESS", "event-type-file"), ("HANDLER_ACCESS", "event-type-handler"),
+                           ("AUTHENTICATION", "event-type-auth")):
             with self.subTest(event=value):
                 Select(self.b.el("#event_type")).select_by_value(value)
                 self.b.click("#filterForm button[type=submit]")
@@ -230,6 +231,18 @@ class AuditLog(UITest):
                     self.assertTrue(r.find_elements("css selector", "." + cls), r.text)
                 self.assertEqual(value, Select(self.b.el("#event_type")).first_selected_option.get_attribute("value"),
                                  "the chosen filter should stay chosen")
+
+    def test_sign_ins_are_recorded_with_who_and_how(self):
+        self.b.sign_out()
+        self.b.sign_in(password="not-the-password")
+        self.b.sign_in()
+        self.b.get("/auditlog?event_type=AUTHENTICATION&limit=50")
+        self.assertClean()
+        rows = list(zip(self.column("Event Type"), self.column("User"),
+                        self.column("Endpoint / Operation"), self.column("Success")))
+        # Newest first: this sign-in, then the refused one before it.
+        self.assertEqual(("Sign-in", USER, "LOGIN", "Success"), rows[0])
+        self.assertEqual(("Sign-in", USER, "LOGIN", "Failed"), rows[1])
 
     def test_limit_choice(self):
         self.station.sql(AUDIT, "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i < 300) "

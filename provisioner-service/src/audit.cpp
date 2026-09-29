@@ -386,7 +386,8 @@ namespace provisioner {
                 query << "AND timestamp <= ? ";
             }
             
-            query << "ORDER BY timestamp DESC LIMIT ?;";
+            // Timestamps are to the second, so id orders events within one.
+            query << "ORDER BY timestamp DESC, id DESC LIMIT ?;";
             
             sqlite3_stmt* stmt;
             rc = sqlite3_prepare_v2(db, query.str().c_str(), -1, &stmt, nullptr);
