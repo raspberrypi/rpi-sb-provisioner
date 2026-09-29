@@ -55,6 +55,14 @@ rpi-sb-provisioner (2.3.6) unstable; urgency=medium
     runs, all the environment a hook receives, its time limit, and a
     reference to the fastboot commands a hook may use.
 
+  * Stop the services, service log and manufacturing pages from throwing
+    away what an operator has selected. They used to rebuild every one to
+    five seconds; they now change only what changed, wait while text is
+    selected, refresh every five seconds, and pause in a hidden tab.
+
+  * Hide the code scanner link where the browser will not allow the
+    camera: over plain HTTP from another machine.
+
   * Refuse a sign-in that a proxy on this machine forwarded over plain HTTP
     from another machine, since the password crossed the network
     unencrypted to reach it. Behind an HTTPS proxy that sends
