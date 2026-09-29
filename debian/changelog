@@ -41,6 +41,20 @@ rpi-sb-provisioner (2.3.6) unstable; urgency=medium
     page if it is public, or the devices page. The sign-in page shows the
     navigation bar.
 
+  * Record every sign-in attempt in the audit log, including those refused
+    for plain HTTP or for too many attempts, and show who made each entry.
+    The audit log can now be filtered to sign-ins and tokens.
+
+  * Say plainly that JTAG lock and EEPROM write protection apply to the
+    devices being provisioned, never to the provisioning server.
+
+  * Show on the Options page which bootloader firmware devices will get,
+    without opening the firmware browser.
+
+  * Rewrite the hook editor's help: every stage's arguments and when it
+    runs, all the environment a hook receives, its time limit, and a
+    reference to the fastboot commands a hook may use.
+
   * Refuse a sign-in that a proxy on this machine forwarded over plain HTTP
     from another machine, since the password crossed the network
     unencrypted to reach it. Behind an HTTPS proxy that sends
