@@ -753,6 +753,7 @@ input:checked + .toggle-slider:before {
 
 .pagination-controls button {
     background-color: #f2f2f2;
+    color: #212529;
     border: 1px solid #ddd;
     padding: 4px 10px;
     border-radius: 4px;
@@ -810,7 +811,7 @@ input:checked + .toggle-slider:before {
 }
 
 .security-disabled {
-    color: #dc3545;
+    color: #b02a37;
     font-size: 14px;
 }
 
