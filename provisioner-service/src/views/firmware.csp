@@ -1,6 +1,12 @@
 <!-- Firmware Browser Sub-View (included by options.csp) -->
 <style>
     /* ===== Inline Firmware Browser ===== */
+    .firmware-current {
+        margin-left: auto;
+        font-weight: 600;
+        color: #212529;
+        text-align: right;
+    }
     .firmware-expand-btn {
         display: flex;
         align-items: center;
@@ -243,6 +249,7 @@
     <button type="button" class="firmware-expand-btn" id="firmware-expand-btn" onclick="toggleFirmwareBrowser()">
         <span class="expand-icon" id="expand-icon">&#9660;</span>
         Browse Available Firmware
+        <span class="firmware-current" id="firmware-current" aria-live="polite"></span>
     </button>
     
     <!-- Expandable Firmware Browser -->
@@ -314,8 +321,22 @@
         }
     }
     
+    // What bootstrap will flash: the chosen image, or else the newest of the
+    // "latest" channel, as getBootloaderUpdateVersion picks it.
+    function showCurrentFirmware(selectedPath) {
+        const el = document.getElementById('firmware-current');
+        const chosen = firmwareListData.find(fw => fw.filepath === selectedPath);
+        const newest = firmwareListData.filter(fw => fw.releaseChannel === 'latest')
+            .map(fw => fw.version).sort().pop();
+        if (chosen) el.textContent = 'Selected: ' + chosen.version + ' (' + chosen.releaseChannel + ')';
+        else if (selectedPath) el.textContent = 'Selected: ' + selectedPath.split('/').pop();
+        else if (newest) el.textContent = 'Automatic: ' + newest + ' (newest in latest)';
+        else el.textContent = 'Automatic: newest for each device';
+    }
+
     function renderFirmwareList(selectedPath) {
         const listEl = document.getElementById('firmware-list');
+        showCurrentFirmware(selectedPath);
         
         if (firmwareListData.length === 0) {
             listEl.innerHTML = `
@@ -510,13 +531,13 @@
     deviceFamilyTiles.forEach(tile => {
         const radio = tile.querySelector('input[name="RPI_DEVICE_FAMILY"]');
         if (radio) {
+            // Open or not, the button's label names this family's firmware.
             tile.addEventListener('click', function() {
-                const browser = document.getElementById('firmware-browser');
-                if (browser && browser.style.display !== 'none') {
-                    setTimeout(loadFirmwareList, 500);
-                }
+                setTimeout(loadFirmwareList, 500);
             });
         }
     });
+    // Label the button before anyone opens the browser.
+    loadFirmwareList();
 </script>
 <%view-end%>
