@@ -1675,12 +1675,12 @@
                     <span class="section-title-icon">&#128737;</span>
                     Hardware Security
                 </h2>
-                <p class="section-description">Optional hardware-level locks. Both are written to the device permanently and cannot be undone afterwards &mdash; not by this tool, and not by Raspberry Pi.</p>
+                <p class="section-description">Optional hardware locks for the devices you provision. They change nothing on this provisioning server. Each is written into every device provisioned while it is on, permanently, and cannot be undone afterwards &mdash; not by this tool, and not by Raspberry Pi.</p>
             </div>
 
-            <div class="inline-danger">
+            <div class="inline-danger" style="margin-bottom: 15px;">
                 <span class="inline-danger-icon" aria-hidden="true">&#9888;</span>
-                <span><strong>These two settings cannot be reversed.</strong> Once a device leaves provisioning with either lock applied, there is no way to remove it. Enable them only when your configuration is final and you have provisioned a test device successfully.</span>
+                <span><strong>These two settings cannot be reversed on a provisioned device.</strong> Once a device leaves provisioning with either lock applied, there is no way to remove it from that device. Enable them only when your configuration is final and you have provisioned a test device successfully.</span>
             </div>
 
             <!-- JTAG Lock Toggle -->
@@ -1690,8 +1690,8 @@
                     <span class="toggle-slider"></span>
                 </label>
                 <div class="toggle-content">
-                    <div class="toggle-title" id="title-RPI_DEVICE_LOCK_JTAG">Lock JTAG Access<span class="toggle-irreversible-tag">Permanent</span></div>
-                    <div class="toggle-description">Permanently disables JTAG hardware debugging on the device. <strong>This also prevents Raspberry Pi engineers from assisting you with hardware debugging or failure analysis on affected devices, for the life of the device.</strong> Recorded in the manufacturing database as requested; the provisioner cannot read the lock back to confirm it applied.</div>
+                    <div class="toggle-title" id="title-RPI_DEVICE_LOCK_JTAG">Lock JTAG access on provisioned devices<span class="toggle-irreversible-tag">Permanent</span></div>
+                    <div class="toggle-description">Permanently disables JTAG hardware debugging on each device provisioned from now on. <strong>This also prevents Raspberry Pi engineers from assisting you with hardware debugging or failure analysis on those devices, for the life of each device.</strong> Recorded in the manufacturing database as requested; the provisioner cannot read the lock back to confirm it applied.</div>
                 </div>
                 <div id="feedback-RPI_DEVICE_LOCK_JTAG" class="field-feedback"></div>
             </div>
@@ -1703,8 +1703,8 @@
                     <span class="toggle-slider"></span>
                 </label>
                 <div class="toggle-content">
-                    <div class="toggle-title" id="title-RPI_DEVICE_EEPROM_WP_SET">Enable EEPROM Write Protection<span class="toggle-irreversible-tag">Permanent</span></div>
-                    <div class="toggle-description">Permanently prevents modification of the device's boot EEPROM, protecting the secure boot configuration. <strong>Bootloader and EEPROM updates will no longer be possible on affected devices</strong>, including security fixes. Recorded in the manufacturing database as requested; the provisioner cannot read the lock back to confirm it applied.</div>
+                    <div class="toggle-title" id="title-RPI_DEVICE_EEPROM_WP_SET">Write-protect the EEPROM on provisioned devices<span class="toggle-irreversible-tag">Permanent</span></div>
+                    <div class="toggle-description">Permanently prevents changes to the boot EEPROM of each device provisioned from now on, protecting its secure boot configuration. <strong>Bootloader and EEPROM updates will no longer be possible on those devices</strong>, including security fixes. Recorded in the manufacturing database as requested; the provisioner cannot read the lock back to confirm it applied.</div>
                 </div>
                 <div id="feedback-RPI_DEVICE_EEPROM_WP_SET" class="field-feedback"></div>
             </div>
