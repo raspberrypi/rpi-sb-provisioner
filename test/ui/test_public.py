@@ -97,6 +97,42 @@ class Public(UITest):
         self.assertIn(SECRET_LOG, self.b.text(), "an operator sees the logs")
         self.b.sign_out()
 
+    def sign_out_from(self, page, next_=None):
+        self.b.sign_in()
+        self.b.get(page)
+        if next_ is not None:
+            self.b.d.execute_script("document.getElementById('rpi-signout-next').value = arguments[0]", next_)
+        self.b.click(".rpi-signout-button")
+        self.b.settle()
+        self.assertFalse(self.b.signed_in())
+
+    def test_signing_out_of_an_operator_page_goes_to_the_dashboard(self):
+        for page in ("/options/get", "/auditlog", f"/service-log/rpi-sb-triage@{KNOWN}.service"):
+            with self.subTest(page=page):
+                self.sign_out_from(page)
+                self.assertEqual("/devices", self.b.path())
+
+    def test_signing_out_of_a_public_page_stays_there(self):
+        for page in (f"/devices/{KNOWN}", "/scantool"):
+            with self.subTest(page=page):
+                self.sign_out_from(page)
+                self.assertEqual(page, self.b.path())
+
+    def test_signing_out_goes_nowhere_else(self):
+        for next_ in ("//example.com/devices", "https://example.com/", "/\\example.com", "/login",
+                      f"/devices/{KNOWN}/log/triage", "/devices/_test", ""):
+            with self.subTest(next=next_):
+                self.sign_out_from("/devices", next_)
+                self.assertEqual("/devices", self.b.path())
+                self.assertIn(urllib.parse.urlsplit(self.b.base).netloc, self.b.d.current_url)
+
+    def test_login_page_has_the_navigation_bar(self):
+        self.b.get("/login")
+        self.assertClean()
+        self.assertTrue(self.b.all("nav a[href='/devices']"))
+        self.assertEqual([], self.b.all("#rpi-sign-in"), "no sign-in link on the sign-in page")
+        self.assertEqual([], self.b.all(".rpi-signout-button"))
+
     def test_device_logs_keys_and_flags_stay_closed(self):
         for path in (f"/devices/{KNOWN}/log/triage", f"/devices/{KNOWN}/log/provisioner",
                      f"/devices/{KNOWN}/key/public", f"/devices/{KNOWN}/key/private",
@@ -182,6 +218,9 @@ class Public(UITest):
                     self.assertAtLogin()
             status, _ = self.raw("GET", "/api/v2/verify-qrcode?code=" + DUID)
             self.assertEqual(401, status)
+            with self.subTest("signing out, with nothing public"):
+                self.sign_out_from("/devices")
+                self.assertAtLogin()
         finally:
             self.station.set_config(RPI_SB_PROVISIONER_PUBLIC_DASHBOARD="1")
             time.sleep(SETTLE)

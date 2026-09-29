@@ -30,6 +30,9 @@ using namespace drogon;
 namespace provisioner {
 namespace auth {
 
+bool publicDashboard();
+bool isPublicPath(const std::string &path);
+
 namespace {
 
     using Clock = std::chrono::steady_clock;
@@ -287,9 +290,6 @@ namespace {
 
     // Only a path on this server, so a crafted link cannot bounce the operator
     // somewhere else after they sign in.
-    std::string safeNext(const std::string &next) {
-        if (next.empty() || next[0] != '/' || next.rfind("//", 0) == 0 ||
-            next.find('\\') != std::string::npos || next.rfind("/login", 0) == 0) {
     // One query-string value. getParameter would parse the parameters here,
     // before the body has arrived, and a form's own fields would be lost.
     std::string queryValue(const HttpRequestPtr &req, const std::string &name) {
@@ -306,6 +306,9 @@ namespace {
         return "";
     }
 
+    std::string safeNext(const std::string &next) {
+        if (next.empty() || next[0] != '/' || next.rfind("//", 0) == 0 ||
+            next.find('\\') != std::string::npos || next.rfind("/login", 0) == 0) {
             return "/devices";
         }
         // Browsers drop tabs and newlines from a URL, so "/\t/host" would
@@ -410,6 +413,8 @@ namespace {
         HttpViewData data;
         data.insert("next", next);
         data.insert("error", error);
+        data.insert("anonymous", true);
+        data.insert("currentPage", std::string("login"));
         auto resp = HttpResponse::newHttpViewResponse("login.csp", data);
         resp->setStatusCode(code);
         resp->addHeader("Cache-Control", "no-store");
@@ -532,7 +537,14 @@ namespace {
             std::lock_guard<std::mutex> lock(g_sessionsMutex);
             g_sessions.erase(id);
         }
-        auto resp = HttpResponse::newRedirectionResponse("/login", k303SeeOther);
+        // Stay on the page if it can still be seen signed out, or else go to
+        // the dashboard; with nothing public, to the sign-in form.
+        std::string to = "/login";
+        if (publicDashboard()) {
+            const std::string next = safeNext(req->getParameter("next"));
+            to = isPublicPath(next.substr(0, next.find_first_of("?#"))) ? next : "/devices";
+        }
+        auto resp = HttpResponse::newRedirectionResponse(to, k303SeeOther);
         resp->addCookie(makeCookie(req, kSessionCookie, "", true, true));
         resp->addCookie(makeCookie(req, kCsrfCookie, "", false, true));
         callback(resp);
@@ -564,10 +576,7 @@ namespace {
     // the device dashboard and one device's page, its live updates, and the
     // code scanner. A device's logs, keys and flags are longer paths, so
     // they stay behind sign-in.
-    bool isPublicRead(const HttpRequestPtr &req) {
-        const auto method = req->getMethod();
-        if (method != Get && method != Head) return false;
-        const std::string &path = req->path();
+    bool isPublicPath(const std::string &path) {
         if (path == "/" || path == "/devices" || path == "/ws/devices" || path == "/scantool" ||
             path == "/api/v2/verify-qrcode" || path == "/auth/session") {
             return true;
@@ -576,6 +585,11 @@ namespace {
         return path.rfind(prefix, 0) == 0 && path.size() > prefix.size() &&
                path.find('/', prefix.size()) == std::string::npos &&
                path.compare(prefix.size(), 1, "_") != 0;
+    }
+
+    bool isPublicRead(const HttpRequestPtr &req) {
+        const auto method = req->getMethod();
+        return (method == Get || method == Head) && isPublicPath(req->path());
     }
 
     std::string username(const HttpRequestPtr &req) {
