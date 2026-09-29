@@ -141,6 +141,11 @@
             background-color: #f6ffed;
             color: #237804;
         }
+
+        .event-type-auth {
+            background-color: #f9f0ff;
+            color: #531dab;
+        }
         
         .success-true {
             color: green;
@@ -179,6 +184,7 @@
                         <option value="HANDLER_ACCESS" <%c++ if (@@.get<std::string>("event_type") == "HANDLER_ACCESS") $$ << "selected"; %>>API Access</option>
                         <option value="FILE_ACCESS" <%c++ if (@@.get<std::string>("event_type") == "FILE_ACCESS") $$ << "selected"; %>>File Access</option>
                         <option value="SYSTEMD_LOG_ACCESS" <%c++ if (@@.get<std::string>("event_type") == "SYSTEMD_LOG_ACCESS") $$ << "selected"; %>>Systemd Log</option>
+                        <option value="AUTHENTICATION" <%c++ if (@@.get<std::string>("event_type") == "AUTHENTICATION") $$ << "selected"; %>>Sign-ins and tokens</option>
                     </select>
                 </div>
                 
@@ -217,6 +223,7 @@
                     <th scope="col">Timestamp</th>
                     <th scope="col">Event Type</th>
                     <th scope="col">Client IP</th>
+                    <th scope="col">User</th>
                     <th scope="col">Endpoint / Operation</th>
                     <th scope="col">Target Path</th>
                     <th scope="col">Success</th>
@@ -237,6 +244,8 @@
                         eventTypeClass = "event-type-file";
                     } else if (entry.at("event_type") == "SYSTEMD_LOG_ACCESS") {
                         eventTypeClass = "event-type-systemd";
+                    } else if (entry.at("event_type") == "AUTHENTICATION") {
+                        eventTypeClass = "event-type-auth";
                     }
                     
                     // Format event type for display
@@ -247,6 +256,8 @@
                         displayEventType = "File Access";
                     } else if (entry.at("event_type") == "SYSTEMD_LOG_ACCESS") {
                         displayEventType = "Systemd Log";
+                    } else if (entry.at("event_type") == "AUTHENTICATION") {
+                        displayEventType = "Sign-in";
                     } else {
                         displayEventType = entry.at("event_type");
                     }
@@ -263,6 +274,11 @@
                         <td><%c++ 
                             if (entry.find("client_ip") != entry.end()) {
                                 $$ << HttpViewData::htmlTranslate(entry.at("client_ip"));
+                            }
+                        %></td>
+                        <td><%c++ 
+                            if (entry.find("username") != entry.end()) {
+                                $$ << HttpViewData::htmlTranslate(entry.at("username"));
                             }
                         %></td>
                         <td><%c++ 
@@ -304,7 +320,7 @@
                 <%c++ } %>
             <%c++ } else { %>
                     <tr>
-                        <td colspan="7" class="no-entries">No audit log entries found matching the filters</td>
+                        <td colspan="8" class="no-entries">No audit log entries found matching the filters</td>
                     </tr>
             <%c++ } %>
             </tbody>
