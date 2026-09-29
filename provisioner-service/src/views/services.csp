@@ -134,6 +134,8 @@
             return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
         }
         
+        let lastTableHtml = null;
+
         // Function to fetch and update the services table
         async function refreshServicesTable() {
             try {
@@ -195,7 +197,18 @@
                     </table>
                 `;
                 
+                // Rebuilding throws away keyboard focus, so do it only when
+                // something changed, and put focus back on the same link.
+                if (tableHtml === lastTableHtml) return;
+                const focused = tableContainer.contains(document.activeElement) &&
+                                document.activeElement.getAttribute('href');
                 tableContainer.innerHTML = tableHtml;
+                lastTableHtml = tableHtml;
+                if (focused) {
+                    const again = [...tableContainer.querySelectorAll('a.log-link')]
+                        .find(a => a.getAttribute('href') === focused);
+                    if (again) again.focus();
+                }
             } catch (error) {
                 console.error('Error refreshing services table:', error);
             }
