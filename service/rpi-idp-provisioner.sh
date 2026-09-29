@@ -145,7 +145,19 @@ if [ "${PROVISIONING_STYLE}" = "secure-boot" ]; then
     fi
 fi
 
+# The staged descriptor, partition cursor and write pipeline live in one
+# fastbootd session, and only USB keeps a session across fastboot calls: over
+# TCP each is a new one. A daemon not in split mode would be driven over TCP
+# and lose the descriptor between stage and idpinit, so it stays on USB.
+keep_idp_on_one_session() {
+    if [ "${TCP_DATA_PLANE_ONLY}" != "yes" ] && [ "${FASTBOOT_DEVICE_SPECIFIER}" != "${TARGET_DEVICE_SERIAL}" ]; then
+        log "Not split mode: IDP stays on USB ${TARGET_DEVICE_SERIAL}, not ${FASTBOOT_DEVICE_SPECIFIER}, to keep one session"
+        FASTBOOT_DEVICE_SPECIFIER="${TARGET_DEVICE_SERIAL}"
+    fi
+}
+
 setup_fastboot_and_id_vars "$1"
+keep_idp_on_one_session
 
 record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_STARTED}" "${TARGET_USB_PATH}"
 
@@ -417,6 +429,7 @@ announce_stop "Erase Device Storage"
 
 # Re-check the fastboot device specifier, as it may take a while for a device to gain IP connectivity
 setup_fastboot_and_id_vars "${FASTBOOT_DEVICE_SPECIFIER}"
+keep_idp_on_one_session
 
 announce_start "IDP Stage and Initialise"
 timeout_fatal_secs "${FASTBOOT_CONTROL_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" stage "${IDP_JSON}"
