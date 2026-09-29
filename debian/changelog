@@ -37,6 +37,10 @@ rpi-sb-provisioner (2.3.6) unstable; urgency=medium
     to edit and Escape to leave. Scrolling tables take focus, and the
     Options switches are named for screen readers.
 
+  * Signing out now leaves a viewer on a page they can still see: the same
+    page if it is public, or the devices page. The sign-in page shows the
+    navigation bar.
+
   * Refuse a sign-in that a proxy on this machine forwarded over plain HTTP
     from another machine, since the password crossed the network
     unencrypted to reach it. Behind an HTTPS proxy that sends
@@ -306,6 +310,11 @@ rpi-sb-provisioner (2.3.6) unstable; urgency=medium
     has a network address. Each command went over TCP as a session of its
     own, so the staged descriptor was lost and idpinit failed with "No
     data. Check description was staged".
+
+  * Fix bootstrap hanging at "Cannot open file mcb.bin" on a CM5 with
+    secure boot (#338). Current recovery.bin asks the host for mcb.bin and
+    memory-training files that rpi-eeprom does not ship; they are now
+    served from rpiboot's bootfiles.bin. Reported by Rafael-SOWNet.
 
   * Allow up to 15 minutes to erase the device before IDP provisioning,
     rather than 30 seconds, so an erase that discards the whole device
