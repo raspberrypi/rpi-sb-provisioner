@@ -193,6 +193,19 @@ class Hooks(UITest):
         self.b.settle()
         self.assertFalse(self.b.el("#helpModal").is_displayed())
 
+    def test_help_marks_this_stage_and_lists_the_contract(self):
+        self.b.get(f"/customisation/get-script?script={HOOK}")
+        self.b.click("#script-help-btn")
+        stage = HOOK.split("-provisioner-", 1)[1]
+        current = self.b.all(".hook-help tr.current")
+        self.assertEqual([stage], [r.get_attribute("data-stage") for r in current])
+        self.assertIn(stage, self.b.el("#hook-help-this").text)
+        text = self.b.el("#helpModal").get_attribute("textContent")
+        for name in ("TARGET_DEVICE_SERIAL", "FASTBOOT_DEVICE_SPECIFIER", "RPI_SB_HOOK_TIMEOUT",
+                     "PROVISION_FAILED_CONTEXT", "OS_IMAGE_SHA256", "oem led", "get_staged"):
+            self.assertIn(name, text)
+        self.assertClean()
+
     def test_copy_from_another_provisioner(self):
         self.station.put(f"{DIR}/sb-provisioner-post-flash.sh", "#!/bin/sh\necho from-sb\n", "0644")
         self.b.get(f"/customisation/get-script?script={HOOK}")
