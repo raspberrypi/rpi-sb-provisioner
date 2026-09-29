@@ -471,6 +471,7 @@ namespace {
                                         clientIp != "::1" && clientIp != "::ffff:127.0.0.1";
         if ((g_config.requireTlsForRemoteLogin && !clientUsedHttps(req) && !isLoopbackPeer(req)) ||
             proxiedFromNetwork) {
+            AuditLog::logAuthentication(req, req->getParameter("username"), "LOGIN", false, "refused: not over HTTPS");
             callback(loginPage(next, "Sign in over HTTPS: this connection is not encrypted.", k403Forbidden));
             return;
         }
@@ -487,6 +488,7 @@ namespace {
         const std::string rhost = AuditLog::getClientIP(req);
         if (!admitLogin(rhost)) {
             OPENSSL_cleanse(password.data(), password.size());
+            AuditLog::logAuthentication(req, user, "LOGIN", false, "refused: too many attempts in progress");
             callback(loginPage(next, "Too many sign-in attempts in progress. Try again shortly.", k429TooManyRequests));
             return;
         }
