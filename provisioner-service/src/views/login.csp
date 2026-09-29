@@ -8,7 +8,7 @@
     <style>
         .login-container {
             max-width: 360px;
-            margin: 80px auto;
+            margin: 40px auto;
             padding: 24px;
             border: 1px solid #ddd;
             border-radius: 6px;
@@ -58,6 +58,7 @@
     </style>
 </head>
 <body>
+    <%view navbar %>
     <main id="main-content" class="login-container">
         <h1>Raspberry Pi Secure Boot Provisioner</h1>
         <p class="login-hint">Sign in with a system account in the <strong>rpi-sb-provisioner</strong> group.</p>
