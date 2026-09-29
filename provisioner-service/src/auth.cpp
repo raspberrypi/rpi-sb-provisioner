@@ -290,6 +290,22 @@ namespace {
     std::string safeNext(const std::string &next) {
         if (next.empty() || next[0] != '/' || next.rfind("//", 0) == 0 ||
             next.find('\\') != std::string::npos || next.rfind("/login", 0) == 0) {
+    // One query-string value. getParameter would parse the parameters here,
+    // before the body has arrived, and a form's own fields would be lost.
+    std::string queryValue(const HttpRequestPtr &req, const std::string &name) {
+        const std::string &query = req->query();
+        std::string::size_type pos = 0;
+        while (pos <= query.size()) {
+            const auto end = std::min(query.find('&', pos), query.size());
+            const auto eq = query.find('=', pos);
+            if (eq < end && drogon::utils::urlDecode(query.substr(pos, eq - pos)) == name) {
+                return drogon::utils::urlDecode(query.substr(eq + 1, end - eq - 1));
+            }
+            pos = end + 1;
+        }
+        return "";
+    }
+
             return "/devices";
         }
         // Browsers drop tabs and newlines from a URL, so "/\t/host" would
@@ -665,7 +681,7 @@ namespace {
 
             if (isStateChanging(req)) {
                 std::string presented = req->getHeader("X-CSRF-Token");
-                if (presented.empty()) presented = req->getParameter("_csrf_token");
+                if (presented.empty()) presented = queryValue(req, "_csrf_token");
                 if (!tokensEqual(presented, session->csrf)) {
                     LOG_WARN << "SECURITY: CSRF token mismatch for " << req->getMethodString() << " " << path
                              << " from " << AuditLog::getClientIP(req);
