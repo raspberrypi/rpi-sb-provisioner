@@ -152,11 +152,35 @@ run_bounded() {
         return 0
     fi
     _rb_rcfile="$(mktemp)"
+    _rb_pidfile="$(mktemp)"
+    _rb_gone="${_rb_rcfile}.gone"
+    # And a board lost part-way through: over TCP the client reconnects and
+    # waits rather than failing. Waiting as its last line, for as long as the
+    # presence probe allows, ends the call. Control calls are left alone: they
+    # may wait for a board that is coming up.
+    _rb_watch=""
+    if [ "$1" = fastboot ] && [ "${_rb_secs}" -gt "${FASTBOOT_CONTROL_TIMEOUT}" ]; then
+        (
+            _w=0
+            while [ ! -s "${_rb_rcfile}" ]; do
+                sleep 1
+                if tail -n 1 "${BOUNDED_OUT}" 2>/dev/null | grep -q '< waiting for'; then _w=$((_w + 1)); else _w=0; fi
+                if [ "${_w}" -ge "${FASTBOOT_PRESENCE_TIMEOUT}" ]; then
+                    : > "${_rb_gone}"
+                    kill -TERM "$(cat "${_rb_pidfile}")" 2>/dev/null
+                    break
+                fi
+            done
+        ) &
+        _rb_watch=$!
+    fi
     # POSIX sh reports a pipeline's last status, so the command's goes via a file.
-    { timeout -k "${BOUNDED_KILL_AFTER}" "${_rb_secs}" "$@" 2>&1; echo $? > "${_rb_rcfile}"; } | tee "${BOUNDED_OUT}"
+    { timeout -k "${BOUNDED_KILL_AFTER}" "${_rb_secs}" "$@" 2>&1 & echo $! > "${_rb_pidfile}"; wait $!; echo $? > "${_rb_rcfile}"; } | tee "${BOUNDED_OUT}"
     BOUNDED_RC="$(cat "${_rb_rcfile}" 2>/dev/null)"
     [ -n "${BOUNDED_RC}" ] || BOUNDED_RC=1
-    rm -f "${_rb_rcfile}"
+    if [ -n "${_rb_watch}" ]; then kill "${_rb_watch}" 2>/dev/null; wait "${_rb_watch}" 2>/dev/null; fi
+    if [ -e "${_rb_gone}" ]; then BOUNDED_RC=124; BOUNDED_ABSENT=2; fi
+    rm -f "${_rb_rcfile}" "${_rb_pidfile}" "${_rb_gone}"
     BOUNDED_REMOTE="$(sed -n "s/.*FAILED (remote: '\(.*\)').*/\1/p" "${BOUNDED_OUT}" | tail -n 1)"
     [ "${_rb_errexit}" -eq 0 ] || set -e
 }
@@ -170,6 +194,8 @@ bounded_report() {
         case "${BOUNDED_RC}" in
             124) if [ "${BOUNDED_ABSENT:-0}" -eq 1 ]; then
                      BOUNDED_WHY="the board did not answer within ${_rb_secs} seconds, so it was not started"
+                 elif [ "${BOUNDED_ABSENT:-0}" -eq 2 ]; then
+                     BOUNDED_WHY="the board went away part-way through, and was not back within ${FASTBOOT_PRESENCE_TIMEOUT} seconds"
                  else
                      BOUNDED_WHY="timed out after ${_rb_secs} seconds"
                  fi ;;
