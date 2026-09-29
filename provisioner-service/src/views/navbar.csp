@@ -200,7 +200,9 @@ nav.rpi-navbar {
         <a href="https://github.com/raspberrypi/rpi-sb-provisioner" target="_blank" class="rpi-github-link">GitHub</a>
         <%c++ if (@@.get<bool>("anonymous")) { %>
         <%c++ /* The dashboard and scanner can be viewed without signing in. */ %>
+        <%c++ if (@@.get<std::string>("currentPage") != "login") { %>
         <a href="/login" id="rpi-sign-in">Sign in</a>
+        <%c++ } %>
         <script>
         (function () {
             var a = document.getElementById('rpi-sign-in');
@@ -209,9 +211,13 @@ nav.rpi-navbar {
         </script>
         <%c++ } else { %>
         <a href="/auth/tokens" id="rpi-signed-in-user" title="API tokens" <%c++ if(@@.get<std::string>("currentPage") == "tokens") { %>class="active" aria-current="page"<%c++ } %>></a>
-        <form method="post" action="/logout" class="rpi-signout-form">
+        <form method="post" action="/logout" class="rpi-signout-form" id="rpi-signout-form">
+            <input type="hidden" name="next" id="rpi-signout-next">
             <button type="submit" class="rpi-signout-button">Sign out</button>
         </form>
+        <script>
+        document.getElementById('rpi-signout-next').value = location.pathname + location.search;
+        </script>
         <%c++ } %>
     </div>
 </nav>

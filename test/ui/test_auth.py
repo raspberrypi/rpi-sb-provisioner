@@ -108,7 +108,7 @@ class SignIn(UITest):
         self.b.get("/devices")
         self.b.click(".rpi-signout-button")
         self.b.settle()
-        self.assertAtLogin()
+        self.assertFalse(self.b.signed_in())
         # The old cookie, replayed, is dead.
         self.b.d.add_cookie({"name": "rpi_sb_session", "value": old, "path": "/"})
         self.b.get("/options/get")
