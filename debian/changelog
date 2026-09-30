@@ -78,6 +78,10 @@ rpi-sb-provisioner (2.3.6) unstable; urgency=medium
   * Hide the code scanner link where the browser will not allow the
     camera: over plain HTTP from another machine.
 
+  * Tidy the web UI's layout: every audit log column has room again, the
+    navigation bar has the same space at each end, and text and badges
+    for a device part-way through are dark enough to read.
+
   * Refuse a sign-in that a proxy on this machine forwarded over plain HTTP
     from another machine, since the password crossed the network
     unencrypted to reach it. Behind an HTTPS proxy that sends
