@@ -98,7 +98,10 @@ class Devices(UITest):
             tiles = self.b.all(tile_css)
             if tiles:
                 seen.add(tiles[0].get_attribute("data-state") or "")
-                if any("COMPLETE" in s or "FINISHED" in s and "PROVISIONER" in s for s in seen):
+                # A card left "finished" by an earlier run must not end the wait
+                # before this one has been seen in triage.
+                if any("TRIAGE" in s for s in seen) and \
+                        any("COMPLETE" in s or "FINISHED" in s and "PROVISIONER" in s for s in seen):
                     break
             time.sleep(0.5)
         self.assertTrue(any("TRIAGE" in s for s in seen), f"the card never showed triage: {seen}")
