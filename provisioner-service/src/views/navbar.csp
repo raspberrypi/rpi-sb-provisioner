@@ -8,6 +8,8 @@ nav.rpi-navbar {
     display: flex;
     align-items: center;
     min-height: 50px;
+    /* The same space at both ends, whatever the last item is. */
+    padding: 0 6px;
 }
 
 .rpi-navbar {
@@ -89,7 +91,7 @@ nav.rpi-navbar {
 
 .rpi-signout-form {
     display: inline;
-    margin: 0 8px 0 0;
+    margin: 2px 1px;
 }
 
 .rpi-signout-button {
@@ -127,6 +129,10 @@ nav.rpi-navbar {
         margin-left: 0;
         order: -1;
         margin-bottom: 5px;
+        flex-wrap: wrap;
+        /* A row of its own, so it wraps rather than overhanging the bar. */
+        flex: 1 1 100%;
+        min-width: 0;
     }
 }
 </style>
