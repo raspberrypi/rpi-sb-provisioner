@@ -91,6 +91,11 @@ rpi-sb-provisioner (2.3.6) unstable; urgency=medium
     added SIGNED_BOOT=1 and reordered BOOT_ORDER in the file itself, the
     package defaults included; it now works on a copy.
 
+  * Add signing keys the way OS images are added: from an Add button, by
+    drag and drop or with the keyboard. A new key joins the saved keys and
+    is used once chosen, so a stray file dropped on the page can no longer
+    become the signing key. The first key is still used straight away.
+
   * Refuse a sign-in that a proxy on this machine forwarded over plain HTTP
     from another machine, since the password crossed the network
     unencrypted to reach it. Behind an HTTPS proxy that sends
