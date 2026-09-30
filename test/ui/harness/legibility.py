@@ -28,6 +28,9 @@ _SHOWN = """
         if (!el.isConnected) return false;
         const s = getComputedStyle(el);
         if (s.visibility === 'hidden' || s.display === 'none' || Number(s.opacity) === 0) return false;
+        // Inside a closed <details> but not its summary: laid out, never shown.
+        const closed = el.closest('details:not([open])');
+        if (closed && !(closed.querySelector(':scope > summary') || {contains: () => false}).contains(el)) return false;
         const r = el.getBoundingClientRect();
         return r.width > 0 && r.height > 0;
     }
