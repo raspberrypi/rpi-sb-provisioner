@@ -82,6 +82,15 @@ rpi-sb-provisioner (2.3.6) unstable; urgency=medium
     navigation bar has the same space at each end, and text and badges
     for a device part-way through are dark enough to read.
 
+  * Edit the bootloader configuration devices get in the web interface,
+    with the Raspberry Pi documentation for each setting beside it,
+    instead of naming a file on the server. Saving checks the file and the
+    EEPROM's size limit, and the next device to bootstrap gets the change.
+
+  * Stop bootstrap changing the bootloader configuration it is given. It
+    added SIGNED_BOOT=1 and reordered BOOT_ORDER in the file itself, the
+    package defaults included; it now works on a copy.
+
   * Refuse a sign-in that a proxy on this machine forwarded over plain HTTP
     from another machine, since the password crossed the network
     unencrypted to reach it. Behind an HTTPS proxy that sends
