@@ -276,6 +276,14 @@ class AuditLog(UITest):
         stamps = self.column("Timestamp")
         self.assertEqual(sorted(stamps, reverse=True), stamps, "newest first")
 
+    def test_every_column_has_room(self):
+        self.b.d.set_window_size(1280, 1000)
+        self.b.get("/auditlog")
+        widths = {h.text: h.size["width"] for h in self.b.all("#auditLogTable thead th")}
+        self.assertEqual(8, len(widths))
+        for name, width in widths.items():
+            self.assertGreater(width, 60, f"{name} is squeezed: {widths}")
+
     def test_a_page_visit_is_recorded(self):
         self.b.get("/services")
         self.b.get("/auditlog")

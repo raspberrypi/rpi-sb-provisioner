@@ -90,34 +90,16 @@
             background-color: #f5f5f5;
         }
         
-        th:nth-child(1), td:nth-child(1) {
-            width: 15%;
-        }
-        
-        th:nth-child(2), td:nth-child(2) {
-            width: 10%;
-        }
-        
-        th:nth-child(3), td:nth-child(3) {
-            width: 10%;
-        }
-        
-        th:nth-child(4), td:nth-child(4) {
-            width: 15%;
-        }
-        
-        th:nth-child(5), td:nth-child(5) {
-            width: 20%;
-        }
-        
-        th:nth-child(6), td:nth-child(6) {
-            width: 10%;
-        }
-        
-        th:nth-child(7), td:nth-child(7) {
-            width: 20%;
-        }
-        
+        /* One per column, in order; they must add up to 100%. */
+        th:nth-child(1), td:nth-child(1) { width: 13%; } /* Timestamp */
+        th:nth-child(2), td:nth-child(2) { width: 9%; } /* Event Type */
+        th:nth-child(3), td:nth-child(3) { width: 10%; } /* Client IP */
+        th:nth-child(4), td:nth-child(4) { width: 8%; } /* User */
+        th:nth-child(5), td:nth-child(5) { width: 17%; } /* Endpoint / Operation */
+        th:nth-child(6), td:nth-child(6) { width: 16%; } /* Target Path */
+        th:nth-child(7), td:nth-child(7) { width: 8%; } /* Success */
+        th:nth-child(8), td:nth-child(8) { width: 19%; } /* Additional Info */
+
         .event-type {
             display: inline-block;
             padding: 4px 8px;
