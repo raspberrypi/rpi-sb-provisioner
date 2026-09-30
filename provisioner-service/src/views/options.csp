@@ -1313,7 +1313,7 @@
             .enc-status-box.enc-error { background: #f8d7da; border: 1px solid #f5c6cb; }
             .enc-error .enc-status-icon { color: #dc3545; }
             .enc-status-icon { font-size: 1.5rem; flex-shrink: 0; line-height: 1; }
-            .enc-warn .enc-status-icon { color: #e0a800; }
+            .enc-warn .enc-status-icon { color: #8a6100; }
             .enc-ok   .enc-status-icon { color: #1e7e34; }
             .enc-status-info { flex: 1; }
             .enc-status-title { font-weight: 500; color: #333; }
