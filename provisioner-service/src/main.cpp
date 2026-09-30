@@ -27,6 +27,7 @@
 #include "images.h"
 #include "devices.h"
 #include "customisation.h"
+#include "bootloader_config.h"
 #include "options.h"
 #include <services.h>
 #include "manufacturing.h"
@@ -624,6 +625,7 @@ int main(int argc, char* argv[])
     deviceHandlers.registerHandlers(app);
     customisationHandlers.registerHandlers(app);
     optionHandlers.registerHandlers(app);
+    provisioner::BootloaderConfig{}.registerHandlers(app);
     serviceHandlers.registerHandlers(app);
     manufacturingHandlers.registerHandlers(app);
     scanToolHandlers.registerHandlers(app);
