@@ -9,8 +9,6 @@ service/rpi-sb-image-bootimg-generator.sh       /usr/bin
 service/rpi-sb-hsm-wrapper-parse.sh             /usr/bin
 service/rpi-sb-pkcs11-sign.sh                   /usr/bin
 service/rpi-sb-pem-sign.sh                      /usr/bin
-fetch-repo-package-list/fetch-repo-package-list /usr/bin
-rpi-package-download/rpi-package-download       /usr/bin
 
 service/rpi-sb-provisioner@.service                         /usr/lib/systemd/system
 service/rpi-fde-provisioner@.service                        /usr/lib/systemd/system
@@ -20,9 +18,6 @@ service/rpi-sb-bootstrap@.service                           /usr/lib/systemd/sys
 service/rpi-sb-triage@.service                              /usr/lib/systemd/system
 service/rpi-sb-image-bootimg-generator@.service             /usr/lib/systemd/system
 
-fetch-repo-package-list/fetch-repo-package-list@.timer      /usr/lib/systemd/system
-fetch-repo-package-list/fetch-repo-package-list@.service    /usr/lib/systemd/system
-rpi-package-download/rpi-package-download@.service          /usr/lib/systemd/system
 
 host-support/cryptroot_initramfs                    /var/lib/rpi-sb-provisioner
 host-support/boot_ramdisk_config.txt                /var/lib/rpi-sb-provisioner
@@ -41,3 +36,5 @@ host-support/usb-ports.d/example.conf.sample        /usr/share/rpi-sb-provisione
 
 host-support/config                                 /usr/share/rpi-sb-provisioner/defaults
 host-support/bootimg-package-config                 /usr/share/rpi-sb-provisioner/defaults
+
+service/pam/rpi-provisioner-ui                  /etc/pam.d

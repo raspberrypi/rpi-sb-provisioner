@@ -1,6 +1,12 @@
 <!-- Firmware Browser Sub-View (included by options.csp) -->
 <style>
     /* ===== Inline Firmware Browser ===== */
+    .firmware-current {
+        margin-left: auto;
+        font-weight: 600;
+        color: #212529;
+        text-align: right;
+    }
     .firmware-expand-btn {
         display: flex;
         align-items: center;
@@ -30,7 +36,7 @@
     }
     
     .expand-icon {
-        font-size: 0.7rem;
+        font-size: 0.75rem;
         transition: transform 0.2s;
     }
     
@@ -92,7 +98,7 @@
     
     .firmware-loading {
         font-size: 0.8rem;
-        color: #6c757d;
+        color: #5c636a;
     }
     
     .firmware-list {
@@ -142,7 +148,7 @@
     }
     
     .firmware-item-channel {
-        font-size: 0.7rem;
+        font-size: 0.75rem;
         padding: 2px 6px;
         border-radius: 3px;
         font-weight: 500;
@@ -157,13 +163,13 @@
     
     .firmware-item-meta {
         font-size: 0.75rem;
-        color: #888;
+        color: #595959;
         margin-top: 2px;
     }
     
     .firmware-selected-badge {
-        font-size: 0.7rem;
-        background: #28a745;
+        font-size: 0.75rem;
+        background: #1e7e34;
         color: white;
         padding: 2px 6px;
         border-radius: 3px;
@@ -198,7 +204,7 @@
     }
     
     .firmware-notes-placeholder {
-        color: #999;
+        color: #595959;
         font-style: italic;
         text-align: center;
         padding: 40px 20px;
@@ -223,7 +229,7 @@
     .firmware-empty {
         text-align: center;
         padding: 30px;
-        color: #888;
+        color: #595959;
     }
     
     .firmware-empty-icon {
@@ -237,12 +243,13 @@
 <%c++ auto firmwareFile = @@.get<std::map<std::string, std::string>>("options").count("RPI_DEVICE_FIRMWARE_FILE") ? @@.get<std::map<std::string, std::string>>("options").at("RPI_DEVICE_FIRMWARE_FILE") : std::string(); %>
 <div class="field-group">
     <label class="field-label">Device Firmware <span class="optional-badge">Optional</span></label>
-    <input type="hidden" id="RPI_DEVICE_FIRMWARE_FILE" name="RPI_DEVICE_FIRMWARE_FILE" value="<%c++ $$ << firmwareFile; %>">
+    <input type="hidden" id="RPI_DEVICE_FIRMWARE_FILE" name="RPI_DEVICE_FIRMWARE_FILE" value="<%c++ $$ << HttpViewData::htmlTranslate(firmwareFile); %>">
     
     <!-- Expand/Collapse Button -->
     <button type="button" class="firmware-expand-btn" id="firmware-expand-btn" onclick="toggleFirmwareBrowser()">
         <span class="expand-icon" id="expand-icon">&#9660;</span>
         Browse Available Firmware
+        <span class="firmware-current" id="firmware-current" aria-live="polite"></span>
     </button>
     
     <!-- Expandable Firmware Browser -->
@@ -314,8 +321,22 @@
         }
     }
     
+    // What bootstrap will flash: the chosen image, or else the newest of the
+    // "latest" channel, as getBootloaderUpdateVersion picks it.
+    function showCurrentFirmware(selectedPath) {
+        const el = document.getElementById('firmware-current');
+        const chosen = firmwareListData.find(fw => fw.filepath === selectedPath);
+        const newest = firmwareListData.filter(fw => fw.releaseChannel === 'latest')
+            .map(fw => fw.version).sort().pop();
+        if (chosen) el.textContent = 'Selected: ' + chosen.version + ' (' + chosen.releaseChannel + ')';
+        else if (selectedPath) el.textContent = 'Selected: ' + selectedPath.split('/').pop();
+        else if (newest) el.textContent = 'Automatic: ' + newest + ' (newest in latest)';
+        else el.textContent = 'Automatic: newest for each device';
+    }
+
     function renderFirmwareList(selectedPath) {
         const listEl = document.getElementById('firmware-list');
+        showCurrentFirmware(selectedPath);
         
         if (firmwareListData.length === 0) {
             listEl.innerHTML = `
@@ -400,11 +421,11 @@
         
         if (isSelected) {
             content += `<div style="padding: 8px 12px; background: #d4edda; color: #155724; border-radius: 4px; text-align: center;">&#10003; Currently selected</div>`;
-            content += `<button type="button" onclick="clearFirmwareSelection()" style="padding: 8px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">Use Default Firmware</button>`;
+            content += `<button type="button" onclick="clearFirmwareSelection()" style="padding: 8px 12px; background: #5c636a; color: white; border: none; border-radius: 4px; cursor: pointer;">Use Default Firmware</button>`;
         } else {
             content += `<button type="button" onclick="selectFirmware('${escapeHtml(path)}', '${escapeHtml(version)}')" class="image-upload-btn">Use This Firmware</button>`;
             if (currentFirmware) {
-                content += `<button type="button" onclick="clearFirmwareSelection()" style="padding: 8px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">Use Default Firmware</button>`;
+                content += `<button type="button" onclick="clearFirmwareSelection()" style="padding: 8px 12px; background: #5c636a; color: white; border: none; border-radius: 4px; cursor: pointer;">Use Default Firmware</button>`;
             }
         }
         
@@ -413,7 +434,7 @@
         content += `<div style="margin-top: 20px; padding-top: 16px; border-top: 1px solid #e0e0e0;">`;
         content += `<dt style="font-weight: 600; color: #555; margin-bottom: 8px;">Release Notes</dt>`;
         
-        notesEl.innerHTML = content + `<dd style="margin: 0;"><span style="color: #888;">Loading…</span></dd></div>`;
+        notesEl.innerHTML = content + `<dd style="margin: 0;"><span style="color: #595959;">Loading…</span></dd></div>`;
         
         try {
             const response = await fetch(`/options/firmware/notes/${version}`);
@@ -422,10 +443,10 @@
                 if (data.notes && data.notes.trim()) {
                     notesEl.innerHTML = content + `<dd style="margin: 0;"><pre style="white-space: pre-wrap; word-wrap: break-word; font-family: inherit; margin: 0; background: none; border: none; padding: 0;">${escapeHtml(data.notes)}</pre></dd></div>`;
                 } else {
-                    notesEl.innerHTML = content + `<dd style="margin: 0; color: #888;">No release notes available for this version.</dd></div>`;
+                    notesEl.innerHTML = content + `<dd style="margin: 0; color: #595959;">No release notes available for this version.</dd></div>`;
                 }
             } else {
-                notesEl.innerHTML = content + `<dd style="margin: 0; color: #888;">No release notes available.</dd></div>`;
+                notesEl.innerHTML = content + `<dd style="margin: 0; color: #595959;">No release notes available.</dd></div>`;
             }
         } catch (error) {
             console.error('Error loading release notes:', error);
@@ -510,13 +531,13 @@
     deviceFamilyTiles.forEach(tile => {
         const radio = tile.querySelector('input[name="RPI_DEVICE_FAMILY"]');
         if (radio) {
+            // Open or not, the button's label names this family's firmware.
             tile.addEventListener('click', function() {
-                const browser = document.getElementById('firmware-browser');
-                if (browser && browser.style.display !== 'none') {
-                    setTimeout(loadFirmwareList, 500);
-                }
+                setTimeout(loadFirmwareList, 500);
             });
         }
     });
+    // Label the button before anyone opens the browser.
+    loadFirmwareList();
 </script>
 <%view-end%>

@@ -134,12 +134,17 @@
         
         .event-type-file {
             background-color: #fff7e6;
-            color: #fa8c16;
+            color: #ad4e00;
         }
         
         .event-type-systemd {
             background-color: #f6ffed;
-            color: #52c41a;
+            color: #237804;
+        }
+
+        .event-type-auth {
+            background-color: #f9f0ff;
+            color: #531dab;
         }
         
         .success-true {
@@ -147,7 +152,7 @@
         }
         
         .success-false {
-            color: red;
+            color: #c0392b;
         }
         
         .success-unknown {
@@ -179,17 +184,18 @@
                         <option value="HANDLER_ACCESS" <%c++ if (@@.get<std::string>("event_type") == "HANDLER_ACCESS") $$ << "selected"; %>>API Access</option>
                         <option value="FILE_ACCESS" <%c++ if (@@.get<std::string>("event_type") == "FILE_ACCESS") $$ << "selected"; %>>File Access</option>
                         <option value="SYSTEMD_LOG_ACCESS" <%c++ if (@@.get<std::string>("event_type") == "SYSTEMD_LOG_ACCESS") $$ << "selected"; %>>Systemd Log</option>
+                        <option value="AUTHENTICATION" <%c++ if (@@.get<std::string>("event_type") == "AUTHENTICATION") $$ << "selected"; %>>Sign-ins and tokens</option>
                     </select>
                 </div>
                 
                 <div class="form-group">
                     <label for="start_date">Start Date:</label>
-                    <input type="datetime-local" id="start_date" name="start_date" value="<%c++ $$ << @@.get<std::string>("start_date"); %>">
+                    <input type="datetime-local" id="start_date" name="start_date" value="<%c++ $$ << HttpViewData::htmlTranslate(@@.get<std::string>("start_date")); %>">
                 </div>
                 
                 <div class="form-group">
                     <label for="end_date">End Date:</label>
-                    <input type="datetime-local" id="end_date" name="end_date" value="<%c++ $$ << @@.get<std::string>("end_date"); %>">
+                    <input type="datetime-local" id="end_date" name="end_date" value="<%c++ $$ << HttpViewData::htmlTranslate(@@.get<std::string>("end_date")); %>">
                 </div>
                 
                 <div class="form-group">
@@ -209,7 +215,7 @@
         </form>
     </div>
     
-    <div class="table-container">
+    <div class="table-container" tabindex="0" role="region" aria-label="Audit log entries">
         <table id="auditLogTable">
             <caption class="sr-only">Audit log entries showing system activity</caption>
             <thead>
@@ -217,6 +223,7 @@
                     <th scope="col">Timestamp</th>
                     <th scope="col">Event Type</th>
                     <th scope="col">Client IP</th>
+                    <th scope="col">User</th>
                     <th scope="col">Endpoint / Operation</th>
                     <th scope="col">Target Path</th>
                     <th scope="col">Success</th>
@@ -237,6 +244,8 @@
                         eventTypeClass = "event-type-file";
                     } else if (entry.at("event_type") == "SYSTEMD_LOG_ACCESS") {
                         eventTypeClass = "event-type-systemd";
+                    } else if (entry.at("event_type") == "AUTHENTICATION") {
+                        eventTypeClass = "event-type-auth";
                     }
                     
                     // Format event type for display
@@ -247,6 +256,8 @@
                         displayEventType = "File Access";
                     } else if (entry.at("event_type") == "SYSTEMD_LOG_ACCESS") {
                         displayEventType = "Systemd Log";
+                    } else if (entry.at("event_type") == "AUTHENTICATION") {
+                        displayEventType = "Sign-in";
                     } else {
                         displayEventType = entry.at("event_type");
                     }
@@ -254,27 +265,32 @@
                     <tr>
                         <td><%c++ 
                             if (entry.find("timestamp") != entry.end() && !entry.at("timestamp").empty()) {
-                                $$ << entry.at("timestamp");
+                                $$ << HttpViewData::htmlTranslate(entry.at("timestamp"));
                             } else {
                                 $$ << "<span class='success-unknown'>Not recorded</span>";
                             }
                         %></td>
-                        <td><span class="event-type <%c++ $$ << eventTypeClass; %>"><%c++ $$ << displayEventType; %></span></td>
+                        <td><span class="event-type <%c++ $$ << eventTypeClass; %>"><%c++ $$ << HttpViewData::htmlTranslate(displayEventType); %></span></td>
                         <td><%c++ 
                             if (entry.find("client_ip") != entry.end()) {
-                                $$ << entry.at("client_ip");
+                                $$ << HttpViewData::htmlTranslate(entry.at("client_ip"));
+                            }
+                        %></td>
+                        <td><%c++ 
+                            if (entry.find("username") != entry.end()) {
+                                $$ << HttpViewData::htmlTranslate(entry.at("username"));
                             }
                         %></td>
                         <td><%c++ 
                             if (entry.find("handler_path") != entry.end() && !entry.at("handler_path").empty()) {
-                                $$ << entry.at("handler_path");
+                                $$ << HttpViewData::htmlTranslate(entry.at("handler_path"));
                             } else if (entry.find("operation") != entry.end() && !entry.at("operation").empty()) {
-                                $$ << entry.at("operation");
+                                $$ << HttpViewData::htmlTranslate(entry.at("operation"));
                             }
                         %></td>
                         <td><%c++ 
                             if (entry.find("target_path") != entry.end() && !entry.at("target_path").empty()) {
-                                $$ << entry.at("target_path");
+                                $$ << HttpViewData::htmlTranslate(entry.at("target_path"));
                             }
                         %></td>
                         <td><%c++ 
@@ -295,16 +311,16 @@
                         %></td>
                         <td><%c++ 
                             if (entry.find("additional_info") != entry.end() && !entry.at("additional_info").empty()) {
-                                $$ << entry.at("additional_info");
+                                $$ << HttpViewData::htmlTranslate(entry.at("additional_info"));
                             } else if (entry.find("user_agent") != entry.end() && !entry.at("user_agent").empty()) {
-                                $$ << entry.at("user_agent");
+                                $$ << HttpViewData::htmlTranslate(entry.at("user_agent"));
                             }
                         %></td>
                     </tr>
                 <%c++ } %>
             <%c++ } else { %>
                     <tr>
-                        <td colspan="7" class="no-entries">No audit log entries found matching the filters</td>
+                        <td colspan="8" class="no-entries">No audit log entries found matching the filters</td>
                     </tr>
             <%c++ } %>
             </tbody>

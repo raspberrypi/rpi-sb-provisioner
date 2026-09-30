@@ -4,6 +4,10 @@ The API documentation is organized into the following sections. Click on any sec
 
 # Core API Sections
 
+## [Authentication](api/authentication.md)
+
+Every endpoint needs an operator in the `rpi-sb-provisioner` group: a signed-in browser session, or an API token sent as `Authorization: Bearer <token>` for scripts. Covers creating tokens and the requests that are refused.
+
 ## [Manufacturing Database API](api/manufacturing.md)
 
 Access device provisioning records and manufacturing data collected during the provisioning process. Provides pagination support and detailed device information including hardware specifications, security settings, and provisioning timestamps.
@@ -68,7 +72,7 @@ Verify QR codes against the manufacturing database for device validation and qua
 
 **Key Endpoints:**
 
-- `POST /api/v2/verify-qrcode` - Verify if a QR code exists in the manufacturing database
+- `GET /api/v2/verify-qrcode?code=` - Verify if a QR code exists in the manufacturing database (also `POST` with a JSON body)
 
 **Use Cases:** Barcode scanner integration, mobile app validation, quality control workflows
 
@@ -210,11 +214,13 @@ Standard error response format used across all endpoints, plus information about
 
 For most integrations, you’ll want to start with:
 
-1.  [Devices API](api/devices.md) - Monitor device provisioning status
+1.  [Authentication](api/authentication.md) - Create an API token for your script
 
-2.  [Manufacturing Database API](api/manufacturing.md) - Access provisioned device records
+2.  [Devices API](api/devices.md) - Monitor device provisioning status
 
-3.  [Services API](api/services.md) - Monitor service execution
+3.  [Manufacturing Database API](api/manufacturing.md) - Access provisioned device records
+
+4.  [Services API](api/services.md) - Monitor service execution
 
 For advanced customisation:
 

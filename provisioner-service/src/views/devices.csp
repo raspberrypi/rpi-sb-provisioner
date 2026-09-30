@@ -6,14 +6,14 @@
     <%view stylesheet %>
     <script src="/static/js/d3.min.js"></script>
     <style>
-        .topology-container { padding: 10px; }
+        .topology-container { padding: 10px; overflow-x: auto; }
         .node { border: 1px solid #ccc; border-radius: 6px; padding: 8px 10px; margin: 6px; background: #fafafa; display: inline-block; min-width: 160px; }
         .hub { background: #eef6ff; border-color: #9ec9ff; }
         .device { background: #f7fff0; border-color: #bde6a1; }
         .node .title { font-weight: bold; margin-bottom: 4px; }
         .children { margin-left: 24px; border-left: 2px dashed #ddd; padding-left: 12px; }
         .state-provisioning { box-shadow: 0 0 0 2px #ffd54f inset; }
-        .state-success { box-shadow: 0 0 0 2px #4caf50 inset; }
+        .state-success { box-shadow: 0 0 0 2px #2e7d32 inset; }
         .state-error { box-shadow: 0 0 0 2px #f44336 inset; }
         .meta { color: #555; font-size: 12px; }
         .badge { display: inline-block; font-weight: 700; font-size: 14px; line-height: 1; padding: 2px 6px; border-radius: 10px; margin-left: 6px; }
@@ -63,8 +63,8 @@
         .d3-node-circle.clicked { stroke: #0b69ff; stroke-width: 4; filter: drop-shadow(0 0 8px rgba(11, 105, 255, 0.5)); }
         
         .d3-node-label { font: 12px sans-serif; text-anchor: middle; pointer-events: none; user-select: none; }
-        .d3-node-badge { font: 10px sans-serif; font-weight: bold; fill: #fff; text-anchor: middle; pointer-events: none; }
-        .d3-node-state { font: 10px sans-serif; fill: #555; text-anchor: middle; pointer-events: none; }
+        .d3-node-badge { font: 12px sans-serif; font-weight: bold; fill: #fff; text-anchor: middle; pointer-events: none; }
+        .d3-node-state { font: 12px sans-serif; fill: #555; text-anchor: middle; pointer-events: none; }
         
         .d3-watermark { font-family: sans-serif; font-weight: 900; opacity: 0.12; fill: #d32f2f; pointer-events: none; text-anchor: middle; dominant-baseline: middle; }
         
@@ -83,7 +83,7 @@
         
         /* Color legend */
         .d3-legend { position: absolute; bottom: 10px; left: 10px; background: rgba(255,255,255,0.95); border: 1px solid #ddd; 
-                     border-radius: 6px; padding: 8px 12px; font-size: 11px; z-index: 100; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+                     border-radius: 6px; padding: 8px 12px; font-size: 12px; z-index: 100; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
         .d3-legend-title { font-weight: 600; margin-bottom: 6px; color: #333; }
         .d3-legend-item { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
         .d3-legend-color { width: 14px; height: 14px; border-radius: 50%; border: 2px solid; flex-shrink: 0; }
@@ -94,7 +94,7 @@
             .view-tabs { flex-wrap: wrap; gap: 6px; }
             .view-tab { padding: 8px 14px; font-size: 0.85rem; min-height: 44px; }
             .mindmap-container svg { min-height: 300px; height: 50vh; }
-            .d3-legend { font-size: 9px; padding: 6px 8px; }
+            .d3-legend { font-size: 12px; padding: 6px 8px; }
             .zoom-controls { top: 6px; right: 6px; }
             .zoom-btn { width: 40px; height: 40px; font-size: 18px; }
         }
@@ -108,18 +108,18 @@
         .test-panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; 
                              border-bottom: 1px solid #ff6b35; padding-bottom: 6px; }
         .test-panel-title { font-weight: bold; color: #ff6b35; font-size: 13px; }
-        .test-panel-close { background: none; border: none; color: #888; cursor: pointer; font-size: 16px; padding: 0 4px; }
+        .test-panel-close { background: none; border: none; color: #b0b0b0; cursor: pointer; font-size: 16px; padding: 0 4px; }
         .test-panel-close:hover { color: #fff; }
-        .test-panel-status { font-size: 10px; color: #888; margin-bottom: 8px; }
+        .test-panel-status { font-size: 12px; color: #b0b0b0; margin-bottom: 8px; }
         .test-panel-status.active { color: #4caf50; }
         .test-btn { display: block; width: 100%; padding: 6px 10px; margin: 4px 0; background: #333; border: 1px solid #555; 
-                    border-radius: 4px; color: #fff; cursor: pointer; text-align: left; font-family: monospace; font-size: 11px; 
+                    border-radius: 4px; color: #fff; cursor: pointer; text-align: left; font-family: monospace; font-size: 12px; 
                     transition: all 0.15s; }
         .test-btn:hover { background: #444; border-color: #ff6b35; }
         .test-btn:active { transform: scale(0.98); }
         .test-btn.danger { border-color: #f44336; }
         .test-btn.danger:hover { background: #5a2020; border-color: #f44336; }
-        .test-btn-desc { font-size: 9px; color: #888; margin-left: 8px; }
+        .test-btn-desc { font-size: 12px; color: #b0b0b0; margin-left: 8px; }
     </style>
     <script>
         let ws = null;
@@ -576,20 +576,26 @@
                 return '';
             }
             
+            // Serials, models and states come from the devices themselves:
+            // a USB product string can say anything.
+            function escapeTopologyText(value) {
+                return String(value).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+            }
+
             function tooltipText(n) {
                 const parts = [];
-                parts.push(`<strong>${labelForNode(n)}</strong>`);
-                if (n.id && n.id !== 'server') parts.push(`ID: ${n.id}`);
+                parts.push(`<strong>${escapeTopologyText(labelForNode(n))}</strong>`);
+                if (n.id && n.id !== 'server') parts.push(`ID: ${escapeTopologyText(n.id)}`);
                 if (usbPortRestrictionActive && typeof n.portPermitted === 'boolean'
                     && !n.isTier && !n.isRootPort && n.id !== 'server') {
                     parts.push(n.portPermitted
                         ? 'USB filter: permitted'
                         : 'USB filter: excluded (will not be provisioned)');
                 }
-                if (n.model) parts.push(`Model: ${n.model}`);
-                if (n.state) parts.push(`State: ${n.state}`);
-                if (n.ip) parts.push(`IP: ${n.ip}`);
-                if (n.image) parts.push(`Image: ${n.image}`);
+                if (n.model) parts.push(`Model: ${escapeTopologyText(n.model)}`);
+                if (n.state) parts.push(`State: ${escapeTopologyText(n.state)}`);
+                if (n.ip) parts.push(`IP: ${escapeTopologyText(n.ip)}`);
+                if (n.image) parts.push(`Image: ${escapeTopologyText(n.image)}`);
                 return parts.join('<br/>');
             }
 
@@ -1471,13 +1477,13 @@
         <label><input type="checkbox" id="pf-hide-excluded"> Hide excluded ports</label>
     </div>
     <div id="rel-view" class="view-container" role="tabpanel" aria-labelledby="tab-rel" hidden>
-        <div class="mindmap-container" role="img" aria-label="Interactive USB device topology graph showing connected devices and their relationships">
+        <div class="mindmap-container" role="group" aria-label="Interactive USB device topology graph showing connected devices and their relationships">
             <svg id="d3-graph-svg" aria-hidden="true"></svg>
             <p class="sr-only">This visualization shows USB devices connected to the provisioning server. Use the Port tree tab for an accessible text-based view of the same information.</p>
         </div>
     </div>
     <div id="topo-view" class="view-container" role="tabpanel" aria-labelledby="tab-topo" hidden>
-        <div class="topology-container" role="region" aria-label="Detailed USB device topology">
+        <div class="topology-container" tabindex="0" role="region" aria-label="Detailed USB device topology">
             <div id="topology-root"></div>
         </div>
     </div>
@@ -1580,7 +1586,7 @@
         async function injectTestScenario(scenario) {
             try {
                 testStatus.textContent = 'Loading ' + scenario + '\u2026';
-                const resp = await fetch('/devices/_test/' + scenario);
+                const resp = await fetch('/devices/_test/' + scenario, { method: 'POST' });
                 if (resp.ok) {
                     const data = await resp.json();
                     testModeActive = data.testMode;

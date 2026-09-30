@@ -6,3 +6,18 @@ Type=notify
 ExecStart=/usr/bin/rpi-sb-provisioner.sh %I
 EnvironmentFile=/usr/share/rpi-sb-provisioner/defaults/config
 EnvironmentFile=-/etc/rpi-sb-provisioner/config
+# Backstop for any hang the script's own timeouts miss. Generous, because the
+# largest flash budgets run to hours; override with a drop-in if needed.
+RuntimeMaxSec=6h
+
+# Tier A hardening: nothing here creates a namespace or restricts devices,
+# because provisioning needs loop devices, mounts and raw USB, and operator
+# hooks may need anything else root can do. Only what no step uses is removed.
+NoNewPrivileges=yes
+CapabilityBoundingSet=~CAP_SYS_MODULE CAP_SYS_BOOT CAP_SYS_TIME CAP_WAKE_ALARM CAP_SYS_PTRACE CAP_SYSLOG CAP_BPF CAP_PERFMON CAP_SYS_PACCT CAP_SYS_TTY_CONFIG CAP_LEASE CAP_BLOCK_SUSPEND CAP_MAC_ADMIN CAP_MAC_OVERRIDE CAP_AUDIT_CONTROL CAP_AUDIT_READ CAP_CHECKPOINT_RESTORE
+LockPersonality=yes
+RestrictRealtime=yes
+ProtectHostname=yes
+SystemCallArchitectures=native
+SystemCallFilter=~@clock @module @reboot @swap @cpu-emulation @obsolete
+SystemCallErrorNumber=EPERM

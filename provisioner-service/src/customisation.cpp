@@ -83,6 +83,23 @@ namespace provisioner {
             return sources;
         }
 
+        // Only the provisioners' own hook points are ever written, enabled or
+        // removed: anything else in the directory is not the UI's to touch.
+        bool isHookPoint(const std::string& base) {
+            for (const auto& [prov, stages] : PROVISIONER_STAGES) {
+                for (const auto& stage : stages) {
+                    if (base == prov + "-" + stage) return true;
+                }
+            }
+            return false;
+        }
+
+        drogon::HttpResponsePtr notAHookPoint(const drogon::HttpRequestPtr& req) {
+            return provisioner::utils::createErrorResponse(
+                req, "The script name is not a valid hook point", drogon::k400BadRequest,
+                "Invalid Script Name", "INVALID_SCRIPT_NAME");
+        }
+
         const std::string HOOK_ENV_DEVICE_IDENTITY =
             "# Environment (device identity):\n"
             "#   TARGET_USB_PATH             USB topology path (e.g., 1-1.2)\n"
@@ -635,6 +652,10 @@ namespace provisioner {
                 filename = filename.substr(0, filename.length() - 3);
             }
             std::string sanitized_filename = utils::sanitize_path_component(filename);
+            if (!isHookPoint(sanitized_filename)) {
+                callback(notAHookPoint(req));
+                return;
+            }
             
             // Construct the full path with .sh extension
             std::string scriptPath = SCRIPTS_DIR + sanitized_filename + ".sh";
@@ -642,6 +663,12 @@ namespace provisioner {
             
             namespace fs = std::filesystem;
             std::error_code ec;
+            if (!fs::exists(fs::symlink_status(scriptPath))) {
+                callback(provisioner::utils::createErrorResponse(
+                    req, "There is no script to delete", drogon::k404NotFound,
+                    "Script Not Found", "SCRIPT_NOT_FOUND"));
+                return;
+            }
             if (!fs::remove(scriptPath, ec)) {
                 auto errorResp = provisioner::utils::createErrorResponse(
                     req,
@@ -658,7 +685,7 @@ namespace provisioner {
             resp->setStatusCode(k200OK);
             resp->setBody("Script deleted successfully");
             callback(resp);
-        });
+        }, {Post});
 
         /**
          * @brief Disables a script file in the customisation directory
@@ -696,6 +723,10 @@ namespace provisioner {
                 filename = filename.substr(0, filename.length() - 3);
             }
             std::string sanitized_filename = utils::sanitize_path_component(filename);
+            if (!isHookPoint(sanitized_filename)) {
+                callback(notAHookPoint(req));
+                return;
+            }
             
             // Construct the full path with .sh extension
             std::string scriptPath = SCRIPTS_DIR + sanitized_filename + ".sh";
@@ -736,7 +767,7 @@ namespace provisioner {
             resp->setStatusCode(k200OK);
             resp->setBody("Script disabled successfully");
             callback(resp);
-        });
+        }, {Post});
 
         /**
          * @brief Enables a script file in the customisation directory
@@ -774,6 +805,10 @@ namespace provisioner {
                 filename = filename.substr(0, filename.length() - 3);
             }
             std::string sanitized_filename = utils::sanitize_path_component(filename);
+            if (!isHookPoint(sanitized_filename)) {
+                callback(notAHookPoint(req));
+                return;
+            }
             
             // Construct the full path with .sh extension
             std::string scriptPath = SCRIPTS_DIR + sanitized_filename + ".sh";
@@ -815,7 +850,7 @@ namespace provisioner {
             resp->setStatusCode(k200OK);
             resp->setBody("Script enabled successfully");
             callback(resp);
-        });
+        }, {Post});
 
         /**
          * @brief Saves or creates a script file in the customisation directory
@@ -896,6 +931,10 @@ namespace provisioner {
                 filename = filename.substr(0, filename.length() - 3);
             }
             std::string sanitized_filename = utils::sanitize_path_component(filename);
+            if (!isHookPoint(sanitized_filename)) {
+                callback(notAHookPoint(req));
+                return;
+            }
             
             // Construct the full path with .sh extension
             std::string scriptPath = SCRIPTS_DIR + sanitized_filename + ".sh";
@@ -972,7 +1011,7 @@ namespace provisioner {
             resp->setContentTypeCode(CT_APPLICATION_JSON);
             resp->setBody(Json::FastWriter().write(scriptMetadata));
             callback(resp);
-        });
+        }, {Post});
 
         /**
          * @brief Uploads a script file to the customisation directory
@@ -1082,6 +1121,10 @@ namespace provisioner {
             }
             
             std::string sanitized_filename = utils::sanitize_path_component(filename);
+            if (!isHookPoint(sanitized_filename)) {
+                callback(notAHookPoint(req));
+                return;
+            }
             
             // Construct the full path with .sh extension
             std::string scriptPath = SCRIPTS_DIR + sanitized_filename + ".sh";
@@ -1320,6 +1363,6 @@ namespace provisioner {
                 resp->setBody(Json::FastWriter().write(response));
                 callback(resp);
             }
-        });
+        }, {Post});
     }
 } // namespace provisioner

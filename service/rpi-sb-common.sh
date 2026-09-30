@@ -114,6 +114,243 @@ with_lock() {
     return $?
 }
 
+# =============================================================================
+# Bounded command execution
+# =============================================================================
+# The fastboot client waits for ever for a device that has gone away, or for a
+# TCP address that never answers, so no fastboot call may run unbounded. Each
+# kind of call has its own budget; flash budgets scale with the payload.
+# =============================================================================
+: "${FASTBOOT_CONTROL_TIMEOUT:=30}"   # getvar, led, idpgetblk, stage
+: "${FASTBOOT_STORAGE_TIMEOUT:=120}"  # partition tables, LUKS format and open
+: "${FASTBOOT_ERASE_TIMEOUT:=900}"    # whole-device discard; eMMC can be slow
+BOUNDED_KILL_AFTER=10
+: "${FASTBOOT_PRESENCE_TIMEOUT:=10}"  # is the board there, before a long call
+
+# Runs "$@" under timeout(1), streaming its output and keeping a copy. Sets
+# BOUNDED_RC, BOUNDED_OUT (the copy, which the caller removes) and
+# BOUNDED_REMOTE, the reason fastboot quotes when the device refuses a
+# command. Output is captured because that reason otherwise reaches only the
+# journal, never the per-device log the UI shows.
+run_bounded() {
+    _rb_secs="$1"
+    shift
+    case $- in *e*) _rb_errexit=1 ;; *) _rb_errexit=0 ;; esac
+    set +e
+    log "Running with ${_rb_secs}s timeout: \"$*\""
+    BOUNDED_OUT="$(mktemp)"
+    BOUNDED_ABSENT=0
+    # A budget is sized for the work, not for a board that has gone: the
+    # client waits out all of it, fifteen minutes for an erase and an hour
+    # for a large flash. So a long call first asks whether anybody is there.
+    if [ "$1" = fastboot ] && [ "$2" = -s ] && [ "${_rb_secs}" -gt "${FASTBOOT_PRESENCE_TIMEOUT}" ] &&
+       ! timeout -k 5 "${FASTBOOT_PRESENCE_TIMEOUT}" fastboot -s "$3" getvar version > /dev/null 2>&1; then
+        echo "the board did not answer within ${FASTBOOT_PRESENCE_TIMEOUT} seconds" > "${BOUNDED_OUT}"
+        BOUNDED_RC=124 BOUNDED_REMOTE="" BOUNDED_ABSENT=1
+        _rb_secs=${FASTBOOT_PRESENCE_TIMEOUT}
+        [ "${_rb_errexit}" -eq 0 ] || set -e
+        return 0
+    fi
+    _rb_rcfile="$(mktemp)"
+    _rb_pidfile="$(mktemp)"
+    _rb_gone="${_rb_rcfile}.gone"
+    # And a board lost part-way through: over TCP the client reconnects and
+    # waits rather than failing. Waiting as its last line, for as long as the
+    # presence probe allows, ends the call. Control calls are left alone: they
+    # may wait for a board that is coming up.
+    _rb_watch=""
+    if [ "$1" = fastboot ] && [ "${_rb_secs}" -gt "${FASTBOOT_CONTROL_TIMEOUT}" ]; then
+        (
+            _w=0
+            while [ ! -s "${_rb_rcfile}" ]; do
+                sleep 1
+                if tail -n 1 "${BOUNDED_OUT}" 2>/dev/null | grep -q '< waiting for'; then _w=$((_w + 1)); else _w=0; fi
+                if [ "${_w}" -ge "${FASTBOOT_PRESENCE_TIMEOUT}" ]; then
+                    : > "${_rb_gone}"
+                    kill -TERM "$(cat "${_rb_pidfile}")" 2>/dev/null
+                    break
+                fi
+            done
+        ) &
+        _rb_watch=$!
+    fi
+    # POSIX sh reports a pipeline's last status, so the command's goes via a file.
+    { timeout -k "${BOUNDED_KILL_AFTER}" "${_rb_secs}" "$@" 2>&1 & echo $! > "${_rb_pidfile}"; wait $!; echo $? > "${_rb_rcfile}"; } | tee "${BOUNDED_OUT}"
+    BOUNDED_RC="$(cat "${_rb_rcfile}" 2>/dev/null)"
+    [ -n "${BOUNDED_RC}" ] || BOUNDED_RC=1
+    if [ -n "${_rb_watch}" ]; then kill "${_rb_watch}" 2>/dev/null; wait "${_rb_watch}" 2>/dev/null; fi
+    if [ -e "${_rb_gone}" ]; then BOUNDED_RC=124; BOUNDED_ABSENT=2; fi
+    rm -f "${_rb_rcfile}" "${_rb_pidfile}" "${_rb_gone}"
+    BOUNDED_REMOTE="$(sed -n "s/.*FAILED (remote: '\(.*\)').*/\1/p" "${BOUNDED_OUT}" | tail -n 1)"
+    [ "${_rb_errexit}" -eq 0 ] || set -e
+}
+
+# Logs why the last run_bounded command ($1, for the message) failed, and sets
+# BOUNDED_WHY for the caller's own message.
+bounded_report() {
+    if [ -n "${BOUNDED_REMOTE}" ]; then
+        BOUNDED_WHY="the device refused it: ${BOUNDED_REMOTE}"
+    else
+        case "${BOUNDED_RC}" in
+            124) if [ "${BOUNDED_ABSENT:-0}" -eq 1 ]; then
+                     BOUNDED_WHY="the board did not answer within ${_rb_secs} seconds, so it was not started"
+                 elif [ "${BOUNDED_ABSENT:-0}" -eq 2 ]; then
+                     BOUNDED_WHY="the board went away part-way through, and was not back within ${FASTBOOT_PRESENCE_TIMEOUT} seconds"
+                 else
+                     BOUNDED_WHY="timed out after ${_rb_secs} seconds"
+                 fi ;;
+            137) BOUNDED_WHY="killed after ignoring the ${_rb_secs}-second timeout, or killed externally" ;;
+            *)   BOUNDED_WHY="exit code ${BOUNDED_RC}" ;;
+        esac
+    fi
+    log "\"$1\" FAILED: ${BOUNDED_WHY}"
+    if [ -z "${BOUNDED_REMOTE}" ]; then
+        log "Last output:"
+        tail -n 20 "${BOUNDED_OUT}" 2>/dev/null | while IFS= read -r _br_line; do
+            log "  ${_br_line}"
+        done
+    fi
+    rm -f "${BOUNDED_OUT}"
+}
+
+# A device serial names log directories, unit instances and database rows,
+# and the device reports it itself, so it can be anything. Accept plain
+# alphanumerics only: no separators, no dots, nothing a path or query can use.
+serial_is_safe() {
+    case "$1" in
+        ""|*[!0-9A-Za-z]*) return 1 ;;
+    esac
+    [ "${#1}" -le 64 ]
+}
+
+# The workdir's contents are reused, flashed and written through as root, so
+# anyone else able to write there could supply their own boot image or plant
+# a symlink. It is used only when root alone can change it.
+workdir_is_private() {
+    [ -d "$1" ] && [ ! -L "$1" ] || return 1
+    [ "$(stat -c %u "$1")" = 0 ] || return 1
+    case "$(stat -c %A "$1")" in
+        ?????w*|????????w*) return 1 ;;
+    esac
+}
+
+# The device names its own network address, so the answer there need not be
+# this device: another board on the network would be flashed with this one's
+# image. A route is used only if it reports the serial seen over USB. That
+# catches a misrouted board, not an attacker on the network, who can learn a
+# serial and answer with it; an untrusted network needs flashing kept to USB.
+# A split-mode data plane will not answer serialno, so there the route need
+# only be reachable, and a misrouted board goes uncaught.
+tcp_route_is_this_device() {
+    [ -n "$1" ] || return 1
+    if [ "${TCP_DATA_PLANE_ONLY}" = "yes" ]; then
+        timeout -k 5 10 fastboot -s "tcp:$1" getvar version >/dev/null 2>&1
+        return
+    fi
+    _tr_out="$(timeout -k 5 10 fastboot -s "tcp:$1" getvar serialno 2>&1)" || return 1
+    _tr_serial="$(printf '%s\n' "${_tr_out}" | sed -n 's/^serialno: *//p' | tr -d '\r' | head -n 1)"
+    if [ -z "${_tr_serial}" ] || [ "${_tr_serial}" != "${TARGET_DEVICE_SERIAL}" ]; then
+        log "Not using tcp:$1: it answers as '${_tr_serial}', not ${TARGET_DEVICE_SERIAL}"
+        return 1
+    fi
+}
+
+# Arguments: $1 = timeout in seconds, remaining = command. Aborts on failure.
+timeout_fatal_secs() {
+    run_bounded "$@"
+    shift
+    if [ "${BOUNDED_RC}" -eq 0 ]; then
+        rm -f "${BOUNDED_OUT}"
+        log "\"$*\" succeeded"
+        return 0
+    fi
+    bounded_report "$*"
+    record_abort_once "${TARGET_DEVICE_SERIAL}" "${TARGET_USB_PATH}"
+    die "\"$*\" FAILED: ${BOUNDED_WHY}"
+}
+
+# As timeout_fatal_secs, but returns the command's status instead of aborting.
+timeout_nonfatal_secs() {
+    run_bounded "$@"
+    shift
+    if [ "${BOUNDED_RC}" -eq 0 ]; then
+        rm -f "${BOUNDED_OUT}"
+        log "\"$*\" succeeded"
+        return 0
+    fi
+    bounded_report "$*"
+    return "${BOUNDED_RC}"
+}
+
+# Budget for a flash, derived from the payload. The rate is a little over half
+# the 9.9 MiB/s measured end to end in #346, whose 600-second limit killed a
+# healthy 5.7 GiB flash at 96%. Too generous only delays noticing a wedged
+# board; too tight destroys a run that was going to succeed.
+FLASH_ASSUMED_RATE_BYTES=5767168  # 5.5 MiB/s, transfer and write together
+FLASH_TIMEOUT_BASE=120            # connection setup, sparse parse, housekeeping
+
+# Arguments: $1 = payload size in bytes. An unknown size gets an hour.
+flash_timeout_for() {
+    case "$1" in
+        ''|*[!0-9]*) echo 3600 ;;
+        *) echo $(( FLASH_TIMEOUT_BASE + $1 / FLASH_ASSUMED_RATE_BYTES )) ;;
+    esac
+}
+
+# Deferred flash writes: fastbootd answers `flash` for a sparse chunk while it
+# is still being written, so the next chunk's download overlaps the write.
+# Switched on for each flash and off again after it, so it never reaches a
+# hook's own flashes and the second staging buffer is freed between flashes.
+FLASH_PIPELINE=0
+
+# Arguments: $1 = the specifier flashes will use. Sets FLASH_PIPELINE when
+# fastbootd offers deferred writes. USB only: one session spans every
+# invocation while the board stays on its port, but each network connection
+# is a new session, which would discard the setting.
+probe_flash_pipeline() {
+    FLASH_PIPELINE=0
+    case "$1" in
+        tcp:*|udp:*)
+            log "Deferred flash writes skipped: flashing over the network"
+            return 0
+            ;;
+    esac
+    if timeout_nonfatal_secs "${FASTBOOT_CONTROL_TIMEOUT}" fastboot -s "$1" getvar rpi-flash-pipeline; then
+        FLASH_PIPELINE=1
+        log "Device offers deferred flash writes"
+    else
+        log "Device does not offer deferred flash writes; continuing without"
+    fi
+}
+
+# Arguments: $1 = fastboot specifier, $2 = partition, $3 = image file.
+fastboot_flash() {
+    _ff_size="$(stat -c%s "$3" 2>/dev/null || echo unknown)"
+    _ff_deferred=0
+    if [ "${FLASH_PIPELINE}" -eq 1 ] && \
+       timeout_nonfatal_secs "${FASTBOOT_CONTROL_TIMEOUT}" fastboot -s "$1" oem flash-pipeline on; then
+        _ff_deferred=1
+    fi
+    timeout_fatal_secs "$(flash_timeout_for "${_ff_size}")" fastboot -s "$1" flash "$2" "$3"
+    if [ "${_ff_deferred}" -eq 1 ]; then
+        # Collect the last chunk's write here, so its failure names this flash.
+        # At most one chunk, fastbootd's 256 MiB download limit, is outstanding.
+        timeout_fatal_secs "$(flash_timeout_for 268435456)" fastboot -s "$1" oem flash-commit
+        timeout_nonfatal_secs "${FASTBOOT_CONTROL_TIMEOUT}" fastboot -s "$1" oem flash-pipeline off || true
+    fi
+}
+
+# Prints fastboot's raw getvar output for $1. A timeout is logged to stderr,
+# because callers capture stdout as the value.
+bounded_getvar() {
+    _bg_rc=0
+    _bg_out="$(timeout -k 5 "${FASTBOOT_CONTROL_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar "$1" 2>&1)" || _bg_rc=$?
+    case "${_bg_rc}" in
+        124|137) log "getvar $1: no answer within ${FASTBOOT_CONTROL_TIMEOUT} seconds" >&2 ;;
+    esac
+    printf '%s\n' "${_bg_out}"
+}
+
 # Cleans up orphaned resources (temp dirs older than MAX_TEMP_DIR_AGE_HOURS)
 cleanup_orphans() {
     mkdir -p "$TEMP_BASE" 2>/dev/null || true
@@ -214,7 +451,18 @@ log_stderr() {
     return "${_ls_rc}"
 }
 
+# The configuration holds credentials such as RPI_CONNECT_API_KEY, and under
+# set -x every assignment in a sourced file is copied into the journal.
 read_config() {
+    case $- in *x*) _rc_xtrace=1 ;; *) _rc_xtrace= ;; esac
+    { set +x; } 2>/dev/null
+    _read_config
+    _rc_status=$?
+    if [ -n "${_rc_xtrace}" ]; then set -x; fi
+    return "${_rc_status}"
+}
+
+_read_config() {
     # Source package defaults first
     if [ -f /usr/share/rpi-sb-provisioner/defaults/config ]; then
         # shellcheck disable=SC1091
@@ -264,8 +512,25 @@ setup_fastboot_and_id_vars() {
     FASTBOOT_TCP_FLASH_SPECIFIER=""
     export FASTBOOT_TCP_FLASH_SPECIFIER
 
-    timeout_fatal fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar version
+    timeout_fatal_secs "${FASTBOOT_CONTROL_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar version
     TARGET_DEVICE_SERIAL="$(get_variable serialno)"
+    if ! serial_is_safe "${TARGET_DEVICE_SERIAL}"; then
+        # Not logged through log(), whose path is built from this value.
+        echo "Refusing device ${FASTBOOT_DEVICE_SPECIFIER}: malformed serial number reported" >&2
+        exit 1
+    fi
+    # Commands later go to the serial the device reports, so a board could
+    # claim its neighbour's and have that one erased and flashed. Over USB the
+    # two must agree; a tcp: route was checked against the serial when chosen.
+    case "${FASTBOOT_DEVICE_SPECIFIER}" in
+        tcp:*) ;;
+        *)
+            if [ "${TARGET_DEVICE_SERIAL}" != "${FASTBOOT_DEVICE_SPECIFIER}" ]; then
+                echo "Refusing device ${FASTBOOT_DEVICE_SPECIFIER}: it reports serial ${TARGET_DEVICE_SERIAL}" >&2
+                exit 1
+            fi
+            ;;
+    esac
 
     # Returns "yes" if the device-side fastbootd is running in -i usb+tcp
     # split mode. Empty/missing/"no" means legacy behaviour (TCP, when
@@ -276,11 +541,12 @@ setup_fastboot_and_id_vars() {
     USE_IPV4=
     USE_IPV6=
     set +e
-    IPV6_ADDRESS="$(fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar ipv6-address 2>&1 | awk '/^ipv6-address:/ {print $2}')"
-    (timeout_nonfatal fastboot -s tcp:"${IPV6_ADDRESS}" getvar version)
+    IPV6_ADDRESS="$(bounded_getvar ipv6-address | awk '/^ipv6-address:/ {print $2}')"
+    printf '%s' "${IPV6_ADDRESS}" | grep -Eqx '[0-9A-Fa-f.]*:[0-9A-Fa-f.]*:[0-9A-Fa-f:.]*(%[A-Za-z0-9_.-]+)?' || IPV6_ADDRESS=""
+    tcp_route_is_this_device "${IPV6_ADDRESS}"
     USE_IPV6=$?
-    IPV4_ADDRESS="$(fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar ipv4-address 2>&1 | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}')"
-    (timeout_nonfatal fastboot -s tcp:"${IPV4_ADDRESS}" getvar version)
+    IPV4_ADDRESS="$(bounded_getvar ipv4-address | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -n 1)"
+    tcp_route_is_this_device "${IPV4_ADDRESS}"
     USE_IPV4=$?
     set -e
 
@@ -619,6 +885,125 @@ classify_gold_master_os() {
     return 1
 }
 
+# The block size libsparse uses, and so the granularity fastboot's host-side
+# sparse writer can express a hole at.
+FASTBOOT_SPARSE_BLOCK_SIZE=4096
+
+# align_image_for_fastboot ${image} ${scratch_dir}
+#
+# fastboot's sparse writer ends each chunk with a don't-care running to the
+# image's end, refuses one that is not whole 4096-byte blocks, then sends a
+# header promising the chunk it skipped, and the device rejects the image.
+# Images sized in 512-byte sectors are legal and hit this (#355), so a copy
+# is zero-padded to the next boundary, past the last partition. The
+# configured image is never padded: it may be read-only or in use.
+#
+# Sets:   FASTBOOT_FLASH_IMAGE to the path to hand to fastboot.
+# Exit:   0 when usable, 1 otherwise, with the reason in
+#         FASTBOOT_FLASH_IMAGE_ERROR.
+align_image_for_fastboot() {
+    _afb_image="$1"
+    _afb_scratch="$2"
+
+    FASTBOOT_FLASH_IMAGE="${_afb_image}"
+    FASTBOOT_FLASH_IMAGE_ERROR=""
+    export FASTBOOT_FLASH_IMAGE FASTBOOT_FLASH_IMAGE_ERROR
+
+    if ! _afb_size=$(stat -c%s "${_afb_image}" 2>/dev/null); then
+        FASTBOOT_FLASH_IMAGE_ERROR="Could not determine the size of ${_afb_image}"
+        return 1
+    fi
+
+    _afb_remainder=$((_afb_size % FASTBOOT_SPARSE_BLOCK_SIZE))
+    if [ "${_afb_remainder}" -eq 0 ]; then
+        return 0
+    fi
+    _afb_padded=$((_afb_size + FASTBOOT_SPARSE_BLOCK_SIZE - _afb_remainder))
+
+    # An image already sitting in the scratch directory is a copy this run made
+    # for itself, and can be padded where it lies.
+    case "${_afb_image}" in
+        "${_afb_scratch}"/*)
+            ;;
+        *)
+            log "OS image is ${_afb_size} bytes, which is not a multiple of ${FASTBOOT_SPARSE_BLOCK_SIZE}; copying it to pad it. Rounding the image up to a ${FASTBOOT_SPARSE_BLOCK_SIZE}-byte boundary at source would avoid this copy on every device."
+            if ! cp --reflink=auto "${_afb_image}" "${_afb_scratch}"/gold-master-aligned.img; then
+                FASTBOOT_FLASH_IMAGE_ERROR="Failed to copy ${_afb_image} into ${_afb_scratch} for padding"
+                return 1
+            fi
+            FASTBOOT_FLASH_IMAGE="${_afb_scratch}/gold-master-aligned.img"
+            ;;
+    esac
+
+    if ! truncate -s "${_afb_padded}" "${FASTBOOT_FLASH_IMAGE}"; then
+        FASTBOOT_FLASH_IMAGE_ERROR="Failed to pad ${FASTBOOT_FLASH_IMAGE} to ${_afb_padded} bytes"
+        return 1
+    fi
+
+    log "Padded the OS image from ${_afb_size} to ${_afb_padded} bytes: fastboot cannot sparse an image whose length is not a multiple of ${FASTBOOT_SPARSE_BLOCK_SIZE}"
+    return 0
+}
+
+# make_sparse_image ${source} ${destination}
+#
+# img2simg exits 0 when libsparse refuses to write a chunk, leaving a header
+# that counts one chunk more than the file holds. Cached in RPI_SB_WORKDIR,
+# that image would go to every later device, which rejects it, with nothing
+# logged against the run that made it. libsparse does print the refusal, so
+# anything on stderr is failure, and the output is renamed into place only
+# once whole. A source length that is not whole blocks, the cause (#355),
+# is refused first.
+#
+# Exit:   0 with ${destination} written, 1 otherwise and the reason logged.
+make_sparse_image() {
+    _msi_src="$1"
+    _msi_dst="$2"
+
+    if ! _msi_size=$(stat -c%s "${_msi_src}" 2>/dev/null); then
+        log "ERROR: make_sparse_image: could not determine the size of ${_msi_src}"
+        return 1
+    fi
+
+    if [ $((_msi_size % FASTBOOT_SPARSE_BLOCK_SIZE)) -ne 0 ]; then
+        log "ERROR: make_sparse_image: ${_msi_src} is ${_msi_size} bytes, which is not a multiple of ${FASTBOOT_SPARSE_BLOCK_SIZE}; libsparse cannot express the tail of it"
+        return 1
+    fi
+
+    if ! _msi_err=$(mktemp); then
+        log "ERROR: make_sparse_image: could not create a temporary file"
+        return 1
+    fi
+
+    if img2simg -s "${_msi_src}" "${_msi_dst}.tmp" 2>"${_msi_err}"; then
+        _msi_rc=0
+    else
+        _msi_rc=$?
+    fi
+
+    # `|| [ -n ... ]` so a final line without a trailing newline is not dropped.
+    while IFS= read -r _msi_line || [ -n "${_msi_line}" ]; do
+        log "img2simg: ${_msi_line}"
+        _msi_rc=1
+    done < "${_msi_err}"
+    rm -f "${_msi_err}"
+
+    if [ "${_msi_rc}" -ne 0 ]; then
+        log "ERROR: make_sparse_image: could not sparse ${_msi_src} into ${_msi_dst}"
+        rm -f "${_msi_dst}.tmp"
+        return 1
+    fi
+
+    # Renamed only once the output is known to be whole, so a failed run cannot
+    # leave a partial sparse behind as a valid-looking cache hit.
+    if ! mv "${_msi_dst}.tmp" "${_msi_dst}"; then
+        log "ERROR: make_sparse_image: could not move ${_msi_dst}.tmp into place"
+        rm -f "${_msi_dst}.tmp"
+        return 1
+    fi
+
+    return 0
+}
+
 run_provision_failed_hook() {
     PROVISIONER_NAME="$1"
     HOOK_CONTEXT="${2:-provisioning}"
@@ -688,6 +1073,17 @@ run_customisation_script() {
         case $- in
             *e*) ERROR_EXIT_WAS_SET=1 ;;
         esac
+        # Operator code, bounded like everything else. A hook legitimately
+        # doing long work can raise RPI_SB_HOOK_TIMEOUT; zero is not accepted,
+        # because timeout(1) reads it as no limit at all.
+        HOOK_TIMEOUT="${RPI_SB_HOOK_TIMEOUT:-1800}"
+        case "${HOOK_TIMEOUT}" in
+            ''|*[!0-9]*|0)
+                log "Ignoring RPI_SB_HOOK_TIMEOUT='${HOOK_TIMEOUT}': not a positive number of seconds"
+                HOOK_TIMEOUT=1800
+                ;;
+        esac
+
         set +e
         export_customisation_env
         if [ "${STAGE_NAME}" = "post-flash" ]; then
@@ -697,7 +1093,7 @@ run_customisation_script() {
         if [ "${STAGE_NAME}" = "post-flash" ]; then
             # For post-flash stage, pass device info that can be used with fastboot.
             # TARGET_USB_PATH and TARGET_DEVICE_PATH are also exported (issue #273).
-            "${SCRIPT_PATH}" "${FASTBOOT_DEVICE_SPECIFIER}" "${TARGET_DEVICE_SERIAL}" "${RPI_DEVICE_STORAGE_TYPE}"
+            timeout -k 10 "${HOOK_TIMEOUT}" "${SCRIPT_PATH}" "${FASTBOOT_DEVICE_SPECIFIER}" "${TARGET_DEVICE_SERIAL}" "${RPI_DEVICE_STORAGE_TYPE}"
         elif [ "${STAGE_NAME}" = "provision-started" ]; then
             # For provision-started stage, forward (fastboot specifier, serial,
             # storage type) so hooks can signal programming rigs (e.g. LED).
@@ -705,12 +1101,12 @@ run_customisation_script() {
             FASTBOOT_SPEC_ARG="$3"
             TARGET_SERIAL_ARG="$4"
             STORAGE_TYPE_ARG="$5"
-            "${SCRIPT_PATH}" "${FASTBOOT_SPEC_ARG}" "${TARGET_SERIAL_ARG}" "${STORAGE_TYPE_ARG}"
+            timeout -k 10 "${HOOK_TIMEOUT}" "${SCRIPT_PATH}" "${FASTBOOT_SPEC_ARG}" "${TARGET_SERIAL_ARG}" "${STORAGE_TYPE_ARG}"
         elif [ "${STAGE_NAME}" = "provision-failed" ]; then
             if [ "${PROVISION_FAILED_CONTEXT:-provisioning}" = "bootstrap" ]; then
-                "${SCRIPT_PATH}" "$3" "$4" "$5" "$6"
+                timeout -k 10 "${HOOK_TIMEOUT}" "${SCRIPT_PATH}" "$3" "$4" "$5" "$6"
             else
-                "${SCRIPT_PATH}" "$3" "$4" "$5"
+                timeout -k 10 "${HOOK_TIMEOUT}" "${SCRIPT_PATH}" "$3" "$4" "$5"
             fi
         elif [ "${STAGE_NAME}" = "bootstrap" ]; then
             # For bootstrap stage, pass device detection info
@@ -718,12 +1114,12 @@ run_customisation_script() {
             TARGET_DEVICE_FAMILY_ARG="$4"
             TARGET_USB_PATH_ARG="$5"
             TARGET_DEVICE_PATH_ARG="$6"
-            "${SCRIPT_PATH}" "${TARGET_DEVICE_SERIAL_ARG}" "${TARGET_DEVICE_FAMILY_ARG}" "${TARGET_USB_PATH_ARG}" "${TARGET_DEVICE_PATH_ARG}"
+            timeout -k 10 "${HOOK_TIMEOUT}" "${SCRIPT_PATH}" "${TARGET_DEVICE_SERIAL_ARG}" "${TARGET_DEVICE_FAMILY_ARG}" "${TARGET_USB_PATH_ARG}" "${TARGET_DEVICE_PATH_ARG}"
         else
             # For filesystem mount stages, pass mount points
             BOOT_MOUNT="$3"
             ROOTFS_MOUNT="$4"
-            "${SCRIPT_PATH}" "${BOOT_MOUNT}" "${ROOTFS_MOUNT}"
+            timeout -k 10 "${HOOK_TIMEOUT}" "${SCRIPT_PATH}" "${BOOT_MOUNT}" "${ROOTFS_MOUNT}"
         fi
         # Capture exit code immediately, before restoring set -e
         SCRIPT_EXIT_CODE=$?
@@ -734,6 +1130,9 @@ run_customisation_script() {
         if [ $SCRIPT_EXIT_CODE -eq 0 ]; then
             announce_stop "Customisation script ${SCRIPT_NAME} completed successfully"
         else
+            case "${SCRIPT_EXIT_CODE}" in
+                124) log "ERROR: Customisation script ${SCRIPT_NAME} did not finish within ${HOOK_TIMEOUT} seconds (RPI_SB_HOOK_TIMEOUT)" ;;
+            esac
             announce_stop "Customisation script ${SCRIPT_NAME} failed with exit code ${SCRIPT_EXIT_CODE}"
             log "ERROR: Customisation script ${SCRIPT_NAME} failed with exit code ${SCRIPT_EXIT_CODE}"
             return $SCRIPT_EXIT_CODE
@@ -747,7 +1146,7 @@ run_customisation_script() {
 # the first newline -- use get_variable_pem() for multi-line values such as
 # public-key/private-key, which the gadget returns as armoured PEM.
 get_variable() {
-    fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar "$1" 2>&1 | grep -oP "${1}"': \K[^\r\n]*' || true
+    bounded_getvar "$1" | grep -oP "${1}"': \K[^\r\n]*' || true
 }
 
 # Retrieve a fastboot variable whose value is an armoured PEM block, printing
@@ -763,7 +1162,7 @@ get_variable() {
 # which rpi-fastbootd does at startup and again immediately after
 # `oem fwcrypto init`.
 get_variable_pem() {
-    _gvp_output=$(fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" getvar "$1" 2>&1 | tr -d '\r') || true
+    _gvp_output=$(bounded_getvar "$1" | tr -d '\r') || true
     _gvp_pem=$(printf '%s\n' "${_gvp_output}" | \
         sed -n '/-----BEGIN /,/-----END /{
             s/^.*\(-----BEGIN \)/\1/
@@ -809,7 +1208,15 @@ unmount() {
         DIR=$1
     fi
 
+    # Bounded: with errexit off, as in cleanup, a busy mount spun here for ever.
+    _um_tries=0
     while mount | grep -q "$DIR"; do
+        _um_tries=$((_um_tries + 1))
+        if [ "${_um_tries}" -gt 5 ]; then
+            log "Giving up on unmounting ${DIR}: still mounted after 5 attempts"
+            return 1
+        fi
+        [ "${_um_tries}" -eq 1 ] || sleep 1
         locs=$(mount | grep "$DIR" | cut -f 3 -d ' ' | sort -r)
         for loc in $locs; do
             umount "$loc"
@@ -1486,11 +1893,10 @@ prepare_signed_boot_simg() {
     sync
     umount "${_out_mnt}" || _fail "umount output vfat" || return 1
 
-    # Atomic rename so a partial write never appears as a valid cache hit.
-    img2simg -s "${_out_vfat}" "${_out_sparse}.tmp" \
+    # make_sparse_image() renames only once it is satisfied the output is
+    # whole, so a partial write never appears as a valid cache hit.
+    make_sparse_image "${_out_vfat}" "${_out_sparse}" \
         || _fail "img2simg output" || return 1
-    mv "${_out_sparse}.tmp" "${_out_sparse}" \
-        || _fail "mv output into cache" || return 1
 
     rm -rf "${_work}"
     return 0

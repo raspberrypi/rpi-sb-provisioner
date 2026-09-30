@@ -6,6 +6,10 @@
 #include <functional>
 #include <cstring>
 #include <cctype>
+#include <cerrno>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <drogon/drogon.h>
 #include "include/audit.h"
 #include "keywrap.h"
@@ -877,24 +881,7 @@ namespace provisioner {
                 return false;
             }
 
-            // Write the wrapped blob (binary).
-            std::ofstream pinFile(PKCS11_PIN_FILE, std::ios::binary);
-            if (!pinFile.is_open()) {
-                LOG_ERROR << "Failed to open PIN file for writing: " << PKCS11_PIN_FILE;
-                return false;
-            }
-            pinFile.write(blob.data(), static_cast<std::streamsize>(blob.size()));
-            pinFile.close();
-            
-            // Set restrictive permissions (owner read-only)
-            try {
-                std::filesystem::permissions(PKCS11_PIN_FILE,
-                    std::filesystem::perms::owner_read,
-                    std::filesystem::perm_options::replace);
-            } catch (const std::filesystem::filesystem_error& e) {
-                LOG_ERROR << "Failed to set PIN file permissions: " << e.what();
-                // Try to remove the file if we can't set permissions
-                std::filesystem::remove(PKCS11_PIN_FILE);
+            if (!writeSecretFile(PKCS11_PIN_FILE, blob)) {
                 return false;
             }
             
@@ -929,6 +916,29 @@ namespace provisioner {
             f.read(hdr, sizeof(hdr));
             std::string head(hdr, static_cast<size_t>(f.gcount()));
             return keywrap::isWrapped(head);
+        }
+
+        bool writeSecretFile(const std::string& path, const std::string& data) {
+            const std::string tmp = path + ".tmp";
+            ::unlink(tmp.c_str());
+            const int fd = ::open(tmp.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0400);
+            if (fd < 0) {
+                LOG_ERROR << "Cannot create " << tmp << ": " << std::strerror(errno);
+                return false;
+            }
+            bool ok = ::fchmod(fd, 0400) == 0;
+            for (size_t done = 0; ok && done < data.size();) {
+                const ssize_t n = ::write(fd, data.data() + done, data.size() - done);
+                if (n <= 0) ok = false; else done += static_cast<size_t>(n);
+            }
+            ok = ok && ::fsync(fd) == 0;
+            ok = (::close(fd) == 0) && ok;
+            if (!ok || ::rename(tmp.c_str(), path.c_str()) != 0) {
+                LOG_ERROR << "Cannot write " << path << ": " << std::strerror(errno);
+                ::unlink(tmp.c_str());
+                return false;
+            }
+            return true;
         }
 
         bool wrapFileInPlace(const std::string& path) {
@@ -968,20 +978,8 @@ namespace provisioner {
             }
             if (!raw.empty()) OPENSSL_cleanse(&raw[0], raw.size());
 
-            std::ofstream out(path, std::ios::binary | std::ios::trunc);
-            if (!out.is_open()) {
+            if (!writeSecretFile(path, blob)) {
                 LOG_ERROR << "Migration: cannot write wrapped secret: " << path;
-                return false;
-            }
-            out.write(blob.data(), static_cast<std::streamsize>(blob.size()));
-            out.close();
-
-            try {
-                std::filesystem::permissions(path,
-                    std::filesystem::perms::owner_read,
-                    std::filesystem::perm_options::replace);
-            } catch (const std::filesystem::filesystem_error& e) {
-                LOG_ERROR << "Migration: failed to set permissions on " << path << ": " << e.what();
                 return false;
             }
 
@@ -1058,149 +1056,6 @@ namespace provisioner {
             return status;
         }
 
-        // ===== CSRF Token Implementation =====
-        
-        CsrfTokenManager& CsrfTokenManager::getInstance() {
-            static CsrfTokenManager instance;
-            return instance;
-        }
-        
-        std::string CsrfTokenManager::generateToken(const std::string& sessionId) {
-            std::lock_guard<std::mutex> lock(mutex_);
-            
-            // Generate random token
-            static const char charset[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-            static std::random_device rd;
-            static std::mt19937 gen(rd());
-            static std::uniform_int_distribution<> dis(0, sizeof(charset) - 2);
-            
-            std::string token;
-            token.reserve(TOKEN_LENGTH);
-            for (int i = 0; i < TOKEN_LENGTH; ++i) {
-                token += charset[dis(gen)];
-            }
-            
-            // Store the token
-            TokenInfo tokenInfo;
-            tokenInfo.token = token;
-            tokenInfo.createdAt = std::chrono::steady_clock::now();
-            tokenInfo.used = false;
-            
-            auto& tokens = sessionTokens_[sessionId];
-            
-            // Limit tokens per session
-            if (tokens.size() >= MAX_TOKENS_PER_SESSION) {
-                tokens.erase(tokens.begin());
-            }
-            
-            tokens.push_back(tokenInfo);
-            
-            LOG_DEBUG << "Generated CSRF token for session " << sessionId.substr(0, 8) << "...";
-            
-            return token;
-        }
-        
-        bool CsrfTokenManager::validateToken(const std::string& sessionId, const std::string& token) {
-            std::lock_guard<std::mutex> lock(mutex_);
-            
-            auto sessionIt = sessionTokens_.find(sessionId);
-            if (sessionIt == sessionTokens_.end()) {
-                LOG_WARN << "CSRF validation failed: unknown session " << sessionId.substr(0, 8) << "...";
-                return false;
-            }
-            
-            auto now = std::chrono::steady_clock::now();
-            
-            for (auto& tokenInfo : sessionIt->second) {
-                if (tokenInfo.token == token) {
-                    // Check if expired
-                    auto age = std::chrono::duration_cast<std::chrono::seconds>(now - tokenInfo.createdAt).count();
-                    if (age > TOKEN_VALIDITY_SECONDS) {
-                        LOG_WARN << "CSRF validation failed: token expired (age: " << age << "s)";
-                        return false;
-                    }
-                    
-                    // Token is valid - mark as used but allow reuse within the validity period
-                    // (for AJAX apps where multiple requests might use the same token)
-                    tokenInfo.used = true;
-                    LOG_DEBUG << "CSRF token validated for session " << sessionId.substr(0, 8) << "...";
-                    return true;
-                }
-            }
-            
-            LOG_WARN << "CSRF validation failed: token not found for session " << sessionId.substr(0, 8) << "...";
-            return false;
-        }
-        
-        void CsrfTokenManager::cleanupExpiredTokens() {
-            std::lock_guard<std::mutex> lock(mutex_);
-            
-            auto now = std::chrono::steady_clock::now();
-            int removedCount = 0;
-            
-            for (auto sessionIt = sessionTokens_.begin(); sessionIt != sessionTokens_.end();) {
-                auto& tokens = sessionIt->second;
-                
-                // Remove expired tokens
-                tokens.erase(
-                    std::remove_if(tokens.begin(), tokens.end(),
-                        [&now, &removedCount](const TokenInfo& info) {
-                            auto age = std::chrono::duration_cast<std::chrono::seconds>(now - info.createdAt).count();
-                            if (age > TOKEN_VALIDITY_SECONDS) {
-                                removedCount++;
-                                return true;
-                            }
-                            return false;
-                        }),
-                    tokens.end()
-                );
-                
-                // Remove empty sessions
-                if (tokens.empty()) {
-                    sessionIt = sessionTokens_.erase(sessionIt);
-                } else {
-                    ++sessionIt;
-                }
-            }
-            
-            if (removedCount > 0) {
-                LOG_DEBUG << "CSRF cleanup: removed " << removedCount << " expired tokens";
-            }
-        }
-        
-        std::string getSessionIdFromRequest(const drogon::HttpRequestPtr& req) {
-            // Create a session ID from IP + User-Agent
-            std::string ip = req->getPeerAddr().toIp();
-            std::string userAgent = req->getHeader("User-Agent");
-            
-            // Simple hash combination
-            std::hash<std::string> hasher;
-            size_t hash = hasher(ip) ^ (hasher(userAgent) << 1);
-            
-            return std::to_string(hash);
-        }
-        
-        bool validateCsrfToken(const drogon::HttpRequestPtr& req) {
-            // Check X-CSRF-Token header first
-            std::string token = req->getHeader("X-CSRF-Token");
-            
-            // If not in header, check request body for JSON requests
-            if (token.empty()) {
-                auto jsonBody = req->getJsonObject();
-                if (jsonBody && jsonBody->isMember("_csrf_token")) {
-                    token = (*jsonBody)["_csrf_token"].asString();
-                }
-            }
-            
-            if (token.empty()) {
-                LOG_WARN << "CSRF validation failed: no token provided";
-                return false;
-            }
-            
-            std::string sessionId = getSessionIdFromRequest(req);
-            return CsrfTokenManager::getInstance().validateToken(sessionId, token);
-        }
-        
         std::string shellQuoteConfigValue(const std::string& value) {
             // A value made up only of these characters is safe to write bare:
             // the shell performs no word-splitting, expansion or command
@@ -1389,8 +1244,29 @@ namespace provisioner {
             return m;
         }
 
+        bool isWritableConfigEntry(const std::string& key, const std::string& value, std::string& why) {
+            static const std::regex name("(RPI|GOLD_MASTER|PROVISIONING|CUSTOMER|PKCS11)_[A-Z0-9_]+");
+            if (!std::regex_match(key, name)) {
+                why = "not a provisioner setting: " + key.substr(0, 64);
+                return false;
+            }
+            if (value.find_first_of(std::string("\r\n\0", 3)) != std::string::npos) {
+                why = key + " may not contain a line break";
+                return false;
+            }
+            return true;
+        }
+
         std::optional<std::map<std::string, std::string>> setConfigValues(
             const std::map<std::string, std::string>& updates) {
+            for (const auto& [k, v] : updates) {
+                std::string why;
+                if (!isWritableConfigEntry(k, v, why)) {
+                    LOG_ERROR << "Refusing config update: " << why;
+                    return std::nullopt;
+                }
+            }
+
             std::lock_guard<std::mutex> lock(configWriteMutex());
 
             // Start from the full merged config so we never drop existing keys,
@@ -1434,17 +1310,17 @@ namespace provisioner {
                 }
             } // ofstream closed here, before the rename
 
-            // An in-place truncate (the pattern this replaces) preserved the
-            // existing file's mode; copy it onto the replacement so we don't
-            // silently relax permissions on the config to the umask default.
+            // Root-only: the config holds credentials such as
+            // RPI_CONNECT_API_KEY, and only root reads it.
             std::error_code ec;
-            if (std::filesystem::exists(target)) {
-                auto perms = std::filesystem::status(target).permissions();
-                std::filesystem::permissions(tmp, perms, ec);
-                if (ec) {
-                    LOG_WARN << "Could not copy config permissions onto temp file: " << ec.message();
-                    ec.clear();
-                }
+            std::filesystem::permissions(tmp, std::filesystem::perms::owner_read |
+                                         std::filesystem::perms::owner_write,
+                                         std::filesystem::perm_options::replace, ec);
+            if (ec) {
+                LOG_ERROR << "Could not restrict permissions on temp config file: " << ec.message();
+                std::error_code rmec;
+                std::filesystem::remove(tmp, rmec);
+                return std::nullopt;
             }
 
             std::filesystem::rename(tmp, target, ec);

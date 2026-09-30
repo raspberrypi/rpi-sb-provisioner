@@ -351,6 +351,26 @@ The workdir contains signed boot images, signed bootfiles, EEPROM staging assets
 
 Persistent data such as uploaded images, manufacturing databases, state databases, logs and configuration are not stored in the workdir and are not removed by workdir cache invalidation.
 
+Give the workdir a directory of its own. Its contents are deleted when the cache is invalidated, so a workdir that is, or holds, the images directory, the manufacturing database, signing keys, logs, a home directory or a system directory is never cleared.
+
+The workdir must be owned by root and writable only by root, for example `install -d -m 0755 -o root -g root /srv/rpi-sb-provisioner/workdir`. Its contents are flashed to devices, so anything else that could write there could replace them. A workdir that others can write to is not used, and each run works in a fresh temporary directory instead. Upgrading to 2.3.6 fixes a dedicated workdir's ownership and empties it; it reports a symlinked workdir with the real path to use instead.
+
+## RPI_SB_PROVISIONER_PUBLIC_DASHBOARD
+
+**Optional**
+
+Whether the devices page, a device's own page and the code scanner can be viewed without signing in. Defaults to `1` (on); set it empty to require signing in for everything.
+
+Viewers who have not signed in see serial numbers, USB ports, addresses, states and image names. They never see a device's logs or per-device overrides, settings, customisation scripts, images, the manufacturing database or the audit log, and they cannot change anything. With the default loopback binding, that means other accounts on this computer; behind a reverse proxy, anyone who can reach it.
+
+## RPI_SB_HOOK_TIMEOUT
+
+**Optional**
+
+The longest a customisation hook may run, in seconds. Defaults to `1800`. A hook still running at the limit is stopped and treated as failed. Set this higher if a hook legitimately takes longer, for example one that flashes further images. Zero is not accepted, because every step of provisioning must have a limit.
+
+The provisioning services also have their own overall limits: six hours for a provisioner, one hour for bootstrap and ten minutes for triage. A higher hook limit may also need a systemd drop-in raising `RuntimeMaxSec` for the service that runs the hook.
+
 # Format of the config file
 
 The config file is a simple text file, with one variable per line. Variables are specified in the format:

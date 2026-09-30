@@ -1,3 +1,367 @@
+rpi-sb-provisioner (2.3.6) unstable; urgency=medium
+
+  * SECURITY: Require operators to sign in to the web UI. It runs as root and
+    asked for no credentials at all, so any local user -- or any web page open
+    in a browser on the provisioning host -- could save a customisation hook,
+    mark it executable, and have it run as root on the next device, as well as
+    upload keys, burn OTP or read the manufacturing database. Operators now
+    sign in with a system account, checked through PAM (/etc/pam.d/
+    rpi-provisioner-ui), that is a member of the new rpi-sb-provisioner group.
+    Installing adds the first user (UID 1000) when the group is created; an
+    image built before that user exists must add its operator by hand.
+    Every state-changing request needs the session's CSRF token, and every
+    state-changing route is now POST-only. Requests addressed to a host name
+    the UI does not answer to are refused, closing DNS rebinding, and a
+    reverse proxy's name must be given with --allowed-host. The permissive
+    CORS headers are gone, WebSocket handshakes from other origins are
+    refused, and signing in to a non-loopback binding needs HTTPS. The UI's
+    TLS key moves out of /tmp, where local users could read it. Scripts use
+    an API token instead of a password: an operator creates one under API
+    tokens, and the script sends it as "Authorization: Bearer". A token acts
+    as its creator, only its hash is stored, and it cannot mint more tokens.
+
+  * Let the devices page, a device's own page and the code scanner be seen
+    without signing in, so a screen on the production line can show progress
+    again. Viewers who have not signed in see serial numbers, USB ports,
+    addresses and progress, but never logs, per-device overrides, settings or
+    records, and cannot change anything. Turn it off under Options, or with
+    RPI_SB_PROVISIONER_PUBLIC_DASHBOARD. The scanner now looks codes up with
+    a GET, and a code cut short by a NUL byte no longer matches every record
+    without a DUID.
+
+  * Make the web UI readable and usable at a glance, on a phone and by
+    keyboard. Text and buttons now meet the WCAG AA contrast ratio, no text
+    is smaller than 12 px, and no page scrolls sideways at phone width. A
+    device tile shows its whole serial number rather than cutting it short.
+    Save and Help in the hook editor can be reached by keyboard: press Enter
+    to edit and Escape to leave. Scrolling tables take focus, and the
+    Options switches are named for screen readers.
+
+  * Signing out now leaves a viewer on a page they can still see: the same
+    page if it is public, or the devices page. The sign-in page shows the
+    navigation bar.
+
+  * Record every sign-in attempt in the audit log, including those refused
+    for plain HTTP or for too many attempts, and show who made each entry.
+    The audit log can now be filtered to sign-ins and tokens.
+
+  * Say plainly that JTAG lock and EEPROM write protection apply to the
+    devices being provisioned, never to the provisioning server.
+
+  * Show on the Options page which bootloader firmware devices will get,
+    without opening the firmware browser.
+
+  * Rewrite the hook editor's help: every stage's arguments and when it
+    runs, all the environment a hook receives, its time limit, and a
+    reference to the fastboot commands a hook may use.
+
+  * Stop the services, service log and manufacturing pages from throwing
+    away what an operator has selected. They used to rebuild every one to
+    five seconds; they now change only what changed, wait while text is
+    selected, refresh every five seconds, and pause in a hidden tab.
+
+  * Hide the code scanner link where the browser will not allow the
+    camera: over plain HTTP from another machine.
+
+  * Refuse a sign-in that a proxy on this machine forwarded over plain HTTP
+    from another machine, since the password crossed the network
+    unencrypted to reach it. Behind an HTTPS proxy that sends
+    X-Forwarded-Proto, the session cookie is now marked Secure.
+
+  * Replace the nginx example. It checked HTTP Basic credentials against
+    PAM, which let any account on the host through, added www-data to the
+    shadow group so nginx could read every password hash, and proxied plain
+    HTTP. It now only provides HTTPS; the web interface signs operators in
+    itself. nginx-example/README.md says how to undo the old setup.
+
+  * Keep the web UI's HTTPS certificate across restarts, give it the host's
+    names and a random serial, and log its SHA-256 fingerprint so it can be
+    checked. A new certificate at every start meant a new browser warning
+    every time.
+
+  * Sandbox the web UI service. It keeps running as root, because it writes
+    what the provisioners run as root, but it no longer holds any
+    capabilities, sees /usr, /boot and /etc read-only apart from
+    /etc/rpi-sb-provisioner, gets a private /tmp and runs under a system-call
+    filter. A workdir or image under /usr or /etc is no longer writable by it.
+
+  * Stop leaving uploaded signing keys in plaintext when wrapping them fails.
+    The wrapped key was written over a file already made read-only, and the
+    write was never checked. Secrets are now replaced atomically and any
+    failure rejects the upload.
+
+  * Depend on p11-kit-modules. OpenSSL's pkcs11-provider reaches every HSM
+    through the p11-kit proxy module it ships, so on a station without it
+    every PKCS#11 key failed with "Module initialization failed", although
+    p11tool listed the token.
+
+  * Check an HSM setup by signing, with a time limit on every command. The
+    documented check exported the public key with openssl pkey, which hangs
+    on a YubiHSM 2 although signing and provisioning work, so users took
+    PKCS#11 to be unusable. The SoftHSM2 steps now also run as root, as its
+    token store needs.
+
+  * SECURITY: Make /etc/rpi-sb-provisioner/config readable by root only. It
+    can hold RPI_CONNECT_API_KEY and was world-readable, so any local user
+    could read it. Rotate the Raspberry Pi Connect key if others have
+    accounts on the provisioning host.
+
+  * SECURITY: Keep the Raspberry Pi Connect API key out of the journal and the
+    process list, and verify the Connect server's certificate. Registering a
+    device traced the key into the journal and passed it on curl's command
+    line, and curl accepted any certificate. Rotate the key if the host is
+    shared. A development server with its own CA can be named with
+    CURL_CA_BUNDLE.
+
+  * Make provisioning data readable only by the rpi-sb-provisioner group:
+    manufacturing records, OS images, logs and customisation hooks were
+    readable by every account on the host.
+
+  * SECURITY: Keep captured device key pairs readable by root only. They were
+    written into the world-readable log tree, so any local user could read a
+    device's private key where one was captured.
+
+  * Save captured device key pairs in /var/log/rpi-sb-provisioner/<serial>/
+    keypair, as documented, rather than one directory deeper, where the
+    device key API could not find them. Existing pairs are moved on upgrade.
+
+  * SECURITY: Escape what others control before the web UI shows it. The
+    audit log wrote user agents, addresses and paths into the page as markup,
+    and anyone who can reach the sign-in page chooses those; journal lines,
+    error messages and an uploaded image's metadata were written the same
+    way. Script planted there ran with the operator's session.
+
+  * SECURITY: Escape the device detail page, its logs and the USB topology
+    tooltip as well, which devices can write into, and keep the Connect API
+    key out of the journal when the configuration is read. Refuse sign-in
+    redirects that browsers would send to another site, and throttle
+    sign-in per address, so one client cannot lock out the rest. Found by an
+    independent review of this release.
+
+  * Refuse to be shown in a frame, so no other page can steer an operator's
+    clicks, and bound the size of requests made before signing in.
+
+  * SECURITY: Load nothing from other sites. The script editor fetched
+    jQuery, the Ace editor and Font Awesome from public CDNs, so a station
+    off the internet had no editor, and code from those sites ran with the
+    operator's session, which can write hooks that run as root. Ace 1.44.0
+    now ships in the package (checked against the npm registry), jQuery and
+    Font Awesome are gone, and the editor falls back to a plain text box if
+    Ace cannot start.
+
+  * Record the real client address in the audit log. X-Forwarded-For was
+    believed from anyone, so a client could name any address it liked; it is
+    now used only from a local reverse proxy. The test-mode header, whose
+    secret value was in the public source, is gone.
+
+  * Accept only the provisioner's own settings when saving options. The
+    config is run as shell by root, and a setting's name was written
+    unchecked, so a saved name could run commands or change PATH for the
+    provisioning scripts. Values may no longer span lines, and a saved
+    Raspberry Pi Connect key no longer reaches the journal.
+
+  * Never empty a workdir that holds the provisioner's images, database,
+    keys or logs, a home directory or a system directory. Every save empties
+    RPI_SB_WORKDIR, and so does every package upgrade, so pointing it at
+    /srv/rpi-sb-provisioner deleted every uploaded image and the
+    manufacturing database.
+
+  * Use RPI_SB_WORKDIR only when root alone can write to it. Its contents
+    are reused and flashed to devices, so anyone else able to write there
+    could replace a signed boot image or bootloader. Such a workdir is set
+    aside and each run uses a fresh temporary directory. Upgrading hands a
+    dedicated workdir made without sudo to root and empties it, so existing
+    stations keep their cache. A symlinked workdir is reported with the
+    path to use instead.
+
+  * SECURITY: Treat what a device reports as untrusted. The serial number and
+    board details a device returns went, as root, straight into database
+    queries and the serial into log paths, so a faulty or hostile device
+    could corrupt the manufacturing records or have a log written outside
+    /var/log/rpi-sb-provisioner. Serials must now be plain alphanumerics,
+    board details are checked against their expected form, and every
+    database value is escaped.
+
+  * Refuse a device whose reported serial differs from the one it was
+    started for, so a board cannot have its neighbour on a multi-head jig
+    provisioned instead, and bound other values devices report.
+
+  * Find a device's USB port only among Raspberry Pis in rpiboot or fastboot
+    mode, and refuse when two carry the same serial. Any USB device matching
+    the serial was taken, so the USB port allowlist could check the wrong
+    port.
+
+  * Flash over the network only to the device that is connected over USB. A
+    device reports its own address, so one could name another board on the
+    network and have that one flashed instead. With a daemon that takes
+    every command over the network, that route must now report the same
+    serial number. A split-mode daemon's network side will not say, so
+    there the route is checked only for reachability, as before.
+
+  * SECURITY: Flash an IDP artefact's images only. The device's reply named
+    the file to send it, so a board could ask for any file root can read,
+    including the configuration and signing keys, and an artefact could name
+    images outside itself.
+
+  * SECURITY: Build boot packages only from a real FAT boot partition. An
+    uploaded image with an ext4 boot partition could use symlinks to put
+    host files into a boot image signed with the customer key.
+
+  * SECURITY: Keep uploaded IDP archives inside the images directory. They
+    are extracted as root, and a symlink or hardlink entry in one could
+    write anywhere on the host or pull host files, keys included, into the
+    image. Links must now stay within the archive, and device nodes and
+    FIFOs are refused. An upload's own file name must now be
+    a plain name, too.
+
+  * SECURITY: Accept only a plain image name when deleting, analysing,
+    hashing or packaging an image. The name was joined to the images
+    directory unchecked, so a crafted request could delete or read any path
+    on the host as root.
+
+  * Refuse out-of-range and malformed input instead of misbehaving:
+    - The code scanner reported a blank code as a device in the
+      manufacturing database whenever a record had no DUID.
+    - A device address containing a NUL byte showed another device's page,
+      because the lookup stopped at the NUL. Device addresses must now look
+      like a serial or a USB path.
+    - Settings sent as a list or object, or as a body that is not a JSON
+      object, and API token labels that were blank or not text, failed with
+      a server error or were accepted. They are now refused.
+    - Uploads with a bad name or type, and deleting a hook with no script,
+      now report the operator's mistake (400 or 404) rather than a server
+      error.
+    - The manufacturing API ignored an offset given without a limit.
+
+  * Save, upload, enable, disable and delete customisation scripts only at
+    the provisioners' hook points. Saving and uploading wrote any name into
+    the scripts directory, and deleting a name that was not a hook failed
+    with a server error rather than saying why.
+
+  * Make the provisioning scripts' state-change notifications reach the web
+    UI. The handler was registered by reference to a variable that no longer
+    existed, so every notification was refused and the UI only noticed
+    changes on its periodic rescan. It failed the same way in 2.3.5.
+
+  * Show the audit log when it is first opened. With no limit chosen the
+    query asked SQLite for LIMIT '', which matched nothing, so the log
+    looked empty until a limit was picked from the filter. This dates from
+    the audit log's introduction.
+
+  * Filter the audit log by the times chosen. The start and end were
+    compared as text against a differently written timestamp, so a start
+    time dropped its whole day and an end time took in all of its day.
+
+  * Let the code scanner use cameras below 720p. It demanded at least
+    1280x720, so a basic webcam failed with an empty "Error initializing
+    camera" message.
+
+  * Return from a device's page to the devices view that was in use. The
+    back link read the view from a setting the devices page no longer
+    writes, so it always went back to the device cards.
+
+  * Start the web UI promptly without the internet. Its check for a newer
+    release ran before it began serving, with no time limit, so behind a
+    proxy or firewall that swallows connections the UI never came up. The
+    check now gives up after 10 seconds.
+
+  * Remove the fetch-repo-package-list and rpi-package-download units. They
+    were never enabled, nothing used them, they could not work on current
+    systemd, and they did not verify what they downloaded.
+
+  * Take from the provisioning, triage and boot image services the privileges
+    they never use: loading kernel modules, rebooting, setting the clock,
+    tracing other processes and similar capabilities, and gaining privileges
+    through setuid programs. The boot image generator, which runs no
+    customisation hooks, is confined further, and the web UI can now open
+    only the devices it needs: the firmware crypto service, and USB or HID
+    security tokens.
+
+  * Pad an OS image whose length is not a multiple of 4096 bytes before handing
+    it to fastboot. The naked provisioner flashes the configured image as it
+    finds it, and the fastboot client sparses whatever it is given: libsparse
+    ends every chunk with a don't-care covering the rest of the declared image
+    length, refuses to emit one that is not a whole number of 4096-byte blocks,
+    and then writes a header advertising the chunk it did not write. The device
+    rejects what arrives as "not a valid sparse image" and provisioning stops
+    at WRITING-OS. A length that is a whole number of 512-byte sectors but not
+    of 4096 bytes is legal -- partition tables are counted in sectors, not in
+    libsparse blocks -- and an Ubuntu Core image built that way is how this was
+    found (#355). The configured image is never modified: one that needs
+    padding is copied first, and the log says so, because rounding the image up
+    at source saves that copy on every device.
+
+  * Stop trusting img2simg's exit status. It reports success when libsparse
+    refused to write a chunk, so a boot or rootfs sparse could be written into
+    the cache advertising one more chunk in its header than it contained, the
+    image it was built from deleted, the partition sized from that header, and
+    every device provisioned from that cache entry sent a sparse image it
+    rejects -- with nothing in the logs pointing back at the run that produced
+    it. libsparse does say so on stderr before carrying on, so anything it
+    writes there is now treated as the failure it is, the sparse is renamed
+    into the cache only once it is known to be whole, and a source whose length
+    libsparse cannot express is refused before img2simg is asked to try. The
+    images the secure boot and FDE provisioners build are all block-aligned
+    today, so this is a guard rather than a fix, and it is the same libsparse
+    behaviour behind #355.
+
+  * Stop any provisioning step from waiting for ever. The fastboot
+    client waits indefinitely for a device that has gone away, and the
+    secure boot, FDE and naked provisioners ran every erase,
+    partitioning, encryption, flash and LED command without a limit, as
+    did the getvar queries shared by triage and every provisioner. A
+    board that dropped off the bus mid-run held its jig port until
+    someone noticed. Every fastboot call now has a limit suited to its
+    work. A flash is allowed time in proportion to its size, rather than
+    the fixed 600 seconds that stopped a healthy 5.7 GiB IDP flash at
+    96% (#346), and the reason a device gives for refusing a command now
+    reaches the per-device log rather than only the journal.
+
+  * Give up within 10 seconds on a board that has gone, instead of waiting
+    out a long step's whole budget: up to 15 minutes for an erase, or over
+    an hour for a large flash. Each long fastboot command first checks that
+    the board answers, for FASTBOOT_PRESENCE_TIMEOUT seconds. The fastboot
+    calls made while registering with Raspberry Pi Connect now have a time
+    limit too.
+
+  * Give up within 10 seconds, too, on a board lost part-way through a long
+    step. Over TCP the fastboot client waits for it to come back, so it
+    still ran out the step's whole budget.
+
+  * Fix IDP provisioning against a fastbootd that is not in split mode but
+    has a network address. Each command went over TCP as a session of its
+    own, so the staged descriptor was lost and idpinit failed with "No
+    data. Check description was staged".
+
+  * Fix bootstrap hanging at "Cannot open file mcb.bin" on a CM5 with
+    secure boot (#338). Current recovery.bin asks the host for mcb.bin and
+    memory-training files that rpi-eeprom does not ship; they are now
+    served from rpiboot's bootfiles.bin. Reported by Rafael-SOWNet.
+
+  * Allow up to 15 minutes to erase the device before IDP provisioning,
+    rather than 30 seconds, so an erase that discards the whole device
+    has time to finish on slow eMMC.
+
+  * Limit customisation hooks to RPI_SB_HOOK_TIMEOUT seconds, 1800 by
+    default. A hook still running at the limit is stopped and reported
+    as failed.
+
+  * Give each provisioning service an overall time limit as a backstop:
+    six hours for a provisioner, one hour for bootstrap, and ten minutes
+    for triage, which had none. A service stopped by a signal is now
+    recorded as aborted. The signal used to reach the cleanup code as a
+    successful exit, so the run was reported as a success and the
+    provision-failed hook never ran. Cleanup also no longer loops for
+    ever on a mount that will not release.
+
+  * Ask fastbootd for deferred flash writes in every provisioner, where
+    it offers them over USB, so the next chunk of an image downloads
+    while the previous one is written. Each flash turns them on and off
+    again, so they never reach a customisation hook's own flashes. A
+    fastbootd without the feature behaves as before.
+
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Thu, 03 Sep 2026 16:26:50 +0100
+
 rpi-sb-provisioner (2.3.5) unstable; urgency=medium
 
   * Rebuild the fastboot gadget images with the firmware the boot ROM
