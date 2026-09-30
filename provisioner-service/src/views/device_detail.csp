@@ -236,7 +236,7 @@
             white-space: nowrap;
         }
         .detail-step.step-complete .detail-step-label { color: #1e7e34; }
-        .detail-step.step-active .detail-step-label { color: #e0a800; font-weight: 700; }
+        .detail-step.step-active .detail-step-label { color: #8a6100; font-weight: 700; }
         .detail-step.step-error .detail-step-label { color: #dc3545; }
         .detail-step-line {
             position: absolute;
@@ -410,10 +410,10 @@
 
                 std::string badgeColor = "#5c636a";
                 if (hState == "complete") badgeColor = "#1e7e34";
-                else if (hState == "error") badgeColor = "#dc3545";
+                else if (hState == "error") badgeColor = "#c82333";
                 else if (hState == "provisioning") badgeColor = "#0062cc";
-                else if (hState == "bootstrap") badgeColor = "#17a2b8";
-                else if (hState == "triage") badgeColor = "#e0a800";
+                else if (hState == "bootstrap") badgeColor = "#117a8b";
+                else if (hState == "triage") badgeColor = "#8a6100";
             %>
                 <tr style="border-bottom: 1px solid #f0f0f0;">
                     <td style="padding: 10px 12px; font-family: monospace; font-size: 0.9rem; color: #444;"><%c++ $$ << HttpViewData::htmlTranslate(hTimestamp); %></td>

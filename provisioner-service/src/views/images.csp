@@ -553,7 +553,7 @@
                 } else if (data.status === 'unsupported') {
                     statusEl.innerHTML = '<span style="color: #595959;">Not applicable for this provisioning style</span>';
                 } else if (data.generating) {
-                    statusEl.innerHTML = '<span style="color: #ffc107;">Generating…</span>';
+                    statusEl.innerHTML = '<span style="color: #8a6100;">Generating…</span>';
                     // Poll for updates
                     setTimeout(() => checkBootPackageStatus(name), 2000);
                 } else {
@@ -579,7 +579,7 @@
         const btn = document.getElementById(btnId);
         
         if (statusEl) {
-            statusEl.innerHTML = '<span style="color: #ffc107;">Generating…</span>';
+            statusEl.innerHTML = '<span style="color: #8a6100;">Generating…</span>';
         }
         if (btn) {
             btn.disabled = true;
