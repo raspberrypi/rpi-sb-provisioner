@@ -345,10 +345,36 @@ enforceSecureBootloaderConfig() {
     #echo "eeprom_write_protect=1" >> "${RPI_SB_WORKDIR}/config.txt"
 }
 
-identifyBootloaderConfig() {
-    # Possible to pass in RPI_DEVICE_BOOTLOADER_CONFIG_FILE... we should make sure the right thing happens with this.
-    if [ ! -f "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" ]; then
-        RPI_DEVICE_BOOTLOADER_CONFIG_FILE="$(mktemp)"
+# Arguments: $1 = secure or naked, $2 = the cached bootloader directory.
+#
+# The configuration comes from the file named in RPI_DEVICE_BOOTLOADER_CONFIG_FILE,
+# else the one edited on the Options page, else the package default. Bootstrap
+# adds to it, so it works on a private copy: it used to change the chosen file,
+# the package's own defaults included. A cache built from another configuration
+# is discarded, EEPROM image and signature too, since the config is inside them.
+prepare_bootloader_config() {
+    _bc_dir="$2"
+    if [ -n "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" ]; then
+        _bc_src="${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
+    elif [ -f "/etc/rpi-sb-provisioner/bootloader.$1" ]; then
+        _bc_src="/etc/rpi-sb-provisioner/bootloader.$1"
+    else
+        _bc_src="/var/lib/rpi-sb-provisioner/bootloader.$1"
+    fi
+    RPI_DEVICE_BOOTLOADER_CONFIG_FILE="$(mktemp)"
+    if [ -f "${_bc_src}" ]; then
+        log "Using bootloader configuration ${_bc_src}"
+        cp "${_bc_src}" "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
+        # A last line without a newline would swallow the next one added.
+        [ -z "$(tail -c 1 "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}")" ] || echo >> "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
+    else
+        log "Warning: bootloader configuration ${_bc_src} does not exist; using an empty one"
+    fi
+    maybe_reorder_boot_order_for_storage "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
+    BOOTLOADER_CONFIG_SHA256="$(sha256sum < "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" | cut -d ' ' -f 1)"
+    if [ -f "${_bc_dir}/config.txt" ] && [ "$(cat "${_bc_dir}/bootloader.sha256" 2>/dev/null)" != "${BOOTLOADER_CONFIG_SHA256}" ]; then
+        log "Bootloader configuration differs from the one the cached bootloader was built with; rebuilding"
+        rm -f "${_bc_dir}/config.txt" "${_bc_dir}/pieeprom.bin" "${_bc_dir}/pieeprom.sig" "${_bc_dir}/bootloader.sha256"
     fi
 }
 
@@ -690,6 +716,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
     if [ "${PROVISIONING_STYLE}" = "secure-boot" ]; then
         SECURE_BOOTLOADER_DIRECTORY="${RPI_SB_WORKDIR}/secure-bootloader/"
         mkdir -p "${SECURE_BOOTLOADER_DIRECTORY}"
+        prepare_bootloader_config secure "${SECURE_BOOTLOADER_DIRECTORY}"
         if [ -f "${SECURE_BOOTLOADER_DIRECTORY}/config.txt" ]; then
             log "Secure bootloader directory already exists, skipping setup"
             if [ "${SPECIAL_FLAG_REPROVISION_DEVICE}" -eq 1 ]; then
@@ -745,12 +772,6 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
 
             record_progress "BOOTLOADER-PREPARING"
             announce_start "Setting up the environment for a signed-boot capable device"
-            if [ -z "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" ]; then
-                RPI_DEVICE_BOOTLOADER_CONFIG_FILE=/var/lib/rpi-sb-provisioner/bootloader.secure
-                log "Using default secure bootloader config file: ${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
-            else
-                log "Using pre-configured bootloader config: ${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
-            fi
 
             SOURCE_EEPROM_IMAGE=
             DESTINATION_EEPROM_IMAGE=
@@ -789,14 +810,9 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
             ####
 
             if signing_available; then
-                # Public key already derived by init_signing_context()
-                identifyBootloaderConfig
+                # Public key already derived by init_signing_context(); the
+                # storage boot order was applied by prepare_bootloader_config.
                 enforceSecureBootloaderConfig
-
-                # Optionally make the selected storage device the first boot
-                # option. Must run before the config is signed below so the
-                # reordered BOOT_ORDER is covered by the signature.
-                maybe_reorder_boot_order_for_storage "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
 
                 # Never reuse a cached signature on the strength of it merely
                 # existing: a failed signing run leaves behind a file with the
@@ -834,6 +850,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
 
                 # This directive informs the bootloader to write the public key into OTP
                 echo "program_pubkey=1" > "${SECURE_BOOTLOADER_DIRECTORY}/config.txt"
+                echo "${BOOTLOADER_CONFIG_SHA256}" > "${SECURE_BOOTLOADER_DIRECTORY}/bootloader.sha256"
                 # Force the post-recovery reboot back into RPIBOOT so the next
                 # phase (fastboot bootstrap) can attach over USB.
                 echo "set_reboot_order=0x3" >> "${SECURE_BOOTLOADER_DIRECTORY}/config.txt"
@@ -946,6 +963,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
             2712|2711)
                 NON_SECURE_BOOTLOADER_DIRECTORY="${RPI_SB_WORKDIR}/non-secure-bootloader/"
                 mkdir -p "${NON_SECURE_BOOTLOADER_DIRECTORY}"
+                prepare_bootloader_config naked "${NON_SECURE_BOOTLOADER_DIRECTORY}"
                 
                 if [ ! -f "${NON_SECURE_BOOTLOADER_DIRECTORY}/config.txt" ]; then
                     # NB: config.txt is the marker this branch uses to decide the
@@ -961,12 +979,6 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
 
                     record_progress "BOOTLOADER-PREPARING"
                     announce_start "Setting up EEPROM update for non-secure-boot device"
-                    if [ -z "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" ]; then
-                        RPI_DEVICE_BOOTLOADER_CONFIG_FILE=/var/lib/rpi-sb-provisioner/bootloader.naked
-                        log "Using default naked bootloader config file: ${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
-                    else
-                        log "Using pre-configured bootloader config: ${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
-                    fi
                     
                     SOURCE_EEPROM_IMAGE=
                     DESTINATION_EEPROM_IMAGE=
@@ -1000,10 +1012,6 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                     
                     # Copy unsigned bootcode
                     cp "${BOOTCODE_BINARY_IMAGE}" "${BOOTCODE_FLASHING_NAME}"
-
-                    # Optionally make the selected storage device the first boot
-                    # option, before the config is baked into the EEPROM below.
-                    maybe_reorder_boot_order_for_storage "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
 
                     # Update EEPROM using the standard update_eeprom function.
                     # Always unsigned, whatever key the station has configured:
@@ -1046,6 +1054,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                     # next phase (fastboot bootstrap) can attach over USB.
                     echo "set_reboot_order=0x3" > "${NON_SECURE_BOOTLOADER_DIRECTORY}/config.txt"
                     echo "recovery_reboot=1" >> "${NON_SECURE_BOOTLOADER_DIRECTORY}/config.txt"
+                    echo "${BOOTLOADER_CONFIG_SHA256}" > "${NON_SECURE_BOOTLOADER_DIRECTORY}/bootloader.sha256"
                     
                     record_progress "EEPROM-UPDATING"
                     log "Updating EEPROM to latest version"
