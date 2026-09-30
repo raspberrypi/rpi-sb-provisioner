@@ -1,9 +1,15 @@
+<%inc
+#include <filesystem>
+%>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <title>Configuration Options</title>
     <%view stylesheet %>
     <style>
+        .bootloader-config-summary { margin: 4px 0 8px; }
+        .bootloader-config-advanced { margin-top: 10px; }
+        .bootloader-config-advanced summary { cursor: pointer; }
         /* ===== Section Styling ===== */
         .config-section {
             background: #fff;
@@ -1175,18 +1181,34 @@
             <%view firmware %>
 
             <!-- Bootloader Config -->
+            <%c++ namespace fs = std::filesystem;
+               const bool secureEdited = fs::exists("/etc/rpi-sb-provisioner/bootloader.secure");
+               const bool nakedEdited = fs::exists("/etc/rpi-sb-provisioner/bootloader.naked"); %>
             <div class="field-group">
-                <label class="field-label" for="RPI_DEVICE_BOOTLOADER_CONFIG_FILE">Bootloader Configuration <span class="optional-badge">Optional</span></label>
-                <input type="text" class="field-input" id="RPI_DEVICE_BOOTLOADER_CONFIG_FILE" name="RPI_DEVICE_BOOTLOADER_CONFIG_FILE"
-                       value="<%c++ $$ << HttpViewData::htmlTranslate(bootloaderConfig); %>"
-                       placeholder="Leave blank to use default"
-                       onblur="validateAndSaveField('RPI_DEVICE_BOOTLOADER_CONFIG_FILE')">
-                <div id="feedback-RPI_DEVICE_BOOTLOADER_CONFIG_FILE" class="field-feedback"></div>
-
-                <div class="inline-help">
-                    <span class="inline-help-icon">&#9432;</span>
-                    <span>Custom bootloader configuration file. A sensible default is provided if not specified.</span>
+                <span class="field-label" id="bootloader-config-label">Bootloader Configuration</span>
+                <div class="bootloader-config-summary" aria-labelledby="bootloader-config-label">
+                    <%c++ if (!bootloaderConfig.empty()) { %>
+                    Devices get the file <code><%c++ $$ << HttpViewData::htmlTranslate(bootloaderConfig); %></code>, named under Advanced below.
+                    <%c++ } else { %>
+                    Secure boot: <strong><%c++ $$ << (secureEdited ? "edited" : "default"); %></strong>.
+                    Other styles: <strong><%c++ $$ << (nakedEdited ? "edited" : "default"); %></strong>.
+                    <%c++ } %>
                 </div>
+                <a class="cust-btn cust-btn-secondary" href="/options/bootloader-config?kind=<%c++ $$ << (provisioningStyle == "secure-boot" ? "secure" : "naked"); %>">Edit bootloader configuration</a>
+
+                <details class="bootloader-config-advanced" <%c++ if (!bootloaderConfig.empty()) { %>open<%c++ } %>>
+                    <summary>Advanced: use a file on this server instead</summary>
+                    <label class="field-label" for="RPI_DEVICE_BOOTLOADER_CONFIG_FILE">Bootloader configuration file</label>
+                    <input type="text" class="field-input" id="RPI_DEVICE_BOOTLOADER_CONFIG_FILE" name="RPI_DEVICE_BOOTLOADER_CONFIG_FILE"
+                           value="<%c++ $$ << HttpViewData::htmlTranslate(bootloaderConfig); %>"
+                           placeholder="Leave blank to use the configuration edited above"
+                           onblur="validateAndSaveField('RPI_DEVICE_BOOTLOADER_CONFIG_FILE')">
+                    <div id="feedback-RPI_DEVICE_BOOTLOADER_CONFIG_FILE" class="field-feedback"></div>
+                    <div class="inline-help">
+                        <span class="inline-help-icon">&#9432;</span>
+                        <span>A path here overrides the editor for every kind of device, for configurations managed outside the provisioner.</span>
+                    </div>
+                </details>
             </div>
 
             <!-- Match Boot Order to Storage Toggle -->

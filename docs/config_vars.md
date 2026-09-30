@@ -134,15 +134,17 @@ Specify the family of Raspberry Pi device you are provisioning. Supported values
 
 ## RPI_DEVICE_BOOTLOADER_CONFIG_FILE
 
-**Mandatory, with a default**
+**Optional**
 
 > **Warning**
 >
-> `rpi-sb-provisioner` will ignore the Raspberry Pi Bootloader configuration built by `pi-gen`, and use the one provided in this variable.
+> `rpi-sb-provisioner` will ignore the Raspberry Pi Bootloader configuration built by `pi-gen`, and use its own.
 
-Specify the Raspberry Pi Bootloader configuration you want your provisioned devices to use. A default is provided.
+The EEPROM bootloader configuration devices get is normally edited in the web interface: Options, then Edit bootloader configuration. There is one for secure-boot devices and one for the other styles. They are kept in `/etc/rpi-sb-provisioner/bootloader.secure` and `/etc/rpi-sb-provisioner/bootloader.naked`, and the package defaults in `/var/lib/rpi-sb-provisioner` are used until you save one.
 
-Further information on the format of this configuration file can be found in the Raspberry Pi Documentation, at <https://www.raspberrypi.com/documentation/computers/config_txt.html>
+Set this variable only to use a file managed outside the provisioner. A path here overrides both edited configurations. The provisioner reads the file and never changes it; for secure boot it adds `SIGNED_BOOT=1` to its own copy. A change to the configuration in use rebuilds the cached bootloader for the next device.
+
+The settings are described in the Raspberry Pi Documentation, at <https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#raspberry-pi-bootloader-configuration>, and the editor shows that description for the setting under the cursor.
 
 ## RPI_DEVICE_FIRMWARE_FILE
 

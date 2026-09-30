@@ -13,6 +13,7 @@ SERIAL = "10000000fedcba98"
 WIDTHS = (375, 768, 1280, 1920)
 PUBLIC = ["/devices", f"/devices/{SERIAL}", "/scantool"]
 OPERATOR = ["/devices", "/devices#rel", "/devices#topo", f"/devices/{SERIAL}", "/options/get",
+            "/options/bootloader-config?kind=secure",
             "/customisation/list-scripts", "/customisation/get-script?script=naked-provisioner-post-flash",
             "/services", f"/service-log/rpi-sb-triage@{SERIAL}.service", "/manu-db", "/auditlog",
             "/auth/tokens", "/scantool", "/no-such-page"]
@@ -121,12 +122,12 @@ class Checks(unittest.TestCase):
         self.assertTrue(any("never reaches" in f for f in found), found)
         self.assertTrue(any("no visible focus" in f for f in found), found)
 
-    def test_screen_reader_text_is_not_clipped_text(self):
     def test_a_closed_details_hides_its_contents(self):
         self.page('<html lang="en"><body><details><summary>More</summary><input aria-label="x"></details>'
                   '<div style="position:fixed;inset:0;pointer-events:none"></div></body></html>')
         self.assertEqual([], L.keyboard(self.b.d))
 
+    def test_screen_reader_text_is_not_clipped_text(self):
         self.page('<html lang="en"><body><span style="position:absolute;width:1px;height:1px;overflow:hidden;'
                   'clip:rect(0,0,0,0)">for screen readers</span></body></html>')
         self.assertEqual([], L.overflow(self.b.d))

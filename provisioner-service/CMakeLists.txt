@@ -344,6 +344,7 @@ target_sources(rpi-provisioner-ui
     src/main.cpp
     src/images.cpp
     src/options.cpp
+    src/bootloader_config.cpp
     src/devices.cpp
     src/customisation.cpp
     src/services.cpp

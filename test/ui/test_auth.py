@@ -11,7 +11,7 @@ from ui.harness.case import UITest
 
 FAILED = "Sign-in failed. Check the username and password"
 # The devices pages and the scanner may be public; see test_public.py.
-PAGES = ["/options/get", "/customisation/list-scripts", "/services",
+PAGES = ["/options/get", "/options/bootloader-config", "/customisation/list-scripts", "/services",
          "/manu-db", "/auditlog", "/auth/tokens", "/images/list"]
 HOOK = "/etc/rpi-sb-provisioner/scripts/naked-provisioner-post-flash.sh"
 
