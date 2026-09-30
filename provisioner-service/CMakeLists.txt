@@ -344,6 +344,7 @@ target_sources(rpi-provisioner-ui
     src/main.cpp
     src/images.cpp
     src/options.cpp
+    src/bootloader_config.cpp
     src/devices.cpp
     src/customisation.cpp
     src/services.cpp
@@ -414,5 +415,6 @@ install(DIRECTORY "${CMAKE_SOURCE_DIR}/static/"
         DESTINATION /usr/share/rpi-sb-provisioner/static
         FILES_MATCHING 
         PATTERN "*.js"
+        PATTERN "*.json"
         PATTERN "*.svg"
         PERMISSIONS OWNER_READ GROUP_READ WORLD_READ)

@@ -1,0 +1,245 @@
+<%inc
+#include <string>
+%>
+<%c++
+std::string kind = @@.get<std::string>("kind");
+std::string content = @@.get<std::string>("content");
+bool edited = @@.get<bool>("edited");
+std::string explicitPath = @@.get<std::string>("explicit_path");
+std::string maxBytes = @@.get<std::string>("max_bytes");
+%>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bootloader configuration - Raspberry Pi Secure Boot Provisioner</title>
+    <%view stylesheet %>
+    <style>
+        .bl-tabs { display: flex; gap: 4px; margin: 12px 0; flex-wrap: wrap; }
+        .bl-tabs a { padding: 8px 14px; border: 1px solid #ccc; border-radius: 4px 4px 0 0; text-decoration: none; color: #212529; background: #f2f2f2; }
+        .bl-tabs a[aria-current="page"] { background: #fff; border-bottom-color: #fff; font-weight: 600; }
+        .bl-layout { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+        .bl-editor { flex: 3 1 420px; min-width: 0; }
+        .bl-help { flex: 2 1 300px; min-width: 0; border: 1px solid #ddd; border-radius: 6px; padding: 12px; background: #fafafa; max-height: 640px; overflow-y: auto; }
+        .bl-help h3 { margin: 0 0 8px; font-size: 1.1rem; }
+        .bl-help table { border-collapse: collapse; width: 100%; font-size: 0.85rem; margin: 8px 0; }
+        .bl-help th, .bl-help td { border: 1px solid #ddd; padding: 4px 6px; text-align: left; vertical-align: top; }
+        .bl-help pre { background: #fff; border: 1px solid #ddd; padding: 6px; overflow-x: auto; }
+        .bl-help code, .bl-help td { overflow-wrap: anywhere; }
+        .bl-help .note { background: #fff8e1; border-left: 3px solid #8a6100; padding: 6px 8px; }
+        .bl-help-attribution { font-size: 0.8rem; color: #595959; border-top: 1px solid #ddd; margin-top: 12px; padding-top: 8px; }
+        .bl-notice { background: #fff3cd; border: 1px solid #8a6100; border-radius: 4px; padding: 10px 12px; margin: 10px 0; }
+        .bl-findings { margin: 10px 0; padding-left: 0; list-style: none; }
+        .bl-findings li { padding: 4px 8px; border-radius: 3px; margin-bottom: 4px; }
+        .bl-findings li.error { background: #f8d7da; color: #5a1220; }
+        .bl-findings li.warning { background: #fff3cd; color: #5c4400; }
+        .bl-findings button { background: none; border: none; color: inherit; text-decoration: underline; cursor: pointer; padding: 0; font: inherit; }
+        .bl-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+        #bl-size { color: #595959; margin-left: auto; }
+        #bl-search { width: 100%; box-sizing: border-box; padding: 6px 8px; margin-bottom: 8px; }
+        #bl-setting-list { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px; }
+        #bl-setting-list button { font: 12px ui-monospace, monospace; padding: 3px 6px; border: 1px solid #ccc; border-radius: 3px; background: #fff; color: #212529; cursor: pointer; }
+        .ace-monokai .ace_gutter { color: #b8b9b2; }
+    </style>
+</head>
+<body>
+    <%view navbar %>
+    <main id="main-content">
+    <a href="/options/get"><span aria-hidden="true">&larr;</span> Back to Options</a>
+    <h1>Bootloader configuration</h1>
+    <p>What the EEPROM bootloader of each device you provision is set to. It is signed into the EEPROM at bootstrap; a change reaches the next device to bootstrap, and the cached bootloader is rebuilt for it.</p>
+
+    <nav class="bl-tabs" aria-label="Kind of device">
+        <a href="?kind=secure" <%c++ if (kind == "secure") { %>aria-current="page"<%c++ } %>>Secure boot</a>
+        <a href="?kind=naked" <%c++ if (kind == "naked") { %>aria-current="page"<%c++ } %>>Other styles (naked, FDE only)</a>
+    </nav>
+
+    <%c++ if (!explicitPath.empty()) { %>
+    <div class="bl-notice" role="note">
+        <strong>Not in use.</strong> Devices get <code><%c++ $$ << HttpViewData::htmlTranslate(explicitPath); %></code> instead, named under Options as the bootloader configuration file. Clear that to use this one.
+    </div>
+    <%c++ } %>
+    <p id="bl-source"><%c++ $$ << (edited ? "Edited here. Reset to default to return to the package's configuration." : "The package default. Saving keeps your own copy, which later upgrades leave alone."); %><%c++ if (kind == "secure") { %> Bootstrap adds <code>SIGNED_BOOT=1</code> for secure boot.<%c++ } %></p>
+
+    <div class="bl-layout">
+        <div class="bl-editor">
+            <p class="script-status-note">In the editor, press Enter to start editing and Escape to leave it. The help follows the setting under the cursor.</p>
+            <div id="ace-editor" hidden style="height: 480px; width: 100%; border: 1px solid #ddd;"></div>
+            <textarea id="editor" spellcheck="false" autocapitalize="off" aria-label="Bootloader configuration"
+                      style="height: 480px; width: 100%; box-sizing: border-box; border: 1px solid #ddd; padding: 8px;
+                             font: 14px/1.4 ui-monospace, 'DejaVu Sans Mono', monospace; white-space: pre;"
+            ><%c++ $$ << HttpViewData::htmlTranslate(content); %></textarea>
+            <ul class="bl-findings" id="bl-findings" aria-live="polite"></ul>
+            <div class="bl-actions">
+                <button id="bl-save" class="btn btn-success" type="button">Save</button>
+                <button id="bl-reset" class="btn btn-secondary" type="button" <%c++ if (!edited) { %>disabled<%c++ } %>>Reset to default</button>
+                <span id="bl-status" role="status"></span>
+                <span id="bl-size"></span>
+            </div>
+        </div>
+        <aside class="bl-help" aria-labelledby="bl-help-title">
+            <h2 id="bl-help-title" style="font-size: 1.2rem; margin-top: 0;">Settings</h2>
+            <label for="bl-search" class="sr-only">Find a setting</label>
+            <input id="bl-search" type="search" placeholder="Find a setting, e.g. BOOT_ORDER">
+            <div id="bl-setting-list"></div>
+            <div id="bl-help-body" aria-live="polite"><p>Put the cursor on a setting, or choose one above.</p></div>
+            <div class="bl-help-attribution" id="bl-attribution"></div>
+        </aside>
+    </div>
+    </main>
+
+<script src="/static/js/ace/ace.js"></script>
+<script>
+(function () {
+    'use strict';
+    var kind = <%c++ $$ << (kind == "naked" ? "'naked'" : "'secure'"); %>;
+    var maxBytes = <%c++ $$ << HttpViewData::htmlTranslate(maxBytes); %>;
+    var area = document.getElementById('editor');
+    var ed = null;
+    if (window.ace) {
+        ace.config.set('basePath', '/static/js/ace');
+        ed = ace.edit('ace-editor');
+        ed.setTheme('ace/theme/monokai');
+        ed.session.setMode('ace/mode/sh');
+        ed.setOption('enableKeyboardAccessibility', true);
+        ed.setFontSize(14);
+        ed.setValue(area.value, -1);
+        document.getElementById('ace-editor').hidden = false;
+        area.hidden = true;
+    }
+    function text() { return ed ? ed.getValue() : area.value; }
+    function setText(v) { if (ed) ed.setValue(v, -1); else area.value = v; }
+    function goToLine(n) {
+        if (ed) { ed.gotoLine(n, 0, true); ed.focus(); }
+        else { area.focus(); }
+    }
+
+    // Help, from the Raspberry Pi documentation shipped with the package.
+    var help = { settings: {} };
+    var body = document.getElementById('bl-help-body');
+    var list = document.getElementById('bl-setting-list');
+    function show(name) {
+        var html = help.settings[name];
+        if (!html) return;
+        body.innerHTML = '<h3></h3>' + html;
+        body.querySelector('h3').textContent = name;
+        body.dataset.setting = name;
+    }
+    body.addEventListener('click', function (e) {
+        var a = e.target.closest('a[data-setting]');
+        if (a) { e.preventDefault(); show(a.dataset.setting); }
+    });
+    function renderList(filter) {
+        list.textContent = '';
+        Object.keys(help.settings).sort().forEach(function (name) {
+            if (filter && name.toLowerCase().indexOf(filter.toLowerCase()) < 0) return;
+            var b = document.createElement('button');
+            b.type = 'button';
+            b.textContent = name;
+            b.addEventListener('click', function () { show(name); });
+            list.appendChild(b);
+        });
+    }
+    document.getElementById('bl-search').addEventListener('input', function () { renderList(this.value); });
+    fetch('/options/bootloader-config/help').then(function (r) { return r.json(); }).then(function (d) {
+        help = d;
+        renderList('');
+        var at = document.getElementById('bl-attribution');
+        at.textContent = 'From the ';
+        var a = document.createElement('a');
+        a.href = d.source; a.target = '_blank'; a.rel = 'noopener';
+        a.textContent = 'Raspberry Pi documentation';
+        at.appendChild(a);
+        at.appendChild(document.createTextNode(', © Raspberry Pi Ltd, CC BY-SA 4.0 (revision ' + d.commit.slice(0, 7) + ').'));
+        follow();
+    }).catch(function () { body.textContent = 'The help could not be loaded.'; });
+
+    function settingAtCursor() {
+        var line;
+        if (ed) line = ed.session.getLine(ed.getCursorPosition().row);
+        else {
+            var before = area.value.slice(0, area.selectionStart);
+            line = area.value.split('\n')[before.split('\n').length - 1] || '';
+        }
+        var m = /^\s*([A-Za-z0-9_]+)\s*=/.exec(line);
+        return m ? m[1] : null;
+    }
+    function follow() {
+        var name = settingAtCursor();
+        if (name && name !== body.dataset.setting) show(name);
+    }
+    if (ed) ed.selection.on('changeCursor', follow);
+    else { area.addEventListener('keyup', follow); area.addEventListener('click', follow); }
+
+    // What the server will say about the text, as you type.
+    var findings = document.getElementById('bl-findings');
+    var size = document.getElementById('bl-size');
+    function report(r) {
+        findings.textContent = '';
+        [ ['error', r.errors || []], ['warning', r.warnings || []] ].forEach(function (pair) {
+            pair[1].forEach(function (f) {
+                var li = document.createElement('li');
+                li.className = pair[0];
+                if (f.line > 0) {
+                    var b = document.createElement('button');
+                    b.type = 'button';
+                    b.textContent = 'Line ' + f.line;
+                    b.addEventListener('click', function () { goToLine(f.line); });
+                    li.appendChild(b);
+                    li.appendChild(document.createTextNode(': '));
+                }
+                li.appendChild(document.createTextNode(f.message));
+                findings.appendChild(li);
+            });
+        });
+        size.textContent = r.bytes + ' of ' + maxBytes + ' bytes';
+    }
+    function post(path, payload) {
+        return fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                             body: JSON.stringify(payload) })
+            .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); });
+    }
+    var timer = null;
+    function checkSoon() {
+        clearTimeout(timer);
+        timer = setTimeout(function () {
+            post('/options/bootloader-config/check', { kind: kind, content: text() })
+                .then(function (r) { report(r.body); }).catch(function () {});
+        }, 400);
+    }
+    if (ed) ed.session.on('change', checkSoon); else area.addEventListener('input', checkSoon);
+    checkSoon();
+
+    var status = document.getElementById('bl-status');
+    var reset = document.getElementById('bl-reset');
+    document.getElementById('bl-save').addEventListener('click', function () {
+        status.textContent = 'Saving…';
+        post('/options/bootloader-config/save', { kind: kind, content: text() }).then(function (r) {
+            report(r.body);
+            if (r.ok && r.body.saved) {
+                status.textContent = 'Saved. The next device to bootstrap gets it.';
+                reset.disabled = false;
+                document.getElementById('bl-source').firstChild.textContent =
+                    'Edited here. Reset to default to return to the package\'s configuration.';
+            } else {
+                status.textContent = 'Not saved: fix the errors listed above.';
+            }
+        }).catch(function () { status.textContent = 'Not saved: the provisioner did not answer.'; });
+    });
+    reset.addEventListener('click', function () {
+        if (!confirm('Replace this configuration with the package default?')) return;
+        post('/options/bootloader-config/reset', { kind: kind }).then(function (r) {
+            if (!r.ok) { status.textContent = 'Not reset.'; return; }
+            setText(r.body.content);
+            status.textContent = 'Reset to the package default.';
+            reset.disabled = true;
+            document.getElementById('bl-source').firstChild.textContent =
+                'The package default. Saving keeps your own copy, which later upgrades leave alone.';
+        });
+    });
+})();
+</script>
+</body>
+</html>
+<%view-end%>
