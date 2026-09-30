@@ -643,6 +643,20 @@ pre {
     border-radius: 4px;
 }
 
+/* The uploader keys and images share (static/js/upload-zone.js). */
+.upload-zone {
+    border: 2px dashed #ccc;
+    border-radius: 8px;
+    padding: 20px;
+    text-align: center;
+    background: #fafafa;
+    margin: 8px 0;
+}
+.upload-zone.dragover { border-color: #0062cc; background: #f0f7ff; }
+.upload-zone.busy { opacity: 0.6; }
+.upload-zone-text { margin-bottom: 8px; }
+.upload-zone-hint { font-size: 0.8rem; color: #595959; margin-top: 8px; }
+
 .scroll-indicator {
     position: absolute;
     right: 10px;

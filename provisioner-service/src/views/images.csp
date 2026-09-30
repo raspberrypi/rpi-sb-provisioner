@@ -55,23 +55,6 @@
         color: #595959;
     }
     
-    .image-upload-zone {
-        border: 2px dashed #ccc;
-        border-radius: 8px;
-        padding: 20px;
-        text-align: center;
-        background: #fafafa;
-        transition: all 0.2s;
-        cursor: pointer;
-        margin: 8px;
-    }
-    
-    .image-upload-zone:hover,
-    .image-upload-zone.dragover {
-        border-color: #0062cc;
-        background: #f0f7ff;
-    }
-    
     .image-upload-progress {
         margin: 8px;
         padding: 12px;
@@ -148,16 +131,17 @@
         <div class="image-browser-header">
             <h4>Available Images</h4>
             <div class="image-browser-actions">
-                <button type="button" class="image-upload-btn" onclick="toggleImageUpload()">Upload New Image</button>
+                <button type="button" class="image-upload-btn" id="image-upload-toggle">Upload New Image</button>
             </div>
         </div>
         
         <!-- Upload Zone (hidden by default) -->
         <div id="image-upload-container" style="display: none;">
-            <div class="image-upload-zone" id="image-upload-zone">
-                <div>Drop an image file here or click to browse</div>
-                <div style="font-size: 0.8rem; color: #595959; margin-top: 8px;">Plain image (.img, .img.xz, .img.zst) or IDP artefact archive (.tar.xz, .tar.zst)</div>
-                <input type="file" id="image-file-input" style="display: none;">
+            <div class="upload-zone" id="image-upload-zone">
+                <div class="upload-zone-text">Drop an image file here, or</div>
+                <button type="button" class="cust-btn cust-btn-secondary upload-choose">Choose a file&hellip;</button>
+                <div class="upload-zone-hint">Plain image (.img, .img.xz, .img.zst) or IDP artefact archive (.tar.xz, .tar.zst)</div>
+                <input type="file" id="image-file-input" hidden>
             </div>
             <div id="image-upload-progress" class="image-upload-progress" style="display: none;">
                 <div class="image-upload-progress-bar">
@@ -196,6 +180,7 @@
     </div>
 </div>
 
+<script src="/static/js/upload-zone.js"></script>
 <script>
     // Everything here comes from an uploaded image's own metadata, which
     // whoever built the image chose.
@@ -1026,44 +1011,14 @@
     
     // Image display is now handled inline in the list
     
-    function toggleImageUpload() {
-        const container = document.getElementById('image-upload-container');
-        container.style.display = container.style.display === 'none' ? 'block' : 'none';
-    }
-    
-    // Image upload handling
-    const imageUploadZone = document.getElementById('image-upload-zone');
-    const imageFileInput = document.getElementById('image-file-input');
-    
-    if (imageUploadZone) {
-        imageUploadZone.addEventListener('click', () => imageFileInput.click());
-        
-        imageUploadZone.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            imageUploadZone.classList.add('dragover');
-        });
-        
-        imageUploadZone.addEventListener('dragleave', () => {
-            imageUploadZone.classList.remove('dragover');
-        });
-        
-        imageUploadZone.addEventListener('drop', (e) => {
-            e.preventDefault();
-            imageUploadZone.classList.remove('dragover');
-            const files = e.dataTransfer.files;
-            if (files.length > 0) {
-                uploadImage(files[0]);
-            }
-        });
-    }
-    
-    if (imageFileInput) {
-        imageFileInput.addEventListener('change', (e) => {
-            if (e.target.files.length > 0) {
-                uploadImage(e.target.files[0]);
-            }
-        });
-    }
+    const imageUploader = RpiUpload.attach({
+        toggle: document.getElementById('image-upload-toggle'),
+        panel: document.getElementById('image-upload-container'),
+        zone: document.getElementById('image-upload-zone'),
+        input: document.getElementById('image-file-input'),
+        onFile: file => uploadImage(file),
+    });
+    function toggleImageUpload() { imageUploader.close(); }
     
     function describeProcessingPhase(filename) {
         const lower = filename.toLowerCase();

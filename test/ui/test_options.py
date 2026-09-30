@@ -1,4 +1,5 @@
 """The options page: every control saves what it shows, and only that."""
+import os
 import time
 
 from selenium.webdriver.common.by import By
@@ -261,3 +262,59 @@ class Firmware(UITest):
         self.assertIn(f"Selected: {version}", self.b.el("#firmware-current").text)
         self.b.get("/options/get")
         self.b.wait_text("#firmware-current", f"Selected: {version}")
+
+
+class KeyUpload(UITest):
+    """Adding a signing key works as adding an OS image does. The test VM has
+    no firmware crypto to wrap a key at rest, so the upload is intercepted."""
+
+    def setUp(self):
+        super().setUp()
+        self.station.set_config(PROVISIONING_STYLE="secure-boot")
+        self.b.get("/options/get")
+
+    def tearDown(self):
+        self.station.set_config(PROVISIONING_STYLE="naked")
+        super().tearDown()
+
+    def test_the_panel_opens_from_the_keyboard(self):
+        toggle = self.b.el("#key-upload-toggle")
+        self.assertEqual("false", toggle.get_attribute("aria-expanded"))
+        self.assertFalse(self.b.el("#key-upload-container").is_displayed())
+        toggle.send_keys(Keys.ENTER)
+        self.assertEqual("true", toggle.get_attribute("aria-expanded"))
+        self.assertTrue(self.b.el("#key-upload-container").is_displayed())
+        toggle.send_keys(Keys.TAB)
+        self.assertIn("upload-choose", self.b.d.switch_to.active_element.get_attribute("class"))
+
+    def upload_answered(self, activated):
+        self.b.d.execute_script("""
+            window.__sent = null;
+            const real = window.fetch;
+            window.fetch = function (url, init) {
+                if (String(url).includes('/options/upload-key')) {
+                    window.__sent = {activate: init.body.get('activate'), name: init.body.get('keyfile').name};
+                    return Promise.resolve(new Response(JSON.stringify({success: true, activated: arguments[0]}),
+                                                        {status: 200, headers: {'Content-Type': 'application/json'}}));
+                }
+                return real.apply(this, arguments);
+            };""".replace("arguments[0]}", "%s}" % ("true" if activated else "false")))
+        self.b.click("#key-upload-toggle")
+        path = os.path.join(self.b.downloads, "uitest-upload.pem")
+        with open(path, "w") as f:
+            f.write("-----BEGIN PRIVATE KEY-----\nnot really\n-----END PRIVATE KEY-----\n")
+        self.b.el("#key-file-input").send_keys(path)
+        deadline = time.time() + 10
+        while time.time() < deadline and not self.b.d.execute_script("return window.__sent"):
+            time.sleep(0.2)
+        return self.b.d.execute_script("return window.__sent")
+
+    def test_a_new_key_does_not_replace_the_one_in_use(self):
+        sent = self.upload_answered(activated=False)
+        self.assertEqual({"activate": "if-none", "name": "uitest-upload.pem"}, sent)
+        self.b.wait_text("body", "Choose Use beside it")
+        self.assertFalse(self.b.el("#key-upload-container").is_displayed(), "the panel closes once the key is added")
+
+    def test_the_first_key_is_used_straight_away(self):
+        self.upload_answered(activated=True)
+        self.b.wait_text("body", "the only key")

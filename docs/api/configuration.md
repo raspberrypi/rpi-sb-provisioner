@@ -187,11 +187,11 @@ Boolean Toggles:
 
 **HTTP Method:** POST
 
-**Description:** Uploads a PEM signing key and updates `CUSTOMER_KEY_FILE_PEM`.
+**Description:** Uploads a PEM signing key, adds it to the saved keys and, by default, makes it the active signing key.
 
 **Request Format:**
 
-Multipart form data containing the PEM key file.
+Multipart form data containing the PEM key file as `keyfile`. An optional `activate` field set to `if-none` makes the key active only when no key is active yet; the web interface sends it, so a new key replaces the one in use only when an operator chooses it. The response's `activated` says which happened.
 
 **Response Format:**
 
@@ -200,6 +200,7 @@ Multipart form data containing the PEM key file.
   "success": true,
   "path": "/etc/rpi-sb-provisioner/keys/customer-key.pem",
   "filename": "customer-key.pem",
+  "activated": true,
   "keyInfo": {
     "algorithm": "RSA",
     "keySize": 2048,

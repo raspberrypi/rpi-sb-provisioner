@@ -1330,8 +1330,16 @@ namespace provisioner {
                 }());
 
             keyregistry::ensureMigratedFromConfig();
+            // An upload makes the key active, as scripts expect. The web page
+            // asks for activate=if-none: a key replaces the active one only
+            // when an operator chooses it, as an image does.
+            bool activate = true;
+            if (fileParser.getParameter<std::string>("activate") == "if-none") {
+                keyregistry::RegistrySnapshot current;
+                activate = !keyregistry::load(current) || current.activeKeyId.empty();
+            }
             const auto keyIdOpt = keyregistry::addPemKey(
-                destPath, safeFilename, keyInfo, keyWrapped, true);
+                destPath, safeFilename, keyInfo, keyWrapped, activate);
             if (!keyIdOpt) {
                 std::filesystem::remove(destPath);
                 auto resp = provisioner::utils::createErrorResponse(
@@ -1345,7 +1353,7 @@ namespace provisioner {
                 return;
             }
 
-            invalidateWorkdirCache("customer key uploaded");
+            if (activate) invalidateWorkdirCache("customer key uploaded");
 
             // Return success with the path and key metadata (parsed above,
             // before the key was wrapped at rest).
@@ -1354,6 +1362,7 @@ namespace provisioner {
             jsonResponse["path"] = destPath;
             jsonResponse["filename"] = safeFilename;
             jsonResponse["keyId"] = *keyIdOpt;
+            jsonResponse["activated"] = activate;
             
             // Include key metadata
             jsonResponse["keyInfo"]["algorithm"] = keyInfo.algorithm;
