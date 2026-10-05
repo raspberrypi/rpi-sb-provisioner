@@ -4,6 +4,13 @@
 #include <fstream>
 #include <sstream>
 #include <iomanip>
+#include <string_view>
+#include <cerrno>
+#include <cstring>
+#include <cstdlib>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <drogon/drogon.h>
 
 namespace provisioner {
@@ -98,6 +105,45 @@ namespace provisioner {
             return provisioner::utils::createErrorResponse(
                 req, "The script name is not a valid hook point", drogon::k400BadRequest,
                 "Invalid Script Name", "INVALID_SCRIPT_NAME");
+        }
+
+        // A provisioner may start a hook part-way through a save, so the script
+        // is written beside the old one and renamed over it: root runs the old
+        // or the new, never a truncated copy. rename() also replaces a symlink
+        // rather than writing through it. Returns why it failed, or "".
+        std::string replaceScript(const std::string& path, std::string_view data, mode_t mode) {
+            std::string tmp = SCRIPTS_DIR + "." + std::filesystem::path(path).filename().string() + ".XXXXXX";
+            int fd = mkstemp(tmp.data());
+            if (fd < 0) return std::string("mkstemp: ") + std::strerror(errno);
+
+            auto fail = [&](const char* step) {
+                const std::string why = std::string(step) + ": " + std::strerror(errno);
+                if (fd >= 0) close(fd);
+                unlink(tmp.c_str());
+                return why;
+            };
+            for (size_t done = 0; done < data.size();) {
+                const ssize_t n = write(fd, data.data() + done, data.size() - done);
+                if (n < 0) {
+                    if (errno == EINTR) continue;
+                    return fail("write");
+                }
+                done += static_cast<size_t>(n);
+            }
+            if (fchmod(fd, mode) != 0) return fail("fchmod");
+            if (fsync(fd) != 0) return fail("fsync");
+            const int closed = close(fd);
+            fd = -1;
+            if (closed != 0) return fail("close");
+            if (rename(tmp.c_str(), path.c_str()) != 0) return fail("rename");
+            return "";
+        }
+
+        // Replacing a hook keeps its mode, so saving never enables or disables
+        // it. A new hook starts disabled.
+        mode_t modeForReplacing(const std::string& path) {
+            struct stat st;
+            return stat(path.c_str(), &st) == 0 ? (st.st_mode & 0777) : 0644;
         }
 
         const std::string HOOK_ENV_DEVICE_IDENTITY =
@@ -939,71 +985,21 @@ namespace provisioner {
             // Construct the full path with .sh extension
             std::string scriptPath = SCRIPTS_DIR + sanitized_filename + ".sh";
             LOG_INFO << "Saving script: " << scriptPath;
-            
-            // Check if we need to preserve existing permissions
-            bool scriptAlreadyExists = fs::exists(scriptPath);
-            fs::perms existingPerms = fs::perms::none;
-            if (scriptAlreadyExists) {
-                // Store existing permissions if file exists
-                existingPerms = fs::status(scriptPath).permissions();
-                LOG_INFO << "Preserving existing permissions for " << scriptPath;
-            }
-            
-            // Write file content
-            std::ofstream file(scriptPath, std::ios::binary);
-            if (!file.is_open()) {
-                auto errorResp = provisioner::utils::createErrorResponse(
+
+            const std::string writeError = replaceScript(scriptPath, content, modeForReplacing(scriptPath));
+            if (!writeError.empty()) {
+                LOG_ERROR << "Failed to save " << scriptPath << ": " << writeError;
+                callback(provisioner::utils::createErrorResponse(
                     req,
                     "Failed to write script file",
                     drogon::k500InternalServerError,
                     "File Error",
                     "FILE_WRITE_ERROR",
-                    "Could not open file for writing: " + scriptPath
-                );
-                callback(errorResp);
+                    writeError
+                ));
                 return;
             }
-            
-            file.write(content.c_str(), content.size());
-            file.close();
-            
-            // For new files, set default permissions (non-executable: 0644)
-            std::error_code ec;
-            if (!scriptAlreadyExists) {
-                fs::permissions(scriptPath, 
-                              fs::perms::owner_read | fs::perms::owner_write | fs::perms::group_read | fs::perms::others_read,
-                              fs::perm_options::replace, ec);
-                if (ec) {
-                    LOG_ERROR << "Failed to set new script file permissions";
-                    auto errorResp = provisioner::utils::createErrorResponse(
-                        req,
-                        "Failed to set script file permissions",
-                        drogon::k500InternalServerError,
-                        "File Error",
-                        "FILE_PERMISSION_ERROR",
-                        "Could not set permissions on new script file: " + scriptPath
-                    );
-                    callback(errorResp);
-                    return;
-                }
-            } else {
-                // For existing files, restore the original permissions
-                fs::permissions(scriptPath, existingPerms, fs::perm_options::replace, ec);
-                if (ec) {
-                    LOG_ERROR << "Failed to restore original script file permissions";
-                    auto errorResp = provisioner::utils::createErrorResponse(
-                        req,
-                        "Failed to restore original script file permissions",
-                        drogon::k500InternalServerError,
-                        "File Error",
-                        "FILE_PERMISSION_ERROR",
-                        "Could not restore permissions on existing script file: " + scriptPath
-                    );
-                    callback(errorResp);
-                    return;
-                }
-            }
-            
+
             // Get updated script metadata
             Json::Value scriptMetadata = getScriptMetadata(scriptPath);
             
@@ -1129,41 +1125,23 @@ namespace provisioner {
             // Construct the full path with .sh extension
             std::string scriptPath = SCRIPTS_DIR + sanitized_filename + ".sh";
             
-            // An upload replaces a hook's script but not its mode: a new hook
-            // starts disabled, as one saved from the editor does.
-            const fs::perms mode = fs::exists(scriptPath)
-                ? fs::status(scriptPath).permissions()
-                : fs::perms::owner_read | fs::perms::owner_write | fs::perms::group_read | fs::perms::others_read;
-
             // Write the file content to the customisation directory
             LOG_INFO << "Saving script: " << scriptPath;
-            std::ofstream file(scriptPath, std::ios::binary);
-            if (!file.is_open()) {
-                auto errorResp = provisioner::utils::createErrorResponse(
+            const std::string writeError =
+                replaceScript(scriptPath, fileInfo.fileContent(), modeForReplacing(scriptPath));
+            if (!writeError.empty()) {
+                LOG_ERROR << "Failed to save " << scriptPath << ": " << writeError;
+                callback(provisioner::utils::createErrorResponse(
                     req,
                     "Failed to write script file",
                     drogon::k500InternalServerError,
                     "File Error",
                     "FILE_WRITE_ERROR",
-                    "Could not open file for writing: " + scriptPath
-                );
-                callback(errorResp);
+                    writeError
+                ));
                 return;
             }
 
-            file.write(fileInfo.fileContent().data(), fileInfo.fileContent().size());
-            file.close();
-            
-            std::error_code ec;
-            fs::permissions(scriptPath, mode, fs::perm_options::replace, ec);
-            if (ec) {
-                LOG_ERROR << "Failed to set script file permissions";
-                resp->setStatusCode(k500InternalServerError);
-                resp->setBody("Failed to set script file permissions");
-                callback(resp);
-                return;
-            }
-            
             auto acceptHeader = req->getHeader("accept");
             if (!acceptHeader.empty() && acceptHeader.find("text/html") != std::string::npos) {
                 drogon::HttpViewData data;
