@@ -229,7 +229,10 @@ Plain text success message: "Script file uploaded successfully"
 
 **Notes:**
 
-- Uploaded scripts are automatically set to executable (0755)
+- A new script is created disabled (0644), as with save-script; enable it
+  with enable-script
+
+- Uploading over an existing script keeps its permissions
 
 - The .sh extension is automatically added if not present
 

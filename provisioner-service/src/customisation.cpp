@@ -1129,6 +1129,12 @@ namespace provisioner {
             // Construct the full path with .sh extension
             std::string scriptPath = SCRIPTS_DIR + sanitized_filename + ".sh";
             
+            // An upload replaces a hook's script but not its mode: a new hook
+            // starts disabled, as one saved from the editor does.
+            const fs::perms mode = fs::exists(scriptPath)
+                ? fs::status(scriptPath).permissions()
+                : fs::perms::owner_read | fs::perms::owner_write | fs::perms::group_read | fs::perms::others_read;
+
             // Write the file content to the customisation directory
             LOG_INFO << "Saving script: " << scriptPath;
             std::ofstream file(scriptPath, std::ios::binary);
@@ -1148,11 +1154,8 @@ namespace provisioner {
             file.write(fileInfo.fileContent().data(), fileInfo.fileContent().size());
             file.close();
             
-            // Set file permissions to 0755 (rwxr-xr-x)
             std::error_code ec;
-            fs::permissions(scriptPath, 
-                          fs::perms::owner_all | fs::perms::group_read | fs::perms::group_exec | fs::perms::others_read | fs::perms::others_exec,
-                          fs::perm_options::replace, ec);
+            fs::permissions(scriptPath, mode, fs::perm_options::replace, ec);
             if (ec) {
                 LOG_ERROR << "Failed to set script file permissions";
                 resp->setStatusCode(k500InternalServerError);
@@ -1173,7 +1176,7 @@ namespace provisioner {
                 resp->setBody("Script file uploaded successfully");
                 callback(resp);
             }
-        });
+        }, {Post});
 
         /**
          * @brief Lists all available hook points for customisation scripts
