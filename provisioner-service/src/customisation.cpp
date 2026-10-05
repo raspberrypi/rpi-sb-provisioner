@@ -1,11 +1,14 @@
 #include "customisation.h"
 #include "utils.h"
+#include "auth.h"
+#include "include/audit.h"
 #include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <iomanip>
 #include <string_view>
 #include <cerrno>
+#include <cstdio>
 #include <cstring>
 #include <cstdlib>
 #include <fcntl.h>
@@ -117,10 +120,10 @@ namespace provisioner {
                 "Script Too Large", "SCRIPT_TOO_LARGE");
         }
 
-        // A provisioner may start a hook part-way through a save, so the script
-        // is written beside the old one and renamed over it: root runs the old
-        // or the new, never a truncated copy. rename() also replaces a symlink
-        // rather than writing through it. Returns why it failed, or "".
+        // A provisioner may start a hook mid-save, so write beside it and rename:
+        // root runs the old script or the new, never a truncated one. rename()
+        // replaces a symlink rather than writing through it. Returns why it
+        // failed, or "".
         std::string replaceScript(const std::string& path, std::string_view data, mode_t mode) {
             std::string tmp = SCRIPTS_DIR + "." + std::filesystem::path(path).filename().string() + ".XXXXXX";
             int fd = mkstemp(tmp.data());
@@ -154,6 +157,32 @@ namespace provisioner {
         mode_t modeForReplacing(const std::string& path) {
             struct stat st;
             return stat(path.c_str(), &st) == 0 ? (st.st_mode & 0777) : 0644;
+        }
+
+        std::string sha256Of(std::string_view data) {
+            provisioner::utils::SHA256Hasher hasher;
+            hasher.update(data.data(), data.size());
+            return hasher.finalize();
+        }
+
+        std::string fileSha256(const std::string& path) {
+            std::ifstream file(path, std::ios::binary);
+            if (!file) return "none";
+            std::ostringstream content;
+            content << file.rdbuf();
+            return sha256Of(content.str());
+        }
+
+        std::string octal(mode_t mode) {
+            char buf[8];
+            snprintf(buf, sizeof(buf), "%04o", static_cast<unsigned>(mode));
+            return buf;
+        }
+
+        // Lets the script a provisioner ran be matched to the change that put it there.
+        void auditHook(const drogon::HttpRequestPtr& req, const std::string& operation,
+                       const std::string& path, bool success, const std::string& detail) {
+            AuditLog::logFileSystemAccess(operation, path, success, auth::username(req), detail);
         }
 
         const std::string HOOK_ENV_DEVICE_IDENTITY =
@@ -748,7 +777,10 @@ namespace provisioner {
                     "Script Not Found", "SCRIPT_NOT_FOUND"));
                 return;
             }
-            if (!fs::remove(scriptPath, ec)) {
+            const std::string removed = "sha256 " + fileSha256(scriptPath);
+            const bool deleted = fs::remove(scriptPath, ec);
+            auditHook(req, "HOOK_DELETE", scriptPath, deleted, deleted ? removed : removed + ": " + ec.message());
+            if (!deleted) {
                 auto errorResp = provisioner::utils::createErrorResponse(
                     req,
                     "Failed to delete script file",
@@ -827,9 +859,11 @@ namespace provisioner {
             
             // Set file permissions to 0644 (rw-r--r--)
             std::error_code ec;
-            fs::permissions(scriptPath, 
+            fs::permissions(scriptPath,
                           fs::perms::owner_read | fs::perms::owner_write | fs::perms::group_read | fs::perms::others_read,
                           fs::perm_options::replace, ec);
+            auditHook(req, "HOOK_DISABLE", scriptPath, !ec,
+                      "sha256 " + fileSha256(scriptPath) + ", mode 0644" + (ec ? ": " + ec.message() : ""));
             if (ec) {
                 auto errorResp = provisioner::utils::createErrorResponse(
                     req,
@@ -912,6 +946,8 @@ namespace provisioner {
             fs::permissions(scriptPath, 
                           fs::perms::owner_all | fs::perms::group_read | fs::perms::group_exec | fs::perms::others_read | fs::perms::others_exec,
                           fs::perm_options::replace, ec);
+            auditHook(req, "HOOK_ENABLE", scriptPath, !ec,
+                      "sha256 " + fileSha256(scriptPath) + ", mode 0755" + (ec ? ": " + ec.message() : ""));
             if (ec) {
                 LOG_ERROR << "Failed to set script file permissions";
                 auto errorResp = provisioner::utils::createErrorResponse(
@@ -1023,7 +1059,12 @@ namespace provisioner {
             std::string scriptPath = SCRIPTS_DIR + sanitized_filename + ".sh";
             LOG_INFO << "Saving script: " << scriptPath;
 
-            const std::string writeError = replaceScript(scriptPath, content, modeForReplacing(scriptPath));
+            const mode_t mode = modeForReplacing(scriptPath);
+            const std::string change = "sha256 " + fileSha256(scriptPath) + " -> " + sha256Of(content) +
+                                       ", mode " + octal(mode);
+            const std::string writeError = replaceScript(scriptPath, content, mode);
+            auditHook(req, "HOOK_SAVE", scriptPath, writeError.empty(),
+                      writeError.empty() ? change : change + ": " + writeError);
             if (!writeError.empty()) {
                 LOG_ERROR << "Failed to save " << scriptPath << ": " << writeError;
                 callback(provisioner::utils::createErrorResponse(
@@ -1168,8 +1209,12 @@ namespace provisioner {
             
             // Write the file content to the customisation directory
             LOG_INFO << "Saving script: " << scriptPath;
-            const std::string writeError =
-                replaceScript(scriptPath, fileInfo.fileContent(), modeForReplacing(scriptPath));
+            const mode_t mode = modeForReplacing(scriptPath);
+            const std::string change = "sha256 " + fileSha256(scriptPath) + " -> " +
+                                       sha256Of(fileInfo.fileContent()) + ", mode " + octal(mode);
+            const std::string writeError = replaceScript(scriptPath, fileInfo.fileContent(), mode);
+            auditHook(req, "HOOK_UPLOAD", scriptPath, writeError.empty(),
+                      writeError.empty() ? change : change + ": " + writeError);
             if (!writeError.empty()) {
                 LOG_ERROR << "Failed to save " << scriptPath << ": " << writeError;
                 callback(provisioner::utils::createErrorResponse(
