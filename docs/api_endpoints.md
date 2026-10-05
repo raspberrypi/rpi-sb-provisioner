@@ -62,7 +62,7 @@ Full CRUD (Create, Read, Update, Delete) operations for managing customisation s
 
 - `GET /customisation/list-hooks` - List all available hook points
 
-- `GET /customisation/create-script` - Get template for new scripts
+- `POST /customisation/create-script` - Get template for new scripts
 
 **Use Cases:** Automated device customisation, deployment-specific configuration, fleet management
 
