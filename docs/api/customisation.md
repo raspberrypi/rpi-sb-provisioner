@@ -343,7 +343,7 @@ DUT reboot).
 
 # /customisation/create-script
 
-**HTTP Method:** GET
+**HTTP Method:** POST
 
 **Description:** Returns a default template for creating a new customisation script.
 
