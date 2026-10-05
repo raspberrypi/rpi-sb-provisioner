@@ -194,6 +194,10 @@ Returns JSON with updated script metadata including SHA256 hash:
 
 **Notes:**
 
+- A script may be at most 1 MiB, and the request body at most 4 MiB.
+  Larger ones are refused with 413 and `SCRIPT_TOO_LARGE`; a chunked body
+  is refused with 411
+
 - New scripts are created with non-executable permissions (0644)
 
 - Existing scripts preserve their original permissions when updated
@@ -233,6 +237,8 @@ Plain text success message: "Script file uploaded successfully"
   with enable-script
 
 - Uploading over an existing script keeps its permissions
+
+- The size limits are the same as for save-script
 
 - The .sh extension is automatically added if not present
 

@@ -107,6 +107,16 @@ namespace provisioner {
                 "Invalid Script Name", "INVALID_SCRIPT_NAME");
         }
 
+        constexpr size_t kMaxScriptBytes = 1024 * 1024;
+        // JSON escaping and multipart framing make the body larger than the script.
+        constexpr unsigned long kMaxScriptBody = 4 * kMaxScriptBytes;
+
+        drogon::HttpResponsePtr scriptTooLarge(const drogon::HttpRequestPtr& req) {
+            return provisioner::utils::createErrorResponse(
+                req, "Scripts are limited to 1 MiB", drogon::k413RequestEntityTooLarge,
+                "Script Too Large", "SCRIPT_TOO_LARGE");
+        }
+
         // A provisioner may start a hook part-way through a save, so the script
         // is written beside the old one and renamed over it: root runs the old
         // or the new, never a truncated copy. rename() also replaces a symlink
@@ -362,6 +372,29 @@ namespace provisioner {
     }
     
     void Customisation::registerHandlers(drogon::HttpAppFramework &app) {
+
+        // The UI lifts Drogon's body limit for image uploads. Refuse an
+        // oversized script before its body is read, not after.
+        app.registerPreRoutingAdvice([](const HttpRequestPtr &req, AdviceCallback &&stop, AdviceChainCallback &&pass) {
+            const std::string &path = req->path();
+            if (path != CUSTOMISATION_PATH + "/save-script" && path != CUSTOMISATION_PATH + "/upload-script") {
+                pass();
+                return;
+            }
+            if (!req->getHeader("Transfer-Encoding").empty()) {
+                auto resp = HttpResponse::newHttpResponse();
+                resp->setStatusCode(k411LengthRequired);
+                stop(resp);
+                return;
+            }
+            const std::string declared = req->getHeader("Content-Length");
+            if (!declared.empty() &&
+                (declared.size() > 9 || std::strtoul(declared.c_str(), nullptr, 10) > kMaxScriptBody)) {
+                stop(scriptTooLarge(req));
+                return;
+            }
+            pass();
+        });
 
         /**
          * @brief Registers HTTP handlers for customisation-related endpoints
@@ -952,7 +985,11 @@ namespace provisioner {
             
             std::string filename = (*json)["filename"].asString();
             std::string content = (*json)["content"].asString();
-            
+            if (content.size() > kMaxScriptBytes) {
+                callback(scriptTooLarge(req));
+                return;
+            }
+
             // Create directories if they don't exist
             namespace fs = std::filesystem;
             if (!fs::exists(SCRIPTS_DIR)) {
@@ -1090,7 +1127,11 @@ namespace provisioner {
             }
             
             const auto& fileInfo = it->second;
-            
+            if (fileInfo.fileContent().size() > kMaxScriptBytes) {
+                callback(scriptTooLarge(req));
+                return;
+            }
+
             // Create directories if they don't exist
             namespace fs = std::filesystem;
             if (!fs::exists(SCRIPTS_DIR)) {
