@@ -273,6 +273,8 @@ class KeyUpload(UITest):
         # A Pi 5 with no IDP image, the only setup that shows the key section.
         self.station.set_config(PROVISIONING_STYLE="secure-boot", RPI_DEVICE_FAMILY="5", GOLD_MASTER_OS_FILE="")
         self.b.get("/options/get")
+        # An HSM key left by another test opens the PKCS#11 tab instead.
+        self.b.click(".key-tab[data-tab=pem]")
 
     def tearDown(self):
         self.station.set_config(PROVISIONING_STYLE="naked")
