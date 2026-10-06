@@ -270,7 +270,8 @@ class KeyUpload(UITest):
 
     def setUp(self):
         super().setUp()
-        self.station.set_config(PROVISIONING_STYLE="secure-boot")
+        # A Pi 5 with no IDP image, the only setup that shows the key section.
+        self.station.set_config(PROVISIONING_STYLE="secure-boot", RPI_DEVICE_FAMILY="5", GOLD_MASTER_OS_FILE="")
         self.b.get("/options/get")
 
     def tearDown(self):
