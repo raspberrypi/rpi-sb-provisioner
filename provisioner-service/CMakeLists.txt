@@ -415,5 +415,6 @@ install(DIRECTORY "${CMAKE_SOURCE_DIR}/static/"
         DESTINATION /usr/share/rpi-sb-provisioner/static
         FILES_MATCHING 
         PATTERN "*.js"
+        PATTERN "*.json"
         PATTERN "*.svg"
         PERMISSIONS OWNER_READ GROUP_READ WORLD_READ)
