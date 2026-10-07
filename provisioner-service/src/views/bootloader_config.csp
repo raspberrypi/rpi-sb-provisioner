@@ -2,9 +2,9 @@
 #include <string>
 %>
 <%c++
-std::string kind = @@.get<std::string>("kind");
+std::string inUse = @@.get<std::string>("in_use");
 std::string content = @@.get<std::string>("content");
-bool edited = @@.get<bool>("edited");
+bool customExists = @@.get<bool>("custom_exists");
 std::string explicitPath = @@.get<std::string>("explicit_path");
 std::string maxBytes = @@.get<std::string>("max_bytes");
 %>
@@ -16,14 +16,14 @@ std::string maxBytes = @@.get<std::string>("max_bytes");
     <title>Bootloader configuration - Raspberry Pi Secure Boot Provisioner</title>
     <%view stylesheet %>
     <style>
-        .bl-tabs { display: flex; gap: 4px; margin: 12px 0; flex-wrap: wrap; }
-        .bl-tabs a { padding: 8px 14px; border: 1px solid #ccc; border-radius: 4px 4px 0 0; text-decoration: none; color: #212529; background: #f2f2f2; }
-        .bl-tabs a[aria-current="page"] { background: #fff; border-bottom-color: #fff; font-weight: 600; }
         .bl-layout { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
         .bl-editor { flex: 3 1 420px; min-width: 0; }
         .bl-help { flex: 2 1 300px; min-width: 0; border: 1px solid #ddd; border-radius: 6px; padding: 12px; background: #fafafa; max-height: 640px; overflow-y: auto; }
         .bl-help h3 { margin: 0 0 8px; font-size: 1.1rem; }
-        .bl-help table { border-collapse: collapse; width: 100%; font-size: 0.85rem; margin: 8px 0; }
+        .bl-help table { border-collapse: collapse; width: 100%; font-size: 0.9rem; margin: 8px 0; }
+        /* "monospace, monospace" stops browsers shrinking code to 13/16. */
+        .bl-help code { font-family: monospace, monospace; font-size: 0.95em; }
+        .bl-help h5 { font-size: 1rem; margin: 14px 0 6px; }
         .bl-help th, .bl-help td { border: 1px solid #ddd; padding: 4px 6px; text-align: left; vertical-align: top; }
         .bl-help pre { background: #fff; border: 1px solid #ddd; padding: 6px; overflow-x: auto; }
         .bl-help code, .bl-help td { overflow-wrap: anywhere; }
@@ -48,19 +48,14 @@ std::string maxBytes = @@.get<std::string>("max_bytes");
     <main id="main-content">
     <a href="/options/get"><span aria-hidden="true">&larr;</span> Back to Options</a>
     <h1>Bootloader configuration</h1>
-    <p>What the EEPROM bootloader of each device you provision is set to. It is signed into the EEPROM at bootstrap; a change reaches the next device to bootstrap, and the cached bootloader is rebuilt for it.</p>
+    <p>The custom configuration of the EEPROM bootloader on the devices you provision. It is signed into the EEPROM at bootstrap, and the next device to bootstrap gets a change.</p>
 
-    <nav class="bl-tabs" aria-label="Kind of device">
-        <a href="?kind=secure" <%c++ if (kind == "secure") { %>aria-current="page"<%c++ } %>>Secure boot</a>
-        <a href="?kind=naked" <%c++ if (kind == "naked") { %>aria-current="page"<%c++ } %>>Other styles (naked, FDE only)</a>
-    </nav>
-
-    <%c++ if (!explicitPath.empty()) { %>
+    <%c++ if (inUse == "other") { %>
     <div class="bl-notice" role="note">
-        <strong>Not in use.</strong> Devices get <code><%c++ $$ << HttpViewData::htmlTranslate(explicitPath); %></code> instead, named under Options as the bootloader configuration file. Clear that to use this one.
+        <strong>Not in use.</strong> Devices get <code><%c++ $$ << HttpViewData::htmlTranslate(explicitPath); %></code>, a file managed outside the provisioner. Saving here makes this configuration the one in use instead.
     </div>
     <%c++ } %>
-    <p id="bl-source"><%c++ $$ << (edited ? "Edited here. Reset to default to return to the package's configuration." : "The package default. Saving keeps your own copy, which later upgrades leave alone."); %><%c++ if (kind == "secure") { %> Bootstrap adds <code>SIGNED_BOOT=1</code> for secure boot.<%c++ } %></p>
+    <p id="bl-source"><%c++ if (inUse == "custom") { %>In use: devices get this configuration.<%c++ } else if (customExists) { %>Saved, but devices get the package default. Saving puts this one in use.<%c++ } else { %>A copy of the package default to start from. Saving puts it in use; upgrades leave it alone.<%c++ } %></p>
 
     <div class="bl-layout">
         <div class="bl-editor">
@@ -73,7 +68,7 @@ std::string maxBytes = @@.get<std::string>("max_bytes");
             <ul class="bl-findings" id="bl-findings" aria-live="polite"></ul>
             <div class="bl-actions">
                 <button id="bl-save" class="btn btn-success" type="button">Save</button>
-                <button id="bl-reset" class="btn btn-secondary" type="button" <%c++ if (!edited) { %>disabled<%c++ } %>>Reset to default</button>
+                <button id="bl-default" class="btn btn-secondary" type="button" <%c++ if (inUse == "default") { %>disabled<%c++ } %>>Use the default instead</button>
                 <span id="bl-status" role="status"></span>
                 <span id="bl-size"></span>
             </div>
@@ -93,7 +88,6 @@ std::string maxBytes = @@.get<std::string>("max_bytes");
 <script>
 (function () {
     'use strict';
-    var kind = <%c++ $$ << (kind == "naked" ? "'naked'" : "'secure'"); %>;
     var maxBytes = <%c++ $$ << HttpViewData::htmlTranslate(maxBytes); %>;
     var area = document.getElementById('editor');
     var ed = null;
@@ -204,7 +198,7 @@ std::string maxBytes = @@.get<std::string>("max_bytes");
     function checkSoon() {
         clearTimeout(timer);
         timer = setTimeout(function () {
-            post('/options/bootloader-config/check', { kind: kind, content: text() })
+            post('/options/bootloader-config/check', { content: text() })
                 .then(function (r) { report(r.body); }).catch(function () {});
         }, 400);
     }
@@ -212,30 +206,27 @@ std::string maxBytes = @@.get<std::string>("max_bytes");
     checkSoon();
 
     var status = document.getElementById('bl-status');
-    var reset = document.getElementById('bl-reset');
+    var useDefault = document.getElementById('bl-default');
+    var source = document.getElementById('bl-source');
     document.getElementById('bl-save').addEventListener('click', function () {
-        status.textContent = 'Saving…';
-        post('/options/bootloader-config/save', { kind: kind, content: text() }).then(function (r) {
+        status.textContent = 'Saving\u2026';
+        post('/options/bootloader-config/save', { content: text() }).then(function (r) {
             report(r.body);
             if (r.ok && r.body.saved) {
-                status.textContent = 'Saved. The next device to bootstrap gets it.';
-                reset.disabled = false;
-                document.getElementById('bl-source').firstChild.textContent =
-                    'Edited here. Reset to default to return to the package\'s configuration.';
+                status.textContent = 'Saved and in use. The next device to bootstrap gets it.';
+                useDefault.disabled = false;
+                source.textContent = 'In use: devices get this configuration.';
             } else {
                 status.textContent = 'Not saved: fix the errors listed above.';
             }
         }).catch(function () { status.textContent = 'Not saved: the provisioner did not answer.'; });
     });
-    reset.addEventListener('click', function () {
-        if (!confirm('Replace this configuration with the package default?')) return;
-        post('/options/bootloader-config/reset', { kind: kind }).then(function (r) {
-            if (!r.ok) { status.textContent = 'Not reset.'; return; }
-            setText(r.body.content);
-            status.textContent = 'Reset to the package default.';
-            reset.disabled = true;
-            document.getElementById('bl-source').firstChild.textContent =
-                'The package default. Saving keeps your own copy, which later upgrades leave alone.';
+    useDefault.addEventListener('click', function () {
+        post('/options/bootloader-config/use', { choice: 'default' }).then(function (r) {
+            if (!r.ok) { status.textContent = 'Not changed.'; return; }
+            status.textContent = 'Devices now get the package default. This configuration is kept.';
+            useDefault.disabled = true;
+            source.textContent = 'Saved, but devices get the package default. Saving puts this one in use.';
         });
     });
 })();

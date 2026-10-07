@@ -140,9 +140,9 @@ Specify the family of Raspberry Pi device you are provisioning. Supported values
 >
 > `rpi-sb-provisioner` will ignore the Raspberry Pi Bootloader configuration built by `pi-gen`, and use its own.
 
-The EEPROM bootloader configuration devices get is normally edited in the web interface: Options, then Edit bootloader configuration. There is one for secure-boot devices and one for the other styles. They are kept in `/etc/rpi-sb-provisioner/bootloader.secure` and `/etc/rpi-sb-provisioner/bootloader.naked`, and the package defaults in `/var/lib/rpi-sb-provisioner` are used until you save one.
+The EEPROM bootloader configuration devices get, when this is empty, is the package default for the provisioning style, in `/var/lib/rpi-sb-provisioner`. The web interface offers it and a custom one as two tiles under Options. Editing and saving the custom one writes `/etc/rpi-sb-provisioner/bootloader.conf` and sets this variable to it; choosing Default empties the variable and keeps the custom file.
 
-Set this variable only to use a file managed outside the provisioner. A path here overrides both edited configurations. The provisioner reads the file and never changes it; for secure boot it adds `SIGNED_BOOT=1` to its own copy. A change to the configuration in use rebuilds the cached bootloader for the next device.
+Any other path names a file managed outside the provisioner. The provisioner reads the configuration in use and never changes it; it adds to its own copy, applying `RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE` and, for secure boot, `SIGNED_BOOT=1`, which the key in OTP makes redundant. A change to the configuration in use rebuilds the cached bootloader for the next device.
 
 The settings are described in the Raspberry Pi Documentation, at <https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#raspberry-pi-bootloader-configuration>, and the editor shows that description for the setting under the cursor.
 
