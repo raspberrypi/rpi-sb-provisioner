@@ -53,6 +53,9 @@ override_dh_auto_build:
 # Install the CMake project but exclude drogon tools
 override_dh_auto_install:
 	dh_auto_install --sourcedirectory=provisioner-service
+	# The static install takes files by type; the bootloader editor's help
+	# was once left out of a package that way.
+	test -s debian/rpi-sb-provisioner/usr/share/rpi-sb-provisioner/static/js/bootloader-help.json
 
 # Enable and start the UI service by default
 override_dh_installsystemd:
@@ -63,5 +66,3 @@ override_dh_installsystemd:
 	dh_installsystemd --name=rpi-sb-bootstrap@
 	dh_installsystemd --name=rpi-sb-triage@
 	dh_installsystemd --no-enable --name=rpi-sb-image-bootimg-generator@
-	dh_installsystemd --no-enable --name=fetch-repo-package-list@
-	dh_installsystemd --no-enable --name=rpi-package-download@

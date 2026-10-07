@@ -194,6 +194,10 @@ Returns JSON with updated script metadata including SHA256 hash:
 
 **Notes:**
 
+- A script may be at most 1 MiB, and the request body at most 4 MiB.
+  Larger ones are refused with 413 and `SCRIPT_TOO_LARGE`; a chunked body
+  is refused with 411
+
 - New scripts are created with non-executable permissions (0644)
 
 - Existing scripts preserve their original permissions when updated
@@ -229,7 +233,12 @@ Plain text success message: "Script file uploaded successfully"
 
 **Notes:**
 
-- Uploaded scripts are automatically set to executable (0755)
+- A new script is created disabled (0644), as with save-script; enable it
+  with enable-script
+
+- Uploading over an existing script keeps its permissions
+
+- The size limits are the same as for save-script
 
 - The .sh extension is automatically added if not present
 
@@ -306,6 +315,14 @@ columns in uppercase — for example `BOARDNAME`, `ETH_MAC`, `OS_IMAGE_SHA256`,
 `CUSTOMER_KEY_FINGERPRINT`, and `CUSTOMER_KEY_LABEL`. Integer fields that
 would be SQL `NULL` are exported as empty strings.
 
+## Time limit
+
+Every hook must finish within `RPI_SB_HOOK_TIMEOUT` seconds, 1800 by default.
+A hook still running at that point is sent `SIGTERM`, then `SIGKILL` ten seconds
+later, and is reported as failed with exit code 124. Raise the limit in the
+config file if a hook legitimately needs longer. See
+[config_vars.md](../config_vars.md#rpi_sb_hook_timeout).
+
 ## provision-failed
 
 The `provision-failed` hook runs when bootstrap, triage, or provisioning exits
@@ -326,7 +343,7 @@ DUT reboot).
 
 # /customisation/create-script
 
-**HTTP Method:** GET
+**HTTP Method:** POST
 
 **Description:** Returns a default template for creating a new customisation script.
 

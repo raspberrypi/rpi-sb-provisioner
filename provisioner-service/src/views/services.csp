@@ -30,7 +30,7 @@
     
     <%view auto_refresh_toggle %>
     
-    <div id="services-table-container">
+    <div id="services-table-container" tabindex="0" role="region" aria-label="Services" style="overflow-x: auto;">
         <%c++ 
         bool isLoading = false;
         try {
@@ -63,28 +63,28 @@
             if(servicesList.size() > 0) {
             %>
                 <%c++ for(const auto& service : servicesList) { %>
-                    <tr>
+                    <tr data-key="<%c++ $$ << HttpViewData::htmlTranslate(service.at("full_name")); %>">
                         <td>
                             <%c++ 
                             // Display base_name and instance if available
                             if (!service.at("instance").empty()) {
-                                $$ << service.at("base_name") << "@" << service.at("instance");
+                                $$ << HttpViewData::htmlTranslate(service.at("base_name") + "@" + service.at("instance"));
                             } else {
-                                $$ << service.at("name");
+                                $$ << HttpViewData::htmlTranslate(service.at("name"));
                             }
                             %>
                         </td>
-                        <td><%c++ $$ << service.at("status"); %></td>
+                        <td><%c++ $$ << HttpViewData::htmlTranslate(service.at("status")); %></td>
                         <td class="status-<%c++ 
                             std::string activeClass = service.at("active");
                             // Remove spaces and parentheses for CSS class
                             activeClass.erase(std::remove_if(activeClass.begin(), activeClass.end(), 
                                 [](char c) { return c == ' ' || c == '(' || c == ')'; }), activeClass.end());
                             $$ << activeClass;
-                        %>"><%c++ $$ << service.at("active"); %></td>
+                        %>"><%c++ $$ << HttpViewData::htmlTranslate(service.at("active")); %></td>
                         <td class="timestamp-cell" data-timestamp="0">Loading…</td>
                         <td>
-                            <a href="/service-log/<%c++ $$ << service.at("full_name"); %>" class="log-link" aria-label="View logs for <%c++ $$ << service.at("full_name"); %>">View Logs</a>
+                            <a href="/service-log/<%c++ $$ << HttpViewData::htmlTranslate(service.at("full_name")); %>" class="log-link" aria-label="View logs for <%c++ $$ << HttpViewData::htmlTranslate(service.at("full_name")); %>">View Logs</a>
                         </td>
                     </tr>
                 <%c++ } %>
@@ -99,6 +99,11 @@
     </div>
 
     <script>
+    // Unit names carry device serials; nothing from the API goes in as markup.
+    function escapeServiceText(value) {
+        return String(value).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+    }
+
         // Function to convert active state to valid CSS class
         function activeStateToClass(active) {
             return 'status-' + active.replace(/[\s()]/g, '');
@@ -129,8 +134,10 @@
             return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
         }
         
+        let lastTableHtml = null;
+
         // Function to fetch and update the services table
-        async function refreshServicesTable() {
+        async function refreshServicesTable(opts) {
             try {
                 const response = await fetch('/api/v2/services');
                 
@@ -166,13 +173,13 @@
                         const formattedTimestamp = formatTimestamp(service.timestamp);
                         
                         tableHtml += `
-                            <tr>
-                                <td>${serviceName}</td>
-                                <td>${service.status}</td>
-                                <td class="${activeStateToClass(service.active)}">${service.active}</td>
-                                <td class="timestamp-cell">${formattedTimestamp}</td>
+                            <tr data-key="${escapeServiceText(service.full_name)}">
+                                <td>${escapeServiceText(serviceName)}</td>
+                                <td>${escapeServiceText(service.status)}</td>
+                                <td class="${activeStateToClass(service.active)}">${escapeServiceText(service.active)}</td>
+                                <td class="timestamp-cell">${escapeServiceText(formattedTimestamp)}</td>
                                 <td>
-                                    <a href="/service-log/${service.full_name}" class="log-link" aria-label="View logs for ${service.full_name}">View Logs</a>
+                                    <a href="/service-log/${escapeServiceText(service.full_name)}" class="log-link" aria-label="View logs for ${escapeServiceText(service.full_name)}">View Logs</a>
                                 </td>
                             </tr>
                         `;
@@ -190,7 +197,12 @@
                     </table>
                 `;
                 
-                tableContainer.innerHTML = tableHtml;
+                // Changed cells only, so focus and selection elsewhere survive;
+                // an automatic update waits while text in the table is selected.
+                if (tableHtml === lastTableHtml) return;
+                const apply = () => { lastTableHtml = tableHtml; RpiLive.update(tableContainer, tableHtml); };
+                if (opts && opts.auto) RpiLive.whenFree(tableContainer, apply, refreshStatus);
+                else apply();
             } catch (error) {
                 console.error('Error refreshing services table:', error);
             }

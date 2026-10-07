@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>API Tokens</title>
+    <%view stylesheet %>
+    <style>
+        .tokens-container { max-width: 900px; }
+        .tokens-container table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+        .tokens-container th, .tokens-container td { text-align: left; padding: 8px; border-bottom: 1px solid #ddd; }
+        .tokens-create { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 16px 0; }
+        .tokens-create input { padding: 6px 8px; font-size: 14px; min-width: 0; flex: 1 1 200px; }
+        .tokens-new {
+            background: #eef7ee; border: 1px solid #b7dfb7; border-radius: 4px;
+            padding: 10px 12px; margin: 12px 0; word-break: break-all;
+        }
+        .tokens-new code { font-size: 14px; }
+        .tokens-empty { color: #666; }
+        .tokens-error { background: #fdecea; color: #8a1c1c; border: 1px solid #f5c2c0; border-radius: 4px; padding: 8px 10px; }
+    </style>
+</head>
+<body>
+    <%view navbar %>
+    <main id="main-content" class="tokens-container">
+        <h1>API Tokens</h1>
+        <p>
+            Scripts can call the provisioner's API with a token instead of signing in:
+            <code>curl -H "Authorization: Bearer &lt;token&gt;" http://localhost:3142/api/v2/manufacturing</code>.
+            A token acts as the operator who created it, with the same access, and stops working if they leave the
+            <strong>rpi-sb-provisioner</strong> group. Store it like a password.
+        </p>
+
+        <form class="tokens-create" id="create-form">
+            <label for="token-label">Label</label>
+            <input type="text" id="token-label" maxlength="100" placeholder="e.g. MES export on line 2" required>
+            <button type="submit" class="cust-btn cust-btn-success">Create token</button>
+        </form>
+        <div id="new-token" class="tokens-new" role="status" hidden>
+            Copy this token now. It will not be shown again.<br>
+            <code id="new-token-value"></code>
+        </div>
+        <div id="token-error" class="tokens-error" role="alert" hidden></div>
+
+        <div tabindex="0" role="region" aria-label="API tokens" style="overflow-x: auto;">
+        <table>
+            <thead><tr><th>Label</th><th>Created by</th><th>Created (UTC)</th><th>ID</th><th></th></tr></thead>
+            <tbody id="token-rows"></tbody>
+        </table>
+        </div>
+    </main>
+    <script>
+    (function () {
+        const rows = document.getElementById('token-rows');
+        const errorBox = document.getElementById('token-error');
+
+        function showError(message) {
+            errorBox.textContent = message;
+            errorBox.hidden = !message;
+        }
+
+        async function load() {
+            const resp = await fetch('/api/v2/tokens', { headers: { 'Accept': 'application/json' } });
+            if (!resp.ok) { showError('Could not load tokens.'); return; }
+            const list = await resp.json();
+            rows.replaceChildren();
+            if (list.length === 0) {
+                const tr = rows.insertRow();
+                const td = tr.insertCell();
+                td.colSpan = 5;
+                td.className = 'tokens-empty';
+                td.textContent = 'No API tokens.';
+                return;
+            }
+            for (const t of list) {
+                const tr = rows.insertRow();
+                for (const value of [t.label, t.user, t.created, t.id]) tr.insertCell().textContent = value;
+                const button = document.createElement('button');
+                button.className = 'cust-btn cust-btn-danger cust-btn-sm';
+                button.textContent = 'Revoke';
+                button.addEventListener('click', async () => {
+                    if (!confirm('Revoke "' + t.label + '"? Anything using it will stop working.')) return;
+                    const r = await fetch('/api/v2/tokens/' + encodeURIComponent(t.id) + '/revoke', { method: 'POST' });
+                    showError(r.ok ? '' : 'Could not revoke the token.');
+                    load();
+                });
+                tr.insertCell().appendChild(button);
+            }
+        }
+
+        document.getElementById('create-form').addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const label = document.getElementById('token-label').value.trim();
+            const resp = await fetch('/api/v2/tokens', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                body: JSON.stringify({ label })
+            });
+            const body = await resp.json().catch(() => ({}));
+            if (!resp.ok) { showError(body.message || 'Could not create the token.'); return; }
+            showError('');
+            document.getElementById('new-token-value').textContent = body.token;
+            document.getElementById('new-token').hidden = false;
+            document.getElementById('token-label').value = '';
+            load();
+        });
+
+        load();
+    })();
+    </script>
+</body>
+</html>
+<%view-end%>

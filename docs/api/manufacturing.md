@@ -95,19 +95,19 @@ The endpoint returns a JSON array where each element represents a provisioned de
 To retrieve the first 10 provisioned devices:
 
 ``` bash
-curl http://localhost:3142/api/v2/manufacturing?limit=10
+curl -H "Authorization: Bearer $RPI_SB_TOKEN" "http://localhost:3142/api/v2/manufacturing?limit=10"
 ```
 
 To retrieve 20 devices after skipping the first 10:
 
 ``` bash
-curl http://localhost:3142/api/v2/manufacturing?offset=10&limit=20
+curl -H "Authorization: Bearer $RPI_SB_TOKEN" "http://localhost:3142/api/v2/manufacturing?offset=10&limit=20"
 ```
 
 To retrieve all devices:
 
 ``` bash
-curl http://localhost:3142/api/v2/manufacturing
+curl -H "Authorization: Bearer $RPI_SB_TOKEN" http://localhost:3142/api/v2/manufacturing
 ```
 
 **Error Responses:**

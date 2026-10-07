@@ -312,8 +312,8 @@ button:hover, .upload-button:hover, .submit-button:hover {
 /* Button Colors - Primary (Blue) */
 .btn-primary, .cust-btn-primary {
     color: #fff;
-    background-color: #007bff;
-    border-color: #007bff;
+    background-color: #0062cc;
+    border-color: #0062cc;
 }
 
 .btn-primary:hover, .cust-btn-primary:hover {
@@ -325,8 +325,8 @@ button:hover, .upload-button:hover, .submit-button:hover {
 /* Button Colors - Success (Green) */
 .btn-success, .cust-btn-success {
     color: #fff;
-    background-color: #28a745;
-    border-color: #28a745;
+    background-color: #1e7e34;
+    border-color: #1e7e34;
 }
 
 .btn-success:hover, .cust-btn-success:hover {
@@ -364,8 +364,8 @@ button:hover, .upload-button:hover, .submit-button:hover {
 /* Button Colors - Secondary (Gray) */
 .btn-secondary, .cust-btn-secondary {
     color: #fff;
-    background-color: #6c757d;
-    border-color: #6c757d;
+    background-color: #5c636a;
+    border-color: #5c636a;
 }
 
 .btn-secondary:hover, .cust-btn-secondary:hover {
@@ -643,17 +643,40 @@ pre {
     border-radius: 4px;
 }
 
+/* A titled panel with its action on the right, as the image browser has. */
+.panel { border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden; background: #fff; }
+.panel-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 12px 16px; background: #f8f9fa; border-bottom: 1px solid #e9ecef; }
+.panel-header h4 { margin: 0; font-size: 0.9rem; color: #495057; }
+.panel-action { white-space: nowrap; padding: 6px 12px; font-size: 0.8rem; background: #0062cc; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
+.panel-action:hover { background: #0056b3; }
+.panel-upload { padding: 0 16px; border-bottom: 1px solid #e9ecef; }
+.panel-body { padding: 12px 16px; }
+.panel-empty { text-align: center; font-style: italic; color: #595959; padding: 20px 0; }
+
+/* The uploader keys and images share (static/js/upload-zone.js). */
+.upload-zone {
+    border: 2px dashed #ccc;
+    border-radius: 8px;
+    padding: 20px;
+    text-align: center;
+    background: #fafafa;
+    margin: 8px 0;
+}
+.upload-zone.dragover { border-color: #0062cc; background: #f0f7ff; }
+.upload-zone.busy { opacity: 0.6; }
+.upload-zone-text { margin-bottom: 8px; }
+.upload-zone-hint { font-size: 0.8rem; color: #595959; margin-top: 8px; }
+
 .scroll-indicator {
     position: absolute;
     right: 10px;
     bottom: 10px;
-    background-color: rgba(0,0,0,0.6);
+    background-color: rgba(0,0,0,0.75);
     color: white;
     padding: 4px 8px;
     border-radius: 4px;
     font-size: 12px;
     z-index: 100;
-    opacity: 0.8;
 }
 
 /* Page Header Layout */
@@ -665,7 +688,7 @@ pre {
 
 /* Export Button */
 .export-btn {
-    background-color: #4CAF50;
+    background-color: #2e7d32;
     color: white;
     padding: 8px 15px;
     border: none;
@@ -754,6 +777,7 @@ input:checked + .toggle-slider:before {
 
 .pagination-controls button {
     background-color: #f2f2f2;
+    color: #212529;
     border: 1px solid #ddd;
     padding: 4px 10px;
     border-radius: 4px;
@@ -806,17 +830,17 @@ input:checked + .toggle-slider:before {
 }
 
 .security-enabled {
-    color: #28a745;
+    color: #1e7e34;
     font-size: 14px;
 }
 
 .security-disabled {
-    color: #dc3545;
+    color: #b02a37;
     font-size: 14px;
 }
 
 .security-unknown {
-    color: #6c757d;
+    color: #5c636a;
     font-size: 14px;
 }
 

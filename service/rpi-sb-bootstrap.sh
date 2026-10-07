@@ -123,7 +123,12 @@ cleanup() {
     exit $returnvalue
 }
 
-trap cleanup EXIT INT TERM
+# Signals exit with their own status so cleanup sees a failure. Trapped
+# directly, cleanup read the last command's status, often 0, and recorded a
+# killed run as a success.
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # On pre-Pi4 devices, only TARGET_DEVICE_PATH is likely to be unique.
 TARGET_DEVICE_PATH="$1"
@@ -138,7 +143,9 @@ TARGET_DEVICE_FAMILY="$(udevadm info --name="$TARGET_DEVICE_PATH" --query=proper
 # TARGET_DEVICE_SERIAL is best-effort, not all rpiboot devices have it set (some only show 32-bits)
 TARGET_DEVICE_SERIAL="$(udevadm info --name="$TARGET_DEVICE_PATH" --query=property --property=ID_SERIAL_SHORT --value)"
 # If TARGET_DEVICE_SERIAL is empty or equals "Broadcom", use TARGET_DEVICE_PATH instead
-if [ -z "${TARGET_DEVICE_SERIAL}" ] || [ "${TARGET_DEVICE_SERIAL}" = "Broadcom" ]; then
+# A serial that is not plain alphanumerics is treated as absent: the device
+# chose it, and it becomes part of a path.
+if [ -z "${TARGET_DEVICE_SERIAL}" ] || [ "${TARGET_DEVICE_SERIAL}" = "Broadcom" ] || ! serial_is_safe "${TARGET_DEVICE_SERIAL}"; then
     TARGET_DEVICE_SERIAL="${TARGET_DEVICE_PATH}"
     log "Using device path as serial: ${TARGET_DEVICE_SERIAL}"
 else
@@ -317,55 +324,6 @@ check_command_exists() {
     fi
 }
 
-timeout_fatal() {
-    command="$*"
-    timeout_seconds=60
-    set +e
-    log "Running command with ${timeout_seconds}-second timeout: \"${command}\""
-    # shellcheck disable=SC2086
-    timeout ${timeout_seconds} ${command}
-    command_exit_status=$?
-    
-    # Handle different exit codes from the timeout command
-    case ${command_exit_status} in
-        0)
-            # Command completed successfully within the time limit
-            log "\"$command\" succeeded with exit code 0."
-            ;;
-        124)
-            # Exit code 124 means the command timed out (TERM signal sent but command didn't exit)
-            record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
-            die "\"${command}\" FAILED: Timed out after ${timeout_seconds} seconds (exit code 124)."
-            ;;
-        125)
-            # Exit code 125 means the timeout command itself failed
-            record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
-            die "\"${command}\" FAILED: The timeout command itself failed (exit code 125)."
-            ;;
-        126)
-            # Exit code 126 means the command was found but could not be executed
-            record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
-            die "\"${command}\" FAILED: Command found but could not be executed (exit code 126)."
-            ;;
-        127)
-            # Exit code 127 means the command was not found
-            record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
-            die "\"${command}\" FAILED: Command not found (exit code 127)."
-            ;;
-        137)
-            # Exit code 137 (128+9) means the command was killed by SIGKILL (kill -9)
-            record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
-            die "\"${command}\" FAILED: Command was killed by SIGKILL (exit code 137)."
-            ;;
-        *)
-            # Any other non-zero exit code is a general failure
-            record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
-            die "\"${command}\" FAILED: Command returned exit code ${command_exit_status}."
-            ;;
-    esac
-    set -e
-}
-
 # NOTE: get_signing_directives() and derivePublicKey() have been moved to rpi-sb-common.sh
 # Use init_signing_context() to initialize signing, then:
 #   - get_openssl_sign_args() for OpenSSL signing
@@ -387,10 +345,36 @@ enforceSecureBootloaderConfig() {
     #echo "eeprom_write_protect=1" >> "${RPI_SB_WORKDIR}/config.txt"
 }
 
-identifyBootloaderConfig() {
-    # Possible to pass in RPI_DEVICE_BOOTLOADER_CONFIG_FILE... we should make sure the right thing happens with this.
-    if [ ! -f "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" ]; then
-        RPI_DEVICE_BOOTLOADER_CONFIG_FILE="$(mktemp)"
+# Arguments: $1 = secure or naked, $2 = the cached bootloader directory.
+#
+# The configuration comes from the file named in RPI_DEVICE_BOOTLOADER_CONFIG_FILE,
+# else the one edited on the Options page, else the package default. Bootstrap
+# adds to it, so it works on a private copy: it used to change the chosen file,
+# the package's own defaults included. A cache built from another configuration
+# is discarded, EEPROM image and signature too, since the config is inside them.
+prepare_bootloader_config() {
+    _bc_dir="$2"
+    if [ -n "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" ]; then
+        _bc_src="${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
+    elif [ -f "/etc/rpi-sb-provisioner/bootloader.$1" ]; then
+        _bc_src="/etc/rpi-sb-provisioner/bootloader.$1"
+    else
+        _bc_src="/var/lib/rpi-sb-provisioner/bootloader.$1"
+    fi
+    RPI_DEVICE_BOOTLOADER_CONFIG_FILE="$(mktemp)"
+    if [ -f "${_bc_src}" ]; then
+        log "Using bootloader configuration ${_bc_src}"
+        cp "${_bc_src}" "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
+        # A last line without a newline would swallow the next one added.
+        [ -z "$(tail -c 1 "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}")" ] || echo >> "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
+    else
+        log "Warning: bootloader configuration ${_bc_src} does not exist; using an empty one"
+    fi
+    maybe_reorder_boot_order_for_storage "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
+    BOOTLOADER_CONFIG_SHA256="$(sha256sum < "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" | cut -d ' ' -f 1)"
+    if [ -f "${_bc_dir}/config.txt" ] && [ "$(cat "${_bc_dir}/bootloader.sha256" 2>/dev/null)" != "${BOOTLOADER_CONFIG_SHA256}" ]; then
+        log "Bootloader configuration differs from the one the cached bootloader was built with; rebuilding"
+        rm -f "${_bc_dir}/config.txt" "${_bc_dir}/pieeprom.bin" "${_bc_dir}/pieeprom.sig" "${_bc_dir}/bootloader.sha256"
     fi
 }
 
@@ -533,6 +517,39 @@ FIRMWARE_RELEASE_STATUS="latest"
 # Taken from rpi-eeprom-update
 BOOTLOADER_UPDATE_IMAGE=""
 BOOTLOADER_UPDATE_VERSION=0
+# Arguments: $1 = directory rpiboot will serve, $2 = the bootcode in it.
+#
+# Current recovery.bin asks the host for mcb.bin and memory-training files that
+# rpi-eeprom does not ship, so a directory holding only the bootcode and EEPROM
+# files hung the board at "Cannot open file mcb.bin" (#338). rpiboot's
+# bootfiles.bin carries them per chip, and everything it has is served, over
+# whatever a cache from before holds. The bootcode names every memsys file of
+# every board, more than bootfiles.bin has for 2712, so only a missing mcb.bin
+# -- the one known to hang -- stops it.
+ensure_recovery_support_files() {
+    _rs_dir="$1"
+    _rs_bootcode="$2"
+    _rs_bootfiles=/usr/share/rpiboot/mass-storage-gadget64/bootfiles.bin
+    case "${TARGET_DEVICE_FAMILY}" in 2711|2712) ;; *) return 0 ;; esac
+    [ -f "${_rs_bootcode}" ] || return 0
+    # Its printable runs, one per line, as strings(1) would give without binutils.
+    _rs_named=$(tr -c '[:print:]' '\n' < "${_rs_bootcode}" | grep -xE 'mcb\.bin|memsys[0-9]{2}\.bin|bootmain' | sort -u)
+    [ -n "${_rs_named}" ] || return 0
+    tar -xf "${_rs_bootfiles}" -C "${_rs_dir}" --strip-components=1 --wildcards \
+        "${TARGET_DEVICE_FAMILY}/mcb.bin" "${TARGET_DEVICE_FAMILY}/memsys*.bin" "${TARGET_DEVICE_FAMILY}/bootmain" 2>/dev/null || true
+    _rs_absent=""
+    for _rs_name in ${_rs_named}; do
+        [ -s "${_rs_dir}/${_rs_name}" ] || _rs_absent="${_rs_absent} ${_rs_name}"
+    done
+    case " ${_rs_absent} " in
+        *" mcb.bin "*)
+            record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
+            mark_permanent_failure
+            die "$(basename "${_rs_bootcode}") asks for mcb.bin, which ${_rs_bootfiles} does not carry for ${TARGET_DEVICE_FAMILY}: rpiboot and rpi-eeprom are out of step" ;;
+    esac
+    log "Serving ${TARGET_DEVICE_FAMILY} recovery support files from rpiboot's bootfiles.bin$([ -n "${_rs_absent}" ] && echo "; named by the bootcode but not carried:${_rs_absent}")"
+}
+
 getBootloaderUpdateVersion() {
    BOOTLOADER_UPDATE_VERSION=0
    
@@ -591,6 +608,10 @@ if [ -z "${RPI_SB_WORKDIR}" ]; then
 elif [ ! -d "${RPI_SB_WORKDIR}" ]; then
     RPI_SB_WORKDIR=$(make_temp_dir "rpi-sb-bootstrap.XXX")
     announce_stop "Finding the cache directory: Created ${RPI_SB_WORKDIR} (configured path isn't a directory)"
+    DELETE_PRIVATE_TMPDIR="true"
+elif ! workdir_is_private "${RPI_SB_WORKDIR}"; then
+    RPI_SB_WORKDIR=$(make_temp_dir "rpi-sb-bootstrap.XXX")
+    announce_stop "Finding the cache directory: Created ${RPI_SB_WORKDIR} (configured path is not root's alone)"
     DELETE_PRIVATE_TMPDIR="true"
 else
     # Deliberately do nothing
@@ -695,6 +716,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
     if [ "${PROVISIONING_STYLE}" = "secure-boot" ]; then
         SECURE_BOOTLOADER_DIRECTORY="${RPI_SB_WORKDIR}/secure-bootloader/"
         mkdir -p "${SECURE_BOOTLOADER_DIRECTORY}"
+        prepare_bootloader_config secure "${SECURE_BOOTLOADER_DIRECTORY}"
         if [ -f "${SECURE_BOOTLOADER_DIRECTORY}/config.txt" ]; then
             log "Secure bootloader directory already exists, skipping setup"
             if [ "${SPECIAL_FLAG_REPROVISION_DEVICE}" -eq 1 ]; then
@@ -735,7 +757,8 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                 esac
             fi
             record_progress "EEPROM-UPDATING"
-            [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal rpiboot -j "${METADATA_DIR}" -d "${SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
+            ensure_recovery_support_files "${SECURE_BOOTLOADER_DIRECTORY}" "${BOOTCODE_FLASHING_NAME}"
+            [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal_secs 60 rpiboot -j "${METADATA_DIR}" -d "${SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
             extract_board_type
         else
             # NB: config.txt is the marker the branch above uses to decide the
@@ -749,12 +772,6 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
 
             record_progress "BOOTLOADER-PREPARING"
             announce_start "Setting up the environment for a signed-boot capable device"
-            if [ -z "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" ]; then
-                RPI_DEVICE_BOOTLOADER_CONFIG_FILE=/var/lib/rpi-sb-provisioner/bootloader.secure
-                log "Using default secure bootloader config file: ${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
-            else
-                log "Using pre-configured bootloader config: ${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
-            fi
 
             SOURCE_EEPROM_IMAGE=
             DESTINATION_EEPROM_IMAGE=
@@ -793,14 +810,9 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
             ####
 
             if signing_available; then
-                # Public key already derived by init_signing_context()
-                identifyBootloaderConfig
+                # Public key already derived by init_signing_context(); the
+                # storage boot order was applied by prepare_bootloader_config.
                 enforceSecureBootloaderConfig
-
-                # Optionally make the selected storage device the first boot
-                # option. Must run before the config is signed below so the
-                # reordered BOOT_ORDER is covered by the signature.
-                maybe_reorder_boot_order_for_storage "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
 
                 # Never reuse a cached signature on the strength of it merely
                 # existing: a failed signing run leaves behind a file with the
@@ -838,6 +850,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
 
                 # This directive informs the bootloader to write the public key into OTP
                 echo "program_pubkey=1" > "${SECURE_BOOTLOADER_DIRECTORY}/config.txt"
+                echo "${BOOTLOADER_CONFIG_SHA256}" > "${SECURE_BOOTLOADER_DIRECTORY}/bootloader.sha256"
                 # Force the post-recovery reboot back into RPIBOOT so the next
                 # phase (fastboot bootstrap) can attach over USB.
                 echo "set_reboot_order=0x3" >> "${SECURE_BOOTLOADER_DIRECTORY}/config.txt"
@@ -883,7 +896,8 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                     log "Normal provisioning mode (not re-provisioning)"
                 fi
                 record_progress "EEPROM-UPDATING"
-                [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal rpiboot -j "${METADATA_DIR}" -d "${SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
+                ensure_recovery_support_files "${SECURE_BOOTLOADER_DIRECTORY}" "${BOOTCODE_FLASHING_NAME}"
+                [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal_secs 60 rpiboot -j "${METADATA_DIR}" -d "${SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
             extract_board_type
             else
                 log "No key specified, skipping eeprom update"
@@ -949,6 +963,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
             2712|2711)
                 NON_SECURE_BOOTLOADER_DIRECTORY="${RPI_SB_WORKDIR}/non-secure-bootloader/"
                 mkdir -p "${NON_SECURE_BOOTLOADER_DIRECTORY}"
+                prepare_bootloader_config naked "${NON_SECURE_BOOTLOADER_DIRECTORY}"
                 
                 if [ ! -f "${NON_SECURE_BOOTLOADER_DIRECTORY}/config.txt" ]; then
                     # NB: config.txt is the marker this branch uses to decide the
@@ -964,12 +979,6 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
 
                     record_progress "BOOTLOADER-PREPARING"
                     announce_start "Setting up EEPROM update for non-secure-boot device"
-                    if [ -z "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" ]; then
-                        RPI_DEVICE_BOOTLOADER_CONFIG_FILE=/var/lib/rpi-sb-provisioner/bootloader.naked
-                        log "Using default naked bootloader config file: ${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
-                    else
-                        log "Using pre-configured bootloader config: ${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
-                    fi
                     
                     SOURCE_EEPROM_IMAGE=
                     DESTINATION_EEPROM_IMAGE=
@@ -1003,10 +1012,6 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                     
                     # Copy unsigned bootcode
                     cp "${BOOTCODE_BINARY_IMAGE}" "${BOOTCODE_FLASHING_NAME}"
-
-                    # Optionally make the selected storage device the first boot
-                    # option, before the config is baked into the EEPROM below.
-                    maybe_reorder_boot_order_for_storage "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
 
                     # Update EEPROM using the standard update_eeprom function.
                     # Always unsigned, whatever key the station has configured:
@@ -1049,10 +1054,12 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                     # next phase (fastboot bootstrap) can attach over USB.
                     echo "set_reboot_order=0x3" > "${NON_SECURE_BOOTLOADER_DIRECTORY}/config.txt"
                     echo "recovery_reboot=1" >> "${NON_SECURE_BOOTLOADER_DIRECTORY}/config.txt"
+                    echo "${BOOTLOADER_CONFIG_SHA256}" > "${NON_SECURE_BOOTLOADER_DIRECTORY}/bootloader.sha256"
                     
                     record_progress "EEPROM-UPDATING"
                     log "Updating EEPROM to latest version"
-                    [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal rpiboot -j "${METADATA_DIR}" -d "${NON_SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
+                    ensure_recovery_support_files "${NON_SECURE_BOOTLOADER_DIRECTORY}" "${BOOTCODE_FLASHING_NAME}"
+                    [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal_secs 60 rpiboot -j "${METADATA_DIR}" -d "${NON_SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
                     extract_board_type
                     log "EEPROM update completed. Device rebooted."
                 else
@@ -1078,7 +1085,7 @@ record_state "${TARGET_DEVICE_SERIAL}" "bootstrap-firmware-updated" "${TARGET_US
 announce_start "fastboot initialisation"
 record_state "${TARGET_DEVICE_SERIAL}" "bootstrap-fastboot-initialisation-started" "${TARGET_USB_PATH}"
 
-timeout_fatal rpiboot -v -j "${METADATA_DIR}" -d "${FASTBOOT_STAGING_DIR}" -p "${TARGET_USB_PATH}"
+timeout_fatal_secs 60 rpiboot -v -j "${METADATA_DIR}" -d "${FASTBOOT_STAGING_DIR}" -p "${TARGET_USB_PATH}"
 extract_board_type
 set +e
 

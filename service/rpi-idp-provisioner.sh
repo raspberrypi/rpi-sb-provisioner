@@ -73,121 +73,6 @@ check_pidevice_storage_type() {
     esac
 }
 
-timeout_nonfatal() {
-    command="$*"
-    set +e
-    log "Running command with 10-second timeout: \"${command}\""
-    # shellcheck disable=SC2086
-    timeout 10 ${command}
-    command_exit_status=$?
-
-    # Handle different exit codes from the timeout command
-    case ${command_exit_status} in
-        0)
-            # Command completed successfully within the time limit
-            log "\"$command\" succeeded with exit code 0."
-            ;;
-        124)
-            # Exit code 124 means the command timed out (TERM signal sent but command didn't exit)
-            log "\"${command}\" FAILED: Timed out after 10 seconds (exit code 124)."
-            ;;
-        125)
-            # Exit code 125 means the timeout command itself failed
-            log "\"${command}\" FAILED: The timeout command itself failed (exit code 125)."
-            ;;
-        126)
-            # Exit code 126 means the command was found but could not be executed
-            log "\"${command}\" FAILED: Command found but could not be executed (exit code 126)."
-            ;;
-        127)
-            # Exit code 127 means the command was not found
-            log "\"${command}\" FAILED: Command not found (exit code 127)."
-            ;;
-        137)
-            # Exit code 137 (128+9) means the command was killed by SIGKILL (kill -9)
-            log "\"${command}\" FAILED: Command was killed by SIGKILL (exit code 137)."
-            ;;
-        *)
-            # Any other non-zero exit code is a general failure
-            log "\"${command}\" FAILED: Command returned exit code ${command_exit_status}."
-            ;;
-    esac
-    set -e
-    return ${command_exit_status}
-}
-
-# timeout_fatal: 30-second default used by rpi-sb-common.sh helpers.
-timeout_fatal() {
-    timeout_fatal_secs 30 "$@"
-}
-
-# timeout_fatal with configurable timeout.
-# Arguments: $1 = timeout in seconds, remaining = command to run
-timeout_fatal_secs() {
-    timeout_seconds="$1"
-    shift
-    command="$*"
-    set +e
-    log "Running command with ${timeout_seconds}s timeout: \"${command}\""
-
-    # Capture the command's output as well as streaming it. When a fastboot
-    # command is refused by the device, the sentence that says why arrives only
-    # in fastboot's own stderr, as FAILED (remote: '...'). Running the command
-    # bare sent that to this script's stderr -- the journal -- and never to the
-    # per-device provisioner.log the UI reads, so an operator was shown an exit
-    # code and nothing that explained it.
-    #
-    # Streaming is preserved through tee: fastboot reports flash progress as it
-    # goes, and buffering it until the command finished would make a long write
-    # look like a hang. The exit status travels via a file because this is
-    # POSIX sh, where the status of a pipeline is the last stage's.
-    _tfs_out="$(mktemp)"
-    _tfs_rc="$(mktemp)"
-    # shellcheck disable=SC2086
-    { timeout "${timeout_seconds}" ${command} 2>&1; echo $? > "${_tfs_rc}"; } | tee "${_tfs_out}"
-    command_exit_status="$(cat "${_tfs_rc}" 2>/dev/null)"
-    [ -n "${command_exit_status}" ] || command_exit_status=1
-    rm -f "${_tfs_rc}"
-
-    # The device's own words, where it gave any. fastboot prints one such line
-    # per refusal; take the last, which is the one that stopped the command.
-    _tfs_remote="$(sed -n "s/.*FAILED (remote: '\(.*\)').*/\1/p" "${_tfs_out}" 2>/dev/null | tail -n 1)"
-
-    case ${command_exit_status} in
-        0)
-            rm -f "${_tfs_out}"
-            log "\"$command\" succeeded with exit code 0."
-            ;;
-        124)
-            log "\"${command}\" FAILED: Timed out after ${timeout_seconds} seconds."
-            log "Last output before the timeout:"
-            tail -n 20 "${_tfs_out}" 2>/dev/null | while IFS= read -r _tfs_line; do
-                log "  ${_tfs_line}"
-            done
-            rm -f "${_tfs_out}"
-            record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "${TARGET_USB_PATH}"
-            die "\"${command}\" FAILED: Timed out after ${timeout_seconds} seconds (exit code 124)."
-            ;;
-        *)
-            if [ -n "${_tfs_remote}" ]; then
-                log "\"${command}\" FAILED: the device refused it: ${_tfs_remote}"
-            else
-                log "\"${command}\" FAILED with exit code ${command_exit_status}. Output:"
-                tail -n 20 "${_tfs_out}" 2>/dev/null | while IFS= read -r _tfs_line; do
-                    log "  ${_tfs_line}"
-                done
-            fi
-            rm -f "${_tfs_out}"
-            record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "${TARGET_USB_PATH}"
-            if [ -n "${_tfs_remote}" ]; then
-                die "\"${command}\" FAILED: ${_tfs_remote}"
-            fi
-            die "\"${command}\" FAILED: Command returned exit code ${command_exit_status}."
-            ;;
-    esac
-    set -e
-}
-
 cleanup() {
     # Capture the exit status that triggered the trap BEFORE any other
     # command runs, otherwise $? is clobbered by the guard/assignment below
@@ -222,7 +107,12 @@ cleanup() {
 
     exit ${return_value}
 }
-trap cleanup EXIT INT TERM
+# Signals exit with their own status so cleanup sees a failure. Trapped
+# directly, cleanup read the last command's status, often 0, and recorded a
+# killed run as a success.
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 ### Pre-requisite checks
 
@@ -255,7 +145,19 @@ if [ "${PROVISIONING_STYLE}" = "secure-boot" ]; then
     fi
 fi
 
+# The staged descriptor, partition cursor and write pipeline live in one
+# fastbootd session, and only USB keeps a session across fastboot calls: over
+# TCP each is a new one. A daemon not in split mode would be driven over TCP
+# and lose the descriptor between stage and idpinit, so it stays on USB.
+keep_idp_on_one_session() {
+    if [ "${TCP_DATA_PLANE_ONLY}" != "yes" ] && [ "${FASTBOOT_DEVICE_SPECIFIER}" != "${TARGET_DEVICE_SERIAL}" ]; then
+        log "Not split mode: IDP stays on USB ${TARGET_DEVICE_SERIAL}, not ${FASTBOOT_DEVICE_SPECIFIER}, to keep one session"
+        FASTBOOT_DEVICE_SPECIFIER="${TARGET_DEVICE_SERIAL}"
+    fi
+}
+
 setup_fastboot_and_id_vars "$1"
+keep_idp_on_one_session
 
 record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_STARTED}" "${TARGET_USB_PATH}"
 
@@ -314,9 +216,25 @@ log "IDP device class: ${IDP_DEVICE_CLASS}"
 log "IDP storage type: ${IDP_STORAGE_TYPE}"
 log "IDP encryption: ${IDP_HAS_ENCRYPTION}"
 
+# A sparse image is named by the artefact and, later, by the device. Either
+# could name a host file instead, which the flash loop would then send to the
+# device, so only a plain name inside the artefact is accepted.
+idp_plain_name() {
+    case "$1" in
+        ""|.*|*/*|*..*) return 1 ;;
+    esac
+    printf '%s' "$1" | grep -Eqx '[A-Za-z0-9._+-]+'
+}
+
 # Verify all referenced .simg files exist
 MISSING_IMAGES=""
+ARTEFACT_SIMGS=""
 for SIMG_NAME in $(jq -r '.layout.partitionimages | to_entries[] | .value.simage // empty' < "${IDP_JSON}"); do
+    if ! idp_plain_name "${SIMG_NAME}"; then
+        die "IDP artefact names an image outside itself: ${SIMG_NAME}"
+    fi
+    ARTEFACT_SIMGS="${ARTEFACT_SIMGS}${SIMG_NAME}
+"
     if [ ! -f "${IDP_DIR}/${SIMG_NAME}" ]; then
         MISSING_IMAGES="${MISSING_IMAGES} ${SIMG_NAME}"
     fi
@@ -381,6 +299,10 @@ elif [ ! -d "${RPI_SB_WORKDIR}" ]; then
     RPI_SB_WORKDIR=$(make_temp_dir "rpi-sb-provisioner.XXX")
     DELETE_PRIVATE_TMPDIR="true"
     announce_stop "Finding the cache directory: Created ${RPI_SB_WORKDIR} (configured path isn't a directory)"
+elif ! workdir_is_private "${RPI_SB_WORKDIR}"; then
+    RPI_SB_WORKDIR=$(make_temp_dir "rpi-sb-provisioner.XXX")
+    DELETE_PRIVATE_TMPDIR="true"
+    announce_stop "Finding the cache directory: Created ${RPI_SB_WORKDIR} (configured path is not root's alone)"
 else
     announce_stop "Finding the cache directory: Using specified name"
 fi
@@ -501,32 +423,42 @@ resolve_flash_source() {
 
 record_progress "STORAGE-ERASING"
 announce_start "Erase Device Storage"
-timeout_fatal_secs 30 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" erase "${RPI_DEVICE_STORAGE_TYPE}"
+timeout_fatal_secs "${FASTBOOT_ERASE_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" erase "${RPI_DEVICE_STORAGE_TYPE}"
 sleep 3
 announce_stop "Erase Device Storage"
 
 # Re-check the fastboot device specifier, as it may take a while for a device to gain IP connectivity
 setup_fastboot_and_id_vars "${FASTBOOT_DEVICE_SPECIFIER}"
+keep_idp_on_one_session
 
 announce_start "IDP Stage and Initialise"
-timeout_fatal_secs 30 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" stage "${IDP_JSON}"
-timeout_fatal_secs 30 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem idpinit
+timeout_fatal_secs "${FASTBOOT_CONTROL_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" stage "${IDP_JSON}"
+timeout_fatal_secs "${FASTBOOT_CONTROL_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem idpinit
 announce_stop "IDP Stage and Initialise"
 
 record_progress "STORAGE-PARTITIONING"
 announce_start "IDP Write Partitions"
-timeout_fatal_secs 120 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem idpwrite
+timeout_fatal_secs "${FASTBOOT_STORAGE_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem idpwrite
 announce_stop "IDP Write Partitions"
+
+# Prefer the TCP data-plane specifier when the daemon advertises split
+# mode (-i usb+tcp); fall back to whatever the control plane is using.
+FLASH_SPECIFIER="${FASTBOOT_TCP_FLASH_SPECIFIER:-${FASTBOOT_DEVICE_SPECIFIER}}"
+probe_flash_pipeline "${FLASH_SPECIFIER}"
 
 record_progress "WRITING-OS"
 announce_start "IDP Flash Images"
 PARTITION_INDEX=0
 while true; do
     set +e
-    RESPONSE=$(fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem idpgetblk 2>&1)
+    RESPONSE=$(timeout -k 5 "${FASTBOOT_CONTROL_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem idpgetblk 2>&1)
     FB_EXIT=$?
     set -e
-    [ $FB_EXIT -ne 0 ] && die "idpgetblk failed (exit ${FB_EXIT}): ${RESPONSE}"
+    case ${FB_EXIT} in
+        0) ;;
+        124|137) die "idpgetblk: no answer within ${FASTBOOT_CONTROL_TIMEOUT} seconds" ;;
+        *) die "idpgetblk failed (exit ${FB_EXIT}): ${RESPONSE}" ;;
+    esac
 
     # Extract the INFO line.
     # The host fastboot client outputs device INFO messages in various formats
@@ -552,6 +484,14 @@ while true; do
     if [ -z "${BLOCKDEV}" ] || [ -z "${SIMG}" ]; then
         die "Malformed idpgetblk response: '${INFO_LINE}' (full response: ${RESPONSE})"
     fi
+    # The device chose both. The image must be one the artefact lists, and the
+    # block device must not be mistaken for an option by fastboot.
+    if ! idp_plain_name "${SIMG}" || ! printf '%s' "${ARTEFACT_SIMGS}" | grep -Fqx -- "${SIMG}"; then
+        die "Device asked for an image the artefact does not contain: '${SIMG}'"
+    fi
+    if ! printf '%s' "${BLOCKDEV}" | grep -Eqx '[A-Za-z0-9][A-Za-z0-9/_-]*'; then
+        die "Device named an invalid block device: '${BLOCKDEV}'"
+    fi
 
     FLASH_SOURCE=$(resolve_flash_source "${SIMG}")
     if [ ! -f "${FLASH_SOURCE}" ]; then
@@ -567,9 +507,6 @@ while true; do
     fi
 
     FLASH_START=$(date +%s)
-    # Prefer the TCP data-plane specifier when the daemon advertises split
-    # mode (-i usb+tcp); fall back to whatever the control plane is using.
-    FLASH_SPECIFIER="${FASTBOOT_TCP_FLASH_SPECIFIER:-${FASTBOOT_DEVICE_SPECIFIER}}"
     # Report each partition as its own state: an IDP artefact can carry many,
     # each taking minutes, so a single "writing" state for the whole loop
     # leaves the tile view looking stalled for the duration. The block device
@@ -578,12 +515,13 @@ while true; do
     # "MAPPER-CRYPTROOT".
     BLOCKDEV_STATE=$(printf '%s' "${BLOCKDEV}" | tr -c 'A-Za-z0-9' '-' | tr 'a-z' 'A-Z')
     record_progress "WRITING-${BLOCKDEV_STATE}"
-    timeout_fatal_secs 600 fastboot -s "${FLASH_SPECIFIER}" flash "${BLOCKDEV}" "${FLASH_SOURCE}"
+    fastboot_flash "${FLASH_SPECIFIER}" "${BLOCKDEV}" "${FLASH_SOURCE}"
     FLASH_END=$(date +%s)
     FLASH_DURATION=$((FLASH_END - FLASH_START))
     log "Flashed ${SIMG} to ${BLOCKDEV} in ${FLASH_DURATION}s"
 done
 log "Flashed ${PARTITION_INDEX} partition(s) total"
+
 announce_stop "IDP Flash Images"
 
 record_progress "FINALISING"
@@ -592,7 +530,7 @@ timeout_fatal_secs 60 fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem idpdone
 announce_stop "IDP Finalise"
 
 announce_start "Set LED status"
-fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem led PWR 0
+timeout_nonfatal_secs "${FASTBOOT_CONTROL_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem led PWR 0 || true
 announce_stop "Set LED status"
 
 metadata_gather

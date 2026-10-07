@@ -10,6 +10,7 @@
 #include <drogon/HttpAppFramework.h>
 #include "utils.h"
 #include "include/audit.h"
+#include "include/auth.h"
 #include "include/schema_validator.h"
 #include "keywrap.h"
 #include "keyregistry.h"
@@ -36,6 +37,60 @@ namespace provisioner {
             }
         }
 
+        // The workdir is emptied as root on every save, so a mistyped path
+        // such as /srv/rpi-sb-provisioner would take the images and the
+        // manufacturing database with it. Refuse any directory that is, or
+        // holds, something that matters.
+        bool workdirSafeToClear(const std::string& workdir, std::string& why) {
+            namespace fs = std::filesystem;
+            std::error_code ec;
+            const fs::path dir = fs::canonical(workdir, ec);
+            if (ec || !fs::path(workdir).is_absolute()) {
+                why = "RPI_SB_WORKDIR must be an existing absolute path";
+                return false;
+            }
+
+            std::vector<std::string> kept = {
+                "/", "/bin", "/boot", "/dev", "/etc", "/home", "/lib", "/media", "/mnt",
+                "/opt", "/proc", "/root", "/run", "/sbin", "/srv", "/sys", "/tmp", "/usr", "/var",
+                "/srv/rpi-sb-provisioner/images", "/etc/rpi-sb-provisioner",
+                "/var/log/rpi-sb-provisioner", "/var/lib/rpi-sb-provisioner",
+            };
+            for (const char *key : {"RPI_SB_PROVISIONER_MANUFACTURING_DB", "CUSTOMER_KEY_FILE_PEM",
+                                    "CUSTOMER_KEY_STORAGE_DIR", "GOLD_MASTER_OS_FILE"}) {
+                if (auto v = utils::getConfigValue(key); v && !v->empty()) kept.push_back(*v);
+            }
+            std::ifstream passwd("/etc/passwd");
+            for (std::string line; std::getline(passwd, line);) {
+                std::vector<std::string> f;
+                std::stringstream ss(line);
+                for (std::string part; std::getline(ss, part, ':');) f.push_back(part);
+                if (f.size() >= 6 && !f[5].empty()) kept.push_back(f[5]);
+            }
+
+            for (const auto &k : kept) {
+                const fs::path p = fs::weakly_canonical(k, ec);
+                if (ec) continue;
+                auto [d, q] = std::mismatch(dir.begin(), dir.end(), p.begin(), p.end());
+                if (d == dir.end()) {
+                    why = "RPI_SB_WORKDIR " + dir.string() + " holds " + p.string();
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        bool clearWorkdirContents(const std::string& workdir) {
+            std::string why;
+            if (!workdirSafeToClear(workdir, why)) {
+                LOG_ERROR << "Not clearing the workdir: " << why;
+                AuditLog::logFileSystemAccess("DELETE_CONTENTS", workdir, false, "", why);
+                return false;
+            }
+            removeDirectoryContents(workdir);
+            return true;
+        }
+
         void invalidateWorkdirCache(const std::string& reason) {
             auto workdirValue = utils::getConfigValue("RPI_SB_WORKDIR");
             std::string workdir = workdirValue ? *workdirValue : "";
@@ -45,30 +100,10 @@ namespace provisioner {
             if (std::filesystem::exists(workdir) && std::filesystem::is_directory(workdir)) {
                 LOG_INFO << "Customer key changed - removing contents of RPI_SB_WORKDIR at " << workdir;
                 AuditLog::logFileSystemAccess("DELETE_CONTENTS", workdir, true, "", reason);
-                removeDirectoryContents(workdir);
+                clearWorkdirContents(workdir);
             } else {
                 LOG_WARN << "RPI_SB_WORKDIR path does not exist or is not a directory: " << workdir;
             }
-        }
-
-        bool validateCsrfForMutation(const HttpRequestPtr& req,
-                                     std::function<void(const HttpResponsePtr&)>& callback) {
-            if (req->getHeader("X-CSRF-Token").empty()) {
-                return true;
-            }
-            if (utils::validateCsrfToken(req)) {
-                return true;
-            }
-            LOG_WARN << "SECURITY: CSRF validation failed from " << AuditLog::getClientIP(req);
-            auto resp = provisioner::utils::createErrorResponse(
-                req,
-                "Invalid or expired security token. Please refresh the page and try again.",
-                drogon::k403Forbidden,
-                "Security Error",
-                "CSRF_VALIDATION_FAILED"
-            );
-            callback(resp);
-            return false;
         }
     }
 
@@ -468,6 +503,11 @@ namespace provisioner {
                         jsonResponse["error"] = "Management API access token must not contain whitespace";
                     }
                 }
+            } else if (fieldName == "RPI_SB_PROVISIONER_PUBLIC_DASHBOARD") {
+                if (fieldValue != "" && fieldValue != "1") {
+                    jsonResponse["valid"] = false;
+                    jsonResponse["error"] = "Must be on (1) or off (empty)";
+                }
             } else if (fieldName == "RPI_CONNECT_DESCRIPTION") {
                 // Any non-empty string is valid; empty is fine (auto-generated description used)
             }
@@ -485,23 +525,6 @@ namespace provisioner {
             // Add audit log entry for handler access
             AuditLog::logHandlerAccess(req, "/options/set");
 
-            // SECURITY: Validate CSRF token for browser requests
-            // Only enforce if the X-CSRF-Token header is present (gradual rollout)
-            if (!req->getHeader("X-CSRF-Token").empty()) {
-                if (!utils::validateCsrfToken(req)) {
-                    LOG_WARN << "SECURITY: CSRF validation failed for /options/set from " << AuditLog::getClientIP(req);
-                    auto resp = provisioner::utils::createErrorResponse(
-                        req,
-                        "Invalid or expired security token. Please refresh the page and try again.",
-                        drogon::k403Forbidden,
-                        "Security Error",
-                        "CSRF_VALIDATION_FAILED"
-                    );
-                    callback(resp);
-                    return;
-                }
-            }
-
             auto body = req->getJsonObject();
             if (!body) {
                 LOG_ERROR << "Options::set: Invalid JSON body";
@@ -515,10 +538,31 @@ namespace provisioner {
                 callback(resp);
                 return;
             }
+            if (!body->isObject()) {
+                callback(provisioner::utils::createErrorResponse(
+                    req, "Send the settings as a JSON object", drogon::k400BadRequest,
+                    "Invalid Request", "INVALID_JSON"));
+                return;
+            }
             std::map<std::string, std::string> updates;
             for (const auto &key : body->getMemberNames()) {
-                const std::string value = body->get(key, "").asString();
-                LOG_INFO << "Options::set: " << key << " = " << value;
+                const Json::Value &raw = (*body)[key];
+                if (!raw.isString()) {
+                    callback(provisioner::utils::createErrorResponse(
+                        req, "Refused: " + key.substr(0, 64) + " must be a string", drogon::k400BadRequest,
+                        "Invalid Setting", "INVALID_CONFIG_ENTRY"));
+                    return;
+                }
+                const std::string value = raw.asString();
+                std::string why;
+                if (!utils::isWritableConfigEntry(key, value, why)) {
+                    callback(provisioner::utils::createErrorResponse(
+                        req, "Refused: " + why, drogon::k400BadRequest,
+                        "Invalid Setting", "INVALID_CONFIG_ENTRY"));
+                    return;
+                }
+                // Keys only: values include the Connect API key.
+                LOG_INFO << "Options::set: " << key;
                 updates[key] = value;
             }
 
@@ -546,7 +590,7 @@ namespace provisioner {
             if (!workdir.empty()) {
                 if (std::filesystem::exists(workdir) && std::filesystem::is_directory(workdir)) {
                     LOG_INFO << "Removing contents of RPI_SB_WORKDIR at " << workdir;
-                    removeDirectoryContents(workdir);
+                    clearWorkdirContents(workdir);
                 } else {
                     LOG_WARN << "RPI_SB_WORKDIR path does not exist or is not a directory: " << workdir;
                 }
@@ -609,7 +653,7 @@ namespace provisioner {
             auto resp = HttpResponse::newHttpResponse();
             resp->setStatusCode(k200OK);
             callback(resp);
-        });
+        }, {Post});
 
         // Add a new endpoint to clear the workdir contents when an image is selected
         app.registerHandler(OPTIONS_PATH + "/clear-workdir", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
@@ -636,8 +680,14 @@ namespace provisioner {
                 if (std::filesystem::is_directory(workdir)) {
                     // Log directory deletion to audit log
                     AuditLog::logFileSystemAccess("DELETE_CONTENTS", workdir, true);
-                    
-                    removeDirectoryContents(workdir);
+
+                    if (!clearWorkdirContents(workdir)) {
+                        callback(provisioner::utils::createErrorResponse(
+                            req, "Not clearing RPI_SB_WORKDIR: it holds files the provisioner "
+                            "needs. Point it at a directory of its own.",
+                            drogon::k409Conflict, "Workdir Not Cleared", "WORKDIR_UNSAFE"));
+                        return;
+                    }
                 } else {
                     LOG_WARN << "RPI_SB_WORKDIR exists but is not a directory: " << workdir;
                 }
@@ -651,17 +701,14 @@ namespace provisioner {
             auto resp = HttpResponse::newHttpResponse();
             resp->setStatusCode(k200OK);
             callback(resp);
-        });
+        }, {Post});
 
-        // CSRF token endpoint - generates a new token for the session
+        // CSRF token endpoint - returns the token bound to the signed-in session
         app.registerHandler(OPTIONS_PATH + "/csrf-token", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
             LOG_INFO << "Options::csrf-token";
             
-            std::string sessionId = utils::getSessionIdFromRequest(req);
-            std::string token = utils::CsrfTokenManager::getInstance().generateToken(sessionId);
-            
             Json::Value response;
-            response["token"] = token;
+            response["token"] = auth::csrfToken(req);
             
             auto resp = HttpResponse::newHttpJsonResponse(response);
             resp->setStatusCode(k200OK);
@@ -753,22 +800,6 @@ namespace provisioner {
                 );
                 callback(resp);
                 return;
-            }
-
-            // SECURITY: Validate CSRF token for browser requests
-            if (!req->getHeader("X-CSRF-Token").empty()) {
-                if (!utils::validateCsrfToken(req)) {
-                    LOG_WARN << "SECURITY: CSRF validation failed for /options/firmware/set from " << AuditLog::getClientIP(req);
-                    auto resp = provisioner::utils::createErrorResponse(
-                        req,
-                        "Invalid or expired security token. Please refresh the page and try again.",
-                        drogon::k403Forbidden,
-                        "Security Error",
-                        "CSRF_VALIDATION_FAILED"
-                    );
-                    callback(resp);
-                    return;
-                }
             }
 
             auto body = req->getJsonObject();
@@ -906,7 +937,7 @@ namespace provisioner {
                     if (std::filesystem::exists(workdir) && std::filesystem::is_directory(workdir)) {
                         LOG_INFO << "Firmware changed - removing contents of RPI_SB_WORKDIR at " << workdir;
                         AuditLog::logFileSystemAccess("DELETE_CONTENTS", workdir, true, "", "firmware selection changed");
-                        removeDirectoryContents(workdir);
+                        clearWorkdirContents(workdir);
                     } else {
                         LOG_WARN << "RPI_SB_WORKDIR path does not exist or is not a directory: " << workdir;
                     }
@@ -1066,22 +1097,6 @@ namespace provisioner {
                 );
                 callback(resp);
                 return;
-            }
-
-            // SECURITY: Validate CSRF token for browser requests
-            if (!req->getHeader("X-CSRF-Token").empty()) {
-                if (!utils::validateCsrfToken(req)) {
-                    LOG_WARN << "SECURITY: CSRF validation failed for /options/upload-key from " << AuditLog::getClientIP(req);
-                    auto resp = provisioner::utils::createErrorResponse(
-                        req,
-                        "Invalid or expired security token. Please refresh the page and try again.",
-                        drogon::k403Forbidden,
-                        "Security Error",
-                        "CSRF_VALIDATION_FAILED"
-                    );
-                    callback(resp);
-                    return;
-                }
             }
 
             // Get the uploaded file
@@ -1283,13 +1298,8 @@ namespace provisioner {
                     }
 
                     std::string wrapped;
-                    if (provisioner::keywrap::wrap(raw, wrapped)) {
-                        std::ofstream kout(destPath, std::ios::binary | std::ios::trunc);
-                        kout.write(wrapped.data(), static_cast<std::streamsize>(wrapped.size()));
-                        kout.close();
-                        std::filesystem::permissions(destPath,
-                            std::filesystem::perms::owner_read,
-                            std::filesystem::perm_options::replace);
+                    if (provisioner::keywrap::wrap(raw, wrapped) &&
+                        utils::writeSecretFile(destPath, wrapped)) {
                         if (!raw.empty()) OPENSSL_cleanse(&raw[0], raw.size());
                         AuditLog::logFileSystemAccess("WRAP_KEY", destPath, true);
                         LOG_INFO << "Customer PEM key wrapped at rest";
@@ -1320,8 +1330,16 @@ namespace provisioner {
                 }());
 
             keyregistry::ensureMigratedFromConfig();
+            // An upload makes the key active, as scripts expect. The web page
+            // asks for activate=if-none: a key replaces the active one only
+            // when an operator chooses it, as an image does.
+            bool activate = true;
+            if (fileParser.getParameter<std::string>("activate") == "if-none") {
+                keyregistry::RegistrySnapshot current;
+                activate = !keyregistry::load(current) || current.activeKeyId.empty();
+            }
             const auto keyIdOpt = keyregistry::addPemKey(
-                destPath, safeFilename, keyInfo, keyWrapped, true);
+                destPath, safeFilename, keyInfo, keyWrapped, activate);
             if (!keyIdOpt) {
                 std::filesystem::remove(destPath);
                 auto resp = provisioner::utils::createErrorResponse(
@@ -1335,7 +1353,7 @@ namespace provisioner {
                 return;
             }
 
-            invalidateWorkdirCache("customer key uploaded");
+            if (activate) invalidateWorkdirCache("customer key uploaded");
 
             // Return success with the path and key metadata (parsed above,
             // before the key was wrapped at rest).
@@ -1344,6 +1362,7 @@ namespace provisioner {
             jsonResponse["path"] = destPath;
             jsonResponse["filename"] = safeFilename;
             jsonResponse["keyId"] = *keyIdOpt;
+            jsonResponse["activated"] = activate;
             
             // Include key metadata
             jsonResponse["keyInfo"]["algorithm"] = keyInfo.algorithm;
@@ -1407,7 +1426,6 @@ namespace provisioner {
                 callback(resp);
                 return;
             }
-            if (!validateCsrfForMutation(req, callback)) return;
 
             auto jsonBody = req->getJsonObject();
             if (!jsonBody || !jsonBody->isMember("id")) {
@@ -1454,7 +1472,6 @@ namespace provisioner {
                 callback(resp);
                 return;
             }
-            if (!validateCsrfForMutation(req, callback)) return;
 
             auto jsonBody = req->getJsonObject();
             if (!jsonBody || !jsonBody->isMember("id")) {
@@ -1494,7 +1511,6 @@ namespace provisioner {
                 callback(resp);
                 return;
             }
-            if (!validateCsrfForMutation(req, callback)) return;
 
             auto jsonBody = req->getJsonObject();
             if (!jsonBody || !jsonBody->isMember("uri")) {
@@ -1578,7 +1594,6 @@ namespace provisioner {
                 callback(resp);
                 return;
             }
-            if (!validateCsrfForMutation(req, callback)) return;
 
             auto jsonBody = req->getJsonObject();
             if (!jsonBody || !jsonBody->isMember("id")) {
@@ -1664,22 +1679,6 @@ namespace provisioner {
                 );
                 callback(resp);
                 return;
-            }
-
-            // SECURITY: Validate CSRF token for browser requests
-            if (!req->getHeader("X-CSRF-Token").empty()) {
-                if (!utils::validateCsrfToken(req)) {
-                    LOG_WARN << "SECURITY: CSRF validation failed for /options/validate-key from " << AuditLog::getClientIP(req);
-                    auto resp = provisioner::utils::createErrorResponse(
-                        req,
-                        "Invalid or expired security token. Please refresh the page and try again.",
-                        drogon::k403Forbidden,
-                        "Security Error",
-                        "CSRF_VALIDATION_FAILED"
-                    );
-                    callback(resp);
-                    return;
-                }
             }
 
             // Parse JSON body
@@ -1894,18 +1893,6 @@ namespace provisioner {
                 return;
             }
 
-            // SECURITY: Validate CSRF token for browser requests
-            if (!req->getHeader("X-CSRF-Token").empty()) {
-                if (!utils::validateCsrfToken(req)) {
-                    LOG_WARN << "SECURITY: CSRF validation failed for /options/provision-device-key from " << AuditLog::getClientIP(req);
-                    auto resp = provisioner::utils::createErrorResponse(
-                        req, "Invalid or expired security token. Please refresh the page and try again.",
-                        drogon::k403Forbidden, "Security Error", "CSRF_VALIDATION_FAILED");
-                    callback(resp);
-                    return;
-                }
-            }
-
             // Require the caller to have named the irreversible thing it is
             // asking for. A bare POST -- a stray retry, a replayed request --
             // must not be enough to write OTP.
@@ -2030,18 +2017,6 @@ namespace provisioner {
                 return;
             }
 
-            // SECURITY: Validate CSRF token for browser requests
-            if (!req->getHeader("X-CSRF-Token").empty()) {
-                if (!utils::validateCsrfToken(req)) {
-                    LOG_WARN << "SECURITY: CSRF validation failed for /options/migrate-secrets from " << AuditLog::getClientIP(req);
-                    auto resp = provisioner::utils::createErrorResponse(
-                        req, "Invalid or expired security token. Please refresh the page and try again.",
-                        drogon::k403Forbidden, "Security Error", "CSRF_VALIDATION_FAILED");
-                    callback(resp);
-                    return;
-                }
-            }
-
             auto jsonBody = req->getJsonObject();
             std::string target = (jsonBody && jsonBody->isMember("target"))
                                  ? (*jsonBody)["target"].asString() : "all";
@@ -2129,22 +2104,6 @@ namespace provisioner {
                 return;
             }
 
-            // SECURITY: Validate CSRF token for browser requests
-            if (!req->getHeader("X-CSRF-Token").empty()) {
-                if (!utils::validateCsrfToken(req)) {
-                    LOG_WARN << "SECURITY: CSRF validation failed for /options/pkcs11-discover from " << AuditLog::getClientIP(req);
-                    auto resp = provisioner::utils::createErrorResponse(
-                        req,
-                        "Invalid or expired security token. Please refresh the page and try again.",
-                        drogon::k403Forbidden,
-                        "Security Error",
-                        "CSRF_VALIDATION_FAILED"
-                    );
-                    callback(resp);
-                    return;
-                }
-            }
-
             // Optional PIN (some tokens require login to list private objects).
             // Body is optional; absence just means "use the stored PIN if any".
             std::string pin;
@@ -2196,22 +2155,6 @@ namespace provisioner {
                 );
                 callback(resp);
                 return;
-            }
-
-            // SECURITY: Validate CSRF token for browser requests
-            if (!req->getHeader("X-CSRF-Token").empty()) {
-                if (!utils::validateCsrfToken(req)) {
-                    LOG_WARN << "SECURITY: CSRF validation failed for /options/set-pkcs11-pin from " << AuditLog::getClientIP(req);
-                    auto resp = provisioner::utils::createErrorResponse(
-                        req,
-                        "Invalid or expired security token. Please refresh the page and try again.",
-                        drogon::k403Forbidden,
-                        "Security Error",
-                        "CSRF_VALIDATION_FAILED"
-                    );
-                    callback(resp);
-                    return;
-                }
             }
 
             // Parse JSON body

@@ -1,9 +1,30 @@
+<%inc
+#include <chrono>
+#include <ctime>
+#include <filesystem>
+#include <fstream>
+#include <regex>
+%>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <title>Configuration Options</title>
     <%view stylesheet %>
     <style>
+        /* Bootloader tiles: the family tiles' look, as links to the editor. */
+        a.bootloader-tile { display: block; text-decoration: none; color: inherit; }
+        .bootloader-tile .tile-header { justify-content: space-between; }
+        .bootloader-tile .tile-badge { margin-top: 0; }
+        .bootloader-order { margin: 10px 0 0; font-size: 0.85rem; color: #333; }
+        .bootloader-state { margin: 8px 0 0; font-size: 0.8rem; color: #595959; display: flex; justify-content: space-between; }
+        .bootloader-edit { color: #0062cc; font-weight: 600; }
+        .bootloader-tile.overridden { background: #f1f3f5; border-style: dashed; }
+        .bootloader-tile.overridden.selected { box-shadow: none; }
+        .bootloader-note { margin: 8px 0 0; font-size: 0.8rem; color: #595959; }
+        .bootloader-config-advanced { margin-top: 10px; }
+        .bootloader-config-advanced summary { cursor: pointer; color: #0062cc; font-size: 0.85rem; list-style: none; display: inline-block; }
+        .bootloader-config-advanced summary::-webkit-details-marker { display: none; }
+        .bootloader-config-advanced[open] summary { margin-bottom: 8px; }
         /* ===== Section Styling ===== */
         .config-section {
             background: #fff;
@@ -41,9 +62,10 @@
             margin-left: 8px;
             font-weight: 500;
         }
+        /* Shaded, not faded: fading took the text below readable contrast. */
         .idp-locked .tile-option {
             pointer-events: none;
-            opacity: 0.7;
+            background: #f1f3f5;
         }
         .idp-locked .tile-option.selected {
             opacity: 1;
@@ -76,10 +98,10 @@
         /* IDP badge in image list */
         .idp-badge {
             display: inline-block;
-            font-size: 0.7rem;
+            font-size: 0.75rem;
             padding: 1px 6px;
             border-radius: 10px;
-            background: #17a2b8;
+            background: #117a8b;
             color: #fff;
             margin-left: 6px;
             font-weight: 600;
@@ -146,12 +168,12 @@
         }
         
         .tile-option:hover {
-            border-color: #007bff;
+            border-color: #0062cc;
             background: #f8faff;
         }
         
         .tile-option.selected {
-            border-color: #007bff;
+            border-color: #0062cc;
             background: #e7f1ff;
             box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.15);
         }
@@ -189,7 +211,7 @@
         
         .tile-badge {
             display: inline-block;
-            font-size: 0.7rem;
+            font-size: 0.75rem;
             padding: 2px 8px;
             border-radius: 10px;
             font-weight: 500;
@@ -254,7 +276,7 @@
             width: 22px;
             height: 22px;
             border-radius: 50%;
-            background: #007bff;
+            background: #0062cc;
             color: white;
             display: none;
             align-items: center;
@@ -304,14 +326,21 @@
         
         .key-tab.active {
             background: #fff;
-            color: #007bff;
-            border-bottom: 2px solid #007bff;
+            color: #0062cc;
+            border-bottom: 2px solid #0062cc;
             margin-bottom: -1px;
         }
         
         .key-tab-icon {
-            font-size: 1.2rem;
+            width: 16px;
+            height: 16px;
+            vertical-align: -3px;
+            margin-right: 4px;
         }
+
+        /* A warning about the key store sits clear of the section's title. */
+        #device-key-status:not(:empty) { margin-bottom: 12px; }
+        .key-store .signing-key-list { margin-top: 0; }
         
         .key-panel {
             display: none;
@@ -321,54 +350,6 @@
         
         .key-panel.active {
             display: block;
-        }
-        
-        .file-upload-zone {
-            display: block;
-            border: 2px dashed #ccc;
-            border-radius: 8px;
-            padding: 30px;
-            text-align: center;
-            background: #fafafa;
-            transition: all 0.2s;
-            cursor: pointer;
-        }
-        
-        .file-upload-zone:hover,
-        .file-upload-zone.dragover {
-            border-color: #007bff;
-            background: #f0f7ff;
-        }
-        
-        .file-upload-zone.has-file {
-            border-color: #28a745;
-            background: #f0fff4;
-        }
-
-        .file-upload-zone.uploading {
-            opacity: 0.6;
-            cursor: wait;
-        }
-        
-        .upload-icon {
-            font-size: 2.5rem;
-            margin-bottom: 10px;
-            color: #999;
-        }
-        
-        .file-upload-zone.has-file .upload-icon {
-            color: #28a745;
-        }
-        
-        .upload-text {
-            font-size: 0.95rem;
-            color: #666;
-            margin-bottom: 8px;
-        }
-        
-        .upload-hint {
-            font-size: 0.8rem;
-            color: #999;
         }
         
         .current-file-display {
@@ -383,7 +364,7 @@
         
         .current-file-icon {
             font-size: 1.5rem;
-            color: #28a745;
+            color: #1e7e34;
         }
         
         .current-file-info {
@@ -429,7 +410,7 @@
         }
         
         .key-metrics-loading {
-            color: #6c757d;
+            color: #5c636a;
             font-style: italic;
             font-size: 0.85rem;
         }
@@ -479,7 +460,7 @@
             border-radius: 4px;
             font-family: monospace;
             font-size: 0.75rem;
-            color: #6c757d;
+            color: #5c636a;
             cursor: help;
         }
         
@@ -561,12 +542,12 @@
         }
         
         .pin-status-loading {
-            color: #6c757d;
+            color: #5c636a;
             font-style: italic;
         }
         
         .pin-status-configured {
-            color: #28a745;
+            color: #1e7e34;
             font-weight: 500;
         }
         
@@ -575,7 +556,7 @@
         }
         
         .pin-status-not-configured {
-            color: #6c757d;
+            color: #5c636a;
         }
         
         .pin-status-error {
@@ -595,7 +576,7 @@
         }
         
         .pin-save-btn {
-            background: #007bff;
+            background: #0062cc;
             color: white;
             margin-right: 10px;
         }
@@ -605,7 +586,7 @@
         }
         
         .pin-save-btn:disabled {
-            background: #6c757d;
+            background: #5c636a;
             cursor: not-allowed;
         }
         
@@ -628,12 +609,12 @@
         }
 
         .pkcs11-provider-status.loading {
-            color: #6c757d;
+            color: #5c636a;
             font-style: italic;
         }
 
         .pkcs11-provider-status.ready {
-            color: #28a745;
+            color: #1e7e34;
             background: #eaf7ee;
         }
 
@@ -649,9 +630,9 @@
         .pkcs11-detect-btn {
             margin-bottom: 10px;
             padding: 8px 16px;
-            border: 1px solid #007bff;
+            border: 1px solid #0062cc;
             background: #fff;
-            color: #007bff;
+            color: #0062cc;
             border-radius: 6px;
             cursor: pointer;
             font-size: 0.9rem;
@@ -660,20 +641,20 @@
         }
 
         .pkcs11-detect-btn:hover {
-            background: #007bff;
+            background: #0062cc;
             color: #fff;
         }
 
         .pkcs11-detect-btn:disabled {
-            border-color: #6c757d;
-            color: #6c757d;
+            border-color: #5c636a;
+            color: #5c636a;
             cursor: not-allowed;
         }
 
         .pkcs11-detect-status {
             font-size: 0.85rem;
             margin-bottom: 10px;
-            color: #6c757d;
+            color: #5c636a;
         }
 
         .pkcs11-detect-status.error {
@@ -704,7 +685,7 @@
         }
         
         .inline-help-icon {
-            color: #6c757d;
+            color: #5c636a;
             flex-shrink: 0;
             margin-top: 1px;
         }
@@ -790,7 +771,7 @@
 
         .toggle-irreversible-tag {
             display: inline-block;
-            font-size: 0.7rem;
+            font-size: 0.75rem;
             letter-spacing: 0.04em;
             text-transform: uppercase;
             font-weight: 700;
@@ -817,7 +798,7 @@
         .field-label .optional-badge {
             font-weight: 400;
             font-size: 0.8rem;
-            color: #888;
+            color: #595959;
             margin-left: 6px;
         }
         
@@ -832,12 +813,12 @@
         
         .field-input:focus {
             outline: none;
-            border-color: #007bff;
+            border-color: #0062cc;
             box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
         }
         
         .field-input.valid {
-            border-color: #28a745;
+            border-color: #1e7e34;
         }
         
         .field-input.invalid {
@@ -894,7 +875,7 @@
         }
         
         .toggle-switch input:checked + .toggle-slider {
-            background-color: #007bff;
+            background-color: #0062cc;
         }
         
         .toggle-switch input:checked + .toggle-slider:before {
@@ -1036,6 +1017,10 @@
     std::string mfgDb = options.count("RPI_SB_PROVISIONER_MANUFACTURING_DB") ? options["RPI_SB_PROVISIONER_MANUFACTURING_DB"] : "";
     std::string keypairDir = options.count("RPI_DEVICE_RETRIEVE_KEYPAIR") ? options["RPI_DEVICE_RETRIEVE_KEYPAIR"] : "";
     bool lockJtag = options.count("RPI_DEVICE_LOCK_JTAG") && !options["RPI_DEVICE_LOCK_JTAG"].empty();
+    // On unless set to empty or 0, as the sign-in gate reads it.
+    bool publicDashboard = !options.count("RPI_SB_PROVISIONER_PUBLIC_DASHBOARD") ||
+                           (!options["RPI_SB_PROVISIONER_PUBLIC_DASHBOARD"].empty() &&
+                            options["RPI_SB_PROVISIONER_PUBLIC_DASHBOARD"] != "0");
     bool eepromWp = options.count("RPI_DEVICE_EEPROM_WP_SET") && !options["RPI_DEVICE_EEPROM_WP_SET"].empty();
     // Boot-order matching is on by default: absent key -> on; only an empty or
     // falsey value turns it off (mirrors boot_order_match_storage_enabled() in
@@ -1169,29 +1154,102 @@
 
             <%view firmware %>
 
-            <!-- Bootloader Config -->
+            <!-- Bootloader Config: a tile per kind of device, like the family tiles -->
+            <%c++
+            namespace fs = std::filesystem;
+            // A configuration's BOOT_ORDER in words, read right to left as the
+            // bootloader does.
+            auto bootOrderWords = [](const std::string &path) -> std::string {
+                std::ifstream f(path);
+                std::string line, value;
+                static const std::regex re(R"(^\s*BOOT_ORDER\s*=\s*0[xX]([0-9a-fA-F]{1,8})\s*$)");
+                std::smatch m;
+                while (std::getline(f, line)) if (std::regex_match(line, m, re)) value = m[1];
+                if (value.empty()) return "";
+                std::string out;
+                for (auto it = value.rbegin(); it != value.rend(); ++it) {
+                    const char c = static_cast<char>(std::tolower(static_cast<unsigned char>(*it)));
+                    const char *name = c == '0' ? "SD (card detect)" : c == '1' ? "SD/eMMC" : c == '2' ? "network" :
+                                       c == '3' ? "RPIBOOT" : c == '4' ? "USB" : c == '5' ? "USB-C" : c == '6' ? "NVMe" :
+                                       c == '7' ? "HTTP" : c == 'e' ? "stop" : c == 'f' ? "restart" : "?";
+                    if (!out.empty()) out += " → ";
+                    out += name;
+                }
+                return out;
+            };
+            auto editedOn = [](const std::string &path) -> std::string {
+                std::error_code ec;
+                const auto t = fs::last_write_time(path, ec);
+                if (ec) return "";
+                const std::time_t tt = std::chrono::system_clock::to_time_t(
+                    std::chrono::clock_cast<std::chrono::system_clock>(t));
+                char buf[32];
+                std::tm tm{};
+                localtime_r(&tt, &tm);
+                std::strftime(buf, sizeof buf, "%d %b %Y", &tm);
+                return buf;
+            };
+            const bool overridden = !bootloaderConfig.empty();
+            const std::string inUse = provisioningStyle == "secure-boot" ? "secure" : "naked";
+            struct BlTile { std::string kind, title, description; };
+            const BlTile blTiles[] = {
+                {"secure", "Secure boot", "Devices provisioned with secure boot."},
+                {"naked", "Other styles", "Naked and full-disk-encryption-only devices."},
+            };
+            %>
             <div class="field-group">
-                <label class="field-label" for="RPI_DEVICE_BOOTLOADER_CONFIG_FILE">Bootloader Configuration <span class="optional-badge">Optional</span></label>
-                <input type="text" class="field-input" id="RPI_DEVICE_BOOTLOADER_CONFIG_FILE" name="RPI_DEVICE_BOOTLOADER_CONFIG_FILE"
-                       value="<%c++ $$ << bootloaderConfig; %>"
-                       placeholder="Leave blank to use default"
-                       onblur="validateAndSaveField('RPI_DEVICE_BOOTLOADER_CONFIG_FILE')">
-                <div id="feedback-RPI_DEVICE_BOOTLOADER_CONFIG_FILE" class="field-feedback"></div>
-
-                <div class="inline-help">
-                    <span class="inline-help-icon">&#9432;</span>
-                    <span>Custom bootloader configuration file. A sensible default is provided if not specified.</span>
+                <span class="field-label" id="bootloader-config-label">Bootloader Configuration</span>
+                <div class="tile-selector two-col bootloader-tiles">
+                <%c++ for (const auto &t : blTiles) {
+                    const std::string edited = "/etc/rpi-sb-provisioner/bootloader." + t.kind;
+                    const bool isEdited = fs::exists(edited);
+                    const std::string order = bootOrderWords(overridden ? bootloaderConfig :
+                        (isEdited ? edited : "/var/lib/rpi-sb-provisioner/bootloader." + t.kind));
+                    const bool current = t.kind == inUse; %>
+                    <a class="tile-option bootloader-tile<%c++ if (current) $$ << " selected"; if (overridden) $$ << " overridden"; %>"
+                       id="bootloader-tile-<%c++ $$ << t.kind; %>" href="/options/bootloader-config?kind=<%c++ $$ << t.kind; %>">
+                        <div class="tile-header">
+                            <span class="tile-title"><%c++ $$ << t.title; %></span>
+                            <%c++ if (current) { %><span class="tile-badge info bootloader-in-use">In use</span><%c++ } %>
+                        </div>
+                        <p class="tile-description"><%c++ $$ << t.description; %></p>
+                        <p class="bootloader-order"><%c++ if (!order.empty()) { %>Boot order: <%c++ $$ << HttpViewData::htmlTranslate(order); %><%c++ } else { %>No boot order set<%c++ } %></p>
+                        <p class="bootloader-state">
+                            <%c++ if (overridden) { %>Overridden by a file on this server
+                            <%c++ } else if (isEdited) { %>Edited <%c++ $$ << editedOn(edited); %>
+                            <%c++ } else { %>Package default<%c++ } %>
+                            <span class="bootloader-edit" aria-hidden="true">Edit &rarr;</span>
+                        </p>
+                    </a>
+                <%c++ } %>
                 </div>
+                <%c++ if (bootOrderMatchStorage) { %>
+                <p class="bootloader-note">The selected storage is moved to the front of the boot order when a device is bootstrapped.</p>
+                <%c++ } %>
+
+                <details class="bootloader-config-advanced" <%c++ if (overridden) { %>open<%c++ } %>>
+                    <summary>Use a file on this server instead&hellip;</summary>
+                    <label class="field-label" for="RPI_DEVICE_BOOTLOADER_CONFIG_FILE">Bootloader configuration file</label>
+                    <input type="text" class="field-input" id="RPI_DEVICE_BOOTLOADER_CONFIG_FILE" name="RPI_DEVICE_BOOTLOADER_CONFIG_FILE"
+                           value="<%c++ $$ << HttpViewData::htmlTranslate(bootloaderConfig); %>"
+                           placeholder="Leave blank to use the configurations above"
+                           onblur="validateAndSaveField('RPI_DEVICE_BOOTLOADER_CONFIG_FILE')">
+                    <div id="feedback-RPI_DEVICE_BOOTLOADER_CONFIG_FILE" class="field-feedback"></div>
+                    <div class="inline-help">
+                        <span class="inline-help-icon">&#9432;</span>
+                        <span>A path here overrides both configurations above, for one managed outside the provisioner.<%c++ if (overridden) { %> Devices get <code><%c++ $$ << HttpViewData::htmlTranslate(bootloaderConfig); %></code>.<%c++ } %></span>
+                    </div>
+                </details>
             </div>
 
             <!-- Match Boot Order to Storage Toggle -->
             <div class="toggle-group">
                 <label class="toggle-switch">
-                    <input type="checkbox" id="RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE" name="RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE" <%c++ if(bootOrderMatchStorage) $$ << "checked"; %> onchange="validateAndSaveField('RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE')">
+                    <input type="checkbox" id="RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE" aria-labelledby="title-RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE" name="RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE" <%c++ if(bootOrderMatchStorage) $$ << "checked"; %> onchange="validateAndSaveField('RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE')">
                     <span class="toggle-slider"></span>
                 </label>
                 <div class="toggle-content">
-                    <div class="toggle-title">Boot selected storage first</div>
+                    <div class="toggle-title" id="title-RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE">Boot selected storage first</div>
                     <div class="toggle-description">Rewrites the bootloader BOOT_ORDER so the selected storage device is tried first, keeping the other devices as fallbacks. Enabled by default. For IDP artefacts, the storage type is taken from the artefact when not set here.</div>
                 </div>
                 <div id="feedback-RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE" class="field-feedback"></div>
@@ -1308,18 +1366,18 @@
             .enc-status-box.enc-error { background: #f8d7da; border: 1px solid #f5c6cb; }
             .enc-error .enc-status-icon { color: #dc3545; }
             .enc-status-icon { font-size: 1.5rem; flex-shrink: 0; line-height: 1; }
-            .enc-warn .enc-status-icon { color: #e0a800; }
-            .enc-ok   .enc-status-icon { color: #28a745; }
+            .enc-warn .enc-status-icon { color: #8a6100; }
+            .enc-ok   .enc-status-icon { color: #1e7e34; }
             .enc-status-info { flex: 1; }
             .enc-status-title { font-weight: 500; color: #333; }
-            .enc-status-note { font-size: 0.8rem; color: #666; margin-top: 4px; }
+            .enc-status-note { font-size: 0.8rem; color: #444; margin-top: 4px; }
             .enc-migrate-btn {
                 flex-shrink: 0;
                 padding: 6px 14px;
                 font-size: 0.85rem;
                 border: none;
                 border-radius: 4px;
-                background: #007bff;
+                background: #0062cc;
                 color: #fff;
                 cursor: pointer;
             }
@@ -1327,13 +1385,6 @@
             .enc-migrate-btn:disabled { opacity: 0.6; cursor: default; }
             .enc-row-feedback { font-size: 0.8rem; flex-basis: 100%; }
             .enc-row-feedback.error { color: #b00020; }
-
-            /* De-emphasise the upload dropzone once a key is configured -
-               replacing the key is the exception, not the default action. */
-            .file-upload-zone.has-file { padding: 10px 12px; }
-            .file-upload-zone.has-file .upload-icon { font-size: 1.1rem; margin-bottom: 2px; }
-            .file-upload-zone.has-file .upload-text { font-size: 0.85rem; margin-bottom: 0; }
-            .file-upload-zone.has-file .upload-hint { display: none; }
 
             .signing-key-list {
                 display: grid;
@@ -1352,8 +1403,8 @@
                 gap: 8px;
             }
             .signing-key-tile.active {
-                border-color: #28a745;
-                box-shadow: 0 0 0 1px #28a745;
+                border-color: #1e7e34;
+                box-shadow: 0 0 0 1px #1e7e34;
             }
             .signing-key-tile.discovered {
                 border-style: dashed;
@@ -1421,8 +1472,8 @@
                 cursor: pointer;
             }
             .signing-key-actions button.primary {
-                background: #007bff;
-                border-color: #007bff;
+                background: #0062cc;
+                border-color: #0062cc;
                 color: #fff;
             }
             .signing-key-actions button.danger {
@@ -1443,25 +1494,36 @@
                 <div class="key-config-container">
                     <div class="key-tabs">
                         <button type="button" class="key-tab <%c++ if(keyPkcs11.empty()) $$ << "active"; %>" data-tab="pem">
-                            <span class="key-tab-icon">&#128196;</span>
+                            <svg class="key-tab-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 1h5l4 4v10H4z M9 1v4h4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
                             PEM Key File
                         </button>
                         <button type="button" class="key-tab <%c++ if(!keyPkcs11.empty()) $$ << "active"; %>" data-tab="pkcs11">
-                            <span class="key-tab-icon">&#128273;</span>
+                            <svg class="key-tab-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="5" cy="8" r="3" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 8h7M12 8v3M14 8v2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
                             PKCS#11 / HSM
                         </button>
                     </div>
 
                     <div class="key-panel <%c++ if(keyPkcs11.empty()) $$ << "active"; %>" data-panel="pem">
-                        <label class="file-upload-zone" id="key-upload-zone" for="key-file-input">
-                            <div class="upload-icon">&#128196;</div>
-                            <div class="upload-text">Drop a PEM private key here or click to browse</div>
-                            <div class="upload-hint">RSA 2048-bit private key. Uploading saves it and makes it the active signing key.</div>
-                            <input type="file" id="key-file-input" accept=".pem,.key" style="display: none;">
-                        </label>
-                        <div id="pem-key-list" class="signing-key-list" aria-live="polite"></div>
-                        <div id="pem-key-empty" class="signing-key-empty">No PEM keys saved yet.</div>
-                        <input type="hidden" name="CUSTOMER_KEY_FILE_PEM" id="CUSTOMER_KEY_FILE_PEM" value="<%c++ $$ << keyFilePem; %>">
+                        <%c++ /* The image browser's panel: header, action on the right, upload inside. */ %>
+                        <div class="panel key-store">
+                            <div class="panel-header">
+                                <h4 id="pem-keys-title">Saved PEM keys</h4>
+                                <button type="button" class="panel-action" id="key-upload-toggle">Add a PEM key</button>
+                            </div>
+                            <div id="key-upload-container" class="panel-upload" style="display: none;">
+                                <div class="upload-zone" id="key-upload-zone">
+                                    <div class="upload-zone-text">Drop a PEM private key here, or</div>
+                                    <button type="button" class="cust-btn cust-btn-secondary upload-choose">Choose a file&hellip;</button>
+                                    <div class="upload-zone-hint">RSA 2048-bit private key. It joins the saved keys; choose Use to sign with it. The first key is used straight away.</div>
+                                    <input type="file" id="key-file-input" accept=".pem,.key" hidden>
+                                </div>
+                            </div>
+                            <div class="panel-body" aria-labelledby="pem-keys-title">
+                                <div id="pem-key-list" class="signing-key-list" aria-live="polite"></div>
+                                <div id="pem-key-empty" class="panel-empty">No PEM keys saved yet</div>
+                            </div>
+                        </div>
+                        <input type="hidden" name="CUSTOMER_KEY_FILE_PEM" id="CUSTOMER_KEY_FILE_PEM" value="<%c++ $$ << HttpViewData::htmlTranslate(keyFilePem); %>">
 
                         <div class="inline-warning">
                             <span class="inline-warning-icon">&#9888;</span>
@@ -1498,7 +1560,7 @@
                                 <code id="pkcs11-uri">pkcs11:object=<em>&lt;alias&gt;</em>;type=private</code>
                             </div>
 
-                            <input type="hidden" name="CUSTOMER_KEY_PKCS11_NAME" id="CUSTOMER_KEY_PKCS11_NAME" value="<%c++ $$ << keyPkcs11; %>">
+                            <input type="hidden" name="CUSTOMER_KEY_PKCS11_NAME" id="CUSTOMER_KEY_PKCS11_NAME" value="<%c++ $$ << HttpViewData::htmlTranslate(keyPkcs11); %>">
                         </div>
 
                         <!-- PKCS#11 PIN Input -->
@@ -1555,7 +1617,7 @@
             <div class="field-group">
                 <label class="field-label" for="RPI_SB_WORKDIR">Work Directory <span class="optional-badge">Optional &mdash; recommended</span></label>
                 <input type="text" class="field-input" id="RPI_SB_WORKDIR" name="RPI_SB_WORKDIR" 
-                       value="<%c++ $$ << workDir; %>" 
+                       value="<%c++ $$ << HttpViewData::htmlTranslate(workDir); %>" 
                        placeholder="/srv/rpi-sb-provisioner/workdir"
                        onblur="validateAndSaveField('RPI_SB_WORKDIR')">
                 <div id="feedback-RPI_SB_WORKDIR" class="field-feedback"></div>
@@ -1570,7 +1632,7 @@
             <div class="field-group">
                 <label class="field-label" for="RPI_SB_PROVISIONER_MANUFACTURING_DB">Manufacturing Database <span class="optional-badge">Optional</span></label>
                 <input type="text" class="field-input" id="RPI_SB_PROVISIONER_MANUFACTURING_DB" name="RPI_SB_PROVISIONER_MANUFACTURING_DB" 
-                       value="<%c++ $$ << mfgDb; %>" 
+                       value="<%c++ $$ << HttpViewData::htmlTranslate(mfgDb); %>" 
                        placeholder="/srv/rpi-sb-provisioner/manufacturing.db"
                        onblur="validateAndSaveField('RPI_SB_PROVISIONER_MANUFACTURING_DB')">
                 <div id="feedback-RPI_SB_PROVISIONER_MANUFACTURING_DB" class="field-feedback"></div>
@@ -1585,7 +1647,7 @@
             <div class="field-group">
                 <label class="field-label" for="RPI_DEVICE_RETRIEVE_KEYPAIR">Keypair Storage Directory <span class="optional-badge">Optional</span></label>
                 <input type="text" class="field-input" id="RPI_DEVICE_RETRIEVE_KEYPAIR" name="RPI_DEVICE_RETRIEVE_KEYPAIR" 
-                       value="<%c++ $$ << keypairDir; %>" 
+                       value="<%c++ $$ << HttpViewData::htmlTranslate(keypairDir); %>" 
                        placeholder="Leave blank to store with logs"
                        onblur="validateAndSaveField('RPI_DEVICE_RETRIEVE_KEYPAIR')">
                 <div id="feedback-RPI_DEVICE_RETRIEVE_KEYPAIR" class="field-feedback"></div>
@@ -1612,7 +1674,7 @@
                 <label class="field-label" for="RPI_CONNECT_API_KEY">Connect Management API Access Token <span class="optional-badge">Optional</span></label>
                 <div class="pin-input-wrapper">
                     <input type="password" class="field-input" id="RPI_CONNECT_API_KEY" name="RPI_CONNECT_API_KEY"
-                           value="<%c++ $$ << connectApiKey; %>"
+                           value="<%c++ $$ << HttpViewData::htmlTranslate(connectApiKey); %>"
                            placeholder="rporg_..."
                            onblur="validateAndSaveField('RPI_CONNECT_API_KEY')">
                     <button type="button" class="pin-toggle-visibility" onclick="toggleConnectKeyVisibility()" aria-label="Toggle access token visibility">&#128065;</button>
@@ -1629,7 +1691,7 @@
             <div class="field-group">
                 <label class="field-label" for="RPI_CONNECT_DESCRIPTION">Description Prefix <span class="optional-badge">Optional</span></label>
                 <input type="text" class="field-input" id="RPI_CONNECT_DESCRIPTION" name="RPI_CONNECT_DESCRIPTION"
-                       value="<%c++ $$ << connectDescription; %>"
+                       value="<%c++ $$ << HttpViewData::htmlTranslate(connectDescription); %>"
                        placeholder="e.g. Factory-A &mdash; board type and serial are added after this"
                        onblur="validateAndSaveField('RPI_CONNECT_DESCRIPTION')">
                 <div id="feedback-RPI_CONNECT_DESCRIPTION" class="field-feedback"></div>
@@ -1641,6 +1703,28 @@
             </div>
         </div>
 
+        <div class="config-section" id="section-web-interface">
+            <div class="section-header">
+                <h2 class="section-title">
+                    <span class="section-title-icon">&#128421;</span>
+                    Web Interface
+                </h2>
+                <p class="section-description">Who can see this interface without signing in. Changing settings always needs an operator.</p>
+            </div>
+
+            <div class="toggle-group">
+                <label class="toggle-switch">
+                    <input type="checkbox" id="RPI_SB_PROVISIONER_PUBLIC_DASHBOARD" aria-labelledby="title-RPI_SB_PROVISIONER_PUBLIC_DASHBOARD" name="RPI_SB_PROVISIONER_PUBLIC_DASHBOARD" <%c++ if(publicDashboard) $$ << "checked"; %> onchange="validateAndSaveField('RPI_SB_PROVISIONER_PUBLIC_DASHBOARD')">
+                    <span class="toggle-slider"></span>
+                </label>
+                <div class="toggle-content">
+                    <div class="toggle-title" id="title-RPI_SB_PROVISIONER_PUBLIC_DASHBOARD">Show devices and the code scanner without signing in</div>
+                    <div class="toggle-description">Anyone who can reach this interface can watch the devices page, open a device's page and check a scanned code. They see serial numbers, USB ports, addresses and progress, but not logs, overrides, settings or records. Turn this off to require signing in for everything.</div>
+                </div>
+                <div id="feedback-RPI_SB_PROVISIONER_PUBLIC_DASHBOARD" class="field-feedback"></div>
+            </div>
+        </div>
+
         <!-- ===== SECTION 6: Hardware Security ===== -->
         <div class="config-section" id="section-hardware-security">
             <div class="section-header">
@@ -1648,23 +1732,23 @@
                     <span class="section-title-icon">&#128737;</span>
                     Hardware Security
                 </h2>
-                <p class="section-description">Optional hardware-level locks. Both are written to the device permanently and cannot be undone afterwards &mdash; not by this tool, and not by Raspberry Pi.</p>
+                <p class="section-description">Optional hardware locks for the devices you provision. They change nothing on this provisioning server. Each is written into every device provisioned while it is on, permanently, and cannot be undone afterwards &mdash; not by this tool, and not by Raspberry Pi.</p>
             </div>
 
-            <div class="inline-danger">
+            <div class="inline-danger" style="margin-bottom: 15px;">
                 <span class="inline-danger-icon" aria-hidden="true">&#9888;</span>
-                <span><strong>These two settings cannot be reversed.</strong> Once a device leaves provisioning with either lock applied, there is no way to remove it. Enable them only when your configuration is final and you have provisioned a test device successfully.</span>
+                <span><strong>These two settings cannot be reversed on a provisioned device.</strong> Once a device leaves provisioning with either lock applied, there is no way to remove it from that device. Enable them only when your configuration is final and you have provisioned a test device successfully.</span>
             </div>
 
             <!-- JTAG Lock Toggle -->
             <div class="toggle-group toggle-irreversible">
                 <label class="toggle-switch">
-                    <input type="checkbox" id="RPI_DEVICE_LOCK_JTAG" name="RPI_DEVICE_LOCK_JTAG" <%c++ if(lockJtag) $$ << "checked"; %> onchange="validateAndSaveField('RPI_DEVICE_LOCK_JTAG')">
+                    <input type="checkbox" id="RPI_DEVICE_LOCK_JTAG" aria-labelledby="title-RPI_DEVICE_LOCK_JTAG" name="RPI_DEVICE_LOCK_JTAG" <%c++ if(lockJtag) $$ << "checked"; %> onchange="validateAndSaveField('RPI_DEVICE_LOCK_JTAG')">
                     <span class="toggle-slider"></span>
                 </label>
                 <div class="toggle-content">
-                    <div class="toggle-title">Lock JTAG Access<span class="toggle-irreversible-tag">Permanent</span></div>
-                    <div class="toggle-description">Permanently disables JTAG hardware debugging on the device. <strong>This also prevents Raspberry Pi engineers from assisting you with hardware debugging or failure analysis on affected devices, for the life of the device.</strong> Recorded in the manufacturing database as requested; the provisioner cannot read the lock back to confirm it applied.</div>
+                    <div class="toggle-title" id="title-RPI_DEVICE_LOCK_JTAG">Lock JTAG access on provisioned devices<span class="toggle-irreversible-tag">Permanent</span></div>
+                    <div class="toggle-description">Permanently disables JTAG hardware debugging on each device provisioned from now on. <strong>This also prevents Raspberry Pi engineers from assisting you with hardware debugging or failure analysis on those devices, for the life of each device.</strong> Recorded in the manufacturing database as requested; the provisioner cannot read the lock back to confirm it applied.</div>
                 </div>
                 <div id="feedback-RPI_DEVICE_LOCK_JTAG" class="field-feedback"></div>
             </div>
@@ -1672,12 +1756,12 @@
             <!-- EEPROM Write Protection Toggle -->
             <div class="toggle-group toggle-irreversible">
                 <label class="toggle-switch">
-                    <input type="checkbox" id="RPI_DEVICE_EEPROM_WP_SET" name="RPI_DEVICE_EEPROM_WP_SET" <%c++ if(eepromWp) $$ << "checked"; %> onchange="validateAndSaveField('RPI_DEVICE_EEPROM_WP_SET')">
+                    <input type="checkbox" id="RPI_DEVICE_EEPROM_WP_SET" aria-labelledby="title-RPI_DEVICE_EEPROM_WP_SET" name="RPI_DEVICE_EEPROM_WP_SET" <%c++ if(eepromWp) $$ << "checked"; %> onchange="validateAndSaveField('RPI_DEVICE_EEPROM_WP_SET')">
                     <span class="toggle-slider"></span>
                 </label>
                 <div class="toggle-content">
-                    <div class="toggle-title">Enable EEPROM Write Protection<span class="toggle-irreversible-tag">Permanent</span></div>
-                    <div class="toggle-description">Permanently prevents modification of the device's boot EEPROM, protecting the secure boot configuration. <strong>Bootloader and EEPROM updates will no longer be possible on affected devices</strong>, including security fixes. Recorded in the manufacturing database as requested; the provisioner cannot read the lock back to confirm it applied.</div>
+                    <div class="toggle-title" id="title-RPI_DEVICE_EEPROM_WP_SET">Write-protect the EEPROM on provisioned devices<span class="toggle-irreversible-tag">Permanent</span></div>
+                    <div class="toggle-description">Permanently prevents changes to the boot EEPROM of each device provisioned from now on, protecting its secure boot configuration. <strong>Bootloader and EEPROM updates will no longer be possible on those devices</strong>, including security fixes. Recorded in the manufacturing database as requested; the provisioner cannot read the lock back to confirm it applied.</div>
                 </div>
                 <div id="feedback-RPI_DEVICE_EEPROM_WP_SET" class="field-feedback"></div>
             </div>
@@ -1685,6 +1769,7 @@
         
     </form>
 
+    <script src="/static/js/upload-zone.js"></script>
     <script>
         // ===== CSRF Token Management =====
         var csrfToken = null;
@@ -2041,34 +2126,14 @@
             });
         });
         
-        // ===== File Upload Zone =====
-        const keyUploadZone = document.getElementById('key-upload-zone');
-        const keyFileInput = document.getElementById('key-file-input');
-        
-        if (keyUploadZone) {
-            keyUploadZone.addEventListener('dragover', (e) => {
-                e.preventDefault();
-                keyUploadZone.classList.add('dragover');
-            });
-            
-            keyUploadZone.addEventListener('dragleave', () => {
-                keyUploadZone.classList.remove('dragover');
-            });
-            
-            keyUploadZone.addEventListener('drop', (e) => {
-                e.preventDefault();
-                keyUploadZone.classList.remove('dragover');
-                if (e.dataTransfer.files.length > 0) {
-                    handleKeyFileUpload(e.dataTransfer.files[0]);
-                }
-            });
-            
-            keyFileInput.addEventListener('change', (e) => {
-                if (e.target.files.length > 0) {
-                    handleKeyFileUpload(e.target.files[0]);
-                }
-            });
-        }
+        // ===== Key upload: the same uploader as OS images =====
+        const keyUploader = document.getElementById('key-upload-zone') && RpiUpload.attach({
+            toggle: document.getElementById('key-upload-toggle'),
+            panel: document.getElementById('key-upload-container'),
+            zone: document.getElementById('key-upload-zone'),
+            input: document.getElementById('key-file-input'),
+            onFile: file => handleKeyFileUpload(file),
+        });
         
         async function handleKeyFileUpload(file) {
             if (!file) return;
@@ -2077,13 +2142,12 @@
                 await fetchCsrfToken();
             }
 
-            if (keyUploadZone) {
-                keyUploadZone.classList.add('uploading');
-                keyUploadZone.style.pointerEvents = 'none';
-            }
+            if (keyUploader) keyUploader.busy(true);
 
             const formData = new FormData();
             formData.append('keyfile', file);
+            // A new key replaces the one in use only when someone chooses it.
+            formData.append('activate', 'if-none');
             
             try {
                 const response = await fetch('/options/upload-key', addCsrfHeader({
@@ -2092,8 +2156,11 @@
                 }));
                 
                 if (response.ok) {
+                    const result = await response.json().catch(() => ({}));
                     await loadSigningKeyRegistry();
-                    showSuccess('Key file uploaded and activated');
+                    if (keyUploader) keyUploader.close();
+                    showSuccess(result.activated ? 'Key added, and signing with it, as it is the only key'
+                                                 : 'Key added. Choose Use beside it to sign with it');
                 } else {
                     const errorData = await response.json().catch(() => ({}));
                     showError(apiErrorMessage(errorData, 'Failed to upload key file'));
@@ -2102,13 +2169,7 @@
                 console.error('Key upload error:', error);
                 showError('Failed to upload key file: ' + (error.message || 'Network error'));
             } finally {
-                if (keyFileInput) {
-                    keyFileInput.value = '';
-                }
-                if (keyUploadZone) {
-                    keyUploadZone.classList.remove('uploading');
-                    keyUploadZone.style.pointerEvents = '';
-                }
+                if (keyUploader) keyUploader.busy(false);
             }
         }
         

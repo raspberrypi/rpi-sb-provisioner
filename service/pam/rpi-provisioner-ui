@@ -1,0 +1,4 @@
+# Operator sign-in for the rpi-sb-provisioner web UI. The service also
+# requires membership of the rpi-sb-provisioner group.
+@include common-auth
+@include common-account

@@ -13,10 +13,30 @@ StandardError=journal
 
 # Security hardening
 PrivateTmp=yes
-NoNewPrivileges=no
+NoNewPrivileges=yes
 ProtectSystem=strict
 ReadWritePaths=/srv/rpi-sb-provisioner
 ReadWritePaths=/var/log/rpi-sb-provisioner
+
+# It loop-mounts an image read-only and signs a boot image, and runs no
+# operator hooks, so it gets far less than the provisioners. Devices stay
+# open for the loop device, /dev/vcio and any HSM.
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictNamespaces=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_CHOWN CAP_FOWNER CAP_FSETID CAP_IPC_LOCK
+SystemCallArchitectures=native
+SystemCallFilter=@system-service @mount
+SystemCallErrorNumber=EPERM
 
 [Install]
 WantedBy=multi-user.target

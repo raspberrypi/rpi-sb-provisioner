@@ -14,19 +14,27 @@
 #include <openssl/pem.h>
 #include <openssl/x509.h>
 #include <openssl/err.h>
+#include <arpa/inet.h>
+#include <openssl/bn.h>
+#include <openssl/rand.h>
+#include <openssl/x509v3.h>
 #include <fstream>
 #include <sstream>
 #include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 #include "images.h"
 #include "devices.h"
 #include "customisation.h"
+#include "bootloader_config.h"
 #include "options.h"
 #include <services.h>
 #include "manufacturing.h"
 #include "include/scantool.h"
 #include "include/audit.h"
 #include "keywrap.h"
+#include "auth.h"
 
 using namespace drogon;
 
@@ -137,7 +145,14 @@ VersionInfo checkForNewerRelease(const std::string& current_version) {
         curl_easy_setopt(curl, CURLOPT_URL, "https://api.github.com/repos/raspberrypi/rpi-sb-provisioner/releases/latest");
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
-        curl_easy_setopt(curl, CURLOPT_USERAGENT, "rpi-sb-provisioner/" + current_version + " libcurl-agent/1.0");
+        const std::string userAgent = "rpi-sb-provisioner/" + current_version + " libcurl-agent/1.0";
+        curl_easy_setopt(curl, CURLOPT_USERAGENT, userAgent.c_str());
+        // This runs before the UI listens. Stations are often offline, or
+        // behind a firewall that drops rather than refuses, and libcurl's
+        // defaults would then hold start-up for minutes.
+        curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 5L);
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+        curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
         
         res = curl_easy_perform(curl);
         curl_easy_cleanup(curl);
@@ -202,6 +217,13 @@ void printHelp(const char* programName) {
               << "  -d, --disable-https        Disable HTTPS\n"
               << "  -l, --log-level <level>    Set log level (trace, debug, info, warn, error, fatal)\n"
               << "                             Default: trace\n"
+              << "  -H, --allowed-host <name>  Accept requests addressed to this host name, such as\n"
+              << "                             a reverse proxy's. May be repeated.\n"
+              << std::endl;
+
+    std::cout << "Access:\n"
+              << "  Operators sign in with their system account, which must be a member of\n"
+              << "  the " << provisioner::auth::kOperatorGroup << " group.\n"
               << std::endl;
     
     std::cout << "HTTPS Support:\n"
@@ -243,7 +265,69 @@ void printVersion() {
 }
 
 // Function to generate a self-signed certificate and key
-bool generateSelfSignedCertificate(const std::string& certPath, const std::string& keyPath) {
+// The names this station answers to, for the certificate's subjectAltName.
+static std::string certificateAltNames(const std::string& listenerAddress) {
+    std::string names = "DNS:localhost,IP:127.0.0.1,IP:::1";
+    char host[256] = {};
+    if (gethostname(host, sizeof(host) - 1) == 0 && host[0]) {
+        names += std::string(",DNS:") + host + ",DNS:" + host + ".local";
+    }
+    unsigned char buf[16];
+    if (listenerAddress != "0.0.0.0" && listenerAddress != "::" && listenerAddress != "127.0.0.1" &&
+        (inet_pton(AF_INET, listenerAddress.c_str(), buf) == 1 || inet_pton(AF_INET6, listenerAddress.c_str(), buf) == 1)) {
+        names += ",IP:" + listenerAddress;
+    }
+    return names;
+}
+
+// Keep the certificate a browser was told to trust. One made afresh at every
+// start taught operators to click through the warning, which is the habit an
+// interception needs, and every copy had serial 1, which Firefox refuses.
+static bool certificateStillUsable(const std::string& certPath, const std::string& keyPath) {
+    FILE* cf = fopen(certPath.c_str(), "rb");
+    if (!cf) return false;
+    X509* cert = PEM_read_X509(cf, nullptr, nullptr, nullptr);
+    fclose(cf);
+    FILE* kf = fopen(keyPath.c_str(), "rb");
+    EVP_PKEY* key = kf ? PEM_read_PrivateKey(kf, nullptr, nullptr, nullptr) : nullptr;
+    if (kf) fclose(kf);
+
+    bool usable = cert && key && X509_check_private_key(cert, key) == 1;
+    if (usable) {
+        // At least 30 days left.
+        time_t soon = time(nullptr) + 30L * 24 * 3600;
+        usable = X509_cmp_time(X509_get0_notAfter(cert), &soon) > 0;
+    }
+    char host[256] = {};
+    if (usable && gethostname(host, sizeof(host) - 1) == 0 && host[0]) {
+        usable = X509_check_host(cert, host, 0, 0, nullptr) == 1;
+    }
+    X509_free(cert);
+    EVP_PKEY_free(key);
+    return usable;
+}
+
+static std::string certificateFingerprint(const std::string& certPath) {
+    FILE* cf = fopen(certPath.c_str(), "rb");
+    if (!cf) return "";
+    X509* cert = PEM_read_X509(cf, nullptr, nullptr, nullptr);
+    fclose(cf);
+    if (!cert) return "";
+    unsigned char md[EVP_MAX_MD_SIZE];
+    unsigned int len = 0;
+    X509_digest(cert, EVP_sha256(), md, &len);
+    X509_free(cert);
+    std::string out;
+    char byte[4];
+    for (unsigned int i = 0; i < len; ++i) {
+        snprintf(byte, sizeof(byte), i ? ":%02X" : "%02X", md[i]);
+        out += byte;
+    }
+    return out;
+}
+
+bool generateSelfSignedCertificate(const std::string& certPath, const std::string& keyPath,
+                                   const std::string& altNames) {
     // Initialize OpenSSL
     OpenSSL_add_all_algorithms();
     ERR_load_crypto_strings();
@@ -285,7 +369,19 @@ bool generateSelfSignedCertificate(const std::string& certPath, const std::strin
     }
 
     // Set certificate details
-    ASN1_INTEGER_set(X509_get_serialNumber(x509), 1);
+    // Random, so a replacement is never mistaken for the certificate it replaces.
+    {
+        unsigned char serial[16];
+        if (RAND_bytes(serial, sizeof(serial)) != 1) {
+            X509_free(x509);
+            EVP_PKEY_free(pkey);
+            return false;
+        }
+        serial[0] &= 0x7f;
+        BIGNUM* bn = BN_bin2bn(serial, sizeof(serial), nullptr);
+        BN_to_ASN1_INTEGER(bn, X509_get_serialNumber(x509));
+        BN_free(bn);
+    }
     X509_gmtime_adj(X509_get_notBefore(x509), 0);
     X509_gmtime_adj(X509_get_notAfter(x509), 31536000L); // Valid for 1 year
 
@@ -296,6 +392,22 @@ bool generateSelfSignedCertificate(const std::string& certPath, const std::strin
     X509_NAME_add_entry_by_txt(name, "O", MBSTRING_ASC, (unsigned char*)"rpi-sb-provisioner User", -1, -1, 0);
     X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, (unsigned char*)"Raspberry Pi Provisioner", -1, -1, 0);
     X509_set_issuer_name(x509, name);
+
+    // Browsers match on subjectAltName only; the CN alone matched nothing.
+    {
+        X509V3_CTX v3;
+        X509V3_set_ctx_nodb(&v3);
+        X509V3_set_ctx(&v3, x509, x509, nullptr, nullptr, 0);
+        X509_EXTENSION* san = X509V3_EXT_conf_nid(nullptr, &v3, NID_subject_alt_name, altNames.c_str());
+        if (!san || !X509_add_ext(x509, san, -1)) {
+            std::cerr << "Error adding subjectAltName" << std::endl;
+            X509_EXTENSION_free(san);
+            X509_free(x509);
+            EVP_PKEY_free(pkey);
+            return false;
+        }
+        X509_EXTENSION_free(san);
+    }
 
     // Sign the certificate
     if (!X509_sign(x509, pkey, EVP_sha256())) {
@@ -318,8 +430,11 @@ bool generateSelfSignedCertificate(const std::string& certPath, const std::strin
     fclose(certFile);
 
     // Save private key to file
-    FILE* keyFile = fopen(keyPath.c_str(), "wb");
+    // Owner-only from creation, whatever the umask.
+    const int keyFd = open(keyPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0600);
+    FILE* keyFile = keyFd >= 0 && fchmod(keyFd, 0600) == 0 ? fdopen(keyFd, "wb") : nullptr;
     if (!keyFile) {
+        if (keyFd >= 0) close(keyFd);
         std::cerr << "Error opening key file for writing" << std::endl;
         X509_free(x509);
         EVP_PKEY_free(pkey);
@@ -350,6 +465,7 @@ int main(int argc, char* argv[])
     int httpsPort = 3143; // Default HTTPS port
     bool enableHttps = true; // Enable HTTPS by default
     trantor::Logger::LogLevel logLevel = trantor::Logger::kTrace;
+    std::vector<std::string> allowedHosts;
 
     // Parse command line options
     static struct option long_options[] = {
@@ -360,11 +476,12 @@ int main(int argc, char* argv[])
         {"https-port", required_argument, 0, 's'},
         {"disable-https", no_argument, 0, 'd'},
         {"log-level", required_argument, 0, 'l'},
+        {"allowed-host", required_argument, 0, 'H'},
         {0, 0, 0, 0}
     };
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "hva:p:s:dl:", long_options, nullptr)) != -1) {
+    while ((opt = getopt_long(argc, argv, "hva:p:s:dl:H:", long_options, nullptr)) != -1) {
         switch (opt) {
             case 'h':
                 printHelp(argv[0]);
@@ -405,18 +522,18 @@ int main(int argc, char* argv[])
             case 'l':
                 logLevel = parseLogLevel(optarg);
                 break;
+            case 'H':
+                allowedHosts.emplace_back(optarg);
+                break;
             default:
                 printHelp(argv[0]);
                 return 1;
         }
     }
 
-    // Create the certificates directory if it doesn't exist
-    std::string certDir = "/tmp/rpi-sb-provisioner";
-    std::filesystem::create_directories(certDir);
-    
-    // Create the private directory for temporary PIN files
-    // This is more secure than using /tmp as it's not world-readable
+    // Private runtime directory, root-only: temporary PIN files and the TLS
+    // key live here. The key used to be written under /tmp, where any local
+    // user could read it, or plant a symlink for root to write through.
     constexpr const char* pinTempDir = "/run/rpi-sb-provisioner";
     try {
         std::filesystem::create_directories(pinTempDir);
@@ -428,16 +545,25 @@ int main(int argc, char* argv[])
         LOG_WARN << "Could not create secure PIN temp directory " << pinTempDir 
                  << ": " << e.what() << " (will use fallback)";
     }
-    
+    // Kept across restarts, so a certificate an operator has accepted stays
+    // the one they accepted.
+    const std::string certDir = "/var/lib/rpi-sb-provisioner/tls";
+    std::error_code certDirError;
+    std::filesystem::create_directories(certDir, certDirError);
+    chmod(certDir.c_str(), S_IRWXU);
+
     // Generate self-signed certificate paths
     std::string certPath = certDir + "/cert.pem";
     std::string keyPath = certDir + "/key.pem";
 
-    // Generate the self-signed certificate
+    // Reuse the certificate if it is still good, else make a new one
     bool certGenerated = false;
     if (enableHttps) {
-        certGenerated = generateSelfSignedCertificate(certPath, keyPath);
-        if (!certGenerated) {
+        certGenerated = certificateStillUsable(certPath, keyPath) ||
+                        generateSelfSignedCertificate(certPath, keyPath, certificateAltNames(listenerAddress));
+        if (certGenerated) {
+            LOG_INFO << "HTTPS certificate SHA-256 fingerprint: " << certificateFingerprint(certPath);
+        } else {
             std::cerr << "Failed to generate self-signed certificate. HTTPS will be disabled." << std::endl;
             enableHttps = false;
         }
@@ -490,34 +616,16 @@ int main(int argc, char* argv[])
                          listenerAddress != "localhost" && 
                          listenerAddress != "::1");
 
-    // Add CORS support for all responses
-    app.registerPostHandlingAdvice([](const drogon::HttpRequestPtr &req, const drogon::HttpResponsePtr &resp) {
-        // Add CORS headers to allow cross-origin requests
-        resp->addHeader("Access-Control-Allow-Origin", "*");
-        resp->addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-        resp->addHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
-        resp->addHeader("Access-Control-Max-Age", "86400"); // 24 hours
-    });
-
-    // Handle preflight OPTIONS requests
-    app.registerPreRoutingAdvice([](const drogon::HttpRequestPtr &req, drogon::FilterCallback &&stop, drogon::FilterChainCallback &&pass) {
-        if (req->method() == drogon::Options) {
-            auto resp = drogon::HttpResponse::newHttpResponse();
-            resp->setStatusCode(drogon::k200OK);
-            resp->addHeader("Access-Control-Allow-Origin", "*");
-            resp->addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-            resp->addHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
-            resp->addHeader("Access-Control-Max-Age", "86400"); // 24 hours
-            stop(resp);
-            return;
-        }
-        pass();
-    });
+    // Every request passes the sign-in gate first. There are deliberately no
+    // CORS headers: no other origin has any business reading these responses.
+    provisioner::auth::install(app, provisioner::auth::Config{
+        listenerAddress, allowedHosts, g_isPublicBinding});
 
     imageHandlers.registerHandlers(app);
     deviceHandlers.registerHandlers(app);
     customisationHandlers.registerHandlers(app);
     optionHandlers.registerHandlers(app);
+    provisioner::BootloaderConfig{}.registerHandlers(app);
     serviceHandlers.registerHandlers(app);
     manufacturingHandlers.registerHandlers(app);
     scanToolHandlers.registerHandlers(app);
@@ -568,17 +676,25 @@ int main(int argc, char* argv[])
         LOG_INFO << "HTTPS listener enabled on " << listenerAddress << ":" << httpsPort;
     }
     
+    // Drogon's own 404 page declares no language, so screen readers guess.
+    {
+        auto notFound = HttpResponse::newHttpResponse();
+        notFound->setContentTypeCode(CT_TEXT_HTML);
+        notFound->setBody(
+            "<!DOCTYPE html>\n<html lang=\"en\">\n<head><meta charset=\"utf-8\">"
+            "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+            "<title>404: Page not found</title></head>\n"
+            "<body style=\"font-family: sans-serif; margin: 2rem; color: #212529;\"><main>"
+            "<h1>Page not found</h1><p>There is nothing at this address.</p>"
+            "<p><a href=\"/devices\">Go to the devices page</a></p></main></body>\n</html>\n");
+        app.setCustom404Page(notFound);
+    }
+
     // Run the application
     app.run();
     
     // Clean up curl global resources
     curl_global_cleanup();
-    
-    // Clean up the certificate files
-    if (certGenerated) {
-        std::remove(certPath.c_str());
-        std::remove(keyPath.c_str());
-    }
     
     return 0;
 }
