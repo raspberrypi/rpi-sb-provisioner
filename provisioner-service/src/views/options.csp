@@ -332,8 +332,15 @@
         }
         
         .key-tab-icon {
-            font-size: 1.2rem;
+            width: 16px;
+            height: 16px;
+            vertical-align: -3px;
+            margin-right: 4px;
         }
+
+        /* A warning about the key store sits clear of the section's title. */
+        #device-key-status:not(:empty) { margin-bottom: 12px; }
+        .key-store .signing-key-list { margin-top: 0; }
         
         .key-panel {
             display: none;
@@ -1363,7 +1370,7 @@
             .enc-ok   .enc-status-icon { color: #1e7e34; }
             .enc-status-info { flex: 1; }
             .enc-status-title { font-weight: 500; color: #333; }
-            .enc-status-note { font-size: 0.8rem; color: #666; margin-top: 4px; }
+            .enc-status-note { font-size: 0.8rem; color: #444; margin-top: 4px; }
             .enc-migrate-btn {
                 flex-shrink: 0;
                 padding: 6px 14px;
@@ -1487,25 +1494,33 @@
                 <div class="key-config-container">
                     <div class="key-tabs">
                         <button type="button" class="key-tab <%c++ if(keyPkcs11.empty()) $$ << "active"; %>" data-tab="pem">
-                            <span class="key-tab-icon">&#128196;</span>
+                            <svg class="key-tab-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 1h5l4 4v10H4z M9 1v4h4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
                             PEM Key File
                         </button>
                         <button type="button" class="key-tab <%c++ if(!keyPkcs11.empty()) $$ << "active"; %>" data-tab="pkcs11">
-                            <span class="key-tab-icon">&#128273;</span>
+                            <svg class="key-tab-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="5" cy="8" r="3" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 8h7M12 8v3M14 8v2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
                             PKCS#11 / HSM
                         </button>
                     </div>
 
                     <div class="key-panel <%c++ if(keyPkcs11.empty()) $$ << "active"; %>" data-panel="pem">
-                        <div id="pem-key-list" class="signing-key-list" aria-live="polite"></div>
-                        <div id="pem-key-empty" class="signing-key-empty">No PEM keys saved yet.</div>
-                        <button type="button" class="cust-btn cust-btn-secondary" id="key-upload-toggle">Add a PEM key</button>
-                        <div id="key-upload-container" style="display: none;">
-                            <div class="upload-zone" id="key-upload-zone">
-                                <div class="upload-zone-text">Drop a PEM private key here, or</div>
-                                <button type="button" class="cust-btn cust-btn-secondary upload-choose">Choose a file&hellip;</button>
-                                <div class="upload-zone-hint">RSA 2048-bit private key. It joins the list above; choose Use to sign with it. The first key is used straight away.</div>
-                                <input type="file" id="key-file-input" accept=".pem,.key" hidden>
+                        <%c++ /* The image browser's panel: header, action on the right, upload inside. */ %>
+                        <div class="panel key-store">
+                            <div class="panel-header">
+                                <h4 id="pem-keys-title">Saved PEM keys</h4>
+                                <button type="button" class="panel-action" id="key-upload-toggle">Add a PEM key</button>
+                            </div>
+                            <div id="key-upload-container" class="panel-upload" style="display: none;">
+                                <div class="upload-zone" id="key-upload-zone">
+                                    <div class="upload-zone-text">Drop a PEM private key here, or</div>
+                                    <button type="button" class="cust-btn cust-btn-secondary upload-choose">Choose a file&hellip;</button>
+                                    <div class="upload-zone-hint">RSA 2048-bit private key. It joins the saved keys; choose Use to sign with it. The first key is used straight away.</div>
+                                    <input type="file" id="key-file-input" accept=".pem,.key" hidden>
+                                </div>
+                            </div>
+                            <div class="panel-body" aria-labelledby="pem-keys-title">
+                                <div id="pem-key-list" class="signing-key-list" aria-live="polite"></div>
+                                <div id="pem-key-empty" class="panel-empty">No PEM keys saved yet</div>
                             </div>
                         </div>
                         <input type="hidden" name="CUSTOMER_KEY_FILE_PEM" id="CUSTOMER_KEY_FILE_PEM" value="<%c++ $$ << HttpViewData::htmlTranslate(keyFilePem); %>">
