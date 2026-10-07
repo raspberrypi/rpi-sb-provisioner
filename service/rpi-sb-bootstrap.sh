@@ -347,17 +347,15 @@ enforceSecureBootloaderConfig() {
 
 # Arguments: $1 = secure or naked, $2 = the cached bootloader directory.
 #
-# The configuration comes from the file named in RPI_DEVICE_BOOTLOADER_CONFIG_FILE,
-# else the one edited on the Options page, else the package default. Bootstrap
-# adds to it, so it works on a private copy: it used to change the chosen file,
-# the package's own defaults included. A cache built from another configuration
-# is discarded, EEPROM image and signature too, since the config is inside them.
+# The configuration is the file in RPI_DEVICE_BOOTLOADER_CONFIG_FILE -- the
+# Options page's custom one, or any other -- else the package default for the
+# style. Bootstrap adds to it, so it works on a private copy: it used to change
+# the chosen file, the defaults included. A cache built from another
+# configuration is discarded, EEPROM image and signature too.
 prepare_bootloader_config() {
     _bc_dir="$2"
     if [ -n "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" ]; then
         _bc_src="${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
-    elif [ -f "/etc/rpi-sb-provisioner/bootloader.$1" ]; then
-        _bc_src="/etc/rpi-sb-provisioner/bootloader.$1"
     else
         _bc_src="/var/lib/rpi-sb-provisioner/bootloader.$1"
     fi

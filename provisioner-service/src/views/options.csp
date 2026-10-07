@@ -1,5 +1,9 @@
 <%inc
+#include <chrono>
+#include <ctime>
 #include <filesystem>
+#include <fstream>
+#include <regex>
 %>
 <!DOCTYPE html>
 <html lang="en">
@@ -7,9 +11,19 @@
     <title>Configuration Options</title>
     <%view stylesheet %>
     <style>
-        .bootloader-config-summary { margin: 4px 0 8px; }
+        /* Bootloader tiles: Default or Custom, each with the boot order devices get. */
+        .bootloader-order { margin: 12px 0 0; padding-top: 10px; border-top: 1px solid #e0e0e0; font-size: 0.85rem; font-weight: 400; color: #333; }
+        .bootloader-order .order-step { white-space: nowrap; }
+        .bootloader-order .order-promoted { font-weight: 700; color: #0062cc; }
+        .bootloader-edit { font-weight: 600; color: #0062cc; }
+        /* Custom before there is one: not choosable, only its Create link acts. */
+        .bootloader-tile.unavailable { cursor: default; }
+        .bootloader-tile.unavailable:hover { border-color: #e0e0e0; background: #fafafa; }
+        .bootloader-storage-toggle { margin-top: 12px; margin-bottom: 0; }
         .bootloader-config-advanced { margin-top: 10px; }
-        .bootloader-config-advanced summary { cursor: pointer; }
+        .bootloader-config-advanced summary { cursor: pointer; color: #0062cc; font-size: 0.85rem; list-style: none; display: inline-block; }
+        .bootloader-config-advanced summary::-webkit-details-marker { display: none; }
+        .bootloader-config-advanced[open] summary { margin-bottom: 8px; }
         /* ===== Section Styling ===== */
         .config-section {
             background: #fff;
@@ -1132,48 +1146,86 @@
 
             <%view firmware %>
 
-            <!-- Bootloader Config -->
-            <%c++ namespace fs = std::filesystem;
-               const bool secureEdited = fs::exists("/etc/rpi-sb-provisioner/bootloader.secure");
-               const bool nakedEdited = fs::exists("/etc/rpi-sb-provisioner/bootloader.naked"); %>
+            <!-- Bootloader Config: Default or Custom, chosen like the family tiles -->
+            <%c++
+            namespace fs = std::filesystem;
+            // A configuration's BOOT_ORDER digits, for the page to show in words.
+            auto bootOrderOf = [](const std::string &path) -> std::string {
+                std::ifstream f(path);
+                std::string line, value;
+                static const std::regex re(R"(^\s*BOOT_ORDER\s*=\s*0[xX]([0-9a-fA-F]{1,8})\s*$)");
+                std::smatch m;
+                while (std::getline(f, line)) if (std::regex_match(line, m, re)) value = m[1];
+                return value;
+            };
+            auto editedOn = [](const std::string &path) -> std::string {
+                std::error_code ec;
+                const auto t = fs::last_write_time(path, ec);
+                if (ec) return "";
+                const std::time_t tt = std::chrono::system_clock::to_time_t(
+                    std::chrono::clock_cast<std::chrono::system_clock>(t));
+                char buf[32];
+                std::tm tm{};
+                localtime_r(&tt, &tm);
+                std::strftime(buf, sizeof buf, "%d %b %Y", &tm);
+                return buf;
+            };
+            const std::string customPath = "/etc/rpi-sb-provisioner/bootloader.conf";
+            const std::string defaultPath = std::string("/var/lib/rpi-sb-provisioner/bootloader.") +
+                                            (provisioningStyle == "secure-boot" ? "secure" : "naked");
+            const bool customExists = fs::exists(customPath);
+            const bool usesDefault = bootloaderConfig.empty();
+            const bool usesOther = !usesDefault && bootloaderConfig != customPath;
+            const std::string customOrder = bootOrderOf(usesOther ? bootloaderConfig : customPath);
+            %>
             <div class="field-group">
                 <span class="field-label" id="bootloader-config-label">Bootloader Configuration</span>
-                <div class="bootloader-config-summary" aria-labelledby="bootloader-config-label">
-                    <%c++ if (!bootloaderConfig.empty()) { %>
-                    Devices get the file <code><%c++ $$ << HttpViewData::htmlTranslate(bootloaderConfig); %></code>, named under Advanced below.
-                    <%c++ } else { %>
-                    Secure boot: <strong><%c++ $$ << (secureEdited ? "edited" : "default"); %></strong>.
-                    Other styles: <strong><%c++ $$ << (nakedEdited ? "edited" : "default"); %></strong>.
-                    <%c++ } %>
+                <div class="tile-selector two-col bootloader-tiles" role="radiogroup" aria-labelledby="bootloader-config-label">
+                    <label class="tile-option bootloader-tile <%c++ if (usesDefault) $$ << "selected"; %>" id="bootloader-tile-default">
+                        <input type="radio" name="bootloader-choice" value="default" <%c++ if (usesDefault) $$ << "checked"; %>>
+                        <span class="tile-check">&#10003;</span>
+                        <div class="tile-header"><span class="tile-title">Default</span></div>
+                        <p class="tile-description">The package's configuration for <%c++ $$ << (provisioningStyle == "secure-boot" ? "secure boot" : "this provisioning style"); %>.</p>
+                        <p class="bootloader-order" data-boot-order="<%c++ $$ << bootOrderOf(defaultPath); %>"></p>
+                    </label>
+                    <label class="tile-option bootloader-tile <%c++ if (!usesDefault) $$ << "selected"; if (!customExists && !usesOther) $$ << " unavailable"; %>" id="bootloader-tile-custom"
+                           data-has-custom="<%c++ $$ << (customExists || usesOther ? "1" : "0"); %>">
+                        <input type="radio" name="bootloader-choice" value="custom" <%c++ if (!usesDefault) $$ << "checked"; %>>
+                        <span class="tile-check">&#10003;</span>
+                        <div class="tile-header"><span class="tile-title">Custom</span></div>
+                        <%c++ if (usesOther) { %>
+                        <p class="tile-description">A file managed outside the provisioner: <code><%c++ $$ << HttpViewData::htmlTranslate(bootloaderConfig); %></code></p>
+                        <%c++ } else if (customExists) { %>
+                        <p class="tile-description">Your own configuration, edited <%c++ $$ << editedOn(customPath); %>. <a href="/options/bootloader-config" class="bootloader-edit">Edit</a></p>
+                        <%c++ } else { %>
+                        <p class="tile-description">Start from the default and change any setting. <a href="/options/bootloader-config" class="bootloader-edit">Create</a></p>
+                        <%c++ } %>
+                        <%c++ if (customExists || usesOther) { %>
+                        <p class="bootloader-order" data-boot-order="<%c++ $$ << customOrder; %>"></p>
+                        <%c++ } %>
+                    </label>
                 </div>
-                <a class="cust-btn cust-btn-secondary" href="/options/bootloader-config?kind=<%c++ $$ << (provisioningStyle == "secure-boot" ? "secure" : "naked"); %>">Edit bootloader configuration</a>
+                <div class="toggle-group bootloader-storage-toggle">
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE" aria-labelledby="title-RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE" name="RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE" <%c++ if(bootOrderMatchStorage) $$ << "checked"; %> onchange="validateAndSaveField('RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE')">
+                        <span class="toggle-slider"></span>
+                    </label>
+                    <div class="toggle-content">
+                        <div class="toggle-title" id="title-RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE">Boot selected storage first</div>
+                        <div class="toggle-description">Moves the selected storage to the front of either boot order above, keeping the rest as fallbacks. For IDP artefacts, the storage type comes from the artefact when not set here.</div>
+                    </div>
+                    <div id="feedback-RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE" class="field-feedback"></div>
+                </div>
 
-                <details class="bootloader-config-advanced" <%c++ if (!bootloaderConfig.empty()) { %>open<%c++ } %>>
-                    <summary>Advanced: use a file on this server instead</summary>
+                <details class="bootloader-config-advanced" <%c++ if (usesOther) { %>open<%c++ } %>>
+                    <summary>Use a file managed outside the provisioner&hellip;</summary>
                     <label class="field-label" for="RPI_DEVICE_BOOTLOADER_CONFIG_FILE">Bootloader configuration file</label>
                     <input type="text" class="field-input" id="RPI_DEVICE_BOOTLOADER_CONFIG_FILE" name="RPI_DEVICE_BOOTLOADER_CONFIG_FILE"
-                           value="<%c++ $$ << HttpViewData::htmlTranslate(bootloaderConfig); %>"
-                           placeholder="Leave blank to use the configuration edited above"
-                           onblur="validateAndSaveField('RPI_DEVICE_BOOTLOADER_CONFIG_FILE')">
+                           value="<%c++ $$ << HttpViewData::htmlTranslate(usesOther ? bootloaderConfig : std::string()); %>"
+                           placeholder="/path/to/bootloader.conf"
+                           onblur="if (this.value) validateAndSaveField('RPI_DEVICE_BOOTLOADER_CONFIG_FILE')">
                     <div id="feedback-RPI_DEVICE_BOOTLOADER_CONFIG_FILE" class="field-feedback"></div>
-                    <div class="inline-help">
-                        <span class="inline-help-icon">&#9432;</span>
-                        <span>A path here overrides the editor for every kind of device, for configurations managed outside the provisioner.</span>
-                    </div>
                 </details>
-            </div>
-
-            <!-- Match Boot Order to Storage Toggle -->
-            <div class="toggle-group">
-                <label class="toggle-switch">
-                    <input type="checkbox" id="RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE" aria-labelledby="title-RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE" name="RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE" <%c++ if(bootOrderMatchStorage) $$ << "checked"; %> onchange="validateAndSaveField('RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE')">
-                    <span class="toggle-slider"></span>
-                </label>
-                <div class="toggle-content">
-                    <div class="toggle-title" id="title-RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE">Boot selected storage first</div>
-                    <div class="toggle-description">Rewrites the bootloader BOOT_ORDER so the selected storage device is tried first, keeping the other devices as fallbacks. Enabled by default. For IDP artefacts, the storage type is taken from the artefact when not set here.</div>
-                </div>
-                <div id="feedback-RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE" class="field-feedback"></div>
             </div>
         </div>
 
@@ -1735,6 +1787,7 @@
         // ===== Tile Selection Logic =====
         document.querySelectorAll('.tile-option').forEach(tile => {
             tile.addEventListener('click', function() {
+                if (this.classList.contains('bootloader-tile')) return;  // its own handler, below
                 const container = this.closest('.tile-selector');
                 container.querySelectorAll('.tile-option').forEach(t => t.classList.remove('selected'));
                 this.classList.add('selected');
@@ -1761,6 +1814,66 @@
             });
         });
         
+        // ===== Bootloader configuration: Default or Custom =====
+        // Each tile shows the boot order devices will get, in words. With
+        // "Boot selected storage first" on, the storage's mode moves to the
+        // front, as bootstrap's _promote_boot_nibble moves it.
+        const BOOT_MODES = { '0': 'SD (card detect)', '1': 'SD/eMMC', '2': 'Network', '3': 'RPIBOOT', '4': 'USB',
+                             '5': 'USB-C', '6': 'NVMe', '7': 'HTTP', 'e': 'Stop', 'f': 'Restart' };
+        const STORAGE_MODE = { sd: '1', emmc: '1', nvme: '6' };
+        function promoteBootMode(digits, mode) {
+            const at = digits.indexOf(mode);
+            return (at < 0 ? digits : digits.slice(0, at) + digits.slice(at + 1)) + mode;
+        }
+        function renderBootOrders() {
+            const toggle = document.getElementById('RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE');
+            const storage = document.querySelector('input[name="RPI_DEVICE_STORAGE_TYPE"]:checked');
+            const mode = toggle && toggle.checked && storage ? STORAGE_MODE[storage.value] : null;
+            document.querySelectorAll('.bootloader-order').forEach(el => {
+                let digits = (el.dataset.bootOrder || '').toLowerCase();
+                el.textContent = '';
+                if (!digits) { el.textContent = 'No boot order set'; return; }
+                if (mode) digits = promoteBootMode(digits, mode);
+                el.appendChild(document.createTextNode('Boot order: '));
+                [...digits].reverse().forEach((d, i) => {
+                    if (i) el.appendChild(document.createTextNode(' → '));
+                    const step = document.createElement('span');
+                    step.className = 'order-step' + (mode && i === 0 ? ' order-promoted' : '');
+                    step.textContent = BOOT_MODES[d] || ('mode ' + d);
+                    el.appendChild(step);
+                });
+            });
+        }
+        renderBootOrders();
+        document.getElementById('RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE')?.addEventListener('change', renderBootOrders);
+        document.querySelectorAll('input[name="RPI_DEVICE_STORAGE_TYPE"]').forEach(r =>
+            r.closest('.tile-option').addEventListener('click', () => setTimeout(renderBootOrders, 0)));
+
+        document.querySelectorAll('.bootloader-tile').forEach(tile => {
+            tile.addEventListener('click', async function (e) {
+                if (e.target.closest('a')) return;  // Edit or Create opens the editor
+                e.preventDefault();
+                const choice = this.querySelector('input').value;
+                if (this.classList.contains('selected')) return;
+                // Nothing to choose yet: the Create link is the way in.
+                if (choice === 'custom' && this.dataset.hasCustom !== '1') {
+                    this.querySelector('.bootloader-edit').focus();
+                    return;
+                }
+                const response = await fetch('/options/bootloader-config/use', addCsrfHeader({
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ choice })
+                }));
+                if (!response.ok) { showError('Could not change the bootloader configuration'); return; }
+                document.querySelectorAll('.bootloader-tile').forEach(t => {
+                    t.classList.toggle('selected', t === this);
+                    t.querySelector('input').checked = t === this;
+                });
+                showSuccess(choice === 'custom' ? 'Devices now get the custom bootloader configuration'
+                                                : 'Devices now get the default bootloader configuration');
+            });
+        });
+
         // ===== Signing Key Registry =====
         let signingKeyRegistry = { activeKeyId: '', keys: [] };
         let pkcs11DiscoveredObjects = [];

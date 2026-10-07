@@ -24,15 +24,22 @@
 namespace provisioner {
 namespace {
 
-    const std::string kEdited = "/etc/rpi-sb-provisioner/bootloader.";
+    // The custom configuration; RPI_DEVICE_BOOTLOADER_CONFIG_FILE naming it is
+    // what puts it in use. Without one, bootstrap uses the package default.
+    const std::string kCustom = "/etc/rpi-sb-provisioner/bootloader.conf";
     const std::string kDefault = "/var/lib/rpi-sb-provisioner/bootloader.";
+    const std::string kSetting = "RPI_DEVICE_BOOTLOADER_CONFIG_FILE";
     const std::string kHelp = "/usr/share/rpi-sb-provisioner/static/js/bootloader-help.json";
     // rpi-eeprom-config's MAX_FILE_SIZE: a 4 KiB erase block less its header.
     constexpr size_t kMaxBytes = 4076;
     // Far more than any real configuration, so a request cannot make us work.
     constexpr size_t kMaxRequest = 64 * 1024;
 
-    bool validKind(const std::string &kind) { return kind == "secure" || kind == "naked"; }
+    // The package default for the station's provisioning style.
+    std::string defaultPath() {
+        const auto style = utils::getConfigValue("PROVISIONING_STYLE", false).value_or("secure-boot");
+        return kDefault + (style == "secure-boot" ? "secure" : "naked");
+    }
 
     std::optional<std::string> readFile(const std::string &path) {
         std::ifstream f(path, std::ios::binary);
@@ -75,7 +82,8 @@ namespace {
     }
 
     // What bootstrap and rpi-eeprom-config will make of the text.
-    Findings check(const std::string &kind, const std::string &text) {
+    Findings check(const std::string &text) {
+        const bool secure = utils::getConfigValue("PROVISIONING_STYLE", false).value_or("secure-boot") == "secure-boot";
         Findings out;
         static const std::regex setting(R"(^([A-Za-z0-9_]+)=(.*)$)");
         static const std::regex hex(R"(^0[xX][0-9a-fA-F]{1,8}$)");
@@ -105,20 +113,21 @@ namespace {
                 continue;
             }
             const std::string name = m[1], value = m[2];
-            if (!knownSettings().empty() && !knownSettings().count(name)) {
+            // SIGNED_BOOT is not in the documentation, and is redundant once the
+            // key is in OTP, but the package's defaults carry it.
+            if (!knownSettings().empty() && !knownSettings().count(name) && name != "SIGNED_BOOT") {
                 add(out.warnings, n, name + " is not a setting the Raspberry Pi documentation describes");
             }
             if (name == "BOOT_ORDER" && !std::regex_match(value, hex)) {
                 add(out.errors, n, "BOOT_ORDER is a hexadecimal number of up to eight digits, such as 0xf41");
             }
-            if (name == "SIGNED_BOOT") {
-                if (value == "1") signedBoot = true;
-                else if (kind == "secure") add(out.warnings, n, "Secure boot always uses SIGNED_BOOT=1; this line is replaced");
-            }
+            if (name == "SIGNED_BOOT" && value == "1") signedBoot = true;
         }
-        // Bootstrap ends the file with a newline and, for secure boot, adds SIGNED_BOOT=1.
+        // Bootstrap ends the file with a newline and, for secure boot, adds
+        // SIGNED_BOOT=1 when it is missing: redundant once the key is in OTP,
+        // but it still has to fit.
         out.bytes = text.size() + ((!text.empty() && text.back() != '\n') ? 1 : 0) +
-                    ((kind == "secure" && !signedBoot) ? std::string("SIGNED_BOOT=1\n").size() : 0);
+                    ((secure && !signedBoot) ? std::string("SIGNED_BOOT=1\n").size() : 0);
         if (out.bytes > kMaxBytes) {
             add(out.errors, 0, "The configuration comes to " + std::to_string(out.bytes) +
                                 " bytes on the device; the EEPROM holds at most " + std::to_string(kMaxBytes));
@@ -160,18 +169,15 @@ namespace {
         return v;
     }
 
-    // A JSON body with a valid kind and, if wanted, content of a sane size.
-    bool readRequest(const HttpRequestPtr &req, bool needContent, std::string &kind, std::string &content,
-                     HttpResponsePtr &error) {
+    // A JSON body's content, of a sane size.
+    bool readContent(const HttpRequestPtr &req, std::string &content, HttpResponsePtr &error) {
         auto body = req->getJsonObject();
-        if (!body || !(*body)["kind"].isString() || !validKind((*body)["kind"].asString()) ||
-            (needContent && !(*body)["content"].isString())) {
-            error = utils::createErrorResponse(req, "Give kind (secure or naked) and content",
-                                               k400BadRequest, "Invalid Request", "INVALID_REQUEST");
+        if (!body || !(*body)["content"].isString()) {
+            error = utils::createErrorResponse(req, "Give the configuration as content", k400BadRequest,
+                                               "Invalid Request", "INVALID_REQUEST");
             return false;
         }
-        kind = (*body)["kind"].asString();
-        content = needContent ? (*body)["content"].asString() : "";
+        content = (*body)["content"].asString();
         if (content.size() > kMaxRequest) {
             error = utils::createErrorResponse(req, "The configuration is far too large", k413RequestEntityTooLarge,
                                                "Too Large", "TOO_LARGE");
@@ -180,23 +186,27 @@ namespace {
         return true;
     }
 
+    // Which configuration devices get: "default", "custom", or another file.
+    std::string inUse(const std::string &setting) {
+        if (setting.empty()) return "default";
+        return setting == kCustom ? "custom" : "other";
+    }
+
 } // namespace
 
 void BootloaderConfig::registerHandlers(HttpAppFramework &app) {
     app.registerHandler("/options/bootloader-config", [](const HttpRequestPtr &req,
                                                         std::function<void(const HttpResponsePtr &)> &&callback) {
         AuditLog::logHandlerAccess(req, "/options/bootloader-config");
-        std::string kind = req->getParameter("kind");
-        if (!validKind(kind)) kind = "secure";
-        const auto edited = readFile(kEdited + kind);
-        const auto config = utils::getAllConfigValues();
-        const auto explicitIt = config.find("RPI_DEVICE_BOOTLOADER_CONFIG_FILE");
+        const auto custom = readFile(kCustom);
+        const std::string setting = utils::getConfigValue(kSetting, false).value_or("");
         HttpViewData data;
         data.insert("currentPage", std::string("options"));
-        data.insert("kind", kind);
-        data.insert("content", edited.value_or(readFile(kDefault + kind).value_or("")));
-        data.insert("edited", edited.has_value());
-        data.insert("explicit_path", explicitIt != config.end() ? explicitIt->second : std::string());
+        // A custom configuration starts as a copy of the default.
+        data.insert("content", custom.value_or(readFile(defaultPath()).value_or("")));
+        data.insert("custom_exists", custom.has_value());
+        data.insert("in_use", inUse(setting));
+        data.insert("explicit_path", setting);
         data.insert("max_bytes", std::to_string(kMaxBytes));
         callback(HttpResponse::newHttpViewResponse("bootloader_config.csp", data));
     }, {Get});
@@ -215,51 +225,60 @@ void BootloaderConfig::registerHandlers(HttpAppFramework &app) {
 
     app.registerHandler("/options/bootloader-config/check", [](const HttpRequestPtr &req,
                                                               std::function<void(const HttpResponsePtr &)> &&callback) {
-        std::string kind, content;
+        std::string content;
         HttpResponsePtr error;
-        if (!readRequest(req, true, kind, content, error)) return callback(error);
-        callback(json(findingsJson(check(kind, content))));
+        if (!readContent(req, content, error)) return callback(error);
+        callback(json(findingsJson(check(content))));
     }, {Post});
 
+    // Saving the custom configuration also puts it in use.
     app.registerHandler("/options/bootloader-config/save", [](const HttpRequestPtr &req,
                                                              std::function<void(const HttpResponsePtr &)> &&callback) {
-        std::string kind, content;
+        std::string content;
         HttpResponsePtr error;
-        if (!readRequest(req, true, kind, content, error)) return callback(error);
-        const Findings found = check(kind, content);
+        if (!readContent(req, content, error)) return callback(error);
+        const Findings found = check(content);
         Json::Value body = findingsJson(found);
         if (!found.errors.empty()) {
             body["saved"] = false;
             return callback(json(body, k400BadRequest));
         }
         if (!content.empty() && content.back() != '\n') content += '\n';
-        const std::string path = kEdited + kind;
-        const bool ok = writeAtomically(path, content);
-        AuditLog::logFileSystemAccess("BOOTLOADER_CONFIG_SAVE", path, ok, auth::username(req));
+        const bool ok = writeAtomically(kCustom, content) && utils::setConfigValue(kSetting, kCustom);
+        AuditLog::logFileSystemAccess("BOOTLOADER_CONFIG_SAVE", kCustom, ok, auth::username(req));
         if (!ok) {
-            return callback(utils::createErrorResponse(req, "Could not write " + path, k500InternalServerError,
-                                                       "Write Error", "WRITE_ERROR", std::strerror(errno)));
+            return callback(utils::createErrorResponse(req, "Could not save " + kCustom, k500InternalServerError,
+                                                       "Write Error", "WRITE_ERROR"));
         }
         body["saved"] = true;
+        body["in_use"] = "custom";
         callback(json(body));
     }, {Post});
 
-    app.registerHandler("/options/bootloader-config/reset", [](const HttpRequestPtr &req,
-                                                              std::function<void(const HttpResponsePtr &)> &&callback) {
-        std::string kind, content;
-        HttpResponsePtr error;
-        if (!readRequest(req, false, kind, content, error)) return callback(error);
-        const std::string path = kEdited + kind;
-        std::error_code ec;
-        std::filesystem::remove(path, ec);
-        AuditLog::logFileSystemAccess("BOOTLOADER_CONFIG_RESET", path, !ec, auth::username(req));
-        if (ec) {
-            return callback(utils::createErrorResponse(req, "Could not remove " + path, k500InternalServerError,
-                                                       "Write Error", "WRITE_ERROR", ec.message()));
+    // Choose the default or the saved custom configuration; the custom file
+    // is kept either way, so the choice can go back.
+    app.registerHandler("/options/bootloader-config/use", [](const HttpRequestPtr &req,
+                                                            std::function<void(const HttpResponsePtr &)> &&callback) {
+        auto body = req->getJsonObject();
+        const std::string choice = body && (*body)["choice"].isString() ? (*body)["choice"].asString() : "";
+        if (choice != "default" && choice != "custom") {
+            return callback(utils::createErrorResponse(req, "Choose default or custom", k400BadRequest,
+                                                       "Invalid Request", "INVALID_REQUEST"));
         }
-        Json::Value body;
-        body["content"] = readFile(kDefault + kind).value_or("");
-        callback(json(body));
+        if (choice == "custom" && !std::filesystem::exists(kCustom)) {
+            return callback(utils::createErrorResponse(req, "There is no custom configuration yet; edit one first",
+                                                       k409Conflict, "No Custom Configuration", "NO_CUSTOM"));
+        }
+        const bool ok = utils::setConfigValue(kSetting, choice == "custom" ? kCustom : "");
+        AuditLog::logFileSystemAccess("BOOTLOADER_CONFIG_USE", choice == "custom" ? kCustom : defaultPath(), ok,
+                                      auth::username(req));
+        if (!ok) {
+            return callback(utils::createErrorResponse(req, "Could not change the setting", k500InternalServerError,
+                                                       "Write Error", "WRITE_ERROR"));
+        }
+        Json::Value out;
+        out["in_use"] = choice;
+        callback(json(out));
     }, {Post});
 }
 
