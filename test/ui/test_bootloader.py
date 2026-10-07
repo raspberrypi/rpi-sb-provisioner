@@ -94,7 +94,9 @@ class BootloaderConfig(UITest):
         self.assertEqual("644", self.station.sh(f"stat -c %a {EDITED}secure").strip())
         self.assertTrue(self.b.el("#bl-reset").is_enabled())
         self.b.get("/options/get")
-        self.assertIn("Secure boot: edited", self.b.el(".bootloader-config-summary").text)
+        tile = self.b.el("#bootloader-tile-secure")
+        self.assertIn("Edited", tile.text)
+        self.assertIn("USB \u2192 SD/eMMC \u2192 restart", tile.text, "0xf14, read right to left, in words")
         self.open()
         self.b.d.execute_script("window.confirm = () => true")
         self.b.click("#bl-reset")
@@ -119,9 +121,20 @@ class BootloaderConfig(UITest):
             self.open()
             self.assertIn("Not in use", self.b.el(".bl-notice").text)
             self.b.get("/options/get")
-            self.assertIn(f"{DEFAULT}naked", self.b.el(".bootloader-config-summary").text)
+            self.assertIn("Overridden", self.b.el("#bootloader-tile-secure").text)
+            self.assertIn(f"{DEFAULT}naked", self.b.el(".bootloader-config-advanced").text)
         finally:
             self.station.set_config(RPI_DEVICE_BOOTLOADER_CONFIG_FILE="")
+
+    def test_the_tile_in_use_follows_the_provisioning_style(self):
+        for style, kind, other in (("secure-boot", "secure", "naked"), ("naked", "naked", "secure")):
+            with self.subTest(style=style):
+                self.station.set_config(PROVISIONING_STYLE=style)
+                self.b.get("/options/get")
+                self.assertIn("In use", self.b.el(f"#bootloader-tile-{kind}").text)
+                self.assertNotIn("In use", self.b.el(f"#bootloader-tile-{other}").text)
+                self.assertTrue(self.b.el(f"#bootloader-tile-{kind}").get_attribute("href").endswith(f"kind={kind}"))
+        self.station.set_config(PROVISIONING_STYLE="naked")
 
     def test_bad_requests_are_refused(self):
         self.open()

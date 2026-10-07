@@ -1,5 +1,9 @@
 <%inc
+#include <chrono>
+#include <ctime>
 #include <filesystem>
+#include <fstream>
+#include <regex>
 %>
 <!DOCTYPE html>
 <html lang="en">
@@ -7,9 +11,20 @@
     <title>Configuration Options</title>
     <%view stylesheet %>
     <style>
-        .bootloader-config-summary { margin: 4px 0 8px; }
+        /* Bootloader tiles: the family tiles' look, as links to the editor. */
+        a.bootloader-tile { display: block; text-decoration: none; color: inherit; }
+        .bootloader-tile .tile-header { justify-content: space-between; }
+        .bootloader-tile .tile-badge { margin-top: 0; }
+        .bootloader-order { margin: 10px 0 0; font-size: 0.85rem; color: #333; }
+        .bootloader-state { margin: 8px 0 0; font-size: 0.8rem; color: #595959; display: flex; justify-content: space-between; }
+        .bootloader-edit { color: #0062cc; font-weight: 600; }
+        .bootloader-tile.overridden { background: #f1f3f5; border-style: dashed; }
+        .bootloader-tile.overridden.selected { box-shadow: none; }
+        .bootloader-note { margin: 8px 0 0; font-size: 0.8rem; color: #595959; }
         .bootloader-config-advanced { margin-top: 10px; }
-        .bootloader-config-advanced summary { cursor: pointer; }
+        .bootloader-config-advanced summary { cursor: pointer; color: #0062cc; font-size: 0.85rem; list-style: none; display: inline-block; }
+        .bootloader-config-advanced summary::-webkit-details-marker { display: none; }
+        .bootloader-config-advanced[open] summary { margin-bottom: 8px; }
         /* ===== Section Styling ===== */
         .config-section {
             background: #fff;
@@ -1132,33 +1147,90 @@
 
             <%view firmware %>
 
-            <!-- Bootloader Config -->
-            <%c++ namespace fs = std::filesystem;
-               const bool secureEdited = fs::exists("/etc/rpi-sb-provisioner/bootloader.secure");
-               const bool nakedEdited = fs::exists("/etc/rpi-sb-provisioner/bootloader.naked"); %>
+            <!-- Bootloader Config: a tile per kind of device, like the family tiles -->
+            <%c++
+            namespace fs = std::filesystem;
+            // A configuration's BOOT_ORDER in words, read right to left as the
+            // bootloader does.
+            auto bootOrderWords = [](const std::string &path) -> std::string {
+                std::ifstream f(path);
+                std::string line, value;
+                static const std::regex re(R"(^\s*BOOT_ORDER\s*=\s*0[xX]([0-9a-fA-F]{1,8})\s*$)");
+                std::smatch m;
+                while (std::getline(f, line)) if (std::regex_match(line, m, re)) value = m[1];
+                if (value.empty()) return "";
+                std::string out;
+                for (auto it = value.rbegin(); it != value.rend(); ++it) {
+                    const char c = static_cast<char>(std::tolower(static_cast<unsigned char>(*it)));
+                    const char *name = c == '0' ? "SD (card detect)" : c == '1' ? "SD/eMMC" : c == '2' ? "network" :
+                                       c == '3' ? "RPIBOOT" : c == '4' ? "USB" : c == '5' ? "USB-C" : c == '6' ? "NVMe" :
+                                       c == '7' ? "HTTP" : c == 'e' ? "stop" : c == 'f' ? "restart" : "?";
+                    if (!out.empty()) out += " → ";
+                    out += name;
+                }
+                return out;
+            };
+            auto editedOn = [](const std::string &path) -> std::string {
+                std::error_code ec;
+                const auto t = fs::last_write_time(path, ec);
+                if (ec) return "";
+                const std::time_t tt = std::chrono::system_clock::to_time_t(
+                    std::chrono::clock_cast<std::chrono::system_clock>(t));
+                char buf[32];
+                std::tm tm{};
+                localtime_r(&tt, &tm);
+                std::strftime(buf, sizeof buf, "%d %b %Y", &tm);
+                return buf;
+            };
+            const bool overridden = !bootloaderConfig.empty();
+            const std::string inUse = provisioningStyle == "secure-boot" ? "secure" : "naked";
+            struct BlTile { std::string kind, title, description; };
+            const BlTile blTiles[] = {
+                {"secure", "Secure boot", "Devices provisioned with secure boot."},
+                {"naked", "Other styles", "Naked and full-disk-encryption-only devices."},
+            };
+            %>
             <div class="field-group">
                 <span class="field-label" id="bootloader-config-label">Bootloader Configuration</span>
-                <div class="bootloader-config-summary" aria-labelledby="bootloader-config-label">
-                    <%c++ if (!bootloaderConfig.empty()) { %>
-                    Devices get the file <code><%c++ $$ << HttpViewData::htmlTranslate(bootloaderConfig); %></code>, named under Advanced below.
-                    <%c++ } else { %>
-                    Secure boot: <strong><%c++ $$ << (secureEdited ? "edited" : "default"); %></strong>.
-                    Other styles: <strong><%c++ $$ << (nakedEdited ? "edited" : "default"); %></strong>.
-                    <%c++ } %>
+                <div class="tile-selector two-col bootloader-tiles">
+                <%c++ for (const auto &t : blTiles) {
+                    const std::string edited = "/etc/rpi-sb-provisioner/bootloader." + t.kind;
+                    const bool isEdited = fs::exists(edited);
+                    const std::string order = bootOrderWords(overridden ? bootloaderConfig :
+                        (isEdited ? edited : "/var/lib/rpi-sb-provisioner/bootloader." + t.kind));
+                    const bool current = t.kind == inUse; %>
+                    <a class="tile-option bootloader-tile<%c++ if (current) $$ << " selected"; if (overridden) $$ << " overridden"; %>"
+                       id="bootloader-tile-<%c++ $$ << t.kind; %>" href="/options/bootloader-config?kind=<%c++ $$ << t.kind; %>">
+                        <div class="tile-header">
+                            <span class="tile-title"><%c++ $$ << t.title; %></span>
+                            <%c++ if (current) { %><span class="tile-badge info bootloader-in-use">In use</span><%c++ } %>
+                        </div>
+                        <p class="tile-description"><%c++ $$ << t.description; %></p>
+                        <p class="bootloader-order"><%c++ if (!order.empty()) { %>Boot order: <%c++ $$ << HttpViewData::htmlTranslate(order); %><%c++ } else { %>No boot order set<%c++ } %></p>
+                        <p class="bootloader-state">
+                            <%c++ if (overridden) { %>Overridden by a file on this server
+                            <%c++ } else if (isEdited) { %>Edited <%c++ $$ << editedOn(edited); %>
+                            <%c++ } else { %>Package default<%c++ } %>
+                            <span class="bootloader-edit" aria-hidden="true">Edit &rarr;</span>
+                        </p>
+                    </a>
+                <%c++ } %>
                 </div>
-                <a class="cust-btn cust-btn-secondary" href="/options/bootloader-config?kind=<%c++ $$ << (provisioningStyle == "secure-boot" ? "secure" : "naked"); %>">Edit bootloader configuration</a>
+                <%c++ if (bootOrderMatchStorage) { %>
+                <p class="bootloader-note">The selected storage is moved to the front of the boot order when a device is bootstrapped.</p>
+                <%c++ } %>
 
-                <details class="bootloader-config-advanced" <%c++ if (!bootloaderConfig.empty()) { %>open<%c++ } %>>
-                    <summary>Advanced: use a file on this server instead</summary>
+                <details class="bootloader-config-advanced" <%c++ if (overridden) { %>open<%c++ } %>>
+                    <summary>Use a file on this server instead&hellip;</summary>
                     <label class="field-label" for="RPI_DEVICE_BOOTLOADER_CONFIG_FILE">Bootloader configuration file</label>
                     <input type="text" class="field-input" id="RPI_DEVICE_BOOTLOADER_CONFIG_FILE" name="RPI_DEVICE_BOOTLOADER_CONFIG_FILE"
                            value="<%c++ $$ << HttpViewData::htmlTranslate(bootloaderConfig); %>"
-                           placeholder="Leave blank to use the configuration edited above"
+                           placeholder="Leave blank to use the configurations above"
                            onblur="validateAndSaveField('RPI_DEVICE_BOOTLOADER_CONFIG_FILE')">
                     <div id="feedback-RPI_DEVICE_BOOTLOADER_CONFIG_FILE" class="field-feedback"></div>
                     <div class="inline-help">
                         <span class="inline-help-icon">&#9432;</span>
-                        <span>A path here overrides the editor for every kind of device, for configurations managed outside the provisioner.</span>
+                        <span>A path here overrides both configurations above, for one managed outside the provisioner.<%c++ if (overridden) { %> Devices get <code><%c++ $$ << HttpViewData::htmlTranslate(bootloaderConfig); %></code>.<%c++ } %></span>
                     </div>
                 </details>
             </div>
