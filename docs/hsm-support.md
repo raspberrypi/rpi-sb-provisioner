@@ -64,7 +64,7 @@ Host-side software (already declared as package dependencies):
 - **`p11-kit-modules`** — the p11-kit proxy module, through which
   `pkcs11-provider` reaches every registered token. Without it the provider
   reports *"Module initialization failed"* and no token is found. Releases
-  before 2.3.6 did not depend on it; `sudo apt install p11-kit-modules`.
+  before 2.4.0 did not depend on it; `sudo apt install p11-kit-modules`.
 - **`gnutls-bin`** — provides `p11tool`, used below to inspect tokens.
 
 ---

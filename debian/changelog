@@ -1,4 +1,21 @@
-rpi-sb-provisioner (2.3.6) unstable; urgency=medium
+rpi-sb-provisioner (2.4.0) unstable; urgency=high
+
+  * UPGRADING FROM 2.3: the web UI now needs signing in, so check these
+    before upgrading a station.
+    - Operators sign in with a system account in the new
+      rpi-sb-provisioner group. The first user (UID 1000) is added when the
+      group is created; add any other operator with
+      "sudo adduser <name> rpi-sb-provisioner".
+    - Scripts that call the API need a token: create one under API tokens
+      and send it as "Authorization: Bearer <token>".
+    - Every state-changing route is POST-only and needs the CSRF token, so
+      anything driving the old GET routes stops working.
+    - Behind a reverse proxy, give its host name with --allowed-host, and
+      sign in over HTTPS; see nginx-example/README.md to undo the old
+      HTTP Basic setup.
+    - New hooks are uploaded disabled, and a new signing key is used only
+      once chosen, unless it is the first.
+    - Upgrading empties the workdir cache, so the first device re-signs.
 
   * SECURITY: Require operators to sign in to the web UI. It runs as root and
     asked for no credentials at all, so any local user -- or any web page open
@@ -393,7 +410,7 @@ rpi-sb-provisioner (2.3.6) unstable; urgency=medium
     again, so they never reach a customisation hook's own flashes. A
     fastbootd without the feature behaves as before.
 
- -- Tom Dewey <tom.dewey@raspberrypi.com>  Thu, 03 Sep 2026 16:26:50 +0100
+ -- Tom Dewey <tom.dewey@raspberrypi.com>  Wed, 07 Oct 2026 08:48:02 +0100
 
 rpi-sb-provisioner (2.3.5) unstable; urgency=medium
 
