@@ -99,10 +99,12 @@ rpi-sb-provisioner (2.4.0) unstable; urgency=high
     navigation bar has the same space at each end, and text and badges
     for a device part-way through are dark enough to read.
 
-  * Edit the bootloader configuration devices get in the web interface,
-    with the Raspberry Pi documentation for each setting beside it,
-    instead of naming a file on the server. Saving checks the file and the
-    EEPROM's size limit, and the next device to bootstrap gets the change.
+  * Choose the bootloader configuration devices get in the web interface:
+    the package default, or a custom one edited there with the Raspberry Pi
+    documentation for each setting beside it, instead of naming a file on
+    the server. Each shows the boot order devices will get, storage first
+    if so set. Saving checks the file and the EEPROM's size limit, and the
+    next device to bootstrap gets the change.
 
   * Stop bootstrap changing the bootloader configuration it is given. It
     added SIGNED_BOOT=1 and reordered BOOT_ORDER in the file itself, the

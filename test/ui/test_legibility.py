@@ -13,7 +13,7 @@ SERIAL = "10000000fedcba98"
 WIDTHS = (375, 768, 1280, 1920)
 PUBLIC = ["/devices", f"/devices/{SERIAL}", "/scantool"]
 OPERATOR = ["/devices", "/devices#rel", "/devices#topo", f"/devices/{SERIAL}", "/options/get",
-            "/options/bootloader-config?kind=secure",
+            "/options/bootloader-config",
             "/customisation/list-scripts", "/customisation/get-script?script=naked-provisioner-post-flash",
             "/services", f"/service-log/rpi-sb-triage@{SERIAL}.service", "/manu-db", "/auditlog",
             "/auth/tokens", "/scantool", "/no-such-page"]
