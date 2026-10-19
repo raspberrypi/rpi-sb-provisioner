@@ -16,6 +16,9 @@
         .bootloader-order .order-step { white-space: nowrap; }
         .bootloader-order .order-promoted { font-weight: 700; color: #0062cc; }
         .bootloader-edit { font-weight: 600; color: #0062cc; }
+        /* Custom before there is one: not choosable, only its Create link acts. */
+        .bootloader-tile.unavailable { cursor: default; }
+        .bootloader-tile.unavailable:hover { border-color: #e0e0e0; background: #fafafa; }
         .bootloader-storage-toggle { margin-top: 12px; margin-bottom: 0; }
         .bootloader-config-advanced { margin-top: 10px; }
         .bootloader-config-advanced summary { cursor: pointer; color: #0062cc; font-size: 0.85rem; list-style: none; display: inline-block; }
@@ -1192,7 +1195,7 @@
                         <p class="tile-description">The package's configuration for <%c++ $$ << (provisioningStyle == "secure-boot" ? "secure boot" : "this provisioning style"); %>.</p>
                         <p class="bootloader-order" data-boot-order="<%c++ $$ << bootOrderOf(defaultPath); %>"></p>
                     </label>
-                    <label class="tile-option bootloader-tile <%c++ if (!usesDefault) $$ << "selected"; %>" id="bootloader-tile-custom"
+                    <label class="tile-option bootloader-tile <%c++ if (!usesDefault) $$ << "selected"; if (!customExists && !usesOther) $$ << " unavailable"; %>" id="bootloader-tile-custom"
                            data-has-custom="<%c++ $$ << (customExists || usesOther ? "1" : "0"); %>">
                         <input type="radio" name="bootloader-choice" value="custom" <%c++ if (!usesDefault) $$ << "checked"; %>>
                         <span class="tile-check">&#10003;</span>
@@ -1867,8 +1870,9 @@
                 e.preventDefault();
                 const choice = this.querySelector('input').value;
                 if (this.classList.contains('selected')) return;
+                // Nothing to choose yet: the Create link is the way in.
                 if (choice === 'custom' && this.dataset.hasCustom !== '1') {
-                    location.href = '/options/bootloader-config';
+                    this.querySelector('.bootloader-edit').focus();
                     return;
                 }
                 const response = await fetch('/options/bootloader-config/use', addCsrfHeader({

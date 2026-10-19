@@ -163,13 +163,27 @@ class BootloaderConfig(UITest):
         self.b.wait_text("body", "custom bootloader configuration")
         self.assertEqual(CUSTOM, self.setting())
 
-    def test_custom_without_a_file_opens_the_editor(self):
+    def test_only_the_link_opens_the_editor(self):
+        # Before a custom configuration exists the tile cannot be chosen,
+        # and clicking it goes nowhere; its Create link opens the editor.
         self.b.get("/options/get")
-        self.assertIn("Create", self.tile("custom").text)
-        self.b.press(self.tile("custom"))
+        self.assertIn("unavailable", self.tile("custom").get_attribute("class"))
+        self.b.press(self.tile("custom").find_element("css selector", ".tile-description"))
+        self.assertEqual("/options/get", self.b.path())
+        self.assertNotIn("selected", self.tile("custom").get_attribute("class"))
+        self.assertEqual("", self.setting())
+        self.b.press(self.tile("custom").find_element("css selector", ".bootloader-edit"))
         self.b.el("#bl-save")
         self.assertEqual("/options/bootloader-config", self.b.path())
-        self.assertEqual("", self.setting())
+        # Once there is one, clicking the tile chooses it and stays on Options.
+        self.save("BOOT_ORDER=0xf41\n")
+        self.b.click("#bl-default")
+        self.b.wait_text("#bl-status", "package default")
+        self.b.get("/options/get")
+        self.b.press(self.tile("custom").find_element("css selector", ".tile-description"))
+        self.b.wait_text("body", "custom bootloader configuration")
+        self.assertEqual("/options/get", self.b.path())
+        self.assertEqual(CUSTOM, self.setting())
 
     def test_the_boot_order_follows_the_storage_switch(self):
         self.save("BOOT_ORDER=0xf416\n")
