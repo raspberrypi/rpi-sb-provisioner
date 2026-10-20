@@ -76,6 +76,10 @@ cleanup() {
         rm -rf "${FASTBOOT_STAGING_DIR}"
     fi
 
+    if [ -n "${REPROVISION_DIR}" ] && [ -d "${REPROVISION_DIR}" ]; then
+        rm -rf "${REPROVISION_DIR}"
+    fi
+
     if [ -n "${DELETE_PRIVATE_TMPDIR}" ]; then
         announce_start "Deleting customised intermediates"
         # shellcheck disable=SC2086
@@ -126,6 +130,8 @@ cleanup() {
 # Signals exit with their own status so cleanup sees a failure. Trapped
 # directly, cleanup read the last command's status, often 0, and recorded a
 # killed run as a success.
+# Set before the trap, so nothing inherited is ever removed.
+REPROVISION_DIR=
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
@@ -374,6 +380,22 @@ prepare_bootloader_config() {
         log "Bootloader configuration differs from the one the cached bootloader was built with; rebuilding"
         rm -f "${_bc_dir}/config.txt" "${_bc_dir}/pieeprom.bin" "${_bc_dir}/pieeprom.sig" "${_bc_dir}/bootloader.sha256"
     fi
+}
+
+# Arguments: $1 = the cached secure bootloader directory.
+#
+# A board flagged for re-provisioning already holds the customer key, so it
+# needs its recovery bootcode signed with it; every other board takes the
+# cache's unsigned one. The signed copy is this run's alone, in REPROVISION_DIR:
+# it used to be written into the shared cache, so with a workdir every later
+# board was sent it, and one without the key refused it.
+reprovision_bootloader_directory() {
+    REPROVISION_DIR="$(make_temp_dir)"
+    cp -a "$1/." "${REPROVISION_DIR}/"
+    log "Re-signing bootcode for special re-provisioning case, for this run only"
+    # shellcheck disable=SC2046
+    log_stderr rpi-sign-bootcode --debug -c 2712 -i "${FIRMWARE_ROOT}-2712/${FIRMWARE_RELEASE_STATUS}/recovery.bin" \
+        -o "${REPROVISION_DIR}/bootcode5.bin" $(get_sign_bootcode_key_args) -v 0 -n 16
 }
 
 # Detects whether an EEPROM image carries an AB-capable layout by checking
@@ -727,14 +749,8 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                         mark_permanent_failure
                         die "No signing key configured for re-provisioning. Aborting."
                     fi
-                    log "Re-signing bootcode for special re-provisioning case"
-                    # For special reprovision, use the original firmware recovery.bin as source, not the cached signed bootcode
-                    BCM_CHIP=2712
-                    FIRMWARE_IMAGE_DIR="${FIRMWARE_ROOT}-${BCM_CHIP}/${FIRMWARE_RELEASE_STATUS}"
-                    BOOTCODE_BINARY_IMAGE="${FIRMWARE_IMAGE_DIR}/recovery.bin"
-                    BOOTCODE_FLASHING_NAME="${SECURE_BOOTLOADER_DIRECTORY}/bootcode5.bin"
-                    # shellcheck disable=SC2046
-                    log_stderr rpi-sign-bootcode --debug -c 2712 -i "${BOOTCODE_BINARY_IMAGE}" -o "${BOOTCODE_FLASHING_NAME}" $(get_sign_bootcode_key_args) -v 0 -n 16
+                    reprovision_bootloader_directory "${SECURE_BOOTLOADER_DIRECTORY}"
+                    BOOTCODE_FLASHING_NAME="${REPROVISION_DIR}/bootcode5.bin"
                 else
                     log "Warning: Special re-provisioning only supported on Pi 5 (2712), skipping for device family ${TARGET_DEVICE_FAMILY}"
                 fi
@@ -754,9 +770,10 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                         ;;
                 esac
             fi
+            BOOTLOADER_SERVE_DIR="${REPROVISION_DIR:-${SECURE_BOOTLOADER_DIRECTORY}}"
             record_progress "EEPROM-UPDATING"
-            ensure_recovery_support_files "${SECURE_BOOTLOADER_DIRECTORY}" "${BOOTCODE_FLASHING_NAME}"
-            [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal_secs 60 rpiboot -j "${METADATA_DIR}" -d "${SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
+            ensure_recovery_support_files "${BOOTLOADER_SERVE_DIR}" "${BOOTCODE_FLASHING_NAME}"
+            [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal_secs 60 rpiboot -j "${METADATA_DIR}" -d "${BOOTLOADER_SERVE_DIR}" -p "${TARGET_USB_PATH}"
             extract_board_type
         else
             # NB: config.txt is the marker the branch above uses to decide the
@@ -884,18 +901,18 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                         # This only makes sense if you're re-provisioning a device that's already been provisioned.
                         # It's a special case, and should not be used in normal operation.
                         # Additionally, this only works on Raspberry Pi 5-family devices.
-                        log "Re-signing bootcode for special re-provisioning case"
-                        # shellcheck disable=SC2046
-                        log_stderr rpi-sign-bootcode --debug -c 2712 -i "${BOOTCODE_BINARY_IMAGE}" -o "${BOOTCODE_FLASHING_NAME}" $(get_sign_bootcode_key_args) -v 0 -n 16
+                        reprovision_bootloader_directory "${SECURE_BOOTLOADER_DIRECTORY}"
+                        BOOTCODE_FLASHING_NAME="${REPROVISION_DIR}/bootcode5.bin"
                     else
                         log "Warning: Special re-provisioning only supported on Pi 5 (2712), skipping for device family ${TARGET_DEVICE_FAMILY}"
                     fi
                 else
                     log "Normal provisioning mode (not re-provisioning)"
                 fi
+                BOOTLOADER_SERVE_DIR="${REPROVISION_DIR:-${SECURE_BOOTLOADER_DIRECTORY}}"
                 record_progress "EEPROM-UPDATING"
-                ensure_recovery_support_files "${SECURE_BOOTLOADER_DIRECTORY}" "${BOOTCODE_FLASHING_NAME}"
-                [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal_secs 60 rpiboot -j "${METADATA_DIR}" -d "${SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
+                ensure_recovery_support_files "${BOOTLOADER_SERVE_DIR}" "${BOOTCODE_FLASHING_NAME}"
+                [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal_secs 60 rpiboot -j "${METADATA_DIR}" -d "${BOOTLOADER_SERVE_DIR}" -p "${TARGET_USB_PATH}"
             extract_board_type
             else
                 log "No key specified, skipping eeprom update"
