@@ -125,6 +125,7 @@ with_lock() {
 : "${FASTBOOT_STORAGE_TIMEOUT:=120}"  # partition tables, LUKS format and open
 : "${FASTBOOT_ERASE_TIMEOUT:=900}"    # whole-device discard; eMMC can be slow
 BOUNDED_KILL_AFTER=10
+PROVISION_FAILED_REASON=
 : "${FASTBOOT_PRESENCE_TIMEOUT:=10}"  # is the board there, before a long call
 
 # Runs "$@" under timeout(1), streaming its output and keeping a copy. Sets
@@ -205,21 +206,29 @@ run_bounded() {
 # Logs why the last run_bounded command ($1, for the message) failed, and sets
 # BOUNDED_WHY for the caller's own message.
 bounded_report() {
+    # BOUNDED_REASON is the same in a word, for the provision-failed hook.
     if [ -n "${BOUNDED_REMOTE}" ]; then
         BOUNDED_WHY="the device refused it: ${BOUNDED_REMOTE}"
+        BOUNDED_REASON=device-refused
     else
         case "${BOUNDED_RC}" in
             124) if [ "${BOUNDED_ABSENT:-0}" -eq 1 ]; then
                      BOUNDED_WHY="the board did not answer within ${_rb_secs} seconds, so it was not started"
+                     BOUNDED_REASON=board-absent
                  elif [ "${BOUNDED_ABSENT:-0}" -eq 2 ]; then
                      BOUNDED_WHY="the board went away part-way through, and was not back within ${FASTBOOT_PRESENCE_TIMEOUT} seconds"
+                     BOUNDED_REASON=board-lost
                  elif [ "${BOUNDED_ABSENT:-0}" -eq 3 ]; then
                      BOUNDED_WHY="the board refused the bootcode it was sent, three times"
+                     BOUNDED_REASON=bootcode-refused
                  else
                      BOUNDED_WHY="timed out after ${_rb_secs} seconds"
+                     BOUNDED_REASON=timed-out
                  fi ;;
-            137) BOUNDED_WHY="killed after ignoring the ${_rb_secs}-second timeout, or killed externally" ;;
-            *)   BOUNDED_WHY="exit code ${BOUNDED_RC}" ;;
+            137) BOUNDED_WHY="killed after ignoring the ${_rb_secs}-second timeout, or killed externally"
+                 BOUNDED_REASON=timed-out ;;
+            *)   BOUNDED_WHY="exit code ${BOUNDED_RC}"
+                 BOUNDED_REASON=command-failed ;;
         esac
     fi
     log "\"$1\" FAILED: ${BOUNDED_WHY}"
@@ -292,6 +301,7 @@ timeout_fatal_secs() {
         return 0
     fi
     bounded_report "$*"
+    PROVISION_FAILED_REASON="${BOUNDED_REASON}"
     record_abort_once "${TARGET_DEVICE_SERIAL}" "${TARGET_USB_PATH}"
     die "\"$*\" FAILED: ${BOUNDED_WHY}"
 }
@@ -1049,6 +1059,8 @@ run_provision_failed_hook() {
     else
         export PROVISION_FAILED_PERMANENT=0
     fi
+    # Why, in a word, when a bounded command failed: rigs can show the cause.
+    export PROVISION_FAILED_REASON="${PROVISION_FAILED_REASON:-}"
     if [ "${HOOK_CONTEXT}" = "bootstrap" ]; then
         export PROVISION_FAILED_CONTEXT=bootstrap
         run_customisation_script "${PROVISIONER_NAME}" "provision-failed" \
@@ -1062,6 +1074,7 @@ run_provision_failed_hook() {
     fi
     unset PROVISION_FAILED_CONTEXT
     unset PROVISION_FAILED_PERMANENT
+    unset PROVISION_FAILED_REASON
     clear_permanent_failure
 }
 
