@@ -302,6 +302,9 @@ timeout_fatal_secs() {
     fi
     bounded_report "$*"
     PROVISION_FAILED_REASON="${BOUNDED_REASON}"
+    # Retrying will not change what the board accepts: it takes the reprovision
+    # flag or another cable. Permanent, so a rig shows red rather than waiting.
+    [ "${BOUNDED_REASON}" = bootcode-refused ] && mark_permanent_failure
     record_abort_once "${TARGET_DEVICE_SERIAL}" "${TARGET_USB_PATH}"
     die "\"$*\" FAILED: ${BOUNDED_WHY}"
 }
