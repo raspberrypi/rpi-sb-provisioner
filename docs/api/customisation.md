@@ -337,6 +337,20 @@ buzzers.
 `PROVISION_FAILED_CONTEXT` is set to `bootstrap` or `provisioning` for the
 duration of the hook. Manufacturing metadata is not available on failure.
 
+`PROVISION_FAILED_REASON` says why, when a time-limited command failed, so a
+rig can show the cause:
+
+| Value | Meaning |
+| --- | --- |
+| `bootcode-refused` | The board refused its bootcode three times. It may already hold a customer key in OTP and need the reprovision flag, or the USB cable or connection may be faulty. |
+| `board-absent` | The board did not answer before a long fastboot command. |
+| `board-lost` | The board went away part-way through a long fastboot command. |
+| `device-refused` | fastbootd answered `FAILED`. |
+| `timed-out` | The command ran out of time. |
+| `command-failed` | The command failed some other way. |
+
+It is empty when the failure had no recorded cause.
+
 The hook is not invoked for duplicate `bootstrap@` lock contention or for triage
 failure while bootstrap is still in progress (expected USB re-enumeration during
 DUT reboot).
