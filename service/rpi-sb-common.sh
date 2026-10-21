@@ -173,6 +173,22 @@ run_bounded() {
             done
         ) &
         _rb_watch=$!
+    # A board that refuses the bootcode, as one holding a customer key refuses
+    # an unsigned one, makes rpiboot retry until its budget runs out. Three
+    # refusals, with no second stage reached, end it.
+    elif [ "$1" = rpiboot ]; then
+        (
+            while [ ! -s "${_rb_rcfile}" ]; do
+                sleep 1
+                _n=$(grep -c 'Failed control transfer' "${BOUNDED_OUT}" 2>/dev/null) || true
+                if [ "${_n:-0}" -ge 3 ] && ! grep -q 'Second stage' "${BOUNDED_OUT}" 2>/dev/null; then
+                    : > "${_rb_gone}.refused"
+                    kill -TERM "$(cat "${_rb_pidfile}")" 2>/dev/null
+                    break
+                fi
+            done
+        ) &
+        _rb_watch=$!
     fi
     # POSIX sh reports a pipeline's last status, so the command's goes via a file.
     { timeout -k "${BOUNDED_KILL_AFTER}" "${_rb_secs}" "$@" 2>&1 & echo $! > "${_rb_pidfile}"; wait $!; echo $? > "${_rb_rcfile}"; } | tee "${BOUNDED_OUT}"
@@ -180,7 +196,8 @@ run_bounded() {
     [ -n "${BOUNDED_RC}" ] || BOUNDED_RC=1
     if [ -n "${_rb_watch}" ]; then kill "${_rb_watch}" 2>/dev/null; wait "${_rb_watch}" 2>/dev/null; fi
     if [ -e "${_rb_gone}" ]; then BOUNDED_RC=124; BOUNDED_ABSENT=2; fi
-    rm -f "${_rb_rcfile}" "${_rb_pidfile}" "${_rb_gone}"
+    if [ -e "${_rb_gone}.refused" ]; then BOUNDED_RC=124; BOUNDED_ABSENT=3; fi
+    rm -f "${_rb_rcfile}" "${_rb_pidfile}" "${_rb_gone}" "${_rb_gone}.refused"
     BOUNDED_REMOTE="$(sed -n "s/.*FAILED (remote: '\(.*\)').*/\1/p" "${BOUNDED_OUT}" | tail -n 1)"
     [ "${_rb_errexit}" -eq 0 ] || set -e
 }
@@ -196,6 +213,8 @@ bounded_report() {
                      BOUNDED_WHY="the board did not answer within ${_rb_secs} seconds, so it was not started"
                  elif [ "${BOUNDED_ABSENT:-0}" -eq 2 ]; then
                      BOUNDED_WHY="the board went away part-way through, and was not back within ${FASTBOOT_PRESENCE_TIMEOUT} seconds"
+                 elif [ "${BOUNDED_ABSENT:-0}" -eq 3 ]; then
+                     BOUNDED_WHY="the board refused the bootcode it was sent, three times"
                  else
                      BOUNDED_WHY="timed out after ${_rb_secs} seconds"
                  fi ;;
@@ -204,6 +223,14 @@ bounded_report() {
         esac
     fi
     log "\"$1\" FAILED: ${BOUNDED_WHY}"
+    # The likeliest cause, offered as one possibility: a cable fails the same way.
+    if [ "${BOUNDED_ABSENT:-0}" -eq 3 ]; then
+        if [ "${SPECIAL_FLAG_REPROVISION_DEVICE:-0}" -eq 1 ]; then
+            log "It was sent bootcode signed with this station's key, for re-provisioning. If the board holds a different customer key in OTP, this station cannot provision it; the transfer can also fail for other reasons, such as a faulty USB cable or connection."
+        else
+            log "If this board has been provisioned with secure boot before, it may already hold a customer key in OTP and refuse unsigned bootcode: consider setting the reprovision flag for it. The transfer can also fail for other reasons, such as a faulty USB cable or connection."
+        fi
+    fi
     if [ -z "${BOUNDED_REMOTE}" ]; then
         log "Last output:"
         tail -n 20 "${BOUNDED_OUT}" 2>/dev/null | while IFS= read -r _br_line; do
