@@ -109,9 +109,10 @@ rpi-sb-provisioner (2.4.0) unstable; urgency=high
   * Stop at once when a board refuses the bootcode, instead of retrying for a
     minute, and say what may be wrong: a board provisioned before may hold
     a customer key and need the reprovision flag, or the USB cable or
-    connection may be at fault. The provision-failed hook runs at once, and
-    PROVISION_FAILED_REASON tells it why a run failed, so a rig can show
-    the cause.
+    connection may be at fault. The provision-failed hook runs at once, with
+    the failure marked permanent so a rig shows its error rather than its
+    in-progress lights, and PROVISION_FAILED_REASON tells it why a run
+    failed.
 
   * Keep the bootcode signed for a board flagged for re-provisioning to that
     board's run. It was written into the shared bootloader cache, so with a
