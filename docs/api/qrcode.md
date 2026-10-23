@@ -12,7 +12,7 @@ The QR Code Verification API provides endpoints for validating QR codes against 
 curl 'http://localhost:3142/api/v2/verify-qrcode?code=10000000abcdef'
 ```
 
-`GET` needs no sign-in unless `RPI_SB_PROVISIONER_PUBLIC_DASHBOARD` is turned off. `POST` with a JSON body is kept for existing scripts, and needs an operator, as other writes do:
+`GET` needs no sign-in unless `RPI_SB_PROVISIONER_PUBLIC_DASHBOARD` is turned off. `POST` with a JSON body is kept for existing scripts. It needs an operator and, from a browser session, the CSRF token, as other writes do:
 
 ``` json
 {
@@ -44,18 +44,16 @@ The endpoint returns a JSON object with verification results:
 
 **Error Responses:**
 
-If the code is missing, blank or not printable:
+If the code is missing, blank, not printable or longer than 256 characters, HTTP 400:
 
 ``` json
 {
-  "error": {
-    "status": 400,
-    "title": "Parameter Error",
-    "code": "INVALID_PARAMETER",
-    "detail": "Missing or invalid code"
-  }
+  "error": "Missing or invalid code",
+  "error_code": "INVALID_PARAMETER"
 }
 ```
+
+If the manufacturing database cannot be read, HTTP 500 with `error_code` `DB_ERROR`.
 
 **Notes:**
 
