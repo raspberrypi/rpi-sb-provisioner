@@ -244,7 +244,7 @@ void BootloaderConfig::registerHandlers(HttpAppFramework &app) {
             return callback(json(body, k400BadRequest));
         }
         if (!content.empty() && content.back() != '\n') content += '\n';
-        const bool ok = writeAtomically(kCustom, content) && utils::setConfigValue(kSetting, kCustom);
+        const bool ok = writeAtomically(kCustom, content) && utils::setConfigValue(kSetting, kCustom, auth::username(req));
         AuditLog::logFileSystemAccess("BOOTLOADER_CONFIG_SAVE", kCustom, ok, auth::username(req));
         if (!ok) {
             return callback(utils::createErrorResponse(req, "Could not save " + kCustom, k500InternalServerError,
@@ -269,7 +269,7 @@ void BootloaderConfig::registerHandlers(HttpAppFramework &app) {
             return callback(utils::createErrorResponse(req, "There is no custom configuration yet; edit one first",
                                                        k409Conflict, "No Custom Configuration", "NO_CUSTOM"));
         }
-        const bool ok = utils::setConfigValue(kSetting, choice == "custom" ? kCustom : "");
+        const bool ok = utils::setConfigValue(kSetting, choice == "custom" ? kCustom : "", auth::username(req));
         AuditLog::logFileSystemAccess("BOOTLOADER_CONFIG_USE", choice == "custom" ? kCustom : defaultPath(), ok,
                                       auth::username(req));
         if (!ok) {

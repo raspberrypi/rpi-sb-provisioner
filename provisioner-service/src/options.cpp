@@ -80,18 +80,18 @@ namespace provisioner {
             return true;
         }
 
-        bool clearWorkdirContents(const std::string& workdir) {
+        bool clearWorkdirContents(const std::string& workdir, const std::string& username) {
             std::string why;
             if (!workdirSafeToClear(workdir, why)) {
                 LOG_ERROR << "Not clearing the workdir: " << why;
-                AuditLog::logFileSystemAccess("DELETE_CONTENTS", workdir, false, "", why);
+                AuditLog::logFileSystemAccess("DELETE_CONTENTS", workdir, false, username, why);
                 return false;
             }
             removeDirectoryContents(workdir);
             return true;
         }
 
-        void invalidateWorkdirCache(const std::string& reason) {
+        void invalidateWorkdirCache(const std::string& reason, const std::string& username) {
             auto workdirValue = utils::getConfigValue("RPI_SB_WORKDIR");
             std::string workdir = workdirValue ? *workdirValue : "";
             if (workdir.empty()) {
@@ -99,8 +99,8 @@ namespace provisioner {
             }
             if (std::filesystem::exists(workdir) && std::filesystem::is_directory(workdir)) {
                 LOG_INFO << "Customer key changed - removing contents of RPI_SB_WORKDIR at " << workdir;
-                AuditLog::logFileSystemAccess("DELETE_CONTENTS", workdir, true, "", reason);
-                clearWorkdirContents(workdir);
+                AuditLog::logFileSystemAccess("DELETE_CONTENTS", workdir, true, username, reason);
+                clearWorkdirContents(workdir, username);
             } else {
                 LOG_WARN << "RPI_SB_WORKDIR path does not exist or is not a directory: " << workdir;
             }
@@ -569,7 +569,7 @@ namespace provisioner {
             // Persist atomically under the shared config-write lock. Returns the
             // full merged config, which the side-effect handling below (workdir
             // clear, manufacturing DB creation) needs.
-            auto merged = utils::setConfigValues(updates);
+            auto merged = utils::setConfigValues(updates, auth::username(req));
             if (!merged) {
                 LOG_ERROR << "Failed to write configuration file";
                 auto resp = provisioner::utils::createErrorResponse(
@@ -590,7 +590,7 @@ namespace provisioner {
             if (!workdir.empty()) {
                 if (std::filesystem::exists(workdir) && std::filesystem::is_directory(workdir)) {
                     LOG_INFO << "Removing contents of RPI_SB_WORKDIR at " << workdir;
-                    clearWorkdirContents(workdir);
+                    clearWorkdirContents(workdir, auth::username(req));
                 } else {
                     LOG_WARN << "RPI_SB_WORKDIR path does not exist or is not a directory: " << workdir;
                 }
@@ -605,7 +605,7 @@ namespace provisioner {
                         LOG_ERROR << "Failed to create manufacturing DB file at " << mfg_db_path->second;
                         
                         // Log failed file creation to audit log
-                        AuditLog::logFileSystemAccess("CREATE", mfg_db_path->second, false);
+                        AuditLog::logFileSystemAccess("CREATE", mfg_db_path->second, false, auth::username(req));
                         
                         auto resp = provisioner::utils::createErrorResponse(
                             req,
@@ -621,7 +621,7 @@ namespace provisioner {
                     mfg_db.close();
                     
                     // Log successful file creation to audit log
-                    AuditLog::logFileSystemAccess("CREATE", mfg_db_path->second, true);
+                    AuditLog::logFileSystemAccess("CREATE", mfg_db_path->second, true, auth::username(req));
                     
                     // Set root read-write permissions (0600)
                     try {
@@ -629,12 +629,12 @@ namespace provisioner {
                             std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
                         
                         // Log successful permission change to audit log
-                        AuditLog::logFileSystemAccess("CHMOD", mfg_db_path->second, true);
+                        AuditLog::logFileSystemAccess("CHMOD", mfg_db_path->second, true, auth::username(req));
                     } catch (const std::filesystem::filesystem_error& e) {
                         LOG_ERROR << "Failed to set permissions on manufacturing DB file: " << e.what();
                         
                         // Log failed permission change to audit log
-                        AuditLog::logFileSystemAccess("CHMOD", mfg_db_path->second, false, "", e.what());
+                        AuditLog::logFileSystemAccess("CHMOD", mfg_db_path->second, false, auth::username(req), e.what());
                         
                         auto resp = provisioner::utils::createErrorResponse(
                             req,
@@ -679,9 +679,9 @@ namespace provisioner {
             if (std::filesystem::exists(workdir)) {
                 if (std::filesystem::is_directory(workdir)) {
                     // Log directory deletion to audit log
-                    AuditLog::logFileSystemAccess("DELETE_CONTENTS", workdir, true);
+                    AuditLog::logFileSystemAccess("DELETE_CONTENTS", workdir, true, auth::username(req));
 
-                    if (!clearWorkdirContents(workdir)) {
+                    if (!clearWorkdirContents(workdir, auth::username(req))) {
                         callback(provisioner::utils::createErrorResponse(
                             req, "Not clearing RPI_SB_WORKDIR: it holds files the provisioner "
                             "needs. Point it at a directory of its own.",
@@ -694,7 +694,7 @@ namespace provisioner {
             } else {
                 LOG_INFO << "RPI_SB_WORKDIR does not exist: " << workdir << " - considered already cleared";
                 // Log skipped operation to audit log
-                AuditLog::logFileSystemAccess("SKIP_DELETE_CONTENTS", workdir, true, "", "Directory does not exist");
+                AuditLog::logFileSystemAccess("SKIP_DELETE_CONTENTS", workdir, true, auth::username(req), "Directory does not exist");
             }
             
             // Return success in all cases
@@ -912,7 +912,7 @@ namespace provisioner {
             }
 
             // Update config with the selected firmware path (atomic, locked).
-            if (!utils::setConfigValue("RPI_DEVICE_FIRMWARE_FILE", selectedFirmware)) {
+            if (!utils::setConfigValue("RPI_DEVICE_FIRMWARE_FILE", selectedFirmware, auth::username(req))) {
                 auto resp = provisioner::utils::createErrorResponse(
                     req,
                     "Failed to write configuration file",
@@ -936,8 +936,8 @@ namespace provisioner {
                 if (!workdir.empty()) {
                     if (std::filesystem::exists(workdir) && std::filesystem::is_directory(workdir)) {
                         LOG_INFO << "Firmware changed - removing contents of RPI_SB_WORKDIR at " << workdir;
-                        AuditLog::logFileSystemAccess("DELETE_CONTENTS", workdir, true, "", "firmware selection changed");
-                        clearWorkdirContents(workdir);
+                        AuditLog::logFileSystemAccess("DELETE_CONTENTS", workdir, true, auth::username(req), "firmware selection changed");
+                        clearWorkdirContents(workdir, auth::username(req));
                     } else {
                         LOG_WARN << "RPI_SB_WORKDIR path does not exist or is not a directory: " << workdir;
                     }
@@ -1230,11 +1230,11 @@ namespace provisioner {
                     std::filesystem::perms::owner_read,
                     std::filesystem::perm_options::replace);
                 
-                AuditLog::logFileSystemAccess("UPLOAD_KEY", destPath, true);
+                AuditLog::logFileSystemAccess("UPLOAD_KEY", destPath, true, auth::username(req));
                 
             } catch (const std::exception& e) {
                 LOG_ERROR << "Failed to save key file: " << e.what();
-                AuditLog::logFileSystemAccess("UPLOAD_KEY", destPath, false, "", e.what());
+                AuditLog::logFileSystemAccess("UPLOAD_KEY", destPath, false, auth::username(req), e.what());
                 auto resp = provisioner::utils::createErrorResponse(
                     req,
                     "Failed to save key file",
@@ -1251,7 +1251,7 @@ namespace provisioner {
 
             if (!keyInfo.success) {
                 std::filesystem::remove(destPath);
-                AuditLog::logFileSystemAccess("UPLOAD_KEY", destPath, false, "",
+                AuditLog::logFileSystemAccess("UPLOAD_KEY", destPath, false, auth::username(req),
                                               keyInfo.errorMessage);
                 auto resp = provisioner::utils::createErrorResponse(
                     req,
@@ -1290,7 +1290,7 @@ namespace provisioner {
                         if (!raw.empty()) OPENSSL_cleanse(&raw[0], raw.size());
                         std::filesystem::remove(destPath);
                         LOG_ERROR << "Rejecting key upload: " << deviceKey.reason;
-                        AuditLog::logFileSystemAccess("WRAP_KEY", destPath, false, "",
+                        AuditLog::logFileSystemAccess("WRAP_KEY", destPath, false, auth::username(req),
                                                       "no usable device key");
                         callback(provisioner::utils::createDeviceKeyErrorResponse(
                             req, "store the uploaded signing key", deviceKey));
@@ -1301,13 +1301,13 @@ namespace provisioner {
                     if (provisioner::keywrap::wrap(raw, wrapped) &&
                         utils::writeSecretFile(destPath, wrapped)) {
                         if (!raw.empty()) OPENSSL_cleanse(&raw[0], raw.size());
-                        AuditLog::logFileSystemAccess("WRAP_KEY", destPath, true);
+                        AuditLog::logFileSystemAccess("WRAP_KEY", destPath, true, auth::username(req));
                         LOG_INFO << "Customer PEM key wrapped at rest";
                     } else {
                         if (!raw.empty()) OPENSSL_cleanse(&raw[0], raw.size());
                         std::filesystem::remove(destPath);
                         LOG_ERROR << "Failed to device-wrap uploaded key; rejecting upload";
-                        AuditLog::logFileSystemAccess("WRAP_KEY", destPath, false, "",
+                        AuditLog::logFileSystemAccess("WRAP_KEY", destPath, false, auth::username(req),
                                                       "device wrap failed");
                         auto resp = provisioner::utils::createErrorResponse(
                             req,
@@ -1339,7 +1339,7 @@ namespace provisioner {
                 activate = !keyregistry::load(current) || current.activeKeyId.empty();
             }
             const auto keyIdOpt = keyregistry::addPemKey(
-                destPath, safeFilename, keyInfo, keyWrapped, activate);
+                destPath, safeFilename, keyInfo, keyWrapped, activate, auth::username(req));
             if (!keyIdOpt) {
                 std::filesystem::remove(destPath);
                 auto resp = provisioner::utils::createErrorResponse(
@@ -1353,7 +1353,7 @@ namespace provisioner {
                 return;
             }
 
-            if (activate) invalidateWorkdirCache("customer key uploaded");
+            if (activate) invalidateWorkdirCache("customer key uploaded", auth::username(req));
 
             // Return success with the path and key metadata (parsed above,
             // before the key was wrapped at rest).
@@ -1438,7 +1438,7 @@ namespace provisioner {
 
             const std::string id = (*jsonBody)["id"].asString();
             std::string errorOut;
-            const bool fingerprintChanged = keyregistry::activateKey(id, errorOut);
+            const bool fingerprintChanged = keyregistry::activateKey(id, errorOut, auth::username(req));
             if (!errorOut.empty()) {
                 auto resp = provisioner::utils::createErrorResponse(
                     req, errorOut, drogon::k400BadRequest, "Activation Failed", "KEY_ACTIVATE_FAILED");
@@ -1447,7 +1447,7 @@ namespace provisioner {
             }
 
             if (fingerprintChanged) {
-                invalidateWorkdirCache("signing key activated");
+                invalidateWorkdirCache("signing key activated", auth::username(req));
             }
 
             Json::Value jsonResponse;
@@ -1483,7 +1483,7 @@ namespace provisioner {
             }
 
             std::string errorOut;
-            if (!keyregistry::removeKey((*jsonBody)["id"].asString(), errorOut)) {
+            if (!keyregistry::removeKey((*jsonBody)["id"].asString(), errorOut, auth::username(req))) {
                 auto resp = provisioner::utils::createErrorResponse(
                     req, errorOut, drogon::k400BadRequest, "Remove Failed", "KEY_REMOVE_FAILED");
                 callback(resp);
@@ -1551,7 +1551,7 @@ namespace provisioner {
                 return std::nullopt;
             }();
 
-            const auto keyIdOpt = keyregistry::addPkcs11Key(uri, label, keyInfo, activate);
+            const auto keyIdOpt = keyregistry::addPkcs11Key(uri, label, keyInfo, activate, auth::username(req));
             if (!keyIdOpt) {
                 auto resp = provisioner::utils::createErrorResponse(
                     req, "Failed to register PKCS#11 key",
@@ -1561,7 +1561,7 @@ namespace provisioner {
             }
 
             if (activate && prevFp && *prevFp != keyInfo.fingerprint) {
-                invalidateWorkdirCache("PKCS#11 key activated");
+                invalidateWorkdirCache("PKCS#11 key activated", auth::username(req));
             }
 
             Json::Value jsonResponse;
@@ -1630,14 +1630,14 @@ namespace provisioner {
             const auto deviceKey = keywrap::deviceKeyStatus();
             if (deviceKey.state != keywrap::DeviceKeyState::Ok) {
                 LOG_ERROR << "Rejecting key wrap: " << deviceKey.reason;
-                AuditLog::logFileSystemAccess("WRAP_KEY", keyOpt->path, false, "",
+                AuditLog::logFileSystemAccess("WRAP_KEY", keyOpt->path, false, auth::username(req),
                                               "no usable device key");
                 callback(provisioner::utils::createDeviceKeyErrorResponse(
                     req, "encrypt the signing key at rest", deviceKey));
                 return;
             }
 
-            if (!utils::wrapFileInPlace(keyOpt->path)) {
+            if (!utils::wrapFileInPlace(keyOpt->path, auth::username(req))) {
                 Json::Value jsonResponse;
                 jsonResponse["success"] = false;
                 jsonResponse["error"] = "Could not encrypt key at rest on this device.";
@@ -1937,7 +1937,7 @@ namespace provisioner {
                      << " on explicit operator consent; this is irreversible";
             AuditLog::logFileSystemAccess("PROVISION_DEVICE_KEY",
                                           "otp:key-" + std::to_string(before.keyId),
-                                          true, "", "operator-confirmed OTP write");
+                                          true, auth::username(req), "operator-confirmed OTP write");
 
             keywrap::DeviceKeyStatus after;
             const bool ok = keywrap::provisionDeviceKey(after);
@@ -1945,7 +1945,7 @@ namespace provisioner {
                 LOG_ERROR << "Device key provisioning failed: " << after.reason;
                 AuditLog::logFileSystemAccess("PROVISION_DEVICE_KEY",
                                               "otp:key-" + std::to_string(before.keyId),
-                                              false, "", after.reason);
+                                              false, auth::username(req), after.reason);
                 callback(provisioner::utils::createDeviceKeyErrorResponse(
                     req, "generate a device key", after));
                 return;
@@ -2039,7 +2039,7 @@ namespace provisioner {
             bool ok = true;
 
             if (doPin && utils::isPkcs11PinConfigured()) {
-                bool r = utils::wrapFileInPlace(utils::PKCS11_PIN_FILE);
+                bool r = utils::wrapFileInPlace(utils::PKCS11_PIN_FILE, auth::username(req));
                 jsonResponse["pin"]["migrated"] = r;
                 ok = ok && r;
             }
@@ -2047,7 +2047,7 @@ namespace provisioner {
                 auto keyPathOpt = utils::getConfigValue("CUSTOMER_KEY_FILE_PEM");
                 std::string keyPath = keyPathOpt ? *keyPathOpt : "";
                 if (!keyPath.empty() && std::filesystem::exists(keyPath)) {
-                    bool r = utils::wrapFileInPlace(keyPath);
+                    bool r = utils::wrapFileInPlace(keyPath, auth::username(req));
                     jsonResponse["key"]["migrated"] = r;
                     ok = ok && r;
                 }
@@ -2188,7 +2188,7 @@ namespace provisioner {
             
             // Handle empty PIN as a request to remove the PIN
             if (pin.empty()) {
-                if (utils::removePkcs11Pin()) {
+                if (utils::removePkcs11Pin(auth::username(req))) {
                     Json::Value jsonResponse;
                     jsonResponse["success"] = true;
                     jsonResponse["configured"] = false;
@@ -2236,7 +2236,7 @@ namespace provisioner {
                 if (deviceKey.state != keywrap::DeviceKeyState::Ok) {
                     LOG_ERROR << "Rejecting PIN save: " << deviceKey.reason;
                     AuditLog::logFileSystemAccess("WRITE_PIN", utils::PKCS11_PIN_FILE,
-                                                  false, "", "no usable device key");
+                                                  false, auth::username(req), "no usable device key");
                     callback(provisioner::utils::createDeviceKeyErrorResponse(
                         req, "store the HSM PIN", deviceKey));
                     return;
@@ -2244,7 +2244,7 @@ namespace provisioner {
             }
 
             // Save the PIN securely
-            if (utils::savePkcs11Pin(pin)) {
+            if (utils::savePkcs11Pin(pin, auth::username(req))) {
                 Json::Value jsonResponse;
                 jsonResponse["success"] = true;
                 jsonResponse["configured"] = true;

@@ -845,7 +845,7 @@ namespace provisioner {
             }
         }
         
-        bool savePkcs11Pin(const std::string& pin) {
+        bool savePkcs11Pin(const std::string& pin, const std::string& username) {
             // Create the keys directory if it doesn't exist
             std::string keyStorageDir = CUSTOMER_KEY_STORAGE_DIR;
             try {
@@ -886,11 +886,11 @@ namespace provisioner {
             }
             
             LOG_INFO << "PKCS#11 PIN saved securely";
-            AuditLog::logFileSystemAccess("WRITE_PIN", PKCS11_PIN_FILE, true);
+            AuditLog::logFileSystemAccess("WRITE_PIN", PKCS11_PIN_FILE, true, username);
             return true;
         }
         
-        bool removePkcs11Pin() {
+        bool removePkcs11Pin(const std::string& username) {
             if (!std::filesystem::exists(PKCS11_PIN_FILE)) {
                 return true;  // Already doesn't exist
             }
@@ -898,7 +898,7 @@ namespace provisioner {
             try {
                 std::filesystem::remove(PKCS11_PIN_FILE);
                 LOG_INFO << "PKCS#11 PIN file removed";
-                AuditLog::logFileSystemAccess("DELETE_PIN", PKCS11_PIN_FILE, true);
+                AuditLog::logFileSystemAccess("DELETE_PIN", PKCS11_PIN_FILE, true, username);
                 return true;
             } catch (const std::filesystem::filesystem_error& e) {
                 LOG_ERROR << "Failed to remove PIN file: " << e.what();
@@ -941,7 +941,7 @@ namespace provisioner {
             return true;
         }
 
-        bool wrapFileInPlace(const std::string& path) {
+        bool wrapFileInPlace(const std::string& path, const std::string& username) {
             if (!std::filesystem::exists(path)) {
                 return false;
             }
@@ -984,7 +984,7 @@ namespace provisioner {
             }
 
             LOG_INFO << "Migration: wrapped secret at rest: " << path;
-            AuditLog::logFileSystemAccess("WRAP_SECRET", path, true);
+            AuditLog::logFileSystemAccess("WRAP_SECRET", path, true, username);
             return true;
         }
 
@@ -1258,7 +1258,8 @@ namespace provisioner {
         }
 
         std::optional<std::map<std::string, std::string>> setConfigValues(
-            const std::map<std::string, std::string>& updates) {
+            const std::map<std::string, std::string>& updates,
+            const std::string& username) {
             for (const auto& [k, v] : updates) {
                 std::string why;
                 if (!isWritableConfigEntry(k, v, why)) {
@@ -1289,7 +1290,7 @@ namespace provisioner {
                 std::ofstream config_write(tmp, std::ios::trunc);
                 if (!config_write.is_open()) {
                     LOG_ERROR << "Failed to open temp config file for writing: " << tmp;
-                    AuditLog::logFileSystemAccess("WRITE", tmp.string(), false, "",
+                    AuditLog::logFileSystemAccess("WRITE", tmp.string(), false, username,
                         "Failed to open temp config file");
                     return std::nullopt;
                 }
@@ -1304,7 +1305,7 @@ namespace provisioner {
                     config_write.close();
                     std::error_code rmec;
                     std::filesystem::remove(tmp, rmec);
-                    AuditLog::logFileSystemAccess("WRITE", tmp.string(), false, "",
+                    AuditLog::logFileSystemAccess("WRITE", tmp.string(), false, username,
                         "Error writing temp config file");
                     return std::nullopt;
                 }
@@ -1328,18 +1329,19 @@ namespace provisioner {
                 LOG_ERROR << "Failed to atomically replace config file: " << ec.message();
                 std::error_code rmec;
                 std::filesystem::remove(tmp, rmec);
-                AuditLog::logFileSystemAccess("WRITE", target.string(), false, "",
+                AuditLog::logFileSystemAccess("WRITE", target.string(), false, username,
                     "Atomic rename failed: " + ec.message());
                 return std::nullopt;
             }
 
-            AuditLog::logFileSystemAccess("WRITE", target.string(), true, "",
+            AuditLog::logFileSystemAccess("WRITE", target.string(), true, username,
                 "Config updated");
             return options;
         }
 
-        bool setConfigValue(const std::string& key, const std::string& value) {
-            return setConfigValues({{key, value}}).has_value();
+        bool setConfigValue(const std::string& key, const std::string& value,
+                            const std::string& username) {
+            return setConfigValues({{key, value}}, username).has_value();
         }
 
         drogon::HttpResponsePtr createConfigErrorResponse(

@@ -46,6 +46,7 @@
 #include <images.h>
 #include "utils.h"
 #include "include/audit.h"
+#include "include/auth.h"
 
 // An image name becomes a path under IMAGES_PATH, and the client
 // chooses it. Only a bare name is accepted: path::operator/= replaces
@@ -1992,7 +1993,7 @@ namespace provisioner {
 
                 try {
                     file.saveAs(targetPath);
-                    AuditLog::logFileSystemAccess("UPLOAD", targetPath.string(), true, "",
+                    AuditLog::logFileSystemAccess("UPLOAD", targetPath.string(), true, auth::username(req),
                         "Original filename: " + originalFilename + (originalFilename != finalFilename ? ", renamed to: " + finalFilename : ""));
                     {
                         std::lock_guard<std::mutex> lock(sha256Cache_mutex);
@@ -2014,7 +2015,7 @@ namespace provisioner {
                     resp->setBody(result.toStyledString());
                 } catch (const std::exception& e) {
                     LOG_ERROR << "Failed to save uploaded file: " << e.what();
-                    AuditLog::logFileSystemAccess("UPLOAD", targetPath.string(), false, "",
+                    AuditLog::logFileSystemAccess("UPLOAD", targetPath.string(), false, auth::username(req),
                         "Upload failed: " + std::string(e.what()));
                     auto resp = provisioner::utils::createErrorResponse(
                         req, "Failed to save uploaded file", drogon::k500InternalServerError,
@@ -2525,7 +2526,7 @@ namespace provisioner {
                         if (!ctx->extractionOk) {
                             LOG_ERROR << "Archive extraction failed: " << ctx->extractionError;
                             if (std::filesystem::exists(ctx->tempDir)) std::filesystem::remove_all(ctx->tempDir);
-                            AuditLog::logFileSystemAccess("UPLOAD_ARCHIVE", ctx->finalDir.string(), false, "",
+                            AuditLog::logFileSystemAccess("UPLOAD_ARCHIVE", ctx->finalDir.string(), false, auth::username(ctx->req),
                                 "Archive extraction failed: " + ctx->extractionError);
                             publishProgress("error", "Archive extraction failed: " + ctx->extractionError);
                             auto resp = provisioner::utils::createErrorResponse(
@@ -2582,7 +2583,7 @@ namespace provisioner {
                             if (!sparseErr.empty()) {
                                 LOG_ERROR << "IDP sparse image validation failed: " << sparseErr;
                                 std::filesystem::remove_all(ctx->tempDir);
-                                AuditLog::logFileSystemAccess("UPLOAD_ARCHIVE", ctx->finalDir.string(), false, "",
+                                AuditLog::logFileSystemAccess("UPLOAD_ARCHIVE", ctx->finalDir.string(), false, auth::username(ctx->req),
                                     "IDP sparse image validation failed: " + sparseErr);
                                 publishProgress("error", "Sparse image validation failed: " + sparseErr);
                                 auto resp = provisioner::utils::createErrorResponse(
@@ -2608,7 +2609,7 @@ namespace provisioner {
                             std::filesystem::rename(ctx->tempDir, ctx->finalDir);
                         }
 
-                        AuditLog::logFileSystemAccess("UPLOAD_ARCHIVE", ctx->finalDir.string(), true, "",
+                        AuditLog::logFileSystemAccess("UPLOAD_ARCHIVE", ctx->finalDir.string(), true, auth::username(ctx->req),
                             "IDP artefact archive streamed and extracted: " + ctx->originalFilename + " -> " + ctx->artefactName);
 
                         // Write SHA256 sidecar
@@ -2670,7 +2671,7 @@ namespace provisioner {
                             ctx->fd = -1;
                         }
 
-                        AuditLog::logFileSystemAccess("UPLOAD", ctx->targetPath, true, "",
+                        AuditLog::logFileSystemAccess("UPLOAD", ctx->targetPath, true, auth::username(ctx->req),
                             "Compressed image decompressed: " + ctx->originalFilename + " -> " + ctx->finalFilename);
 
                         {
@@ -2703,7 +2704,7 @@ namespace provisioner {
                         ctx->callback(resp);
                     } else {
                         // ---- .img post-processing ----
-                        AuditLog::logFileSystemAccess("UPLOAD", ctx->targetPath, true, "",
+                        AuditLog::logFileSystemAccess("UPLOAD", ctx->targetPath, true, auth::username(ctx->req),
                             "Original filename: " + ctx->originalFilename +
                             (ctx->originalFilename != ctx->finalFilename ? ", renamed to: " + ctx->finalFilename : ""));
 
@@ -2922,7 +2923,7 @@ namespace provisioner {
             triggerBootImgGeneration(imageName);
             
             // Log the action
-            AuditLog::logFileSystemAccess("GENERATE_BOOT_PACKAGE", imagePath.string(), true, "", 
+            AuditLog::logFileSystemAccess("GENERATE_BOOT_PACKAGE", imagePath.string(), true, auth::username(req), 
                 "Manual boot package generation requested");
             
             // Return success response
@@ -3003,7 +3004,7 @@ namespace provisioner {
                 }
                 
                 // Log the download
-                AuditLog::logFileSystemAccess("DOWNLOAD", packagePath.string(), true, "",
+                AuditLog::logFileSystemAccess("DOWNLOAD", packagePath.string(), true, auth::username(req),
                     "Boot package downloaded for image: " + imageName);
                 
                 // Send the file
@@ -3146,7 +3147,7 @@ namespace provisioner {
                         if (std::filesystem::exists(sidecarPath)) {
                             std::filesystem::remove(sidecarPath);
                         }
-                        AuditLog::logFileSystemAccess("DELETE", imagePath.string(), true, "", 
+                        AuditLog::logFileSystemAccess("DELETE", imagePath.string(), true, auth::username(req), 
                             "IDP artefact directory deleted: " + imageName);
                     } else {
                         std::filesystem::remove(imagePath);
@@ -3156,7 +3157,7 @@ namespace provisioner {
                         if (std::filesystem::exists(sidecarPath)) {
                             std::filesystem::remove(sidecarPath);
                         }
-                        AuditLog::logFileSystemAccess("DELETE", imagePath.string(), true, "",
+                        AuditLog::logFileSystemAccess("DELETE", imagePath.string(), true, auth::username(req),
                             "Image file deleted: " + imageName);
                     }
 
@@ -3169,7 +3170,7 @@ namespace provisioner {
                     if (goldMaster && !goldMaster->empty()) {
                         std::filesystem::path goldMasterPath(*goldMaster);
                         if (goldMasterPath == imagePath || goldMasterPath.filename() == imageName) {
-                            if (provisioner::utils::setConfigValue("GOLD_MASTER_OS_FILE", "")) {
+                            if (provisioner::utils::setConfigValue("GOLD_MASTER_OS_FILE", "", auth::username(req))) {
                                 LOG_INFO << "Cleared GOLD_MASTER_OS_FILE after deleting selected image: " << imageName;
                             } else {
                                 LOG_WARN << "Failed to clear GOLD_MASTER_OS_FILE after deleting selected image: " << imageName;
@@ -3184,7 +3185,7 @@ namespace provisioner {
                     LOG_ERROR << "Failed to delete image: " << e.what();
                     
                     // Log failed file deletion
-                    AuditLog::logFileSystemAccess("DELETE", imagePath.string(), false, "", 
+                    AuditLog::logFileSystemAccess("DELETE", imagePath.string(), false, auth::username(req), 
                         "Failed to delete image: " + std::string(e.what()));
                     
                     auto resp = provisioner::utils::createErrorResponse(
