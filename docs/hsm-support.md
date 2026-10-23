@@ -39,11 +39,6 @@ Two consequences follow from this design:
    `-engine pkcs11`). No `openssl.cnf` changes are required or read for token
    discovery (see [Configuration is via p11-kit, not openssl.cnf](#configuration-is-via-p11-kit-not-opensslcnf)).
 
-> **Note**
->
-> This refactor did not change the compatibility surface: the helper uses the
-> same provider stack the provisioner has always used, driven programmatically.
-
 ---
 
 ## Requirements
@@ -52,7 +47,7 @@ An HSM/token must satisfy all of the following to be usable for Pi secure boot:
 
 | Requirement | Detail |
 | --- | --- |
-| **RSA-2048 key** | Raspberry Pi secure boot requires a 2048-bit RSA key. Keys that are EC, or RSA of any other size (1024/3072/4096), are reported as *not fit for purpose* and rejected. This is a device constraint, not an HSM one. |
+| **RSA-2048 key** | Raspberry Pi secure boot requires a 2048-bit RSA key. Keys that are EC, or RSA of any other size (1024/3072/4096), are reported as unusable and cannot be chosen for provisioning. This is a device constraint, not an HSM one. |
 | **RSA PKCS#1 v1.5 signing** | The token must support `CKM_SHA256_RSA_PKCS` (or `CKM_RSA_PKCS` over a SHA-256 DigestInfo). This is near-universal. |
 | **PKCS#11 module loadable by p11-kit** | A PKCS#11 v2.x+ `.so` that p11-kit can enumerate. |
 | **User-PIN login (`CKU_USER`)** | The provisioner logs in with a single user PIN supplied in-process (see [PIN handling](#pin-handling-and-security)). |
@@ -95,7 +90,7 @@ likely to work even if it is not named here. Validate it with the
 
 These are genuine limitations to be aware of:
 
-- **Non-RSA-2048 keys** — rejected as unfit (a Pi secure-boot constraint).
+- **Non-RSA-2048 keys** — refused (a Pi secure-boot constraint).
 - **Non-PIN authentication flows** — external PIN-pad readers, security-officer-only
   (`CKU_SO`) login, or challenge/response schemes. The provisioner supplies a
   single user PIN; it cannot drive an interactive or out-of-band auth flow.
@@ -157,7 +152,25 @@ sign with the key through the web UI, in
 runs the checks with `sudo`. A rule of the same name in `/etc/polkit-1/rules.d`
 replaces the package's.
 
-The `CUSTOMER_KEY_PKCS11_NAME` value then takes the form:
+### Choosing the key in the web interface
+
+Under Options, **Security Configuration**, **Bootloader Signing Key**, open the
+**PKCS#11 / HSM** tab:
+
+- The banner reads **PKCS#11 provider detected** once `pkcs11-provider` loads;
+  otherwise it says what to install.
+- Enter the token PIN under **HSM PIN** first if the token needs one to list
+  its keys, then press **Detect keys on HSM**. Each key found has **Save & use**,
+  which saves it and puts it in use straight away.
+- Alternatively type the object label under **Key Label**; the page builds
+  `pkcs11:object=<label>;type=private` from it, checks it and puts it in use.
+- Saved HSM keys are listed with **Use for provisioning** and **Remove**. A key
+  that is not RSA-2048 cannot be used.
+
+Choosing a key writes its URI to `CUSTOMER_KEY_PKCS11_NAME` and empties
+`CUSTOMER_KEY_FILE_PEM`. Setting both by hand makes provisioning refuse to sign.
+
+Set by hand, the `CUSTOMER_KEY_PKCS11_NAME` value takes the form:
 
 ```
 'pkcs11:object=<keypair-alias>;type=private'
@@ -166,14 +179,18 @@ The `CUSTOMER_KEY_PKCS11_NAME` value then takes the form:
 > **Warning**
 >
 > Enclose the value in single quotes and percent-encode any reserved characters
-> in the object label — for example a label `SIGN key` becomes `SIGN%20key`.
+> in the object label — for example a label `SIGN key` becomes `SIGN%20key`. The
+> web interface quotes the value itself.
 
 ---
 
 ## PIN handling and security
 
-If the token requires a PIN, store it through the WebUI
-(**Save PIN & Validate**). What happens then:
+If the token requires a PIN, enter it under **HSM PIN** and press
+**Validate & Save PIN**. The PIN is first tried against the key in
+`CUSTOMER_KEY_PKCS11_NAME`, if one is set, and saved only if that works; the
+status line then reads *PIN is configured*, and **Remove PIN** deletes it. What
+happens then:
 
 - The PIN is **device-wrapped at rest** — encrypted with a key derived from the
   provisioning Raspberry Pi's firmware crypto device key, so a stolen disk image
@@ -182,7 +199,8 @@ If the token requires a PIN, store it through the WebUI
 - This requires the host to **have** a device key. It is not programmed at the
   factory, so a station that has only ever been imaged for provisioning may not
   have one, and saving a PIN will be refused until it does. The Options page
-  reports this and offers to generate one; see
+  reports *This host cannot store signing keys* and, where it can, offers
+  **Generate device key**; see
   [the host device key](architecture.md#the-host-device-key). Generating writes
   OTP permanently.
 - At both key-validation and provisioning-time signing, the PIN is **unwrapped
@@ -273,13 +291,14 @@ If signing succeeds, set in `/etc/rpi-sb-provisioner/config`:
 CUSTOMER_KEY_PKCS11_NAME='pkcs11:token=testtoken;object=signkey;type=private'
 ```
 
-store the PIN through the WebUI (**Save PIN & Validate**), and the WebUI should
-report the key as **valid for secure boot**. Then check the provisioner's own
+or choose the key on the **PKCS#11 / HSM** tab as above, store the PIN with
+**Validate & Save PIN**, and the key should be reported as
+**Valid for secure boot**. Then check the provisioner's own
 helper, which uses the saved PIN exactly as provisioning will:
 
 ```sh
 URI='pkcs11:token=testtoken;object=signkey;type=private'
-sudo timeout 60 rpi-sb-keyhelper sign --pkcs11-uri "$URI" --in /tmp/hsm-test.bin | wc -c   # expect 512
+sudo timeout 60 rpi-sb-keyhelper sign --pkcs11-uri "$URI" --in /tmp/hsm-test.bin | wc -c   # expect 512 (hex)
 sudo timeout 60 rpi-sb-keyhelper pubkey --pkcs11-uri "$URI"   # prints the public key
 ```
 
@@ -297,12 +316,13 @@ messages and their causes:
 | Message | Likely cause | What to check |
 | --- | --- | --- |
 | `Module initialization failed` from `pkcs11:p11prov_ctx_status` | `p11-kit-modules` missing, so the provider cannot load p11-kit's proxy | `ls /usr/lib/*/p11-kit-proxy.so`; `sudo apt install p11-kit-modules`. |
-| `PKCS#11 provider not installed` / provider not available | `pkcs11-provider` package missing | `dpkg -l pkcs11-provider`; reinstall the provisioner's dependencies. |
+| `PKCS#11 provider not installed` / `PKCS#11 provider not available` | `pkcs11-provider` package missing | `dpkg -l pkcs11-provider`; reinstall the provisioner's dependencies. |
 | `Cannot access PKCS#11 key` (during bootstrap) | Token not visible, wrong URI, or login failed | `p11tool --list-tokens` sees the token? Does the `object=` alias match `p11tool --login --list-all`? Is the PIN stored/correct? |
 | `Invalid PIN` / `PIN incorrect or not provided` | Wrong PIN, or none supplied to a login-required token | Re-enter the PIN in the WebUI; confirm the token's user PIN, not the SO PIN. |
 | `Key not found on HSM` | The `object=` label does not exist on the token | Compare the alias against `p11tool --login --list-all 'pkcs11:token=<label>'`. |
 | `Cannot access HSM - check connection` | Token/slot not present or module can't reach the device | Is the HSM connected/authenticated? Is the module path in the `.module` file correct? |
-| Key reported *not fit for purpose* | Key is not RSA-2048 | Generate/import an RSA-2048 key; EC and other RSA sizes are unsupported for Pi secure boot. |
+| `Pi secure boot requires RSA-2048 (key is RSA-…)` or `Unsupported: Pi secure boot requires RSA` | Key is not RSA-2048 | Generate/import an RSA-2048 key; EC and other RSA sizes are unsupported for Pi secure boot. |
+| `Both CUSTOMER_KEY_PKCS11_NAME and CUSTOMER_KEY_FILE_PEM are set` | Both set by hand | Empty one, or choose the key again in the web interface. |
 | A check hangs, such as `openssl pkey ... -pubout` | Some tokens, including a YubiHSM 2, hang in OpenSSL's command-line key export | Check signing instead, as above; the provisioner does not use that command. |
 | `type=private` disappears from the URI | Legacy unquoted config truncated at the first `;` | Re-save the value through the WebUI (it now quotes automatically), or manually single-quote it in the config. |
 

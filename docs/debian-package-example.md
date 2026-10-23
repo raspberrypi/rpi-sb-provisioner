@@ -11,7 +11,7 @@
 The maintainer field is configurable via `/etc/rpi-sb-provisioner/bootimg-package-config`.
 
     Package: rpi-sb-boot-update
-    Version: a3f5e8c9b2d1
+    Version: 0.a3f5e8c9b2d1
     Section: admin
     Priority: optional
     Architecture: all
@@ -29,7 +29,7 @@ The maintainer field is configurable via `/etc/rpi-sb-provisioner/bootimg-packag
 
 ## Changelog
 
-    rpi-sb-boot-update (a3f5e8c9b2d1) stable; urgency=medium
+    rpi-sb-boot-update (0.a3f5e8c9b2d1) stable; urgency=medium
 
       * Secure boot image update generated from: 2024-10-06-raspios-bookworm-arm64.img
       * Source image SHA256: a3f5e8c9b2d1f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1
@@ -40,7 +40,7 @@ The maintainer field is configurable via `/etc/rpi-sb-provisioner/bootimg-packag
 
 ## Package Contents
 
-    rpi-sb-boot-update_a3f5e8c9b2d1_all.deb
+    rpi-sb-boot-update_0.a3f5e8c9b2d1_all.deb
     ├── boot/
     │   └── firmware/
     │       ├── boot.img       # Signed boot image (FAT32 filesystem containing
@@ -63,12 +63,12 @@ The maintainer field is configurable via `/etc/rpi-sb-provisioner/bootimg-packag
 ## Installing the Package
 
 ``` bash
-$ sudo dpkg -i rpi-sb-boot-update_a3f5e8c9b2d1_all.deb
+$ sudo dpkg -i rpi-sb-boot-update_0.a3f5e8c9b2d1_all.deb
 Selecting previously unselected package rpi-sb-boot-update.
 (Reading database ... 123456 files and directories currently installed.)
-Preparing to unpack rpi-sb-boot-update_a3f5e8c9b2d1_all.deb ...
-Unpacking rpi-sb-boot-update (a3f5e8c9b2d1) ...
-Setting up rpi-sb-boot-update (a3f5e8c9b2d1) ...
+Preparing to unpack rpi-sb-boot-update_0.a3f5e8c9b2d1_all.deb ...
+Unpacking rpi-sb-boot-update (0.a3f5e8c9b2d1) ...
+Setting up rpi-sb-boot-update (0.a3f5e8c9b2d1) ...
 Secure boot files installed to /boot/firmware
 Reboot required for changes to take effect
 ```
@@ -82,7 +82,7 @@ Desired=Unknown/Install/Remove/Purge/Hold
 |/ Err?=(none)/Reinst-required (Status,Err: uppercase=bad)
 ||/ Name                Version         Architecture Description
 +++-===================-===============-============-==================================
-ii  rpi-sb-boot-update  a3f5e8c9b2d1    all          Raspberry Pi Secure Boot Update
+ii  rpi-sb-boot-update  0.a3f5e8c9b2d1    all          Raspberry Pi Secure Boot Update
 
 $ dpkg -L rpi-sb-boot-update
 /.
@@ -109,7 +109,7 @@ Section: admin
 Installed-Size: 245678
 Maintainer: Your Organization <ops@example.com>
 Architecture: all
-Version: a3f5e8c9b2d1
+Version: 0.a3f5e8c9b2d1
 Description: Raspberry Pi Secure Boot Update
  This package contains a signed boot.img and boot.sig for secure boot
  enabled Raspberry Pi devices.
@@ -122,7 +122,7 @@ Description: Raspberry Pi Secure Boot Update
  preserving the existing root filesystem.
 
 $ zcat /usr/share/doc/rpi-sb-boot-update/changelog.Debian.gz
-rpi-sb-boot-update (a3f5e8c9b2d1) stable; urgency=medium
+rpi-sb-boot-update (0.a3f5e8c9b2d1) stable; urgency=medium
 
   * Secure boot image update generated from: 2024-10-06-raspios-bookworm-arm64.img
   * Source image SHA256: a3f5e8c9b2d1f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1
@@ -136,19 +136,19 @@ rpi-sb-boot-update (a3f5e8c9b2d1) stable; urgency=medium
 
 # Upgrading Example
 
-When a new version is uploaded:
+When a package from another image is installed. Versions are not ordered by date, so `dpkg -i` may report a downgrade instead; it installs the package either way:
 
 ``` bash
-$ sudo dpkg -i rpi-sb-boot-update_b7c2a1f5e3d8_all.deb
+$ sudo dpkg -i rpi-sb-boot-update_0.b7c2a1f5e3d8_all.deb
 (Reading database ... 123456 files and directories currently installed.)
-Preparing to unpack rpi-sb-boot-update_b7c2a1f5e3d8_all.deb ...
-Unpacking rpi-sb-boot-update (b7c2a1f5e3d8) over (a3f5e8c9b2d1) ...
-Setting up rpi-sb-boot-update (b7c2a1f5e3d8) ...
+Preparing to unpack rpi-sb-boot-update_0.b7c2a1f5e3d8_all.deb ...
+Unpacking rpi-sb-boot-update (0.b7c2a1f5e3d8) over (0.a3f5e8c9b2d1) ...
+Setting up rpi-sb-boot-update (0.b7c2a1f5e3d8) ...
 Secure boot files installed to /boot/firmware
 Reboot required for changes to take effect
 
 $ dpkg -l rpi-sb-boot-update
-ii  rpi-sb-boot-update  b7c2a1f5e3d8    all          Raspberry Pi Secure Boot Update
+ii  rpi-sb-boot-update  0.b7c2a1f5e3d8    all          Raspberry Pi Secure Boot Update
 ```
 
 # Package Info File Example
@@ -159,15 +159,15 @@ The generated package info file (`*.package-info.txt`) contains:
     ==========================
 
     Package: rpi-sb-boot-update
-    Version: a3f5e8c9b2d1
+    Version: 0.a3f5e8c9b2d1
     Architecture: all
-    Filename: rpi-sb-boot-update_a3f5e8c9b2d1_all.deb
+    Filename: rpi-sb-boot-update_0.a3f5e8c9b2d1_all.deb
 
     Source Image: 2024-10-06-raspios-bookworm-arm64.img
     Image SHA256: a3f5e8c9b2d1f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1
 
     Installation:
-      sudo dpkg -i rpi-sb-boot-update_a3f5e8c9b2d1_all.deb
+      sudo dpkg -i rpi-sb-boot-update_0.a3f5e8c9b2d1_all.deb
 
     Removal:
       sudo dpkg -r rpi-sb-boot-update
@@ -178,6 +178,10 @@ The generated package info file (`*.package-info.txt`) contains:
 
     Note: A reboot is required after installation for changes to take effect.
           The config.txt is embedded inside boot.img and will be used after reboot.
+
+> **Warning**
+>
+> Despite the `Removal` line the generator writes, do not remove the package from a device: `dpkg -r` deletes `/boot/firmware/boot.img` and `boot.sig`, and a secure boot device will not boot without them. Install another version instead.
 
 # Integration with APT
 
@@ -192,9 +196,9 @@ The generated package info file (`*.package-info.txt`) contains:
     │               └── Packages.gz
     └── pool/
         └── main/
-            ├── rpi-sb-boot-update_a3f5e8c9b2d1_all.deb
-            ├── rpi-sb-boot-update_b7c2a1f5e3d8_all.deb
-            └── rpi-sb-boot-update_c8d3b2e6f4a9_all.deb
+            ├── rpi-sb-boot-update_0.a3f5e8c9b2d1_all.deb
+            ├── rpi-sb-boot-update_0.b7c2a1f5e3d8_all.deb
+            └── rpi-sb-boot-update_0.c8d3b2e6f4a9_all.deb
 
 ## Using APT
 
@@ -205,14 +209,14 @@ Reading package lists... Done
 
 $ apt policy rpi-sb-boot-update
 rpi-sb-boot-update:
-  Installed: a3f5e8c9b2d1
-  Candidate: c8d3b2e6f4a9
+  Installed: 0.a3f5e8c9b2d1
+  Candidate: 0.c8d3b2e6f4a9
   Version table:
-     c8d3b2e6f4a9 500
+     0.c8d3b2e6f4a9 500
         500 http://your-server/apt stable/main all Packages
-     b7c2a1f5e3d8 500
+     0.b7c2a1f5e3d8 500
         500 http://your-server/apt stable/main all Packages
- *** a3f5e8c9b2d1 100
+ *** 0.a3f5e8c9b2d1 100
         100 /var/lib/dpkg/status
 
 $ sudo apt upgrade rpi-sb-boot-update
@@ -224,12 +228,12 @@ The following packages will be upgraded:
 Need to get 123 MB of archives.
 After this operation, 0 B of additional disk space will be used.
 Do you want to continue? [Y/n] y
-Get:1 http://your-server/apt stable/main all rpi-sb-boot-update all c8d3b2e6f4a9 [123 MB]
+Get:1 http://your-server/apt stable/main all rpi-sb-boot-update all 0.c8d3b2e6f4a9 [123 MB]
 Fetched 123 MB in 5s (24.6 MB/s)
 (Reading database ... 123456 files and directories currently installed.)
-Preparing to unpack .../rpi-sb-boot-update_c8d3b2e6f4a9_all.deb ...
-Unpacking rpi-sb-boot-update (c8d3b2e6f4a9) over (a3f5e8c9b2d1) ...
-Setting up rpi-sb-boot-update (c8d3b2e6f4a9) ...
+Preparing to unpack .../rpi-sb-boot-update_0.c8d3b2e6f4a9_all.deb ...
+Unpacking rpi-sb-boot-update (0.c8d3b2e6f4a9) over (0.a3f5e8c9b2d1) ...
+Setting up rpi-sb-boot-update (0.c8d3b2e6f4a9) ...
 Secure boot files installed to /boot/firmware
 Reboot required for changes to take effect
 ```
@@ -237,6 +241,8 @@ Reboot required for changes to take effect
 # Notes
 
 - Package versions are deterministic - the same source image always produces the same package version
+
+- Versions do not increase with time: `apt upgrade` offers a package only when its hash happens to sort higher. In the `apt policy` example above, `0.c8d3b2e6f4a9` is the candidate because `c` sorts after `a`, not because it is newer. Install a chosen version with `sudo apt install rpi-sb-boot-update=<version> --allow-downgrades`
 
 - The version can be used to trace back to the exact source image via SHA256
 

@@ -10,21 +10,21 @@ This feature addresses the use case described in [Issue \#191](https://github.co
 
 ## Workflow
 
-1.  **Image Upload:** User uploads a new system image via the web interface
+1.  **Image Upload:** User uploads a new system image via the web interface. A compressed image is decompressed first. IDP artefacts are not packaged.
 
-2.  **Automatic Trigger:** The provisioner service detects the upload
+2.  **Automatic Trigger:** The provisioner service starts the generator once the upload is complete. It can also be started from the image's details in the image browser with **Generate Boot Package**, offered only while a signing key is configured; the **Boot Package** row there shows whether a package exists.
 
-3.  **Configuration Check:** System verifies:
+3.  **Configuration Check:** System verifies, in this order:
 
     - `PROVISIONING_STYLE` is set to `secure-boot`
 
-    - Customer key material is available (`CUSTOMER_KEY_FILE_PEM` or `CUSTOMER_KEY_PKCS11_NAME`)
+    - Customer key material is available (`CUSTOMER_KEY_FILE_PEM` or `CUSTOMER_KEY_PKCS11_NAME`), and can be used
 
     - `RPI_DEVICE_FAMILY` is configured
 
 4.  **Boot Image Generation:** If checks pass, the system:
 
-    - Extracts the boot partition from the uploaded image
+    - Extracts the boot partition, the image's first partition, which must be FAT
 
     - Inserts the pre-boot authentication initramfs
 
@@ -50,7 +50,7 @@ For each uploaded image (e.g., `2024-10-06-raspios-bookworm-arm64.img`), the fol
 
 - `<image-basename>.package-info.txt` - Package information and installation instructions
 
-The Debian package version is derived from the first 12 characters of the source image’s SHA256 hash, ensuring each package has a unique, traceable version.
+The Debian package version is `0.` followed by the first 12 characters of the source image’s SHA256 hash, so each package has a unique, traceable version.
 
 Example:
 
@@ -58,7 +58,7 @@ Example:
     ├── 2024-10-06-raspios-bookworm-arm64.boot.img
     ├── 2024-10-06-raspios-bookworm-arm64.boot.sig
     ├── 2024-10-06-raspios-bookworm-arm64.config.txt
-    ├── rpi-sb-boot-update_a3f5e8c9b2d1_all.deb
+    ├── rpi-sb-boot-update_0.a3f5e8c9b2d1_all.deb
     └── 2024-10-06-raspios-bookworm-arm64.package-info.txt
 
 # Using Generated Boot Images
@@ -69,15 +69,13 @@ The easiest way to update provisioned devices is using the generated Debian pack
 
 ``` bash
 # On the provisioned device
-sudo dpkg -i rpi-sb-boot-update_a3f5e8c9b2d1_all.deb
+sudo dpkg -i rpi-sb-boot-update_0.a3f5e8c9b2d1_all.deb
 sudo reboot
 ```
 
 The package will:
 
-- Install boot.img and boot.sig to `/boot/firmware/`
-
-- Overwrite existing boot files
+- Install boot.img and boot.sig to `/boot/firmware/`, replacing the ones written at provisioning
 
 - Display a message indicating a reboot is required
 
@@ -88,8 +86,6 @@ The package will:
 - Standard package management integration
 
 - Version tracking with `dpkg -l rpi-sb-boot-update`
-
-- Clean removal with `dpkg -r rpi-sb-boot-update`
 
 - Automatic handling of file permissions
 
@@ -186,17 +182,17 @@ Since package versions are based on the source image SHA256:
 
 - Each unique source image produces a unique package version
 
-- dpkg/apt will treat packages with different versions as updates
+- The versions do not increase with time. Debian compares the hash's letters and digits in turn, so a newer image's version may sort below an older one's, and `apt upgrade` will then not offer it. Install the version you want explicitly, for example `sudo apt install rpi-sb-boot-update=0.b7c2a1f5e3d8 --allow-downgrades`, or with `dpkg -i`
 
 - You can have multiple versions in your repository
 
 - Devices can be pinned to specific versions if needed
 
-Example version progression:
+Example versions from three images:
 
-    rpi-sb-boot-update_a3f5e8c9b2d1_all.deb  # Initial version
-    rpi-sb-boot-update_b7c2a1f5e3d8_all.deb  # After config.txt change
-    rpi-sb-boot-update_c8d3b2e6f4a9_all.deb  # After kernel update
+    rpi-sb-boot-update_0.a3f5e8c9b2d1_all.deb  # Initial image
+    rpi-sb-boot-update_0.b7c2a1f5e3d8_all.deb  # After config.txt change
+    rpi-sb-boot-update_0.c8d3b2e6f4a9_all.deb  # After kernel update
 
 ## Security Considerations
 
@@ -237,7 +233,7 @@ CUSTOMER_KEY_PKCS11_NAME='pkcs11:object=<keypair-alias>;type=private'
 
 ## Package Metadata Configuration
 
-In `/etc/rpi-sb-provisioner/bootimg-package-config`:
+In `/etc/rpi-sb-provisioner/bootimg-package-config`, which is set by hand (package defaults are in `/usr/share/rpi-sb-provisioner/defaults/bootimg-package-config`):
 
 ``` bash
 # Maintainer name for generated Debian packages
@@ -251,7 +247,7 @@ RPI_SB_PACKAGE_MAINTAINER_EMAIL="ops@example.com"
 
 - Name: `System Administrator`
 
-- Email: `root@<hostname>` (uses the provisioner server’s hostname)
+- Email: `root@<hostname>`, from `hostname -f` on the provisioner server
 
 This separate configuration file allows you to customize the package metadata without modifying the main provisioner configuration.
 
@@ -259,11 +255,13 @@ This separate configuration file allows you to customize the package metadata wi
 
 If these are not set, the boot image generation will be skipped:
 
-- If `PROVISIONING_STYLE` is not `secure-boot`, generation is skipped
+- If `PROVISIONING_STYLE` is not `secure-boot`, generation is skipped. The web interface offers **Generate Boot Package** for `fde-only` too, but the generator skips that style
 
 - If no key material is configured, generation is skipped
 
 - If `RPI_DEVICE_FAMILY` is not set, generation is skipped
+
+A key that is configured but cannot be used, such as a missing PEM file or an unreachable HSM, fails the run instead.
 
 # Monitoring and Logs
 
@@ -301,7 +299,7 @@ systemctl list-units 'rpi-sb-image-bootimg-generator@*'
 |-------------------------------------------|-----------------------------------------------------------------------------------|
 | `rpi-sb-image-bootimg-generator.sh`       | POSIX shell script that extracts boot partition and generates signed boot.img     |
 | `rpi-sb-image-bootimg-generator@.service` | systemd template service that runs the generation script                          |
-| `images.cpp::triggerBootImgGeneration()`  | C++ function in web service that triggers the systemd service via D-Bus on upload |
+| `images.cpp::triggerBootImgGeneration()`  | C++ function in web service that starts the systemd service via D-Bus, on upload or from **Generate Boot Package** |
 
 ## Process Flow
 
@@ -317,13 +315,13 @@ systemctl list-units 'rpi-sb-image-bootimg-generator@*'
 
 6.  Shell script:
 
-    - Reads configuration from `/etc/rpi-sb-provisioner/config`
+    - Reads the package defaults, then `/etc/rpi-sb-provisioner/config`, then the package metadata configuration
 
     - Validates prerequisites (secure-boot mode, key material, device family)
 
     - Mounts the image using loop device
 
-    - Extracts and modifies boot partition
+    - Copies the boot partition, refusing one that holds links or special files, and modifies the copy
 
     - Creates and signs `boot.img`
 
@@ -367,12 +365,19 @@ journalctl -u rpi-sb-image-bootimg-generator@<image-filename>.service -n 100
 | Cause    | Uploaded file is not a valid Raspberry Pi OS image                                        |
 | Solution | Ensure the uploaded image is a standard Raspberry Pi OS image with a FAT32 boot partition |
 
-**Issue:** "Key file does not exist" error
+**Issue:** "Boot partition contains links or special files" error, or the boot partition will not mount
+
+|          |                                                                                           |
+|----------|-------------------------------------------------------------------------------------------|
+| Cause    | The image's first partition is not a FAT boot partition                                   |
+| Solution | Use a standard Raspberry Pi OS image; a boot partition of any other type is refused       |
+
+**Issue:** "PEM key file not found" error, followed by "Failed to initialize signing context"
 
 |          |                                                          |
 |----------|----------------------------------------------------------|
 | Cause    | `CUSTOMER_KEY_FILE_PEM` points to a non-existent file    |
-| Solution | Verify the key file path and ensure the file is readable by the provisioner |
+| Solution | Verify the key file path, or choose the key again under Options |
 
 # Package Management
 
@@ -392,19 +397,19 @@ dpkg -L rpi-sb-boot-update
 zcat /usr/share/doc/rpi-sb-boot-update/changelog.Debian.gz
 ```
 
-## Package Removal
+## Reverting
 
-To revert to a previous boot configuration:
+To revert to a previous boot configuration, install the package version built from the earlier image:
 
 ``` bash
-# Remove the package (leaves config files)
-sudo dpkg -r rpi-sb-boot-update
-
-# Purge the package (removes everything)
-sudo dpkg -P rpi-sb-boot-update
+sudo apt install rpi-sb-boot-update=<version> --allow-downgrades
+# or
+sudo dpkg -i rpi-sb-boot-update_<version>_all.deb
 ```
 
-**Note:** After removal, you’ll need to manually restore the previous boot.img and boot.sig files.
+> **Warning**
+>
+> Do not remove or purge the package on a device. `/boot/firmware/boot.img` and `boot.sig` are its files, so `dpkg -r` deletes them, and a secure boot device will not boot until they are restored.
 
 ## Querying Package Version
 
@@ -420,7 +425,7 @@ cat /srv/rpi-sb-provisioner/images/bootimg-output/*.package-info.txt
 
 Potential improvements for this feature:
 
-- Web UI integration to display and download generated packages
+- A download button in the web UI (the API serves a package at `/download-boot-package?name=<image>`)
 
 - Automatic cleanup of old packages
 
