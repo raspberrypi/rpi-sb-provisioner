@@ -38,3 +38,4 @@ host-support/config                                 /usr/share/rpi-sb-provisione
 host-support/bootimg-package-config                 /usr/share/rpi-sb-provisioner/defaults
 
 service/pam/rpi-provisioner-ui                  /etc/pam.d
+service/polkit/50-rpi-sb-provisioner-pcscd.rules /usr/share/polkit-1/rules.d
