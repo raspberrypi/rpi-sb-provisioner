@@ -428,6 +428,11 @@ rpi-sb-provisioner (2.4.0) unstable; urgency=high
   * Show a tick, not a literal "\2713", beside "PKCS#11 provider
     detected" and a configured PIN. Reported by Richard Oliver.
 
+  * Let members of the rpi-sb-provisioner group use a token behind pcscd,
+    such as a YubiKey, from an SSH session. Polkit allowed only root and
+    the local desktop, so p11tool over SSH found no token. The provisioner
+    itself runs as root and was unaffected. Reported by Richard Oliver.
+
  -- Tom Dewey <tom.dewey@raspberrypi.com>  Wed, 07 Oct 2026 08:48:02 +0100
 
 rpi-sb-provisioner (2.3.5) unstable; urgency=medium

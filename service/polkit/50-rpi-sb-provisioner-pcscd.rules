@@ -1,0 +1,10 @@
+// pcscd asks polkit before serving a client, and allows only root or an
+// active local session. Operators may already sign with the station's key
+// through the web UI, so let them reach its token from an SSH session too.
+polkit.addRule(function(action, subject) {
+    if ((action.id == "org.debian.pcsc-lite.access_pcsc" ||
+         action.id == "org.debian.pcsc-lite.access_card") &&
+        subject.isInGroup("rpi-sb-provisioner")) {
+        return polkit.Result.YES;
+    }
+});

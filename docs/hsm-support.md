@@ -148,6 +148,15 @@ p11tool --list-tokens
 p11tool --login --list-all 'pkcs11:token=<your-token-label>'
 ```
 
+USB smart cards and tokens, such as a YubiKey or Nitrokey, reach their
+module through `pcscd`, which asks polkit before serving each client. It allows
+root, which the provisioner runs as, and an active local session, but not SSH.
+The package adds members of the `rpi-sb-provisioner` group, who can already
+sign with the key through the web UI, in
+`/usr/share/polkit-1/rules.d/50-rpi-sb-provisioner-pcscd.rules`. Anyone else
+runs the checks with `sudo`. A rule of the same name in `/etc/polkit-1/rules.d`
+replaces the package's.
+
 The `CUSTOMER_KEY_PKCS11_NAME` value then takes the form:
 
 ```
