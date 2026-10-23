@@ -438,6 +438,37 @@ rpi-sb-provisioner (2.4.0) unstable; urgency=high
     docs/user-guide.md, which the man page is now built from. Reported by
     Richard Oliver.
 
+  * Offer the JTAG lock and EEPROM write protection only with secure boot,
+    the only style bootstrap applies them to, and record them in the
+    manufacturing database only then.
+
+  * Say when no RPIBOOT GPIO is set, rather than showing GPIO 8 selected
+    while bootstrap programmed none.
+
+  * Create the keypair directory named on the Options page, as the page
+    promised, rather than quietly keeping keys with the device's logs.
+
+  * Offer a boot package only with secure boot. Generate Boot Package
+    showed for fde-only too, and produced nothing.
+
+  * Stop telling operators to remove a boot package: dpkg -r deletes
+    boot.img and boot.sig, and a secure boot device then will not boot.
+
+  * Keep each page of a unit's log in the order chosen; with Newest First,
+    the lines within a page ran oldest first.
+
+  * Start a hash when /get-image-sha256 is asked for one never begun,
+    instead of reporting it in progress for ever.
+
+  * Report a plain image upload complete on /ws/progress, as archives and
+    compressed images already were.
+
+  * Record the signed-in user in the audit log for log reads and file
+    changes, not only for sign-ins and page requests.
+
+  * Make the Connect management API token write-only, like the HSM PIN, and
+    link the Raspberry Pi documentation on creating one.
+
  -- Tom Dewey <tom.dewey@raspberrypi.com>  Wed, 07 Oct 2026 08:48:02 +0100
 
 rpi-sb-provisioner (2.3.5) unstable; urgency=medium
