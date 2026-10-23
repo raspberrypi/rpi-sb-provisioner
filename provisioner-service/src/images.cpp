@@ -1842,6 +1842,7 @@ namespace provisioner {
 
             // Check cache for SHA256 result
             bool resultReady = false;
+            bool cached = false;
             std::string sha256;
             SHA256Status status = SHA256Status::PENDING;
             double progress = 0.0;
@@ -1850,6 +1851,7 @@ namespace provisioner {
                 std::lock_guard<std::mutex> lock(sha256Cache_mutex);
                 auto it = sha256Cache.find(imageName);
                 if (it != sha256Cache.end()) {
+                    cached = true;
                     status = it->second.status;
                     if (status == SHA256Status::COMPLETE) {
                         sha256 = it->second.value;
@@ -1876,8 +1878,8 @@ namespace provisioner {
             Json::Value result;
             
             if (!resultReady) {
-                // Return immediate status for pending calculations
-                if (status == SHA256Status::PENDING) {
+                // status starts as PENDING, so only the cache can say one is running
+                if (cached && status == SHA256Status::PENDING) {
                     result["sha256"] = "Calculating...";
                     result["status"] = "pending";
                     result["message"] = "SHA256 calculation is in progress.";
