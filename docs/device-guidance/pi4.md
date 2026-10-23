@@ -123,7 +123,7 @@ After GPIO 8 configuration is complete, the device can be provisioned.
 
 The Devices page in the web interface shows when the device has finished. The provisioner also turns off the power LED at the end:
 
-- **Both LEDs off** = Provisioning is complete
+- **Power LED off** = Provisioning is complete
 
 - The jumper wire can now be removed
 
@@ -141,7 +141,7 @@ Bootstrap writes a new EEPROM to every Raspberry Pi 4 family device, built from 
 |-----------------------------|------------------------------------------------------------------------------------------------|
 | **One-time setup**          | The GPIO configuration only needs to be done once per device. It is permanent.                 |
 | **GPIO 8 recommended**      | Use GPIO 8 for consistency. Other GPIO pins can work but GPIO 8 is the standard.               |
-| **Keep jumper connected**   | Do not remove the jumper wire during provisioning. Leave it connected until both LEDs are off. |
+| **Keep jumper connected**   | Do not remove the jumper wire during provisioning. Leave it connected until the power LED is off. |
 | **No re-connection needed** | You do not need to unplug and re-plug the device during provisioning.                          |
 | **Good cables matter**      | Use a high-quality USB cable. Poor cables cause connection problems.                           |
 
@@ -217,7 +217,7 @@ You can also extract and inspect the full EEPROM:
 
 - Plug in USB cable
 
-- Wait for both LEDs to turn off
+- Wait for the power LED to turn off
 
 - Remove jumper wire and disconnect
 

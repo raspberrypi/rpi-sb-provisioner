@@ -44,7 +44,7 @@ leave it connected.
 
 The Devices page in the web interface shows when the device has finished. The provisioner also turns off the power LED at the end:
 
-- **Both LEDs off** = Provisioning is complete
+- **Power LED off** = Provisioning is complete
 
 - You can now disconnect the device
 
@@ -105,7 +105,7 @@ Bootstrap writes a new EEPROM to every Raspberry Pi 5 family device, built from 
 
 2.  Leave the device connected
 
-3.  Wait for both LEDs to turn off
+3.  Wait for the power LED to turn off
 
 4.  Provisioning complete
 
@@ -117,4 +117,4 @@ Bootstrap writes a new EEPROM to every Raspberry Pi 5 family device, built from 
 
 - Use good quality cables
 
-- Both LEDs off = provisioning complete
+- Power LED off = provisioning complete
