@@ -10,15 +10,15 @@ export DEB_BUILD_NETWORK = yes
 
 # Target to generate the man page
 debian/rpi-sb-provisioner.1:
-	# First create the content from the README
-	pandoc -f gfm -s -t man README.md > debian/rpi-sb-provisioner.1.tmp
+	# First create the content from the user guide
+	pandoc -f gfm -s -t man docs/user-guide.md > debian/rpi-sb-provisioner.1.tmp
 	  
-	# Now add proper NAME section with awk and create intermediate man page
+	# Add a NAME section, and drop the guide's preamble and contents list
 	awk 'BEGIN { print ".TH \"rpi-sb-provisioner\" \"1\" \"\" \"\" \"User Commands\""; \
 	             print ".SH NAME"; \
 	             print "rpi-sb-provisioner \\- Raspberry Pi Secure Boot Provisioner"; \
 	             first_section = 1; } \
-	     /^\.SH / { if (first_section) { first_section = 0; } else { print; } next; } \
+	     /^\.SH / { first_section = 0; print; next; } \
 	     /^\.TH / { next; } \
 	     /^\.hy/ { next; } \
 	     { if (!first_section) print; }' debian/rpi-sb-provisioner.1.tmp > debian/rpi-sb-provisioner.1.raw
