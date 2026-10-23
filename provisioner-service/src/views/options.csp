@@ -1647,7 +1647,7 @@
                     <span class="section-title-icon">&#9729;</span>
                     Cloud Services
                 </h2>
-                <p class="section-description">Register provisioned devices with Raspberry Pi Connect for Organisations. Requires a management API access token from the Settings tab of your Connect organisation.</p>
+                <p class="section-description">Register provisioned devices with Raspberry Pi Connect for Organisations. Requires a management API access token, made under <strong>API access tokens</strong> on the Settings tab of your Connect organisation: see <a href="https://www.raspberrypi.com/documentation/services/connect-for-organisations.html#management-api-access-tokens" target="_blank" rel="noopener">Create management API access tokens</a> in the Raspberry Pi documentation.</p>
             </div>
 
             <!-- Connect API Key -->
