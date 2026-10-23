@@ -255,7 +255,7 @@ This separate configuration file allows you to customize the package metadata wi
 
 If these are not set, the boot image generation will be skipped:
 
-- If `PROVISIONING_STYLE` is not `secure-boot`, generation is skipped. The web interface offers **Generate Boot Package** for `fde-only` too, but the generator skips that style
+- If `PROVISIONING_STYLE` is not `secure-boot`, generation is skipped, and the web interface does not offer **Generate Boot Package**
 
 - If no key material is configured, generation is skipped
 
