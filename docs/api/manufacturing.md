@@ -11,7 +11,7 @@ The Manufacturing Database API provides access to device provisioning data colle
 | Parameter | Type    | Required | Description                                                                               |
 |-----------|---------|----------|-------------------------------------------------------------------------------------------|
 | offset    | Integer | No       | Number of records to skip (default: 0)                                                    |
-| limit     | Integer | No       | Maximum number of records to return. If not specified or less than 1, returns all records |
+| limit     | Integer | No       | Maximum number of records to return. If not specified, not a number or less than 1, returns all records |
 
 **Response Format:**
 
@@ -20,13 +20,13 @@ The endpoint returns a JSON array where each element represents a provisioned de
 ``` json
 [
   {
-    "id": 1,
+    "id": "1",
     "boardname": "CM5",
     "serial": "c561b701c85be8ea",
     "eth_mac": "2c:cf:67:bd:78:4f",
     "wifi_mac": "00:00:00:00:00:00",
     "bt_mac": "00:00:00:00:00:00",
-    "mmc_size": 15634268160,
+    "mmc_size": "15634268160",
     "mmc_cid": "150100414a5444345206c9e4baeeba00",
     "rpi_duid": "0000911043955412",
     "board_revision": "0x0",
@@ -45,15 +45,17 @@ The endpoint returns a JSON array where each element represents a provisioned de
     "connect_device_id": "device-123456",
     "customer_key_fingerprint": "a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456",
     "customer_key_label": "production-2026",
-    "eeprom_size": 524288,
+    "eeprom_size": "524288",
     "eeprom_jedec": "ef4018",
     "eeprom_unique_id": "0123456789abcdef",
-    "bootloader_build_timestamp": 1780326171,
+    "bootloader_build_timestamp": "1780326171",
     "provision_ts": "2025-04-28 13:53:28"
   },
   ...
 ]
 ```
+
+Every value is a JSON string, numbers included, and a database `NULL` is returned as `""`. Where the table below says "null", expect an empty string.
 
 **Field Descriptions:**
 
@@ -112,18 +114,22 @@ curl -H "Authorization: Bearer $RPI_SB_TOKEN" http://localhost:3142/api/v2/manuf
 
 **Error Responses:**
 
-On error, the endpoint returns a JSON object with error details:
+On error, the endpoint returns HTTP 500 with the standard error body (see [errors.md](errors.md)):
 
 ``` json
 {
-  "error": {
-    "status": 500,
-    "title": "Database Error",
-    "code": "DB_ERROR",
-    "detail": "Failed to retrieve manufacturing database data"
-  }
+  "error": "Manufacturing database file not found",
+  "error_code": "DB_FILE_NOT_FOUND",
+  "details": "Path: /srv/rpi-sb-provisioner/manufacturing.db"
 }
 ```
+
+| `error_code`         | Cause                                                        |
+|----------------------|--------------------------------------------------------------|
+| `DB_PATH_NOT_SET`    | `RPI_SB_PROVISIONER_MANUFACTURING_DB` is not set              |
+| `DB_FILE_NOT_FOUND`  | The database file does not exist (nothing provisioned yet)   |
+| `DB_OPEN_ERROR`      | SQLite could not open the file                               |
+| `SQL_PREPARE_ERROR`, `DB_FETCH_ERROR` | The query failed; `details` carries SQLite's message |
 
 **Notes:**
 

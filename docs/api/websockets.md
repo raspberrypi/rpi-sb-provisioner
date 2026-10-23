@@ -1,5 +1,7 @@
 WebSocket endpoints provide real-time updates for long-running operations and dynamic data.
 
+A handshake from another origin is refused with `403 CROSS_ORIGIN`. `/ws/devices` may be opened without signing in while the public dashboard is on, up to 32 such connections at once; the others need an operator, by session cookie or bearer token (see [authentication.md](authentication.md)).
+
 # /ws/devices
 
 **Protocol:** WebSocket
@@ -17,7 +19,8 @@ Server sends JSON messages with current topology:
   "nodes": [
     {
       "id": "1-1.4",
-      "parentId": "server",
+      "parentId": "1-1",
+      "portPermitted": true,
       "isHub": false,
       "vendor": "0a5c",
       "product": "2712",
@@ -29,6 +32,8 @@ Server sends JSON messages with current topology:
       "ip": "192.168.1.100",
       "ethMac": "d8:3a:dd:12:34:56",
       "modelGen": 5,
+      "boardType": "CM5",
+      "speed": 480,
       "history": [
         { "state": "SB-PROVISIONER-WRITING-ROOTFS", "ts": "2026-08-26 09:41:12" },
         { "state": "SB-PROVISIONER-WRITING-BOOTFS", "ts": "2026-08-26 09:40:58" },
@@ -36,6 +41,8 @@ Server sends JSON messages with current topology:
       ]
     }
   ],
+  "usbPortRules": [],
+  "usbPortRestrictionActive": false,
   "removed": ["1-1.3"]
 }
 ```
@@ -46,7 +53,15 @@ Server sends JSON messages with current topology:
 
 - Broadcasts updates when devices connect/disconnect or state changes
 
-- Includes placeholder nodes for empty hub ports
+- Includes placeholder nodes for empty hub ports, marked `"placeholder": true`
+
+- A node's optional fields (`vendor`, `product`, `productName`, `serial`, `state`, `image`, `model`, `ip`, `speed`, `modelGen`, `boardType`, `ethMac`, `history`) are left out when unknown. The root node is `server`, with `parentId` `null`
+
+- `portPermitted` says whether the USB port allowlist lets the provisioner act on a device at that port; `usbPortRules` lists the allowlist's patterns and `usbPortRestrictionActive` whether there are any
+
+- `companionPairs`, when present, pairs each USB 2 bus with its USB 3 companion (`hsBus`, `ssBus`, `ssPortCount`)
+
+- Client messages are ignored
 
 - The `removed` array lists device IDs that were disconnected
 
@@ -120,8 +135,66 @@ Error:
 
 - Multiple clients can subscribe to the same image calculation
 
-- Progress updates are sent approximately every 5% of completion
+- If the image has no cached result, the request starts a calculation and the server replies `{"image_name": ..., "status": "pending"}`
 
-- Calculations are automatically cancelled when no clients are listening
+- `progress` and `progress_percent` appear once some progress has been made
 
-- SHA256 sidecar files (.sha256) are not hashable and will return an error
+- A pending calculation is cancelled when the last client listening for it disconnects
+
+- An image name that is not plain, or one ending `.sha256`, is answered with `status` `error`
+
+# /ws/boot-package
+
+**Protocol:** WebSocket
+
+**Description:** Reports whether a signed boot package exists for an image, and follows its generation.
+
+**Client Messages:**
+
+``` json
+{
+  "action": "check_boot_package",
+  "image_name": "raspios-2025-04-01.img"
+}
+```
+
+**Server Messages:**
+
+``` json
+{
+  "image_name": "raspios-2025-04-01.img",
+  "exists": true,
+  "package_name": "rpi-sb-boot-update_1.0_all.deb",
+  "status": "available"
+}
+```
+
+`status` is `available`, `not_found`, `generating`, `unsupported` (the provisioning style has no boot packages) or `no_signing_key`. Updates are sent to every client that has asked about the image.
+
+# /ws/progress
+
+**Protocol:** WebSocket
+
+**Description:** Streams the progress of an image upload. Choose an ID, send it as the `X-Upload-Id` header on `POST /upload-image`, and subscribe to `upload:<id>` here.
+
+**Client Messages:**
+
+``` json
+{ "subscribe": "upload:3f9c2b" }
+```
+
+``` json
+{ "unsubscribe": "upload:3f9c2b" }
+```
+
+**Server Messages:**
+
+``` json
+{ "phase": "decompressing", "bytes_written": 1073741824, "total_bytes": 4294967296 }
+```
+
+``` json
+{ "phase": "extracting", "bytes_written": 524288000, "current_entry": "rootfs.simg" }
+```
+
+The last message has `phase` `complete`, or `error` with a `message`; the topic is then closed. A plain `.img` upload sends only `error` messages, never `complete`: wait for the HTTP response instead.
