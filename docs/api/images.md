@@ -226,7 +226,7 @@ If an image file with the same name exists, the upload is renamed:
 
 - An image file whose name is taken is renamed with a numeric suffix. An IDP archive replaces an existing artefact of the same name.
 
-- SHA256 calculation, and for `secure-boot` and `fde-only` styles boot package generation, begin automatically after upload.
+- SHA256 calculation, and for the `secure-boot` style boot package generation, begin automatically after upload.
 
 - IDP archives are extracted with the archive's SHA256 stored in a `.sha256` sidecar file. Every entry must stay inside the archive: absolute paths, `..`, links pointing outside it, device nodes and FIFOs are refused.
 
@@ -344,7 +344,7 @@ HTTP 400 for `IMAGE_NOT_FOUND`, `MISSING_IMAGE_NAME` and `INVALID_IMAGE_NAME`; 5
 
 **HTTP Method:** GET
 
-**Description:** Reports whether a signed boot package (a Debian package, `rpi-sb-boot-update_*_all.deb`) has been generated for a given image. Boot packages are only produced in `secure-boot` or `fde-only` provisioning styles.
+**Description:** Reports whether a signed boot package (a Debian package, `rpi-sb-boot-update_*_all.deb`) has been generated for a given image. Boot packages are only produced in the `secure-boot` provisioning style.
 
 **Parameters:**
 
@@ -418,7 +418,7 @@ When the current provisioning style does not support boot packages:
 
 **HTTP Method:** POST
 
-**Description:** Triggers asynchronous generation of a signed boot package (`boot.img`) for the specified image. Only supported in `secure-boot` or `fde-only` provisioning styles.
+**Description:** Triggers asynchronous generation of a signed boot package (`boot.img`) for the specified image. Only supported in the `secure-boot` provisioning style.
 
 **Parameters:**
 
@@ -440,14 +440,14 @@ When the current provisioning style does not support boot packages:
 
 ``` json
 {
-  "error": "Boot package generation only supported in secure-boot or fde-only mode (current: naked)",
+  "error": "Boot package generation only supported in secure-boot mode (current: naked)",
   "error_code": "UNSUPPORTED_PROVISIONING_STYLE"
 }
 ```
 
 | Status | `error_code`                      | Cause                                     |
 |--------|-----------------------------------|-------------------------------------------|
-| 400    | `UNSUPPORTED_PROVISIONING_STYLE`  | `PROVISIONING_STYLE` is not `secure-boot` or `fde-only` |
+| 400    | `UNSUPPORTED_PROVISIONING_STYLE`  | `PROVISIONING_STYLE` is not `secure-boot` |
 | 409    | `NO_SIGNING_KEY`                  | No signing key is configured              |
 | 400    | `MISSING_PARAMETER`, `INVALID_IMAGE_NAME` | Bad `name`                        |
 | 404    | `IMAGE_NOT_FOUND`                 | No such image                             |
