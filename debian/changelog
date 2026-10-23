@@ -469,6 +469,8 @@ rpi-sb-provisioner (2.4.0) unstable; urgency=high
   * Make the Connect management API token write-only, like the HSM PIN, and
     link the Raspberry Pi documentation on creating one.
 
+  * Label the settings JSON from /options/get as application/json.
+
  -- Tom Dewey <tom.dewey@raspberrypi.com>  Wed, 07 Oct 2026 08:48:02 +0100
 
 rpi-sb-provisioner (2.3.5) unstable; urgency=medium
