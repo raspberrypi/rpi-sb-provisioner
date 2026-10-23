@@ -308,15 +308,17 @@ metadata_gather() {
     DEVKEY_REVOKED_VALUE=$(signed_flag_value "$(metadata_get "secure-devkey")")
     SIGNED_BOOT_VALUE="${PUBKEY_PROGRAMMED_VALUE}"
 
+    # Bootstrap sends both locks only on the secure-boot path; recording
+    # them for another style would claim a lock the device never got.
     JTAG_LOCKED_VALUE="NULL"
-    if [ -n "${RPI_DEVICE_LOCK_JTAG}" ]; then
+    if [ -n "${RPI_DEVICE_LOCK_JTAG}" ] && [ "${PROVISIONING_STYLE}" = "secure-boot" ]; then
         JTAG_LOCKED_VALUE="1"
     elif [ "${SECURE}" = "1" ]; then
         JTAG_LOCKED_VALUE="0"
     fi
 
     EEPROM_WP_VALUE="NULL"
-    if [ -n "${RPI_DEVICE_EEPROM_WP_SET}" ]; then
+    if [ -n "${RPI_DEVICE_EEPROM_WP_SET}" ] && [ "${PROVISIONING_STYLE}" = "secure-boot" ]; then
         EEPROM_WP_VALUE="1"
     elif [ "${SECURE}" = "1" ]; then
         EEPROM_WP_VALUE="0"

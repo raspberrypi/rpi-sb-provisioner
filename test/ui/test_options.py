@@ -83,6 +83,7 @@ class Options(UITest):
         self.assertEqual("text", el.get_attribute("type"))
 
     def test_checkboxes_save_one_or_nothing(self):
+        self.choose("PROVISIONING_STYLE", "secure-boot")
         for field in ("RPI_DEVICE_LOCK_JTAG", "RPI_DEVICE_EEPROM_WP_SET", "RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE"):
             with self.subTest(field=field):
                 box = self.b.el("#" + field)
@@ -100,6 +101,8 @@ class Options(UITest):
                 self.assertEqual(style == "secure-boot", self.shown("#key-config-group"),
                                  "signing keys are for secure boot only")
                 self.assertEqual(style != "naked", self.shown("#cipher-group"), "a cipher is for encrypted styles")
+                self.assertEqual(style == "secure-boot", self.shown("#section-hardware-security"),
+                                 "bootstrap applies the hardware locks only with secure boot")
 
     def test_zero_2_w_has_no_secure_boot_or_nvme(self):
         self.choose("RPI_DEVICE_FAMILY", "2W")
