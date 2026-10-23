@@ -46,9 +46,9 @@ No button pressing is required.
 
 ## Determining Completion
 
-The Devices page in the web interface shows when the device has finished. The provisioner also asks the device to turn off its power LED:
+The Devices page in the web interface shows when the device has finished. The provisioner also asks the device to turn off its LED:
 
-- When provisioning is complete, the activity LED will be off
+- When provisioning is complete, the LED is off
 
 - The device can be disconnected
 
