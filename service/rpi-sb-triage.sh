@@ -151,8 +151,15 @@ timeout_fatal_secs "${FASTBOOT_CONTROL_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_
 # LOG_DIRECTORY already ends in the serial. Adding it again put keys where
 # neither the documentation nor the key API looks.
 KEYPAIR_DIR="${LOG_DIRECTORY}/keypair"
-if [ -d "${RPI_DEVICE_RETRIEVE_KEYPAIR}" ]; then
-    KEYPAIR_DIR="${RPI_DEVICE_RETRIEVE_KEYPAIR}"
+# The Options page accepts a directory whose parent exists, and says it
+# will be created; make only the last component, so an unmounted drive's
+# path is not filled in on the disk beneath it.
+if [ -n "${RPI_DEVICE_RETRIEVE_KEYPAIR}" ]; then
+    if [ -d "${RPI_DEVICE_RETRIEVE_KEYPAIR}" ] || mkdir -m 0700 "${RPI_DEVICE_RETRIEVE_KEYPAIR}" 2>/dev/null; then
+        KEYPAIR_DIR="${RPI_DEVICE_RETRIEVE_KEYPAIR}"
+    else
+        log "WARNING: Cannot create ${RPI_DEVICE_RETRIEVE_KEYPAIR}; keeping the keypair in ${KEYPAIR_DIR}"
+    fi
 fi
 # Root-only: this can hold the device's private key, and the log tree
 # around it is world-readable.
