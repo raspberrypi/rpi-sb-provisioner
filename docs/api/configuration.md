@@ -18,14 +18,13 @@ Every `POST` endpoint here needs the CSRF token from a browser session, or a bea
   "RPI_SB_WORKDIR": "/srv/rpi-sb-provisioner/work",
   "RPI_SB_PROVISIONER_MANUFACTURING_DB": "/srv/rpi-sb-provisioner/manufacturing.db",
   "RPI_DEVICE_FAMILY": "5",
-  "RPI_DEVICE_FIRMWARE_FILE": "/lib/firmware/raspberrypi/bootloader-2712/default/pieeprom-2025-01-17.bin",
-  "RPI_CONNECT_API_KEY": ""
+  "RPI_DEVICE_FIRMWARE_FILE": "/lib/firmware/raspberrypi/bootloader-2712/default/pieeprom-2025-01-17.bin"
 }
 ```
 
 **Notes:**
 
-- Every value is a string, secrets included: `RPI_CONNECT_API_KEY` is returned as stored, so treat the response, and any token that can read it, accordingly
+- Every value is a string. `RPI_CONNECT_API_KEY` is write-only and never returned, so a client that writes these settings back leaves the saved token alone
 
 - The response body is JSON but is not labelled `application/json`
 
