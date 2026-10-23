@@ -267,7 +267,7 @@ Description prefix used when registering devices with Raspberry Pi Connect. The 
 
 Specify a directory to copy the device unique keypair to. The keys will be named \<serial\>.der and \<serial\>.pub, and are written in PEM format, readable by root only.
 
-Set to the path of an existing directory. If it is empty, or the directory does not exist, keys are stored in `/var/log/rpi-sb-provisioner/<serial>/keypair`. Set from Options, **Storage & Output**, **Keypair Storage Directory**.
+Set to a directory whose parent exists; triage creates the directory itself, root-only, if it is missing. If it is empty, or cannot be created, keys are stored in `/var/log/rpi-sb-provisioner/<serial>/keypair`. Set from Options, **Storage & Output**, **Keypair Storage Directory**.
 
 > **Note**
 >
