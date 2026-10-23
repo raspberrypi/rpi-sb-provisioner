@@ -1706,7 +1706,7 @@
         </div>
 
         <!-- ===== SECTION 6: Hardware Security ===== -->
-        <div class="config-section" id="section-hardware-security">
+        <div class="config-section" id="section-hardware-security" <%c++ if(provisioningStyle != "secure-boot" || deviceFamily == "2W") $$ << "style=\"display: none;\""; %>>
             <div class="section-header">
                 <h2 class="section-title">
                     <span class="section-title-icon">&#128737;</span>
@@ -2913,6 +2913,12 @@
             const selectedFamily = document.querySelector('input[name="RPI_DEVICE_FAMILY"]:checked');
             const supportsSecureBoot = selectedFamily && deviceSupportsSecureBoot(selectedFamily.value);
             
+            // Bootstrap applies the hardware locks only with secure boot.
+            const hardwareSecurity = document.getElementById('section-hardware-security');
+            if (hardwareSecurity) {
+                hardwareSecurity.style.display = (style === 'secure-boot' && supportsSecureBoot) ? '' : 'none';
+            }
+
             if (style === 'naked') {
                 keyConfigGroup.style.display = 'none';
                 cipherGroup.style.display = 'none';
