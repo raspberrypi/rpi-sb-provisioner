@@ -545,11 +545,6 @@ namespace provisioner {
                 collected++;
             }
             
-            // If order is desc, we collected backwards, so reverse to show newest first
-            if (order == "desc") {
-                std::reverse(logEntries.begin(), logEntries.end());
-            }
-            
             sd_journal_close(j);
             
             // Create the response
@@ -769,11 +764,6 @@ namespace provisioner {
                 std::string entry = std::string(isotimestr) + " " + message;
                 logEntries.push_back(entry);
                 collected++;
-            }
-            
-            // If order is desc, we collected backwards, so reverse to show newest first
-            if (order == "desc") {
-                std::reverse(logEntries.begin(), logEntries.end());
             }
             
             sd_journal_close(j);

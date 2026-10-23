@@ -5,6 +5,7 @@ import glob
 import io
 import os
 import tempfile
+import re
 import time
 
 from selenium.common.exceptions import StaleElementReferenceException
@@ -74,11 +75,20 @@ class ServiceLog(UITest):
     def entries(self):
         return [e.text for e in self.b.all("#logContainer .log-entry")]
 
+    def numbers(self):
+        return [int(m.group(1)) for m in (re.search(r"uitest line (\d+)$", e) for e in self.entries()) if m]
+
     def test_newest_first_by_default_and_oldest_on_request(self):
-        first = self.entries()[0]
+        # Each page must be in the order chosen, not only the pages.
+        newest = self.numbers()
+        self.assertGreater(len(newest), 1)
+        self.assertEqual(sorted(newest, reverse=True), newest)
+        self.assertEqual(120, newest[0])
         Select(self.b.el("#orderSelect")).select_by_value("asc")
         self.b.settle()
-        self.assertNotEqual(first, self.entries()[0])
+        oldest = self.numbers()
+        self.assertEqual(sorted(oldest), oldest)
+        self.assertEqual(1, oldest[0])
 
     def test_page_size(self):
         Select(self.b.el("#pageSizeSelect")).select_by_value("25")
