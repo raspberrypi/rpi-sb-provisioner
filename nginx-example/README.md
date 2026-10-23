@@ -21,7 +21,7 @@ The web interface keeps listening on `127.0.0.1` only, and nginx is the one thin
        sudo ln -s /etc/nginx/sites-available/rpi-provisioner-ui /etc/nginx/sites-enabled/
        sudo nginx -t && sudo systemctl reload nginx
 
-3. Tell the web interface to answer to that name. It refuses requests addressed to names it doesn't know, which stops other websites reaching it through DNS rebinding:
+3. Tell the web interface to answer to that name. It refuses requests addressed to names it doesn't know, which stops other websites reaching it through DNS rebinding. It already answers to `localhost`, the machine's host name and `<hostname>.local`, and its own IP addresses; any other name must be given with `--allowed-host`, which may be repeated:
 
        sudo systemctl edit rpi-provisioner-ui
 
@@ -39,11 +39,11 @@ The web interface keeps listening on `127.0.0.1` only, and nginx is the one thin
 
 ## Things to avoid
 
-- **Plain HTTP.** The example redirects port 80 to HTTPS. Don't proxy port 80 through to the web interface: it would accept sign-ins sent unencrypted, because every request reaches it from nginx on loopback.
+- **Plain HTTP.** The example redirects port 80 to HTTPS. Don't proxy port 80 through to the web interface. With `X-Forwarded-Proto: http` set, as the example's header would be, the interface refuses the sign-in; without that header, every request looks to it like a browser on this machine, and it accepts a password that crossed the network unencrypted.
 - **Authentication in nginx.** Earlier versions of this example put HTTP Basic authentication in nginx, checked against PAM, and added `www-data` to the `shadow` group. That let any account on the machine through and let nginx read every password hash. If you set that up, undo it:
 
       sudo gpasswd -d www-data shadow
       sudo rm /etc/pam.d/nginx
 
   Then remove the `auth_pam` lines from your nginx site.
-- **Listening on the network directly.** Running the web interface with `--address 0.0.0.0` bypasses this proxy.
+- **Listening on the network directly.** Running the web interface with `--address 0.0.0.0` bypasses this proxy. It then offers its own HTTPS on port 3143, with a self-signed certificate whose SHA-256 fingerprint it logs at start, and refuses sign-ins over plain HTTP from other machines.

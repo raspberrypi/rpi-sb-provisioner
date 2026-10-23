@@ -42,13 +42,17 @@ leave it connected.
 
 ## When Is Provisioning Complete?
 
-Watch the LEDs on the Raspberry Pi 5:
+The Devices page in the web interface shows when the device has finished. The provisioner also turns off the power LED at the end:
 
 - **Both LEDs off** = Provisioning is complete
 
 - You can now disconnect the device
 
 - The device is ready to use
+
+# Bootloader Configuration
+
+Bootstrap writes a new EEPROM to every Raspberry Pi 5 family device, built from the newest bootloader in `/lib/firmware/raspberrypi/bootloader-2712/latest/` unless the Options page names a firmware. Its configuration is the one chosen on the Options page: **Default**, the package's configuration for the provisioning style, or **Custom**, edited at `/options/bootloader-config`. With **Boot selected storage first** on (`RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE`, the default), the selected storage type is moved to the front of `BOOT_ORDER`; both tiles show the boot order devices will get.
 
 # Important Points To Remember
 
@@ -57,7 +61,7 @@ Watch the LEDs on the Raspberry Pi 5:
 | **Single connection**             | Connect once and leave the device plugged in; it reboots itself between phases. |
 | **Hold button before cable**      | Always hold the power button BEFORE plugging in the cable.                      |
 | **Good cables matter**            | Use a high-quality USB A to USB C cable. Poor cables cause connection problems. |
-| **Monitor in web interface**      | The web interface at <http://localhost:3142> shows provisioning progress.       |
+| **Monitor in web interface**      | The Devices page at <http://localhost:3142/devices> shows provisioning progress. |
 
 # Troubleshooting Raspberry Pi 5
 
