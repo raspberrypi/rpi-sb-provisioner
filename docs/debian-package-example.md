@@ -169,8 +169,10 @@ The generated package info file (`*.package-info.txt`) contains:
     Installation:
       sudo dpkg -i rpi-sb-boot-update_0.a3f5e8c9b2d1_all.deb
 
-    Removal:
-      sudo dpkg -r rpi-sb-boot-update
+    Reverting:
+      Install the package built from the earlier image. Do not remove this
+      one: dpkg -r deletes boot.img and boot.sig, and a secure boot device
+      will not boot without them.
 
     Contents:
       /boot/firmware/boot.img (contains config.txt, kernel, initramfs, etc.)
@@ -178,10 +180,6 @@ The generated package info file (`*.package-info.txt`) contains:
 
     Note: A reboot is required after installation for changes to take effect.
           The config.txt is embedded inside boot.img and will be used after reboot.
-
-> **Warning**
->
-> Despite the `Removal` line the generator writes, do not remove the package from a device: `dpkg -r` deletes `/boot/firmware/boot.img` and `boot.sig`, and a secure boot device will not boot without them. Install another version instead.
 
 # Integration with APT
 
