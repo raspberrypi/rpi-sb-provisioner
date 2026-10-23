@@ -217,7 +217,7 @@ curl -X POST -H "Authorization: Bearer $RPI_SB_TOKEN" -H "Content-Type: applicat
 
 **HTTP Method:** GET
 
-**Description:** Downloads the public key file for a specific device.
+**Description:** Downloads the public key file for a specific device. It is looked for in the directory named by `RPI_DEVICE_RETRIEVE_KEYPAIR`, when that is set, and then with the device's logs in `/var/log/rpi-sb-provisioner/{serialno}/keypair/`. The private key endpoint looks in the same places.
 
 **Path Parameters:**
 
