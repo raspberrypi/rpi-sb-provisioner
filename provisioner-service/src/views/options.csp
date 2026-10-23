@@ -551,7 +551,7 @@
         }
         
         .pin-status-configured::before {
-            content: "\\2713 ";
+            content: "\2713 ";
         }
         
         .pin-status-not-configured {
@@ -618,7 +618,7 @@
         }
 
         .pkcs11-provider-status.ready::before {
-            content: "\\2713 ";
+            content: "\2713 ";
         }
 
         .pkcs11-provider-status.unavailable {

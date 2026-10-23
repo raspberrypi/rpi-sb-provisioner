@@ -179,6 +179,11 @@ class Options(UITest):
         self.b.settle()
         self.assertTrue(self.b.el("#pkcs11-provider-status").text.strip())
         self.assertTrue(self.b.el("#pin-status").text.strip())
+        # A CSS escape the template doubled showed as a literal "\2713".
+        marks = self.b.d.execute_script("""
+            return [...document.querySelectorAll('.pkcs11-provider-status, [class*=pin-status-]')]
+                .map(e => getComputedStyle(e, '::before').content).filter(c => c.includes('\\\\'));""")
+        self.assertEqual([], marks)
         self.assertClean()
 
 
