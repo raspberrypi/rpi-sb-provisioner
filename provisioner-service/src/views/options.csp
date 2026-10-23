@@ -1127,13 +1127,14 @@
 
             <!-- RPIBOOT GPIO (Raspberry Pi 4 family only) -->
             <div class="field-group" id="rpibootGpioGroup" style="display: none;">
-                <label class="field-label">RPIBOOT GPIO Pin</label>
+                <label class="field-label" for="RPI_DEVICE_RPIBOOT_GPIO">RPIBOOT GPIO Pin</label>
                 <select id="RPI_DEVICE_RPIBOOT_GPIO"
                         name="RPI_DEVICE_RPIBOOT_GPIO"
                         class="form-control"
                         style="font-size: 1.1em; padding: 12px; width: 100%; max-width: 400px;"
                         onchange="validateAndSaveField('RPI_DEVICE_RPIBOOT_GPIO')">
-                    <option value="8" <%c++ if(rpibootGpio.empty() || rpibootGpio == "8") $$ << "selected"; %>>GPIO 8 (Recommended)</option>
+                    <%c++ if (rpibootGpio.empty()) { %><option value="" selected disabled>Not set: choose a pin</option><%c++ } %>
+                    <option value="8" <%c++ if(rpibootGpio == "8") $$ << "selected"; %>>GPIO 8 (Recommended)</option>
                     <option value="7" <%c++ if(rpibootGpio == "7") $$ << "selected"; %>>GPIO 7</option>
                     <option value="6" <%c++ if(rpibootGpio == "6") $$ << "selected"; %>>GPIO 6</option>
                     <option value="5" <%c++ if(rpibootGpio == "5") $$ << "selected"; %>>GPIO 5</option>

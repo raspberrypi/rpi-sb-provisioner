@@ -119,6 +119,8 @@ class Options(UITest):
         self.choose("RPI_DEVICE_FAMILY", "4")
         self.assertTrue(self.shown("#rpibootGpioGroup"))
         from selenium.webdriver.support.ui import Select
+        # A pin burned into OTP must be a choice, so an unset one says so.
+        self.assertEqual("", Select(self.b.el("#RPI_DEVICE_RPIBOOT_GPIO")).first_selected_option.get_attribute("value"))
         Select(self.b.el("#RPI_DEVICE_RPIBOOT_GPIO")).select_by_value("7")
         self.saved("RPI_DEVICE_RPIBOOT_GPIO", "7")
         self.choose("RPI_DEVICE_FAMILY", "5")
