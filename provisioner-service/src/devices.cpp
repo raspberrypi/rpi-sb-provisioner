@@ -1491,6 +1491,23 @@ namespace provisioner {
                identifier.find_first_not_of(allowed) == std::string::npos;
     }
 
+    // Where triage put a device's key file. A directory set on the Options
+    // page is tried first; keys from runs before it was set, or from a run
+    // that could not create it, stay with the device's logs.
+    static std::string keypairFile(const std::string &serial, const std::string &extension)
+    {
+        const std::string name = provisioner::utils::sanitize_path_component(serial) + extension;
+        const std::string fallback = "/var/log/rpi-sb-provisioner/" +
+                                     provisioner::utils::sanitize_path_component(serial) + "/keypair/" + name;
+        const auto dir = provisioner::utils::getConfigValue("RPI_DEVICE_RETRIEVE_KEYPAIR", false);
+        if (dir && !dir->empty()) {
+            const std::string configured = *dir + "/" + name;
+            std::error_code ec;
+            if (std::filesystem::is_regular_file(configured, ec)) return configured;
+        }
+        return fallback;
+    }
+
     static std::string resolveDeviceSerial(const std::string &identifier)
     {
         if (!isDeviceIdentifier(identifier)) return {};
@@ -2186,7 +2203,7 @@ namespace provisioner {
                 return;
             }
 
-            std::string keyPath = "/var/log/rpi-sb-provisioner/" + provisioner::utils::sanitize_path_component(serialno) + "/keypair/" + provisioner::utils::sanitize_path_component(serialno) + ".pub";
+            std::string keyPath = keypairFile(serialno, ".pub");
             std::ifstream keyFile(keyPath);
             if (!keyFile.is_open()) {
                 auto resp = provisioner::utils::createErrorResponse(
@@ -2270,7 +2287,7 @@ namespace provisioner {
                 return;
             }
 
-            std::string keyPath = "/var/log/rpi-sb-provisioner/" + provisioner::utils::sanitize_path_component(serialno) + "/keypair/" + provisioner::utils::sanitize_path_component(serialno) + ".der";
+            std::string keyPath = keypairFile(serialno, ".der");
             std::ifstream keyFile(keyPath);
             if (!keyFile.is_open()) {
                 // Log failed file access to audit log
