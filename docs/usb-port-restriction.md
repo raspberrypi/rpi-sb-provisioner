@@ -2,8 +2,8 @@
 
 By default `rpi-sb-provisioner` programs any Raspberry Pi device that appears on
 any USB port of the provisioning host. The udev rules that ship with the package
-match on vendor and product ID alone, so a board plugged in anywhere on the host
-is picked up and provisioned.
+match on USB vendor and product ID, not on port, so a board plugged in anywhere
+on the host is picked up and provisioned.
 
 On a fixed programming jig that is rarely what you want. A single-headed jig has
 exactly one port wired to its head, and a board attached to any other port — a
@@ -51,7 +51,8 @@ directory under `/sys/bus/usb/devices`:
     <bus>-<port>[.<port>...]
 
 Shell glob metacharacters are permitted. Blank lines are ignored, as is
-anything from a `#` to the end of a line.
+anything from a `#` to the end of a line. Spaces and tabs are removed, so two
+paths on one line run together; give each its own line.
 
     # /etc/rpi-sb-provisioner/usb-ports.d/50-jig.conf
 
@@ -89,6 +90,10 @@ The USB path of any device the provisioner has handled is also shown on its
 device details page in the web UI, and in the `USB path` field of the device
 tiles.
 
+Where the path has to be found from the serial number, only Raspberry Pis in
+rpiboot or fastboot mode are considered, and if two carry the same serial the
+path is treated as unknown.
+
 ## What happens to a device on a non-permitted port
 
 The device is skipped, not failed:
@@ -96,8 +101,9 @@ The device is skipped, not failed:
 - The reason is written to the provisioning log for that device.
 - A `PORT-EXCLUDED` state is recorded against it, so the skip is visible in the
   web UI. The device tile is muted rather than flagged red, and reads
-  `Skipped: USB port not permitted`; the device details page explains which
-  directory the rules came from.
+  `Skipped: USB port not permitted`; the device details page says the device
+  is on a port the rules in `/etc/rpi-sb-provisioner/usb-ports.d` do not
+  permit.
 - No lock, no udev rule and no `rpiboot` invocation is created for it, and the
   provision-failed hook does not run.
 
@@ -109,8 +115,9 @@ bootstrap at all.
 
 ## What the web UI shows
 
-While a restriction is in force the devices page carries a filter bar naming
-the effective rules, with a **Hide excluded ports** checkbox. It applies to all
+While a restriction is in force the devices page carries a filter bar,
+**USB port filter active:**, listing the effective patterns, with a
+**Hide excluded ports** checkbox. It applies to all
 three views at once — device cards, topology map and port tree — so a jig
 shows only its own heads, and the host's other USB devices (a network adapter,
 a keyboard, a debug cable) stay out of the operator's way.
@@ -135,6 +142,7 @@ ignored and confirm the skip is recorded:
 
     journalctl -u 'rpi-sb-bootstrap@*' -n 50
 
-You should see the port that was rejected and the list of ports that are
-permitted. No service restart or `udevadm` reload is needed — the rule files
+For a board that boots straight to fastboot, look at `rpi-sb-triage@*`
+instead. You should see `USB port <path> is not listed in …; skipping
+bootstrap` (or `triage`), followed by `Permitted USB ports:` and the patterns. No service restart or `udevadm` reload is needed — the rule files
 are read afresh each time a device appears.

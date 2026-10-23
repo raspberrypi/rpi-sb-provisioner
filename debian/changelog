@@ -433,6 +433,11 @@ rpi-sb-provisioner (2.4.0) unstable; urgency=high
     the local desktop, so p11tool over SSH found no token. The provisioner
     itself runs as root and was unaffected. Reported by Richard Oliver.
 
+  * Bring the documentation into line with the web interface and the code.
+    The README is now a short landing page; the user guide moved to
+    docs/user-guide.md, which the man page is now built from. Reported by
+    Richard Oliver.
+
  -- Tom Dewey <tom.dewey@raspberrypi.com>  Wed, 07 Oct 2026 08:48:02 +0100
 
 rpi-sb-provisioner (2.3.5) unstable; urgency=medium

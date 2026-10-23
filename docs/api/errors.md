@@ -1,33 +1,34 @@
-All API endpoints follow a standard error response format:
+# Error responses
+
+Most endpoints report errors with this JSON body:
 
 ``` json
 {
-  "error": {
-    "status": 400,
-    "title": "Error Title",
-    "code": "ERROR_CODE",
-    "detail": "Detailed error message",
-    "additional": "Optional additional information"
-  }
+  "error": "Image not found",
+  "error_code": "IMAGE_NOT_FOUND",
+  "details": "Optional technical detail"
 }
 ```
 
-**Field Descriptions:**
+| Field        | Description                                                  |
+|--------------|--------------------------------------------------------------|
+| `error`      | Human-readable message                                       |
+| `error_code` | Machine-readable code; omitted by a few older handlers       |
+| `details`    | Further context, when there is any                           |
 
-| Field      | Description                                                  |
-|------------|--------------------------------------------------------------|
-| status     | HTTP status code                                             |
-| title      | Brief error title                                            |
-| code       | Machine-readable error code                                  |
-| detail     | Human-readable error description                             |
-| additional | Optional additional context information (not always present) |
+Some endpoints use their own shape, documented with each endpoint. In particular, requests refused before they reach a handler (see [authentication.md](authentication.md#requests-that-are-refused)) and the API token endpoints answer with:
 
-# Content Negotiation
+``` json
+{
+  "error": "CSRF_VALIDATION_FAILED",
+  "message": "Invalid or expired security token. Please refresh the page and try again."
+}
+```
 
-Most endpoints support content negotiation through the `Accept` header:
+Here `error` is the machine-readable code and `message` the human-readable text.
 
-- `Accept: application/json` - Returns JSON response
+# Content negotiation
 
-- `Accept: text/html` - Returns HTML view when available
+Endpoints that report errors with the body above return an HTML error page instead when the request's `Accept` header contains `text/html`. Otherwise, including when there is no `Accept` header, they return JSON.
 
-If no `Accept` header is provided or if it doesn’t contain a supported MIME type, the API defaults to returning JSON responses.
+A few endpoints, such as `/devices` and `/auditlog`, also return their HTML page for `Accept: text/html` and JSON otherwise; each says so in its own section.

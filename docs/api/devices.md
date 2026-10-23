@@ -1,25 +1,27 @@
 The Devices API provides access to information about devices being provisioned, their logs, and associated cryptographic keys.
 
+Device identifiers in these paths are a serial number or, for a device that has not reported one yet, its USB path (such as `1-1.4`). An identifier may contain only letters, digits, `.`, `-` and `:`, up to 64 characters; anything else is answered with `400 DEVICE_NOT_FOUND`.
+
+`/devices` and `/devices/{serialno}` can be read without signing in while the public dashboard is on (see [authentication.md](authentication.md)). The log, key and flag endpoints always need an operator.
+
 # /devices
 
 **HTTP Method:** GET
 
-**Description:** Returns a list of all devices currently being provisioned or previously provisioned by the system.
+**Description:** Returns the provisioning state history recorded in `/srv/rpi-sb-provisioner/state.db`. There is one entry per state change, newest first, so a device appears once for every state it has passed through. With `Accept: text/html` the devices page is returned instead.
 
 **Parameters:** None
 
 **Response Format:**
 
-The endpoint returns a JSON object containing an array of devices:
-
 ``` json
 {
   "devices": [
     {
-      "serial": "10000000abcdef",
-      "port": "usb:1-1.4",
-      "ip_address": "192.168.1.100",
-      "state": "provisioning",
+      "serial": "c561b701",
+      "port": "1-1.4",
+      "ip_address": "",
+      "state": "SB-PROVISIONER-FINISHED",
       "image": "raspios-trixie.img"
     },
     ...
@@ -32,47 +34,42 @@ The endpoint returns a JSON object containing an array of devices:
 | Field      | Description                                                                           |
 |------------|---------------------------------------------------------------------------------------|
 | serial     | Device serial number                                                                  |
-| port       | USB endpoint or port identifier                                                       |
-| ip_address | IP address assigned to the device during provisioning                                 |
-| state      | Current state of the device (e.g., "bootstrap", "triage", "provisioning", "complete") |
-| image      | OS image being provisioned to the device                                              |
+| port       | USB path of the port the device is on                                                 |
+| ip_address | Address the device reported for flashing over the network, or empty                  |
+| state      | State recorded at that point, such as `BOOTSTRAP-STARTED`, `TRIAGE-FINISHED`, `SB-PROVISIONER-STARTED`, `FDE-PROVISIONER-ABORTED` or `PORT-EXCLUDED`. Provisioners prefix their states with `SB-PROVISIONER`, `FDE-PROVISIONER`, `NAKED-PROVISIONER` or `IDP-PROVISIONER`. |
+| image      | OS image summary recorded with the state, or empty                                    |
 
 # /devices/{serialno}
 
 **HTTP Method:** GET
 
-**Description:** Returns detailed information about a specific device identified by its serial number.
+**Description:** Returns the latest state of one device, looked up by serial number and then, if that finds nothing, by USB path. With `Accept: text/html` the device's page is returned; it includes logs and per-device flags only for a signed-in operator.
 
 **Path Parameters:**
 
-| Parameter | Type   | Required | Description                 |
-|-----------|--------|----------|-----------------------------|
-| serialno  | String | Yes      | Serial number of the device |
+| Parameter | Type   | Required | Description                          |
+|-----------|--------|----------|--------------------------------------|
+| serialno  | String | Yes      | Serial number or USB path of the device |
 
 **Response Format:**
 
-The endpoint returns a JSON object with device details:
-
 ``` json
 {
-  "serial": "10000000abcdef",
-  "port": "usb:1-1.4",
-  "state": "provisioning"
+  "serial": "c561b701",
+  "port": "1-1.4",
+  "state": "SB-PROVISIONER-FINISHED"
 }
 ```
 
 **Error Responses:**
 
-If the device is not found:
+If the device is not found, HTTP 400:
 
 ``` json
 {
-  "error": {
-    "status": 400,
-    "title": "Device Not Found",
-    "code": "DEVICE_NOT_FOUND",
-    "detail": "Requested serial: 10000000abcdef"
-  }
+  "error": "Device not found in database",
+  "error_code": "DEVICE_NOT_FOUND",
+  "details": "Requested identifier: c561b701"
 }
 ```
 
@@ -98,16 +95,17 @@ Plain text log file content.
 
 If the log file is not found:
 
+HTTP 400:
+
 ``` json
 {
-  "error": {
-    "status": 400,
-    "title": "Log Not Found",
-    "code": "LOG_NOT_FOUND",
-    "detail": "Attempted path: /var/log/rpi-sb-provisioner/{serialno}/provisioner.log"
-  }
+  "error": "Log file not found",
+  "error_code": "LOG_NOT_FOUND",
+  "details": "Attempted path: /var/log/rpi-sb-provisioner/{serialno}/provisioner.log"
 }
 ```
+
+The bootstrap and triage log endpoints answer the same way.
 
 ## /devices/{serialno}/log/bootstrap
 
@@ -141,6 +139,78 @@ Plain text log file content.
 
 Plain text log file content.
 
+# Per-device flags
+
+Flags change what the next run does to one device. Each is a file in `/etc/rpi-sb-provisioner/special-<flag>/<serial>` holding `once` or `persistent`.
+
+| Flag                 | Effect                                                                                       |
+|----------------------|----------------------------------------------------------------------------------------------|
+| `skip-eeprom`        | Skip writing the EEPROM and bootloader during bootstrap                                      |
+| `reprovision-device` | Provision a device that has been provisioned before, re-signing the bootcode from the original `recovery.bin`. Raspberry Pi 5 family (BCM2712) only. |
+
+## /devices/{serialno}/flags
+
+**HTTP Method:** GET
+
+**Description:** Reports every flag and whether it is set for the device. A USB path is resolved to the device's serial first.
+
+**Response Format:**
+
+``` json
+{
+  "serial": "c561b701",
+  "flags": [
+    {
+      "id": "reprovision-device",
+      "label": "Re-provision Device",
+      "description": "Provisions a device that has already been provisioned, ...",
+      "constraint": "Raspberry Pi 5 family only (BCM2712)",
+      "active": true,
+      "mode": "once"
+    }
+  ]
+}
+```
+
+`constraint` is present only for flags that apply to some devices. `mode` is `off`, `once` or `persistent`.
+
+## /devices/{serialno}/flags
+
+**HTTP Method:** POST
+
+**Description:** Sets or clears one flag.
+
+**Request Body:**
+
+``` json
+{ "flag": "skip-eeprom", "mode": "once" }
+```
+
+| Field | Description                                   |
+|-------|-----------------------------------------------|
+| flag  | A flag id from the table above                |
+| mode  | `once`, `persistent`, or `off` to clear it    |
+
+**Response Format:**
+
+``` json
+{ "success": true, "flag": "skip-eeprom", "mode": "once", "serial": "c561b701" }
+```
+
+**Error Responses:**
+
+| Status | `error_code`                                   | Cause                                              |
+|--------|------------------------------------------------|----------------------------------------------------|
+| 400    | `INVALID_JSON`, `MISSING_FLAG`, `INVALID_MODE`, `UNKNOWN_FLAG` | Bad request body                        |
+| 409    | `SERIAL_NOT_RESOLVED`                          | The device has not reported a serial yet; retry later |
+| 500    | `FLAG_DIR_ERROR`, `FLAG_WRITE_ERROR`, `FLAG_REMOVE_ERROR` | The flag file could not be written or removed |
+
+``` bash
+curl -X POST -H "Authorization: Bearer $RPI_SB_TOKEN" -H "Content-Type: application/json" \
+  -d '{"flag":"reprovision-device","mode":"once"}' \
+  http://localhost:3142/devices/c561b701/flags
+```
+
 # Device Key Endpoints
 
 ## /devices/{serialno}/key/public
@@ -163,14 +233,13 @@ Binary file (Content-Type: application/octet-stream) containing the device’s p
 
 If the key file is not found:
 
+HTTP 400:
+
 ``` json
 {
-  "error": {
-    "status": 400,
-    "title": "Key Not Found",
-    "code": "KEY_NOT_FOUND",
-    "detail": "Attempted path: /var/log/rpi-sb-provisioner/{serialno}/keypair/{serialno}.pub"
-  }
+  "error": "Public key file not found",
+  "error_code": "KEY_NOT_FOUND",
+  "details": "Attempted path: /var/log/rpi-sb-provisioner/{serialno}/keypair/{serialno}.pub"
 }
 ```
 
@@ -198,7 +267,7 @@ This endpoint is **disabled by default** and requires explicit configuration to 
     RPI_SB_PROVISIONER_ENABLE_PRIVATE_KEY_API=true
     ```
 
-3.  Restart the provisioner service
+3.  Nothing needs restarting: the setting is read on every request.
 
 4.  **WARNING:** Only enable in secure, isolated networks
 
@@ -214,30 +283,25 @@ Binary file (Content-Type: application/octet-stream) containing the device’s p
 
 **Error Responses:**
 
-If the endpoint is disabled (default):
+If the endpoint is disabled (default), HTTP 403:
 
 ``` json
 {
-  "error": {
-    "status": 403,
-    "title": "Endpoint Disabled",
-    "code": "PRIVATE_KEY_API_DISABLED",
-    "detail": "Private key download API is disabled for security reasons. This endpoint must be explicitly enabled in configuration: Set RPI_SB_PROVISIONER_ENABLE_PRIVATE_KEY_API=true in /etc/rpi-sb-provisioner/config. WARNING: Enabling this endpoint exposes device private keys via HTTP and should only be done in secure, isolated networks.",
-    "additional": "This is a security feature. Private keys are cryptographic secrets that should not be transmitted over HTTP."
-  }
+  "error": "Private key download API is disabled for security reasons. This endpoint must be explicitly enabled in configuration: Set RPI_SB_PROVISIONER_ENABLE_PRIVATE_KEY_API=true in /etc/rpi-sb-provisioner/config. WARNING: Enabling this endpoint exposes device private keys via HTTP and should only be done in secure, isolated networks.",
+  "error_code": "PRIVATE_KEY_API_DISABLED",
+  "details": "This is a security feature. Private keys are cryptographic secrets that should not be transmitted over HTTP."
 }
 ```
 
 If the key file is not found:
 
+HTTP 400:
+
 ``` json
 {
-  "error": {
-    "status": 400,
-    "title": "Key Not Found",
-    "code": "KEY_NOT_FOUND",
-    "detail": "Attempted path: /var/log/rpi-sb-provisioner/{serialno}/keypair/{serialno}.der"
-  }
+  "error": "Private key file not found",
+  "error_code": "KEY_NOT_FOUND",
+  "details": "Attempted path: /var/log/rpi-sb-provisioner/{serialno}/keypair/{serialno}.der"
 }
 ```
 
