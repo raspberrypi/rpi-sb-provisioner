@@ -425,6 +425,9 @@ rpi-sb-provisioner (2.4.0) unstable; urgency=high
     again, so they never reach a customisation hook's own flashes. A
     fastbootd without the feature behaves as before.
 
+  * Show a tick, not a literal "\2713", beside "PKCS#11 provider
+    detected" and a configured PIN. Reported by Richard Oliver.
+
  -- Tom Dewey <tom.dewey@raspberrypi.com>  Wed, 07 Oct 2026 08:48:02 +0100
 
 rpi-sb-provisioner (2.3.5) unstable; urgency=medium
