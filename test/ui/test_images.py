@@ -175,6 +175,17 @@ class Images(UITest):
         self.b.wait_text("#error-text", "Failed to clear cache")
         self.assertTrue(self.on_station("uitest-unsafe.img"))
 
+    def test_fde_only_has_no_boot_package(self):
+        # The generator signs boot.img, and makes nothing for fde-only.
+        self.station.set_config(PROVISIONING_STYLE="fde-only")
+        self.station.sh(f"head -c 65536 /dev/zero > {IMAGES}/uitest-fde.img")
+        self.b.get("/options/get")
+        self.open_details("uitest-fde.img")
+        self.b.wait_text("#image-details", "Not applicable", timeout=20)
+        self.assertEqual([], self.b.all("[id^='generate-boot-btn-']"))
+        status, _ = self.b.fetch("/generate-boot-package?name=uitest-fde.img", "POST", {})
+        self.assertEqual(400, status)
+
     def test_boot_package_needs_a_signing_key(self):
         self.station.set_config(PROVISIONING_STYLE="secure-boot", CUSTOMER_KEY_FILE_PEM="", CUSTOMER_KEY_PKCS11_NAME="")
         self.station.sh(f"head -c 65536 /dev/zero > {IMAGES}/uitest-boot.img")
