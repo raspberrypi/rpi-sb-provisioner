@@ -396,8 +396,10 @@ Image SHA256: ${IMAGE_SHA256}
 Installation:
   sudo dpkg -i ${PACKAGE_FULL_NAME}.deb
 
-Removal:
-  sudo dpkg -r ${PACKAGE_NAME}
+Reverting:
+  Install the package built from the earlier image. Do not remove this
+  one: dpkg -r deletes boot.img and boot.sig, and a secure boot device
+  will not boot without them.
 
 Contents:
   /boot/firmware/boot.img (contains config.txt, kernel, initramfs, etc.)
