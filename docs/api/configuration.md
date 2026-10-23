@@ -26,7 +26,6 @@ Every `POST` endpoint here needs the CSRF token from a browser session, or a bea
 
 - Every value is a string. `RPI_CONNECT_API_KEY` is write-only and never returned, so a client that writes these settings back leaves the saved token alone
 
-- The response body is JSON but is not labelled `application/json`
 
 # /options/set
 

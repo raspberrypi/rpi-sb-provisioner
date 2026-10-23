@@ -82,6 +82,11 @@ class Options(UITest):
         self.b.click("[aria-label='Toggle access token visibility']")
         self.assertEqual("text", el.get_attribute("type"))
 
+    def test_settings_json_is_labelled_json(self):
+        kind = self.b.d.execute_async_script(
+            "fetch('/options/get').then(r => arguments[0](r.headers.get('content-type')));")
+        self.assertIn("application/json", kind)
+
     def test_connect_key_is_write_only(self):
         secret = "rporg_uitestsecret"
         self.station.set_config(RPI_CONNECT_API_KEY=secret)
