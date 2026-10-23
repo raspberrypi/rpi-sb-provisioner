@@ -27,6 +27,7 @@ using namespace trantor;
 #include <services.h>
 #include "utils.h"
 #include "include/audit.h"
+#include "include/auth.h"
 
 namespace provisioner {
 
@@ -396,7 +397,7 @@ namespace provisioner {
             }
 
             // Log systemd log access to audit log
-            AuditLog::logSystemdAccess(serviceName);
+            AuditLog::logSystemdAccess(serviceName, auth::username(req));
 
             // Parse pagination and ordering parameters
             int page = 1;
@@ -619,7 +620,7 @@ namespace provisioner {
             }
 
             // Log systemd log access to audit log
-            AuditLog::logSystemdAccess(serviceName);
+            AuditLog::logSystemdAccess(serviceName, auth::username(req));
 
             // Parse pagination and ordering parameters
             int page = 1;

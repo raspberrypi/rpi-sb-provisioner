@@ -190,16 +190,18 @@ namespace provisioner {
          * The PIN is stored in a separate file with restrictive permissions (0400)
          * 
          * @param pin The PIN to save
+         * @param username Who asked, for the audit log
          * @return true if successful, false otherwise
          */
-        bool savePkcs11Pin(const std::string& pin);
+        bool savePkcs11Pin(const std::string& pin, const std::string& username);
         
         /**
          * Remove the PKCS#11 PIN file
          *
+         * @param username Who asked, for the audit log
          * @return true if successful or file didn't exist, false on error
          */
-        bool removePkcs11Pin();
+        bool removePkcs11Pin(const std::string& username);
 
         /**
          * Check whether the file at path is stored device-wrapped (encrypted at
@@ -217,10 +219,11 @@ namespace provisioner {
          * call this automatically. The result is written at 0400.
          *
          * @param path Path to the secret file to wrap in place
+         * @param username Who consented, for the audit log
          * @return true if the file is wrapped on return (including the
          *         already-wrapped no-op case), false on failure
          */
-        bool wrapFileInPlace(const std::string& path);
+        bool wrapFileInPlace(const std::string& path, const std::string& username);
 
         /**
          * Replace a secret file atomically: a fresh owner-read-only file is
@@ -428,20 +431,24 @@ namespace provisioner {
          * guarantee.
          *
          * @param updates Key/value overrides to merge into the config
+         * @param username Who asked, for the audit log
          * @return The full merged config on success (for callers that need the
          *         post-write state), or std::nullopt if the write failed
          */
         std::optional<std::map<std::string, std::string>> setConfigValues(
-            const std::map<std::string, std::string>& updates);
+            const std::map<std::string, std::string>& updates,
+            const std::string& username);
 
         /**
          * Convenience wrapper around setConfigValues for a single key.
          *
          * @param key The configuration key to set
          * @param value The value to write (empty string clears the key)
+         * @param username Who asked, for the audit log
          * @return true if the config file was written successfully
          */
-        bool setConfigValue(const std::string& key, const std::string& value);
+        bool setConfigValue(const std::string& key, const std::string& value,
+                            const std::string& username);
 
         /**
          * Whether a key and value may be written to the config, which root

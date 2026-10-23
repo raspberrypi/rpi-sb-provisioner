@@ -141,7 +141,7 @@ namespace {
         return key;
     }
 
-    bool writeConfigFromActive(const RegistryKey* active) {
+    bool writeConfigFromActive(const RegistryKey* active, const std::string& username) {
         std::string pem;
         std::string pkcs11;
         if (active) {
@@ -159,7 +159,7 @@ namespace {
         bool ok = utils::setConfigValues({
             {"CUSTOMER_KEY_FILE_PEM", pem},
             {"CUSTOMER_KEY_PKCS11_NAME", pkcs11},
-        }).has_value();
+        }, username).has_value();
         if (!ok) {
             LOG_ERROR << "Failed to write config for key activation";
         }
@@ -276,7 +276,8 @@ std::optional<std::string> addPemKey(const std::string& path,
                                      const std::string& label,
                                      const utils::KeyInfo& info,
                                      bool wrapped,
-                                     bool activate) {
+                                     bool activate,
+                                     const std::string& username) {
     RegistrySnapshot snap;
     if (!load(snap)) return std::nullopt;
 
@@ -284,7 +285,7 @@ std::optional<std::string> addPemKey(const std::string& path,
         if (existing.type == "pem" && existing.path == path) {
             if (activate) {
                 std::string err;
-                activateKey(existing.id, err);
+                activateKey(existing.id, err, username);
             }
             return existing.id;
         }
@@ -294,19 +295,20 @@ std::optional<std::string> addPemKey(const std::string& path,
     snap.keys.push_back(keyInfoToRegistryKey(id, "pem", label, path, "", wrapped, info));
     if (activate || snap.activeKeyId.empty()) {
         snap.activeKeyId = id;
-        if (!writeConfigFromActive(&snap.keys.back())) {
+        if (!writeConfigFromActive(&snap.keys.back(), username)) {
             return std::nullopt;
         }
     }
     if (!save(snap)) return std::nullopt;
-    AuditLog::logFileSystemAccess("REGISTER_KEY", path, true, "", id);
+    AuditLog::logFileSystemAccess("REGISTER_KEY", path, true, username, id);
     return id;
 }
 
 std::optional<std::string> addPkcs11Key(const std::string& uri,
                                         const std::string& label,
                                         const utils::KeyInfo& info,
-                                        bool activate) {
+                                        bool activate,
+                                        const std::string& username) {
     RegistrySnapshot snap;
     if (!load(snap)) return std::nullopt;
 
@@ -314,7 +316,7 @@ std::optional<std::string> addPkcs11Key(const std::string& uri,
         if (existing.type == "pkcs11" && existing.uri == uri) {
             if (activate) {
                 std::string err;
-                activateKey(existing.id, err);
+                activateKey(existing.id, err, username);
             }
             return existing.id;
         }
@@ -324,16 +326,16 @@ std::optional<std::string> addPkcs11Key(const std::string& uri,
     snap.keys.push_back(keyInfoToRegistryKey(id, "pkcs11", label, "", uri, true, info));
     if (activate || snap.activeKeyId.empty()) {
         snap.activeKeyId = id;
-        if (!writeConfigFromActive(&snap.keys.back())) {
+        if (!writeConfigFromActive(&snap.keys.back(), username)) {
             return std::nullopt;
         }
     }
     if (!save(snap)) return std::nullopt;
-    AuditLog::logFileSystemAccess("REGISTER_KEY", uri, true, "", id);
+    AuditLog::logFileSystemAccess("REGISTER_KEY", uri, true, username, id);
     return id;
 }
 
-bool removeKey(const std::string& id, std::string& errorOut) {
+bool removeKey(const std::string& id, std::string& errorOut, const std::string& username) {
     RegistrySnapshot snap;
     if (!load(snap)) {
         errorOut = "Failed to load key registry";
@@ -356,7 +358,7 @@ bool removeKey(const std::string& id, std::string& errorOut) {
         try {
             if (std::filesystem::exists(it->path)) {
                 std::filesystem::remove(it->path);
-                AuditLog::logFileSystemAccess("DELETE_KEY", it->path, true, "", id);
+                AuditLog::logFileSystemAccess("DELETE_KEY", it->path, true, username, id);
             }
         } catch (const std::filesystem::filesystem_error& e) {
             LOG_WARN << "Failed to delete PEM file " << it->path << ": " << e.what();
@@ -371,7 +373,7 @@ bool removeKey(const std::string& id, std::string& errorOut) {
     return true;
 }
 
-bool activateKey(const std::string& id, std::string& errorOut) {
+bool activateKey(const std::string& id, std::string& errorOut, const std::string& username) {
     RegistrySnapshot snap;
     if (!load(snap)) {
         errorOut = "Failed to load key registry";
@@ -393,7 +395,7 @@ bool activateKey(const std::string& id, std::string& errorOut) {
 
     const auto prevFp = previousActiveFingerprint();
     snap.activeKeyId = id;
-    if (!writeConfigFromActive(&*keyOpt)) {
+    if (!writeConfigFromActive(&*keyOpt, username)) {
         errorOut = "Failed to update configuration";
         return false;
     }
@@ -404,7 +406,7 @@ bool activateKey(const std::string& id, std::string& errorOut) {
 
     AuditLog::logFileSystemAccess("ACTIVATE_KEY",
                                   keyOpt->type == "pem" ? keyOpt->path : keyOpt->uri,
-                                  true, "", id);
+                                  true, username, id);
 
     return prevFp && *prevFp != keyOpt->fingerprint;
 }
