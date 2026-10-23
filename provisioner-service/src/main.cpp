@@ -229,7 +229,8 @@ void printHelp(const char* programName) {
     std::cout << "HTTPS Support:\n"
               << "  By default, the application generates a self-signed certificate\n"
               << "  and sets up an HTTPS listener. The certificate is valid for 1 year\n"
-              << "  and is regenerated every time the application starts.\n"
+              << "  and kept across restarts. It is replaced when fewer than 30 days\n"
+              << "  remain or it no longer names this host.\n"
               << std::endl;
 }
 
