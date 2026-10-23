@@ -325,6 +325,24 @@ class AuditLog(UITest):
         self.assertEqual(("Sign-in", USER, "LOGIN", "Success"), rows[0])
         self.assertEqual(("Sign-in", USER, "LOGIN", "Failed"), rows[1])
 
+    def last_user(self, where):
+        return self.station.sql(AUDIT, f"SELECT username FROM audit_log WHERE {where} "
+                                       "ORDER BY id DESC LIMIT 1;").strip()
+
+    def test_log_reads_and_file_writes_record_who(self):
+        self.b.get(f"/service-log/{UNIT}")
+        self.assertEqual(USER, self.last_user(f"event_type = 'SYSTEMD_LOG_ACCESS' AND target_path = '{UNIT}'"))
+
+        setting = "RPI_DEVICE_BOOTLOADER_CONFIG_FILE"
+        before = self.station.config().get(setting)
+        try:
+            status, _ = self.b.fetch("/options/bootloader-config/use", "POST", {"choice": "default"})
+            self.assertEqual(200, status)
+            self.assertEqual(USER, self.last_user("operation = 'WRITE' "
+                                                  "AND target_path = '/etc/rpi-sb-provisioner/config'"))
+        finally:
+            self.station.set_config(**{setting: before})
+
     def test_limit_choice(self):
         self.station.sql(AUDIT, "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i < 300) "
                                 "INSERT INTO audit_log (timestamp, event_type, handler_path) "

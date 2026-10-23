@@ -1884,18 +1884,18 @@ namespace provisioner {
                 std::string serialDir = "/var/log/rpi-sb-provisioner/" + provisioner::utils::sanitize_path_component(device.serial);
                 std::string endpointDir = "/var/log/rpi-sb-provisioner/" + provisioner::utils::sanitize_path_component(device.port);
                 
-                auto tryReadLog = [](const std::string &primaryDir, const std::string &fallbackDir, const std::string &filename) -> std::string {
+                auto tryReadLog = [user = auth::username(req)](const std::string &primaryDir, const std::string &fallbackDir, const std::string &filename) -> std::string {
                     for (const auto &dir : {primaryDir, fallbackDir}) {
                         if (dir.empty()) continue;
                         std::string path = dir + "/" + filename;
                         std::ifstream f(path);
                         if (f.is_open()) {
-                            AuditLog::logFileSystemAccess("READ", path, true);
+                            AuditLog::logFileSystemAccess("READ", path, true, user);
                             std::stringstream buf;
                             buf << f.rdbuf();
                             return buf.str();
                         }
-                        AuditLog::logFileSystemAccess("READ", path, false);
+                        AuditLog::logFileSystemAccess("READ", path, false, user);
                     }
                     return {};
                 };
@@ -2034,7 +2034,7 @@ namespace provisioner {
             if (!logFile.is_open()) {
                 LOG_ERROR << "Failed to open log file: " << logPath;
                 // Log failed file access to audit log
-                AuditLog::logFileSystemAccess("READ", logPath, false);
+                AuditLog::logFileSystemAccess("READ", logPath, false, auth::username(req));
                 
                 auto resp = provisioner::utils::createErrorResponse(
                     req,
@@ -2049,7 +2049,7 @@ namespace provisioner {
             }
 
             // Log successful file access to audit log
-            AuditLog::logFileSystemAccess("READ", logPath, true);
+            AuditLog::logFileSystemAccess("READ", logPath, true, auth::username(req));
             
             LOG_INFO << "Successfully opened log file: " << logPath;
             std::stringstream buffer;
@@ -2225,7 +2225,7 @@ namespace provisioner {
                 AuditLog::logFileSystemAccess("DENIED_PRIVATE_KEY_ACCESS", 
                     "/var/log/rpi-sb-provisioner/" + serialno + "/keypair/" + serialno + ".der", 
                     false, 
-                    "", 
+                    auth::username(req), 
                     "Private key API is disabled for security. Client IP: " + AuditLog::getClientIP(req));
                 
                 auto resp = provisioner::utils::createErrorResponse(
@@ -2274,7 +2274,7 @@ namespace provisioner {
             std::ifstream keyFile(keyPath);
             if (!keyFile.is_open()) {
                 // Log failed file access to audit log
-                AuditLog::logFileSystemAccess("READ_PRIVATE_KEY", keyPath, false, "", 
+                AuditLog::logFileSystemAccess("READ_PRIVATE_KEY", keyPath, false, auth::username(req), 
                     "Private key file not found for serial: " + serialno + ", Client IP: " + AuditLog::getClientIP(req));
                 
                 auto resp = provisioner::utils::createErrorResponse(
@@ -2294,7 +2294,7 @@ namespace provisioner {
                      << " is being transmitted to " << AuditLog::getClientIP(req);
             
             // Log successful private key access to audit log
-            AuditLog::logFileSystemAccess("READ_PRIVATE_KEY", keyPath, true, "", 
+            AuditLog::logFileSystemAccess("READ_PRIVATE_KEY", keyPath, true, auth::username(req), 
                 "CRITICAL: Private key transmitted for serial: " + serialno + 
                 ", Client IP: " + AuditLog::getClientIP(req) + 
                 ", User-Agent: " + req->getHeader("User-Agent"));
@@ -2498,7 +2498,7 @@ namespace provisioner {
                 if (std::filesystem::exists(filePath)) {
                     try {
                         std::filesystem::remove(filePath);
-                        AuditLog::logFileSystemAccess("DELETE_FLAG", filePath, true, "",
+                        AuditLog::logFileSystemAccess("DELETE_FLAG", filePath, true, auth::username(req),
                             "Special flag removed: " + flagId + " for device " + realSerial);
                         LOG_INFO << "Removed special flag: " << flagId << " for device " << realSerial;
                     } catch (const std::exception &e) {
@@ -2538,7 +2538,7 @@ namespace provisioner {
                 f << mode << "\n";
                 f.close();
 
-                AuditLog::logFileSystemAccess("SET_FLAG", filePath, true, "",
+                AuditLog::logFileSystemAccess("SET_FLAG", filePath, true, auth::username(req),
                     "Special flag set: " + flagId + " (" + mode + ") for device " + realSerial);
                 LOG_INFO << "Set special flag: " << flagId << " (" << mode << ") for device " << realSerial;
             }

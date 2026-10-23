@@ -12,6 +12,7 @@
 #include "include/manufacturing.h"
 #include "utils.h"
 #include "include/audit.h"
+#include "include/auth.h"
 
 namespace provisioner {
 
@@ -88,7 +89,7 @@ namespace provisioner {
                 LOG_ERROR << "Manufacturing database file does not exist: " << *dbPath;
                 
                 // Log failed file access to audit log
-                AuditLog::logFileSystemAccess("READ", *dbPath, false);
+                AuditLog::logFileSystemAccess("READ", *dbPath, false, auth::username(req));
                 
                 auto resp = utils::createErrorResponse(
                     req,
@@ -103,7 +104,7 @@ namespace provisioner {
             }
             
             // Log successful database access to audit log
-            AuditLog::logFileSystemAccess("READ", *dbPath, true);
+            AuditLog::logFileSystemAccess("READ", *dbPath, true, auth::username(req));
             
             // Open the database
             sqlite3 *db;

@@ -70,7 +70,7 @@ Every value is a string. A field is left out when the entry has no value for it.
 | operation       | What was done, such as `DELETE`, `UPLOAD`, `HOOK_SAVE` or `LOGIN`                               |
 | target_path     | File or unit acted on                                                                          |
 | success         | `Yes` or `No`                                                                                  |
-| username        | Who made the entry: the signed-in operator or the token's owner, or for a sign-in the name tried. Recorded for endpoint access, sign-ins, token changes, hook changes and bootloader configuration changes; empty for most other file operations and for service log reads |
+| username        | Who made the entry: the signed-in operator or the token's owner, or for a sign-in the name tried. Recorded for every entry a request causes, except reads of the configuration file; empty for work the service does on its own, such as hashing an image |
 | additional_info | Further detail, such as why a sign-in failed or a hook's SHA-256 before and after              |
 
 **Event Types:**
