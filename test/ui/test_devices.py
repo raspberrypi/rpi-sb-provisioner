@@ -191,3 +191,35 @@ class DeviceDetail(UITest):
         self.b.get("/devices/ffffffffffffffff")
         self.assertIn("Device not found", self.b.text())
         self.assertClean(error_page=True)
+
+
+class KeyDownload(UITest):
+    """A device's public key is served from wherever triage put it."""
+    SERIAL = "uitestkey0001"
+    DEFAULT = f"/var/log/rpi-sb-provisioner/{SERIAL}/keypair"
+    CUSTOM = "/srv/rpi-sb-provisioner/uitest-keys"
+
+    def setUp(self):
+        super().setUp()
+        self.station.sh(f"rm -rf {self.CUSTOM} /var/log/rpi-sb-provisioner/{self.SERIAL}; "
+                        f"mkdir -p {self.DEFAULT} {self.CUSTOM}; "
+                        f"echo default-key > {self.DEFAULT}/{self.SERIAL}.pub")
+        self.station.set_config(RPI_DEVICE_RETRIEVE_KEYPAIR="")
+        self.b.get("/devices")
+
+    def tearDown(self):
+        self.station.set_config(RPI_DEVICE_RETRIEVE_KEYPAIR="")
+        self.station.sh(f"rm -rf {self.CUSTOM} /var/log/rpi-sb-provisioner/{self.SERIAL}")
+        super().tearDown()
+
+    def key(self):
+        status, body = self.b.fetch(f"/devices/{self.SERIAL}/key/public")
+        self.assertEqual(200, status, body)
+        return body.strip()
+
+    def test_the_configured_directory_is_tried_first(self):
+        self.assertEqual("default-key", self.key())
+        self.station.set_config(RPI_DEVICE_RETRIEVE_KEYPAIR=self.CUSTOM)
+        self.assertEqual("default-key", self.key(), "keys from before the directory was set stay found")
+        self.station.sh(f"echo custom-key > {self.CUSTOM}/{self.SERIAL}.pub")
+        self.assertEqual("custom-key", self.key())
