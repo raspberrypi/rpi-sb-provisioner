@@ -140,6 +140,7 @@ namespace provisioner {
                     jsonOptions[key] = value;
                 }
                 resp->setStatusCode(k200OK);
+                resp->setContentTypeCode(CT_APPLICATION_JSON);
                 resp->setBody(Json::FastWriter().write(jsonOptions));
             }
             
