@@ -90,7 +90,7 @@ compute_image_summary() {
 #                   that have run compute_image_summary need not pass it.
 #   $5 (ip)       - Optional IP address.
 #
-# The function creates/updates an SQLite database at /var/log/rpi-sb-provisioner/state.db
+# The function creates/updates an SQLite database at /srv/rpi-sb-provisioner/state.db
 # tracking the provisioning state of devices over time. Each state change creates a new
 # record with a timestamp.
 

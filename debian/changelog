@@ -145,10 +145,10 @@ rpi-sb-provisioner (2.4.0) unstable; urgency=high
     every time.
 
   * Sandbox the web UI service. It keeps running as root, because it writes
-    what the provisioners run as root, but it no longer holds any
-    capabilities, sees /usr, /boot and /etc read-only apart from
-    /etc/rpi-sb-provisioner, gets a private /tmp and runs under a system-call
-    filter. A workdir or image under /usr or /etc is no longer writable by it.
+    what the provisioners run as root, but it keeps only CAP_DAC_OVERRIDE,
+    sees /usr, /boot and /etc read-only apart from /etc/rpi-sb-provisioner,
+    gets a private /tmp and runs under a system-call filter. A workdir or
+    image under /usr or /etc is no longer writable by it.
 
   * Stop leaving uploaded signing keys in plaintext when wrapping them fails.
     The wrapped key was written over a file already made read-only, and the
