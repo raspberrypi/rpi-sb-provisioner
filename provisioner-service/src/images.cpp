@@ -2728,6 +2728,7 @@ namespace provisioner {
                             ? "File uploaded successfully (renamed to avoid conflict)"
                             : "File uploaded successfully";
                         result["sha256"] = sha256Hex.empty() ? "Calculating..." : sha256Hex;
+                        publishProgress("complete");
                         resp->setBody(result.toStyledString());
                         ctx->callback(resp);
                     }
