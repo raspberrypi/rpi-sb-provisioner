@@ -1027,7 +1027,7 @@
     std::string bootOrderMatchRaw = options.count("RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE") ? options["RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE"] : "1";
     bool bootOrderMatchStorage = !(bootOrderMatchRaw.empty() || bootOrderMatchRaw == "0" || bootOrderMatchRaw == "false" || bootOrderMatchRaw == "no" || bootOrderMatchRaw == "off");
     std::string rpibootGpio = options.count("RPI_DEVICE_RPIBOOT_GPIO") ? options["RPI_DEVICE_RPIBOOT_GPIO"] : "";
-    std::string connectApiKey = options.count("RPI_CONNECT_API_KEY") ? options["RPI_CONNECT_API_KEY"] : "";
+    bool connectKeySaved = options.count("RPI_CONNECT_API_KEY") && !options["RPI_CONNECT_API_KEY"].empty();
     std::string connectDescription = options.count("RPI_CONNECT_DESCRIPTION") ? options["RPI_CONNECT_DESCRIPTION"] : "";
     %>
 
@@ -1655,12 +1655,13 @@
                 <label class="field-label" for="RPI_CONNECT_API_KEY">Connect Management API Access Token <span class="optional-badge">Optional</span></label>
                 <div class="pin-input-wrapper">
                     <input type="password" class="field-input" id="RPI_CONNECT_API_KEY" name="RPI_CONNECT_API_KEY"
-                           value="<%c++ $$ << HttpViewData::htmlTranslate(connectApiKey); %>"
-                           placeholder="rporg_..."
-                           onblur="validateAndSaveField('RPI_CONNECT_API_KEY')">
+                           value="" autocomplete="off"
+                           placeholder="<%c++ $$ << (connectKeySaved ? "Saved: enter a new token to replace it" : "rporg_..."); %>"
+                           onblur="saveConnectKey()">
                     <button type="button" class="pin-toggle-visibility" onclick="toggleConnectKeyVisibility()" aria-label="Toggle access token visibility">&#128065;</button>
                 </div>
                 <div id="feedback-RPI_CONNECT_API_KEY" class="field-feedback"></div>
+                <button type="button" class="pin-remove-btn" id="connect-key-remove" onclick="removeConnectKey()" <%c++ if (!connectKeySaved) $$ << "hidden"; %>>Remove token</button>
 
                 <div class="inline-help">
                     <span class="inline-help-icon">&#9432;</span>
@@ -2597,6 +2598,31 @@
             } else {
                 pinInput.type = 'password';
                 icon.innerHTML = '&#128065;';  // Eye
+            }
+        }
+
+        // The Connect token is write-only: the page never holds a saved one,
+        // so an empty field leaves it alone and only Remove clears it.
+        function markConnectKeySaved(saved) {
+            const keyInput = document.getElementById('RPI_CONNECT_API_KEY');
+            keyInput.value = '';
+            keyInput.placeholder = saved ? 'Saved: enter a new token to replace it' : 'rporg_...';
+            document.getElementById('connect-key-remove').hidden = !saved;
+        }
+
+        async function saveConnectKey() {
+            if (document.getElementById('RPI_CONNECT_API_KEY').value === '') return;
+            await validateAndSaveField('RPI_CONNECT_API_KEY');
+            if (document.getElementById('feedback-RPI_CONNECT_API_KEY').classList.contains('success')) {
+                markConnectKeySaved(true);
+            }
+        }
+
+        async function removeConnectKey() {
+            document.getElementById('RPI_CONNECT_API_KEY').value = '';
+            await validateAndSaveField('RPI_CONNECT_API_KEY');
+            if (document.getElementById('feedback-RPI_CONNECT_API_KEY').classList.contains('success')) {
+                markConnectKeySaved(false);
             }
         }
 

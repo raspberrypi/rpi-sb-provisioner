@@ -82,6 +82,27 @@ class Options(UITest):
         self.b.click("[aria-label='Toggle access token visibility']")
         self.assertEqual("text", el.get_attribute("type"))
 
+    def test_connect_key_is_write_only(self):
+        secret = "rporg_uitestsecret"
+        self.station.set_config(RPI_CONNECT_API_KEY=secret)
+        self.b.get("/options/get")
+        self.assertNotIn(secret, self.b.d.page_source)
+        self.assertIn("Saved", self.b.el("#RPI_CONNECT_API_KEY").get_attribute("placeholder"))
+        status, body = self.b.fetch("/options/get")
+        self.assertEqual(200, status)
+        self.assertNotIn("RPI_CONNECT_API_KEY", body)
+        # Leaving the empty field must not wipe the saved token.
+        self.b.el("#RPI_CONNECT_API_KEY").click()
+        self.b.el("#RPI_CONNECT_DESCRIPTION").click()
+        self.b.settle()
+        self.assertEqual(secret, self.cfg("RPI_CONNECT_API_KEY"))
+        self.type_and_leave("RPI_CONNECT_API_KEY", "rporg_replacement")
+        self.saved("RPI_CONNECT_API_KEY", "rporg_replacement")
+        self.assertEqual("", self.b.el("#RPI_CONNECT_API_KEY").get_attribute("value"))
+        self.b.click("#connect-key-remove")
+        self.saved("RPI_CONNECT_API_KEY", "")
+        self.assertFalse(self.b.el("#connect-key-remove").is_displayed())
+
     def test_checkboxes_save_one_or_nothing(self):
         self.choose("PROVISIONING_STYLE", "secure-boot")
         for field in ("RPI_DEVICE_LOCK_JTAG", "RPI_DEVICE_EEPROM_WP_SET", "RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE"):

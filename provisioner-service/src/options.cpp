@@ -131,6 +131,10 @@ namespace provisioner {
                 viewData.insert("currentPage", std::string("options"));
                 resp = HttpResponse::newHttpViewResponse("options.csp", viewData);
             } else {
+                // The Connect token is write-only, like the HSM PIN. Leaving it
+                // out, rather than masking it, means a client that writes these
+                // settings back cannot replace the token with the mask.
+                configValues.erase("RPI_CONNECT_API_KEY");
                 Json::Value jsonOptions;
                 for (const auto& [key, value] : configValues) {
                     jsonOptions[key] = value;
