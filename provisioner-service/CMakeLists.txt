@@ -298,6 +298,9 @@ find_package(OpenSSL REQUIRED)
 # derive the device-bound key-wrapping key from the on-SoC OTP key.
 find_library(RPIFWCRYPTO_LIBRARY NAMES rpifwcrypto REQUIRED)
 
+# PAM, for operator sign-in to the web UI (libpam0g-dev).
+find_library(PAM_LIBRARY NAMES pam REQUIRED)
+
 # Define the views directory and output directory for compiled templates
 set(VIEWS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/views)
 set(CSP_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/views_output)
@@ -341,12 +344,15 @@ target_sources(rpi-provisioner-ui
     src/main.cpp
     src/images.cpp
     src/options.cpp
+    src/bootloader_config.cpp
     src/devices.cpp
     src/customisation.cpp
     src/services.cpp
     src/manufacturing.cpp
     src/scantool.cpp
     src/audit.cpp
+    src/auth.cpp
+    src/api_tokens.cpp
     src/utils.cpp
     src/keywrap.cpp
     src/keyregistry.cpp
@@ -376,6 +382,7 @@ target_link_libraries(rpi-provisioner-ui
     OpenSSL::SSL
     OpenSSL::Crypto
     ${RPIFWCRYPTO_LIBRARY}
+    ${PAM_LIBRARY}
     ${LibArchive_LIBRARIES}
     ${ZSTD_LIBRARIES}
     ${LIBLZMA_LIBRARIES}
@@ -408,5 +415,6 @@ install(DIRECTORY "${CMAKE_SOURCE_DIR}/static/"
         DESTINATION /usr/share/rpi-sb-provisioner/static
         FILES_MATCHING 
         PATTERN "*.js"
+        PATTERN "*.json"
         PATTERN "*.svg"
         PERMISSIONS OWNER_READ GROUP_READ WORLD_READ)

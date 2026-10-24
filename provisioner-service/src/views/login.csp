@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Sign in - Raspberry Pi Secure Boot Provisioner</title>
+    <%view stylesheet %>
+    <style>
+        .login-container {
+            max-width: 360px;
+            margin: 40px auto;
+            padding: 24px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            background: #fff;
+        }
+        .login-container h1 {
+            font-size: 20px;
+            margin: 0 0 4px;
+        }
+        .login-container p.login-hint {
+            color: #555;
+            font-size: 13px;
+            margin: 0 0 20px;
+        }
+        .login-container label {
+            display: block;
+            font-weight: bold;
+            margin: 12px 0 4px;
+        }
+        .login-container input[type="text"],
+        .login-container input[type="password"] {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 8px;
+            font-size: 15px;
+        }
+        .login-container button {
+            margin-top: 20px;
+            width: 100%;
+            padding: 10px;
+            font-size: 15px;
+            background: #0066cc;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .login-error {
+            background: #fdecea;
+            color: #8a1c1c;
+            border: 1px solid #f5c2c0;
+            border-radius: 4px;
+            padding: 8px 10px;
+            margin-bottom: 12px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <%view navbar %>
+    <main id="main-content" class="login-container">
+        <h1>Raspberry Pi Secure Boot Provisioner</h1>
+        <p class="login-hint">Sign in with a system account in the <strong>rpi-sb-provisioner</strong> group.</p>
+        <%c++ auto error = @@.get<std::string>("error"); %>
+        <%c++ if(!error.empty()) { %>
+            <div class="login-error" role="alert"><%c++ $$ << HttpViewData::htmlTranslate(error); %></div>
+        <%c++ } %>
+        <form method="post" action="/login">
+            <input type="hidden" name="next" value="<%c++ $$ << HttpViewData::htmlTranslate(@@.get<std::string>("next")); %>">
+            <label for="username">Username</label>
+            <input type="text" id="username" name="username" autocomplete="username" autocapitalize="none" required autofocus>
+            <label for="password">Password</label>
+            <input type="password" id="password" name="password" autocomplete="current-password" required>
+            <button type="submit">Sign in</button>
+        </form>
+    </main>
+</body>
+</html>
+<%view-end%>

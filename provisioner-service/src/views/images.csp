@@ -31,7 +31,7 @@
     .image-upload-btn {
         padding: 6px 12px;
         font-size: 0.8rem;
-        background: #007bff;
+        background: #0062cc;
         color: white;
         border: none;
         border-radius: 4px;
@@ -52,24 +52,7 @@
     .image-empty {
         text-align: center;
         padding: 30px;
-        color: #888;
-    }
-    
-    .image-upload-zone {
-        border: 2px dashed #ccc;
-        border-radius: 8px;
-        padding: 20px;
-        text-align: center;
-        background: #fafafa;
-        transition: all 0.2s;
-        cursor: pointer;
-        margin: 8px;
-    }
-    
-    .image-upload-zone:hover,
-    .image-upload-zone.dragover {
-        border-color: #007bff;
-        background: #f0f7ff;
+        color: #595959;
     }
     
     .image-upload-progress {
@@ -89,13 +72,13 @@
     
     .image-upload-progress-fill {
         height: 100%;
-        background: #007bff;
+        background: #0062cc;
         transition: width 0.3s;
     }
     
     .image-upload-progress-fill.indeterminate {
         width: 100% !important;
-        background: linear-gradient(90deg, #007bff 25%, #4dabf7 50%, #007bff 75%);
+        background: linear-gradient(90deg, #0062cc 25%, #4dabf7 50%, #0062cc 75%);
         background-size: 200% 100%;
         animation: indeterminate-slide 1.5s linear infinite;
     }
@@ -118,7 +101,7 @@
     
     .image-upload-elapsed {
         font-size: 0.75rem;
-        color: #888;
+        color: #595959;
         text-align: center;
         margin-top: 4px;
     }
@@ -141,23 +124,24 @@
 <%c++ auto goldMasterFile = @@.get<std::map<std::string, std::string>>("options").count("GOLD_MASTER_OS_FILE") ? @@.get<std::map<std::string, std::string>>("options").at("GOLD_MASTER_OS_FILE") : std::string(); %>
 <div class="field-group">
     <label class="field-label">OS Image</label>
-    <input type="hidden" name="GOLD_MASTER_OS_FILE" id="GOLD_MASTER_OS_FILE" value="<%c++ $$ << goldMasterFile; %>">
+    <input type="hidden" name="GOLD_MASTER_OS_FILE" id="GOLD_MASTER_OS_FILE" value="<%c++ $$ << HttpViewData::htmlTranslate(goldMasterFile); %>">
     
     <!-- Image Browser -->
     <div class="image-browser-container">
         <div class="image-browser-header">
             <h4>Available Images</h4>
             <div class="image-browser-actions">
-                <button type="button" class="image-upload-btn" onclick="toggleImageUpload()">Upload New Image</button>
+                <button type="button" class="image-upload-btn" id="image-upload-toggle">Upload New Image</button>
             </div>
         </div>
         
         <!-- Upload Zone (hidden by default) -->
         <div id="image-upload-container" style="display: none;">
-            <div class="image-upload-zone" id="image-upload-zone">
-                <div>Drop an image file here or click to browse</div>
-                <div style="font-size: 0.8rem; color: #888; margin-top: 8px;">Plain image (.img, .img.xz, .img.zst) or IDP artefact archive (.tar.xz, .tar.zst)</div>
-                <input type="file" id="image-file-input" style="display: none;">
+            <div class="upload-zone" id="image-upload-zone">
+                <div class="upload-zone-text">Drop an image file here, or</div>
+                <button type="button" class="cust-btn cust-btn-secondary upload-choose">Choose a file&hellip;</button>
+                <div class="upload-zone-hint">Plain image (.img, .img.xz, .img.zst) or IDP artefact archive (.tar.xz, .tar.zst)</div>
+                <input type="file" id="image-file-input" hidden>
             </div>
             <div id="image-upload-progress" class="image-upload-progress" style="display: none;">
                 <div class="image-upload-progress-bar">
@@ -196,7 +180,14 @@
     </div>
 </div>
 
+<script src="/static/js/upload-zone.js"></script>
 <script>
+    // Everything here comes from an uploaded image's own metadata, which
+    // whoever built the image chose.
+    function escapeImageText(value) {
+        return String(value).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+    }
+
     // ===== Image Browser Functions =====
     let imageList = [];
     let currentImageSelection = document.getElementById('GOLD_MASTER_OS_FILE')?.value || '';
@@ -419,24 +410,24 @@
         if (img.is_idp) {
             const idpSection = document.createElement('div');
             idpSection.style.cssText = 'margin-top: 16px; padding-top: 16px; border-top: 1px solid #e0e0e0;';
-            idpSection.innerHTML = '<span style="color: #888;">Analysing IDP artefact\u2026</span>';
+            idpSection.innerHTML = '<span style="color: #595959;">Analysing IDP artefact\u2026</span>';
             detailsEl.appendChild(idpSection);
 
             fetch('/analyze-image?name=' + encodeURIComponent(img.name))
                 .then(r => r.json())
                 .then(data => {
                     if (data.error) {
-                        idpSection.innerHTML = '<span style="color: #dc3545;">Error: ' + data.error + '</span>';
+                        idpSection.innerHTML = '<span style="color: #dc3545;">Error: ' + escapeImageText(data.error) + '</span>';
                         return;
                     }
                     let html = '<h4 style="margin: 0 0 8px 0; color: #0c5460;">IDP Metadata</h4><dl style="margin:0; font-size: 0.9rem;">';
-                    if (data.image_name) html += '<dt style="font-weight:600; margin-top:8px; color:#555;">Image Name</dt><dd style="margin:4px 0 0 0;">' + data.image_name + '</dd>';
-                    if (data.image_version) html += '<dt style="font-weight:600; margin-top:8px; color:#555;">Version</dt><dd style="margin:4px 0 0 0;">' + data.image_version + '</dd>';
-                    if (data.device_class) html += '<dt style="font-weight:600; margin-top:8px; color:#555;">Device Family</dt><dd style="margin:4px 0 0 0;">' + data.device_class + ' <span style="color:#888;">(from ' + (data.device_class_raw || '?') + ')</span></dd>';
-                    if (data.storage_type) html += '<dt style="font-weight:600; margin-top:8px; color:#555;">Storage Type</dt><dd style="margin:4px 0 0 0;">' + data.storage_type + '</dd>';
+                    if (data.image_name) html += '<dt style="font-weight:600; margin-top:8px; color:#555;">Image Name</dt><dd style="margin:4px 0 0 0;">' + escapeImageText(data.image_name) + '</dd>';
+                    if (data.image_version) html += '<dt style="font-weight:600; margin-top:8px; color:#555;">Version</dt><dd style="margin:4px 0 0 0;">' + escapeImageText(data.image_version) + '</dd>';
+                    if (data.device_class) html += '<dt style="font-weight:600; margin-top:8px; color:#555;">Device Family</dt><dd style="margin:4px 0 0 0;">' + escapeImageText(data.device_class) + ' <span style="color:#595959;">(from ' + escapeImageText((data.device_class_raw || '?')) + ')</span></dd>';
+                    if (data.storage_type) html += '<dt style="font-weight:600; margin-top:8px; color:#555;">Storage Type</dt><dd style="margin:4px 0 0 0;">' + escapeImageText(data.storage_type) + '</dd>';
                     html += '<dt style="font-weight:600; margin-top:8px; color:#555;">Encryption</dt><dd style="margin:4px 0 0 0;">' + (data.encryption ? 'Yes' : 'No') + '</dd>';
-                    if (data.cipher) html += '<dt style="font-weight:600; margin-top:8px; color:#555;">Cipher</dt><dd style="margin:4px 0 0 0;">' + data.cipher + '</dd>';
-                    if (data.partition_count !== undefined) html += '<dt style="font-weight:600; margin-top:8px; color:#555;">Partitions</dt><dd style="margin:4px 0 0 0;">' + data.partition_count + '</dd>';
+                    if (data.cipher) html += '<dt style="font-weight:600; margin-top:8px; color:#555;">Cipher</dt><dd style="margin:4px 0 0 0;">' + escapeImageText(data.cipher) + '</dd>';
+                    if (data.partition_count !== undefined) html += '<dt style="font-weight:600; margin-top:8px; color:#555;">Partitions</dt><dd style="margin:4px 0 0 0;">' + escapeImageText(data.partition_count) + '</dd>';
                     html += '</dl>';
                     idpSection.innerHTML = html;
                 })
@@ -458,7 +449,7 @@
             const bootStatus = document.createElement('dd');
             bootStatus.id = 'boot-package-status-' + img.name.replace(/[^a-zA-Z0-9]/g, '_');
             bootStatus.style.cssText = 'margin: 4px 0 0 0;';
-            bootStatus.innerHTML = '<span style="color: #888;">Checking\u2026</span>';
+            bootStatus.innerHTML = '<span style="color: #595959;">Checking\u2026</span>';
             bootSection.appendChild(bootStatus);
             
             detailsEl.appendChild(bootSection);
@@ -486,7 +477,7 @@
 
             const deselectBtn = document.createElement('button');
             deselectBtn.type = 'button';
-            deselectBtn.style.cssText = 'padding: 8px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;';
+            deselectBtn.style.cssText = 'padding: 8px 12px; background: #5c636a; color: white; border: none; border-radius: 4px; cursor: pointer;';
             deselectBtn.textContent = 'Deselect Image';
             deselectBtn.onclick = () => clearImageSelection();
             actions.appendChild(deselectBtn);
@@ -500,7 +491,7 @@
                 const generateBootBtn = document.createElement('button');
                 generateBootBtn.type = 'button';
                 generateBootBtn.id = 'generate-boot-btn-' + img.name.replace(/[^a-zA-Z0-9]/g, '_');
-                generateBootBtn.style.cssText = 'padding: 8px 12px; background: #17a2b8; color: white; border: none; border-radius: 4px; cursor: pointer;';
+                generateBootBtn.style.cssText = 'padding: 8px 12px; background: #117a8b; color: white; border: none; border-radius: 4px; cursor: pointer;';
                 generateBootBtn.textContent = 'Generate Boot Package';
                 generateBootBtn.onclick = () => generateBootPackage(img.name);
                 actions.appendChild(generateBootBtn);
@@ -508,7 +499,7 @@
 
             const clearCacheBtn = document.createElement('button');
             clearCacheBtn.type = 'button';
-            clearCacheBtn.style.cssText = 'padding: 8px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;';
+            clearCacheBtn.style.cssText = 'padding: 8px 12px; background: #5c636a; color: white; border: none; border-radius: 4px; cursor: pointer;';
             clearCacheBtn.textContent = 'Clear Cached Files';
             clearCacheBtn.onclick = () => clearImageCache(img.name);
             actions.appendChild(clearCacheBtn);
@@ -534,9 +525,9 @@
             if (response.ok) {
                 const data = await response.json();
                 if (data.exists) {
-                    statusEl.innerHTML = '<span style="color: #28a745;">&#10003; Available</span>';
+                    statusEl.innerHTML = '<span style="color: #1e7e34;">&#10003; Available</span>';
                     if (data.version) {
-                        statusEl.innerHTML += '<br><span style="font-size: 0.85rem; color: #666;">Version: ' + data.version + '</span>';
+                        statusEl.innerHTML += '<br><span style="font-size: 0.85rem; color: #666;">Version: ' + escapeImageText(data.version) + '</span>';
                     }
                 } else if (data.status === 'no_signing_key') {
                     statusEl.innerHTML = '';
@@ -545,20 +536,20 @@
                     // rest of the page agree if it still thinks otherwise.
                     if (signingMaterialAvailable()) refreshSigningStatus();
                 } else if (data.status === 'unsupported') {
-                    statusEl.innerHTML = '<span style="color: #888;">Not applicable for this provisioning style</span>';
+                    statusEl.innerHTML = '<span style="color: #595959;">Not applicable for this provisioning style</span>';
                 } else if (data.generating) {
-                    statusEl.innerHTML = '<span style="color: #ffc107;">Generating…</span>';
+                    statusEl.innerHTML = '<span style="color: #8a6100;">Generating…</span>';
                     // Poll for updates
                     setTimeout(() => checkBootPackageStatus(name), 2000);
                 } else {
-                    statusEl.innerHTML = '<span style="color: #888;">Not generated</span>';
+                    statusEl.innerHTML = '<span style="color: #595959;">Not generated</span>';
                 }
             } else {
-                statusEl.innerHTML = '<span style="color: #888;">Not generated</span>';
+                statusEl.innerHTML = '<span style="color: #595959;">Not generated</span>';
             }
         } catch (error) {
             console.error('Error checking boot package status:', error);
-            statusEl.innerHTML = '<span style="color: #888;">Unknown</span>';
+            statusEl.innerHTML = '<span style="color: #595959;">Unknown</span>';
         }
     }
     
@@ -573,7 +564,7 @@
         const btn = document.getElementById(btnId);
         
         if (statusEl) {
-            statusEl.innerHTML = '<span style="color: #ffc107;">Generating…</span>';
+            statusEl.innerHTML = '<span style="color: #8a6100;">Generating…</span>';
         }
         if (btn) {
             btn.disabled = true;
@@ -583,7 +574,7 @@
         
         try {
             const response = await fetch('/generate-boot-package?name=' + encodeURIComponent(name), {
-                method: 'GET'
+                method: 'POST'
             });
             
             if (response.ok) {
@@ -604,7 +595,7 @@
                             if (data.exists) {
                                 clearInterval(checkInterval);
                                 if (statusEl) {
-                                    statusEl.innerHTML = '<span style="color: #28a745;">&#10003; Available</span>';
+                                    statusEl.innerHTML = '<span style="color: #1e7e34;">&#10003; Available</span>';
                                 }
                                 if (btn) {
                                     btn.disabled = false;
@@ -1020,44 +1011,14 @@
     
     // Image display is now handled inline in the list
     
-    function toggleImageUpload() {
-        const container = document.getElementById('image-upload-container');
-        container.style.display = container.style.display === 'none' ? 'block' : 'none';
-    }
-    
-    // Image upload handling
-    const imageUploadZone = document.getElementById('image-upload-zone');
-    const imageFileInput = document.getElementById('image-file-input');
-    
-    if (imageUploadZone) {
-        imageUploadZone.addEventListener('click', () => imageFileInput.click());
-        
-        imageUploadZone.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            imageUploadZone.classList.add('dragover');
-        });
-        
-        imageUploadZone.addEventListener('dragleave', () => {
-            imageUploadZone.classList.remove('dragover');
-        });
-        
-        imageUploadZone.addEventListener('drop', (e) => {
-            e.preventDefault();
-            imageUploadZone.classList.remove('dragover');
-            const files = e.dataTransfer.files;
-            if (files.length > 0) {
-                uploadImage(files[0]);
-            }
-        });
-    }
-    
-    if (imageFileInput) {
-        imageFileInput.addEventListener('change', (e) => {
-            if (e.target.files.length > 0) {
-                uploadImage(e.target.files[0]);
-            }
-        });
-    }
+    const imageUploader = RpiUpload.attach({
+        toggle: document.getElementById('image-upload-toggle'),
+        panel: document.getElementById('image-upload-container'),
+        zone: document.getElementById('image-upload-zone'),
+        input: document.getElementById('image-file-input'),
+        onFile: file => uploadImage(file),
+    });
+    function toggleImageUpload() { imageUploader.close(); }
     
     function describeProcessingPhase(filename) {
         const lower = filename.toLowerCase();

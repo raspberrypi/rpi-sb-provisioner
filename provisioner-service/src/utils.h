@@ -190,16 +190,18 @@ namespace provisioner {
          * The PIN is stored in a separate file with restrictive permissions (0400)
          * 
          * @param pin The PIN to save
+         * @param username Who asked, for the audit log
          * @return true if successful, false otherwise
          */
-        bool savePkcs11Pin(const std::string& pin);
+        bool savePkcs11Pin(const std::string& pin, const std::string& username);
         
         /**
          * Remove the PKCS#11 PIN file
          *
+         * @param username Who asked, for the audit log
          * @return true if successful or file didn't exist, false on error
          */
-        bool removePkcs11Pin();
+        bool removePkcs11Pin(const std::string& username);
 
         /**
          * Check whether the file at path is stored device-wrapped (encrypted at
@@ -217,10 +219,19 @@ namespace provisioner {
          * call this automatically. The result is written at 0400.
          *
          * @param path Path to the secret file to wrap in place
+         * @param username Who consented, for the audit log
          * @return true if the file is wrapped on return (including the
          *         already-wrapped no-op case), false on failure
          */
-        bool wrapFileInPlace(const std::string& path);
+        bool wrapFileInPlace(const std::string& path, const std::string& username);
+
+        /**
+         * Replace a secret file atomically: a fresh owner-read-only file is
+         * written, synced and renamed over the target. Rewriting a 0400 file
+         * in place only works with CAP_DAC_OVERRIDE, and a failure there used
+         * to go unnoticed, leaving the plaintext behind.
+         */
+        bool writeSecretFile(const std::string& path, const std::string& data);
 
         /**
          * True if any configured secret (the PKCS#11 PIN or the customer PEM
@@ -278,70 +289,6 @@ namespace provisioner {
             return "";
         }
         
-        // ===== CSRF Protection =====
-        
-        /**
-         * CSRF token manager - handles generation and validation of tokens
-         * Tokens are time-limited and single-use for maximum security
-         */
-        class CsrfTokenManager {
-        public:
-            static CsrfTokenManager& getInstance();
-            
-            /**
-             * Generate a new CSRF token for a session
-             * 
-             * @param sessionId A unique identifier for the session (can be IP + User-Agent hash)
-             * @return The generated token
-             */
-            std::string generateToken(const std::string& sessionId);
-            
-            /**
-             * Validate a CSRF token
-             * 
-             * @param sessionId The session identifier
-             * @param token The token to validate
-             * @return true if valid, false otherwise
-             */
-            bool validateToken(const std::string& sessionId, const std::string& token);
-            
-            /**
-             * Clean up expired tokens (call periodically)
-             */
-            void cleanupExpiredTokens();
-            
-        private:
-            CsrfTokenManager() = default;
-            
-            struct TokenInfo {
-                std::string token;
-                std::chrono::steady_clock::time_point createdAt;
-                bool used = false;
-            };
-            
-            std::mutex mutex_;
-            std::unordered_map<std::string, std::vector<TokenInfo>> sessionTokens_;
-            
-            static constexpr int TOKEN_VALIDITY_SECONDS = 3600;  // 1 hour
-            static constexpr int MAX_TOKENS_PER_SESSION = 10;
-            static constexpr int TOKEN_LENGTH = 32;
-        };
-        
-        /**
-         * Generate a session ID from request (IP + User-Agent hash)
-         * 
-         * @param req The HTTP request
-         * @return A session identifier string
-         */
-        std::string getSessionIdFromRequest(const drogon::HttpRequestPtr& req);
-        
-        /**
-         * Validate CSRF token from request header or body
-         * 
-         * @param req The HTTP request
-         * @return true if valid, false otherwise
-         */
-        bool validateCsrfToken(const drogon::HttpRequestPtr& req);
         /**
          * Sanitize path components to prevent directory traversal attacks
          * 
@@ -484,20 +431,34 @@ namespace provisioner {
          * guarantee.
          *
          * @param updates Key/value overrides to merge into the config
+         * @param username Who asked, for the audit log
          * @return The full merged config on success (for callers that need the
          *         post-write state), or std::nullopt if the write failed
          */
         std::optional<std::map<std::string, std::string>> setConfigValues(
-            const std::map<std::string, std::string>& updates);
+            const std::map<std::string, std::string>& updates,
+            const std::string& username);
 
         /**
          * Convenience wrapper around setConfigValues for a single key.
          *
          * @param key The configuration key to set
          * @param value The value to write (empty string clears the key)
+         * @param username Who asked, for the audit log
          * @return true if the config file was written successfully
          */
-        bool setConfigValue(const std::string& key, const std::string& value);
+        bool setConfigValue(const std::string& key, const std::string& value,
+                            const std::string& username);
+
+        /**
+         * Whether a key and value may be written to the config, which root
+         * sources as shell. Keys are written bare, so they must be one of the
+         * provisioner's own variable names, never PATH, IFS or LD_PRELOAD.
+         * Values are read back line by line, so they may not span lines.
+         *
+         * @param why Set to the reason when the entry is refused
+         */
+        bool isWritableConfigEntry(const std::string& key, const std::string& value, std::string& why);
 
         /**
          * Quote a value for safe inclusion in the shell-sourced config file.

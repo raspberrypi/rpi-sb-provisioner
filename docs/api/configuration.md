@@ -1,10 +1,12 @@
-The Configuration API provides endpoints for managing system configuration options, firmware selection, and working directory management.
+The Configuration API provides endpoints for managing system configuration options, firmware selection, the bootloader configuration, signing keys and working directory management.
+
+Every `POST` endpoint here needs the CSRF token from a browser session, or a bearer token (see [authentication.md](authentication.md)).
 
 # /options/get
 
 **HTTP Method:** GET
 
-**Description:** Retrieves all current configuration values.
+**Description:** Retrieves all current configuration values: the package defaults in `/usr/share/rpi-sb-provisioner/defaults/config` overlaid with `/etc/rpi-sb-provisioner/config`. With `Accept: text/html` the Options page is returned instead.
 
 **Parameters:** None
 
@@ -16,22 +18,20 @@ The Configuration API provides endpoints for managing system configuration optio
   "RPI_SB_WORKDIR": "/srv/rpi-sb-provisioner/work",
   "RPI_SB_PROVISIONER_MANUFACTURING_DB": "/srv/rpi-sb-provisioner/manufacturing.db",
   "RPI_DEVICE_FAMILY": "5",
-  "RPI_DEVICE_FIRMWARE_FILE": "/lib/firmware/raspberrypi/bootloader-2712/default/pieeprom-2025-01-17.bin",
-  "RPI_CONNECT_API_KEY": ""
+  "RPI_DEVICE_FIRMWARE_FILE": "/lib/firmware/raspberrypi/bootloader-2712/default/pieeprom-2025-01-17.bin"
 }
 ```
 
 **Notes:**
 
-- Returns all configuration key-value pairs from `/etc/rpi-sb-provisioner/config`
+- Every value is a string. `RPI_CONNECT_API_KEY` is write-only and never returned, so a client that writes these settings back leaves the saved token alone
 
-- Configuration values control provisioning behavior
 
 # /options/set
 
 **HTTP Method:** POST
 
-**Description:** Updates one or more configuration values.
+**Description:** Updates one or more configuration values. Values not named are kept.
 
 **Request Format:**
 
@@ -48,24 +48,20 @@ HTTP 200 OK with no body on success.
 
 **Error Responses:**
 
-``` json
-{
-  "error": {
-    "status": 500,
-    "title": "Config Error",
-    "code": "CONFIG_WRITE_ERROR",
-    "detail": "Failed to write configuration file"
-  }
-}
-```
+| Status | `error_code`           | Cause                                                                 |
+|--------|------------------------|-----------------------------------------------------------------------|
+| 400    | `INVALID_JSON`         | The body is not a JSON object                                         |
+| 400    | `INVALID_CONFIG_ENTRY` | A value is not a string or holds a line break, or a name is not a provisioner setting (it must match `(RPI\|GOLD_MASTER\|PROVISIONING\|CUSTOMER\|PKCS11)_[A-Z0-9_]+`) |
+| 500    | `CONFIG_WRITE_ERROR`   | The file could not be written                                         |
+| 500    | `DB_CREATE_ERROR`, `DB_PERMISSION_ERROR` | The manufacturing database file could not be created  |
+
+Nothing is written if any entry is refused.
 
 **Notes:**
 
-- Merges provided values with existing configuration
+- Every successful save empties `RPI_SB_WORKDIR`, whatever changed, so the next device re-signs. A workdir that holds the provisioner's images, database, keys or logs, a home directory or a system directory is never emptied
 
-- Automatically creates manufacturing database file if path is set and file doesn’t exist
-
-- Clears working directory contents if `RPI_SB_WORKDIR`, selected firmware, or signing-key settings are modified
+- Creates the manufacturing database file, mode 0600, if its path is set and the file does not exist
 
 # /options/validate
 
@@ -149,15 +145,15 @@ Format-Specific:
 
 - `RPI_CONNECT_API_KEY` - Must not contain whitespace
 
+- `RPI_SB_PROVISIONER_PUBLIC_DASHBOARD` - `1` (on) or empty (off)
+
 Boolean Toggles:
 
 - `RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE` - Enabled by default; rewrites `BOOT_ORDER` so the selected storage device boots first. Stored as `1` (on) or empty (off); the WebUI exposes this as a switch
 
 **Security Measures:**
 
-- **HTTP Method Restriction:** Only accepts POST requests; returns 405 Method Not Allowed for other methods
-
-- **Dynamic Field Whitelist:** Only validates fields that exist in the configuration file; rejects unknown fields
+- **Dynamic Field Whitelist:** Only validates fields that exist in the configuration; any other is refused with `400 UNKNOWN_FIELD`
 
 - **Path Canonicalization:** File paths are canonicalized to prevent path traversal attacks (../)
 
@@ -173,7 +169,7 @@ Boolean Toggles:
 
 - Used by the web UI for real-time field validation
 
-- Always returns HTTP 200 with JSON indicating validation success/failure
+- Returns HTTP 200 with `valid` for every known field; `400` (`INVALID_JSON`, `MISSING_FIELD_NAME`, `UNKNOWN_FIELD`) only for a malformed request
 
 - File system checks verify actual file/directory existence and permissions
 
@@ -187,11 +183,19 @@ Boolean Toggles:
 
 **HTTP Method:** POST
 
-**Description:** Uploads a PEM signing key and updates `CUSTOMER_KEY_FILE_PEM`.
+**Description:** Uploads a PEM signing key, adds it to the saved keys and, by default, makes it the active signing key.
 
 **Request Format:**
 
-Multipart form data containing the PEM key file.
+`multipart/form-data` with the PEM key as its first file, at most 64 KiB, named `*.pem`, `*.key` or with no extension. It is stored under `/etc/rpi-sb-provisioner/keys/` by its file name.
+
+An optional `activate` form field set to `if-none` makes the key active only when no key is active yet. The web interface sends it, so a new key replaces the one in use only when an operator chooses it; without it the uploaded key becomes active, as older scripts expect. The response's `activated` says which happened.
+
+``` bash
+curl -X POST -H "Authorization: Bearer $RPI_SB_TOKEN" \
+  -F "keyfile=@customer-key.pem" -F "activate=if-none" \
+  http://localhost:3142/options/upload-key
+```
 
 **Response Format:**
 
@@ -200,21 +204,28 @@ Multipart form data containing the PEM key file.
   "success": true,
   "path": "/etc/rpi-sb-provisioner/keys/customer-key.pem",
   "filename": "customer-key.pem",
+  "keyId": "a1b2c3d4e5f6",
+  "activated": true,
   "keyInfo": {
     "algorithm": "RSA",
     "keySize": 2048,
     "isPrivateKey": true,
     "fingerprint": "sha256:...",
-    "isFitForPurpose": true
+    "isFitForPurpose": true,
+    "statusMessage": "Key is suitable for Raspberry Pi secure boot signing",
+    "statusLevel": "success",
+    "valid": true
   }
 }
 ```
+
+**Error Responses:** `400` with `PARSE_ERROR`, `NO_FILE`, `FILE_TOO_LARGE`, `INVALID_FILE_TYPE` or `INVALID_KEY_FORMAT`; `409` with `DEVICE_KEY_BLANK` or `DEVICE_KEY_UNAVAILABLE` when this host cannot encrypt the key at rest; `500` with `STORAGE_ERROR`, `SAVE_ERROR`, `WRAP_ERROR` or `REGISTRY_ERROR`.
 
 **Notes:**
 
 - Uploaded PEM keys are device-wrapped at rest before the handler returns. If device wrapping fails, the upload is rejected and the plaintext file is removed.
 
-- Uploading a PEM key clears `CUSTOMER_KEY_PKCS11_NAME`
+- Activating a PEM key, by upload or later, sets `CUSTOMER_KEY_FILE_PEM` and clears `CUSTOMER_KEY_PKCS11_NAME`, and empties the workdir cache
 
 - Uploaded keys are added to the saved-key registry. Use `/options/keys/activate`
   to make a saved key the active provisioning key.
@@ -258,6 +269,8 @@ is active.
 }
 ```
 
+A PKCS#11 key has `uri` in place of `path`.
+
 ## /options/keys/activate
 
 **HTTP Method:** POST
@@ -286,6 +299,8 @@ is active.
 - Activating a key with a different fingerprint invalidates cached signed
   artefacts in the workdir.
 
+- Errors: `400 MISSING_KEY_ID`, `400 KEY_ACTIVATE_FAILED` (with the reason in `error`).
+
 ## /options/keys/remove
 
 **HTTP Method:** POST
@@ -300,6 +315,8 @@ be removed until another key is activated.
   "id": "a1b2c3d4e5f6"
 }
 ```
+
+**Response Format:** `{"success": true}`. Errors: `400 MISSING_KEY_ID`, `400 KEY_REMOVE_FAILED`.
 
 ## /options/keys/register-pkcs11
 
@@ -318,6 +335,8 @@ be removed until another key is activated.
 }
 ```
 
+Only `uri` is required. `label` defaults to the URI and `activate` to `true`. The PIN is used to check the key and is not stored; store one with `/options/set-pkcs11-pin`.
+
 **Response Format:**
 
 ``` json
@@ -335,6 +354,8 @@ be removed until another key is activated.
   }
 }
 ```
+
+**Error Responses:** `400 MISSING_PKCS11_URI`, `400 INVALID_PKCS11_KEY`, `500 REGISTRY_ERROR`.
 
 ## /options/keys/wrap
 
@@ -357,7 +378,7 @@ be removed until another key is activated.
   programmed) or `DEVICE_KEY_UNAVAILABLE`, carrying the reason and, where one
   exists, the remedy in `details`.
 
-- Returns an error if the key is already wrapped or wrapping fails.
+- Returns `{"success": true}`, also when the key was already wrapped. `404 KEY_NOT_FOUND` if `id` names no PEM key; HTTP 500 with `{"success": false, "error": ...}` if wrapping fails.
 
 ## /options/validate-key
 
@@ -401,6 +422,26 @@ For a PKCS#11 key:
   }
 }
 ```
+
+`keyType` is `pem` or `pkcs11`; an invalid key still returns HTTP 200, with `valid` false and an `errorMessage`. A request with neither `uri` nor `path` gets `400 MISSING_KEY_IDENTIFIER`; an unsafe path gets `400 INVALID_KEY_PATH`.
+
+## /options/signing-status
+
+**HTTP Method:** GET
+
+**Description:** Reports whether the provisioning scripts would find a usable signing key. Never returns key material.
+
+**Response Format:**
+
+``` json
+{
+  "available": false,
+  "mode": "none",
+  "reason": "No signing key is configured."
+}
+```
+
+`mode` is `pem`, `pem-wrapped`, `pkcs11`, `none` or `conflict` (both a PEM and a PKCS#11 key are configured). `reason` is present when there is a problem.
 
 ## /options/pkcs11-status
 
@@ -478,7 +519,7 @@ If discovery fails, the response may include `errorMessage`.
 }
 ```
 
-An empty `pin` removes the stored PIN.
+An empty `pin` removes the stored PIN. A PIN may be up to 256 characters.
 
 **Response Format:**
 
@@ -488,6 +529,8 @@ An empty `pin` removes the stored PIN.
   "configured": true
 }
 ```
+
+Removing the PIN returns `"configured": false` and `"message": "PIN removed"`. Errors: `400 INVALID_JSON`, `400 MISSING_PIN`, `400 PIN_TOO_LONG`, `500 PIN_REMOVE_ERROR`.
 
 **Notes:**
 
@@ -613,6 +656,8 @@ A host that already has a key returns `provisioned: false` with
 
 **Notes:**
 
+- If any secret could not be wrapped the response is HTTP 500 with `success` false and an `error`.
+
 - Every migration here shares one precondition. Where the host has no usable
   device key the request is refused up front with `409` and `DEVICE_KEY_BLANK`
   or `DEVICE_KEY_UNAVAILABLE`, rather than reporting a per-secret failure whose
@@ -622,7 +667,7 @@ A host that already has a key returns `provisioned: false` with
 
 **HTTP Method:** POST
 
-**Description:** Clears all contents of the working directory specified in `RPI_SB_WORKDIR` configuration.
+**Description:** Empties the working directory named by `RPI_SB_WORKDIR`.
 
 **Parameters:** None
 
@@ -636,35 +681,52 @@ HTTP 200 OK with no body on success.
 
 - Does not delete the working directory itself, only its contents
 
-- Safe to call even if directory doesn’t exist
+- Returns 200 when `RPI_SB_WORKDIR` is unset or does not exist
+
+- Refused with `409 WORKDIR_UNSAFE` when the workdir holds the provisioner's images, database, keys or logs, a home directory or a system directory
 
 # Firmware Management
 
-## /options/firmware
+## /options/firmware/list
 
 **HTTP Method:** GET
 
-**Description:** Lists available firmware versions for the configured device family.
-
-**Parameters:** None
+**Description:** Lists the bootloader firmware available for the configured device family, and the one selected.
 
 **Response Format:**
 
-Returns HTML view with firmware list, release notes, and selection interface.
+``` json
+{
+  "deviceFamily": "5",
+  "chipNumber": "2712",
+  "selectedFirmwareFile": "/usr/lib/firmware/raspberrypi/bootloader-2712/default/pieeprom-2025-01-17.bin",
+  "firmwareList": [
+    {
+      "version": "2025-01-17",
+      "filename": "pieeprom-2025-01-17.bin",
+      "filepath": "/usr/lib/firmware/raspberrypi/bootloader-2712/default/pieeprom-2025-01-17.bin",
+      "releaseChannel": "default",
+      "size": "2097152"
+    }
+  ]
+}
+```
 
 **Notes:**
 
-- Scans `/lib/firmware/raspberrypi/bootloader-{chip}/` for available firmware
+- Scans `/lib/firmware/raspberrypi/bootloader-<chip>/` and its release channels (`default`, `latest`, `beta`, `stable`, `critical`)
 
-- Automatically groups firmware by version across release channels
+- `size` is a string, in bytes
 
-- Shows firmware from default, latest, beta, stable, and critical channels
+- `selectedFirmwareFile` is empty when the package default is used
+
+- The Options page's firmware browser is part of the Options page itself; there is no separate firmware page
 
 ## /options/firmware/set
 
 **HTTP Method:** POST
 
-**Description:** Sets the selected firmware file for device provisioning.
+**Description:** Sets `RPI_DEVICE_FIRMWARE_FILE`. An empty `firmware_path` returns to the package default. The path must be a regular file under `/lib/firmware/raspberrypi/bootloader-*`, and is stored in canonical form. The workdir cache is emptied so the next device gets the new firmware.
 
 **Request Format:**
 
@@ -682,20 +744,18 @@ HTTP 200 OK with no body on success.
 
 ``` json
 {
-  "error": {
-    "status": 400,
-    "title": "Invalid Request",
-    "code": "FIRMWARE_NOT_FOUND",
-    "detail": "Selected firmware file does not exist"
-  }
+  "error": "Selected firmware file does not exist",
+  "error_code": "FIRMWARE_NOT_FOUND"
 }
 ```
+
+Other errors: `400 INVALID_JSON`, `400 INVALID_FIRMWARE_PATH`, `400 NOT_A_FILE`, `400 INVALID_PATH`, `500 CONFIG_WRITE_ERROR`.
 
 ## /options/firmware/notes/{version}
 
 **HTTP Method:** GET
 
-**Description:** Retrieves release notes for a specific firmware version.
+**Description:** Retrieves the release notes for one firmware version, from `release-notes.md` for the configured family's chip (BCM2711 for family `4`, otherwise BCM2712).
 
 **Path Parameters:**
 
@@ -714,8 +774,107 @@ HTTP 200 OK with no body on success.
 
 **Error Responses:**
 
+HTTP 404:
+
 ``` json
 {
   "error": "No release notes found for version 2025-01-17"
 }
 ```
+
+# Bootloader Configuration
+
+Devices get either the package default bootloader configuration for the provisioning style (`/var/lib/rpi-sb-provisioner/bootloader.secure` for `secure-boot`, `bootloader.naked` otherwise) or a custom one kept in `/etc/rpi-sb-provisioner/bootloader.conf`. The choice is `RPI_DEVICE_BOOTLOADER_CONFIG_FILE`: empty for the default, or that file's path for the custom one. The next device to bootstrap gets the change.
+
+## /options/bootloader-config
+
+**HTTP Method:** GET
+
+**Description:** The bootloader configuration editor (HTML). There is no JSON form; read the setting from `/options/get`.
+
+## /options/bootloader-config/help
+
+**HTTP Method:** GET
+
+**Description:** The Raspberry Pi documentation for each bootloader setting, as shipped in the package.
+
+**Response Format:**
+
+``` json
+{
+  "source": "...",
+  "commit": "...",
+  "licence": "...",
+  "attribution": "...",
+  "settings": {
+    "BOOT_ORDER": "<p>...</p>"
+  }
+}
+```
+
+Each setting's text is HTML. If the file is missing, HTTP 404 with `{"settings": {}}`.
+
+## /options/bootloader-config/check
+
+**HTTP Method:** POST
+
+**Description:** Checks a configuration without saving it.
+
+**Request Format:**
+
+``` json
+{ "content": "[all]\nBOOT_UART=1\nBOOT_ORDER=0xf461\n" }
+```
+
+**Response Format:**
+
+``` json
+{
+  "errors": [],
+  "warnings": [
+    { "line": 2, "message": "BOOT_UARTX is not a setting the Raspberry Pi documentation describes" }
+  ],
+  "bytes": 47,
+  "max_bytes": 4076
+}
+```
+
+Errors are lines that are not plain ASCII, not a `NAME=value` setting, `[filter]` or `# comment`, an unclosed filter, or a `BOOT_ORDER` that is not a hexadecimal number of up to eight digits. `bytes` is the size on the device: with a final newline and, for `secure-boot`, the `SIGNED_BOOT=1` bootstrap adds when it is missing. More than `max_bytes`, the EEPROM's limit, is an error on line 0. Unknown setting names are only warnings.
+
+A body without a string `content` gets `400 INVALID_REQUEST`; content over 64 KiB gets `413 TOO_LARGE`.
+
+## /options/bootloader-config/save
+
+**HTTP Method:** POST
+
+**Description:** Checks, then saves the custom configuration and puts it in use.
+
+**Request Format:** as `/check`.
+
+**Response Format:**
+
+The `/check` result with `"saved": true` and `"in_use": "custom"`. If the check finds errors, HTTP 400 with the same result and `"saved": false`; nothing is written. A write failure gets `500 WRITE_ERROR`.
+
+The save is recorded in the audit log as `BOOTLOADER_CONFIG_SAVE`, with the operator.
+
+## /options/bootloader-config/use
+
+**HTTP Method:** POST
+
+**Description:** Chooses which configuration devices get. The custom file is kept either way, so the choice can be reversed.
+
+**Request Format:**
+
+``` json
+{ "choice": "default" }
+```
+
+`choice` is `default` or `custom`.
+
+**Response Format:**
+
+``` json
+{ "in_use": "default" }
+```
+
+**Error Responses:** `400 INVALID_REQUEST` for any other choice; `409 NO_CUSTOM` when choosing `custom` before one has been saved; `500 WRITE_ERROR`. Recorded in the audit log as `BOOTLOADER_CONFIG_USE`.

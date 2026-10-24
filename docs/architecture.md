@@ -38,9 +38,9 @@ The system consists of five main components:
 
 The provisioning workflow begins with device detection.
 
-### udev Rules (`/lib/udev/rules.d/60-rpi-sb-provisioner.rules`)
+### udev Rules (`/usr/lib/udev/rules.d/60-rpi-sb-provisioner.rules`)
 
-Two rules detect Raspberry Pi devices in different boot states:
+A first rule de-authorises the USB mass-storage interface a device in RPIBOOT mode may offer, so only the rpiboot vendor interface is used. Two more detect Raspberry Pi devices in different boot states:
 
 **Rule 1: RPIBOOT mode detection**
 
@@ -55,15 +55,15 @@ Two rules detect Raspberry Pi devices in different boot states:
 **Action:** Start `rpi-sb-bootstrap@.service` with the device path as parameter
 
 **Product IDs:**
-\* `2764` - Raspberry Pi 3 family devices (Zero 2 W)
-\* `2711` - Raspberry Pi 4 family devices (Raspberry Pi 4, Compute Module 4)
-\* `2712` - Raspberry Pi 5 family devices (Raspberry Pi 5, Compute Module 5)
+- `2764` - Raspberry Pi 3 family devices (Zero 2 W)
+- `2711` - Raspberry Pi 4 family devices (Raspberry Pi 4, Compute Module 4)
+- `2712` - Raspberry Pi 5 family devices (Raspberry Pi 5, Compute Module 5)
 
 **Rule 2: fastboot mode detection**
 
     ACTION=="add", SUBSYSTEM=="usb",
       ATTRS{idVendor}=="18d1", ATTR{idProduct}=="4e40",
-      ATTR{manufacturer}=="Raspberry Pi"
+      ATTR{manufacturer}=="Raspberry Pi",
       TAG+="systemd",
       PROGRAM="/usr/bin/systemd-escape -p --template=rpi-sb-triage@.service $attr{serial}",
       ENV{SYSTEMD_WANTS}+="%c"
@@ -90,7 +90,8 @@ Provisioning proceeds through three phases, each implemented as a systemd templa
 >
 > Provisioning is triggered automatically when a device is connected.
 > All provisioners erase the device’s storage before writing the OS image.
-> If `GOLD_MASTER_OS_FILE` is not configured or points to a missing file, the device storage will still be erased, and provisioning will then fail — leaving the device with wiped storage.
+> Triage, and each provisioner again, refuses a `GOLD_MASTER_OS_FILE` that is unset, missing, empty or unreadable, or an IDP directory without exactly one JSON descriptor, before storage is touched, and marks the failure permanent.
+> Bootstrap does not check the image, so by then a secure-boot device already has the key hash in OTP and an updated EEPROM.
 > Always ensure a valid image is selected before connecting a device.
 
 ### Phase 1: Bootstrap (`rpi-sb-bootstrap@.service`)
@@ -100,16 +101,26 @@ Provisioning proceeds through three phases, each implemented as a systemd templa
 **Triggered by:** udev rule detecting RPIBOOT mode
 
 **Key operations:**
-\* Load recovery firmware into device via rpiboot
-\* For secure boot mode: Program signing key hash into device OTP memory
-\* Update device EEPROM firmware
-\* Boot device into fastboot mode
+
+- Refuse a Raspberry Pi 4 or 5 whose family differs from `RPI_DEVICE_FAMILY`
+
+- Run the `bootstrap` customisation hook
+
+- Raspberry Pi 4 and 5 families only: build an EEPROM image from the newest `pieeprom-*.bin` under `/lib/firmware/raspberrypi/bootloader-<chip>/latest/`, or the firmware chosen on the Options page, with the bootloader configuration chosen there (Default or Custom). Bootstrap works on a copy, which it moves storage first in `BOOT_ORDER` when `RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE` is on, and to which it adds `SIGNED_BOOT=1` for secure boot. The image is flashed over rpiboot
+
+- Secure boot only: sign the EEPROM configuration (and, on Raspberry Pi 5, the bootcode) with the customer key, and program the key hash into OTP (`program_pubkey=1`), with JTAG lock, EEPROM write protection and, on Raspberry Pi 4, the RPIBOOT GPIO if configured
+
+- Load the fastboot gadget through rpiboot. The Zero 2 W takes this step alone: it has no EEPROM and no secure boot
+
+A board that refuses the bootcode three times stops the run at once, marked permanent, with a hint in the log that it may hold a customer key and need the reprovision flag.
 
 **Script:** `/usr/bin/rpi-sb-bootstrap.sh`
 
-**Logging:** `/var/log/rpi-sb-provisioner/<serial>/bootstrap.log`
+**Logging:** `/var/log/rpi-sb-provisioner/<serial>/bootstrap.log` (written under `/var/log/rpi-sb-provisioner/early/` until the serial is known)
 
-**State tracking:** `/var/run/rpi-sb-state/<serial>/bootstrap`
+**State tracking:** `BOOTSTRAP-STARTED`, `BOOTSTRAP-FINISHED` or `BOOTSTRAP-ABORTED` rows in the state database
+
+**Time limit:** one hour for the whole unit (`RuntimeMaxSec=1h`)
 
 ### Phase 2: Triage (`rpi-sb-triage@.service`)
 
@@ -118,21 +129,25 @@ Provisioning proceeds through three phases, each implemented as a systemd templa
 **Triggered by:** udev rule detecting fastboot mode
 
 **Key operations:**
-\* Verify device is in fastboot mode
-\* Provision the device unique secret (`oem fwcrypto init`) if not already present — every provisioned device receives one regardless of provisioning style, as it is used for HMAC-based LUKS key derivation and device identity
-\* Capture the device public key to the log directory or a configured retrieval path. The private key is captured too if the device will still export it, but provisioning the key locks the OTP slot, so in practice only the public key is retained
-\* Read configuration to determine provisioning route:
-- If `GOLD_MASTER_OS_FILE` points to a directory (IDP artefact), start `rpi-idp-provisioner@.service` regardless of `PROVISIONING_STYLE`
-- Otherwise, start provisioner based on `PROVISIONING_STYLE`:
-**`secure-boot` → `rpi-sb-provisioner@.service`**
-`fde-only` → `rpi-fde-provisioner@.service`
-\*\* `naked` → `rpi-naked-provisioner@.service`
+- Refuse a device on a USB port the port allowlist excludes
+- Refuse an unusable `GOLD_MASTER_OS_FILE` (see the warning above)
+- Check the device answers over fastboot and reports the serial it was started for
+- Provision the device unique secret (`oem fwcrypto init`) if not already present — every provisioned device receives one regardless of provisioning style, as it is used for HMAC-based LUKS key derivation and device identity
+- Capture the device public key to the log directory or a configured retrieval path. The private key is captured too if the device will still export it, but provisioning the key locks the OTP slot, so in practice only the public key is retained
+- Read configuration to determine provisioning route:
+  - If `GOLD_MASTER_OS_FILE` is an IDP artefact directory, start `rpi-idp-provisioner@.service` regardless of `PROVISIONING_STYLE`
+  - Otherwise, start a provisioner based on `PROVISIONING_STYLE`:
+    - `secure-boot` → `rpi-sb-provisioner@.service`
+    - `fde-only` → `rpi-fde-provisioner@.service`
+    - `naked` → `rpi-naked-provisioner@.service`
 
 **Script:** `/usr/bin/rpi-sb-triage.sh`
 
 **Logging:** `/var/log/rpi-sb-provisioner/<serial>/triage.log`
 
-**State tracking:** `/var/run/rpi-sb-state/<serial>/triage`
+**State tracking:** `TRIAGE-STARTED`, `TRIAGE-FINISHED` or `TRIAGE-ABORTED` rows in the state database
+
+**Time limit:** ten minutes (`TimeoutStartSec=10min`)
 
 ### Phase 3: Provisioning (`rpi-*-provisioner@.service`)
 
@@ -158,55 +173,49 @@ Four variants implement different security and deployment models:
 
 **Secure Boot Provisioner** (`rpi-sb-provisioner@.service`)
 
+- Build `boot.img` from the OS image's boot partition, with the pre-boot authentication initramfs (kernel modules copied from the image) in place of the image's own, and sign it with the customer key as `boot.sig`. The result is cached in `RPI_SB_WORKDIR` for later devices
+
 - Erase device storage via fastboot
 
-- Use the device unique secret to derive the LUKS unlock material
+- Have the device create a DOS partition table, a FAT boot partition and a second partition filling the rest (`oem partinit`, `oem partapp`)
 
-- Partition and format storage
+- Have the device create and open a LUKS2 container on the second partition with `RPI_DEVICE_STORAGE_CIPHER` (`oem cryptinit`, `oem cryptopen`); the device derives the unlock material from its device unique secret
 
-- Create LUKS2 encrypted container
+- Flash the boot partition, and the OS image's root filesystem into the container
 
-- Deploy OS image into encrypted container
+- Turn off the device's power LED
 
-- Create pre-boot authentication environment (kernel + minimal modules)
-
-- Sign EEPROM bootloader and pre-boot environment with customer key
-
-- Configure secure boot chain
+The EEPROM was already signed and written by bootstrap.
 
 **Full Disk Encryption Provisioner** (`rpi-fde-provisioner@.service`)
 
-- Erase device storage via fastboot
+- As the secure boot provisioner, but `boot.img` is not signed
 
-- Use the device unique secret to derive the LUKS unlock material
-
-- Partition and format storage
-
-- Create LUKS2 encrypted container
-
-- Deploy OS image into encrypted container
-
-- Create pre-boot authentication environment (unsigned)
+- On Zero 2 W, the pre-boot files go directly into the boot partition rather than into `boot.img`
 
 **Naked Provisioner** (`rpi-naked-provisioner@.service`)
 
 - Erase device storage via fastboot
 
-- Partition and format storage
+- Flash the OS image whole, as supplied, with no encryption: its own partition table and boot files are used. A copy is flashed instead if `bootfs-mounted` or `rootfs-mounted` hooks are enabled, or if the image's length must be padded to a multiple of 4096 bytes
 
-- Deploy OS image directly (no encryption)
+- Turn off the device's power LED
 
-- Install standard boot firmware (uses Raspberry Pi retail key)
+Every provisioner runs the `provision-started` hook before its work and the `post-flash` hook after flashing, and records manufacturing data. The secure boot, FDE and naked provisioners also run the `bootfs-mounted` and `rootfs-mounted` hooks against the mounted image; the IDP provisioner does not.
 
 **Scripts:**
-\* `/usr/bin/rpi-idp-provisioner.sh`
-\* `/usr/bin/rpi-sb-provisioner.sh`
-\* `/usr/bin/rpi-fde-provisioner.sh`
-\* `/usr/bin/rpi-naked-provisioner.sh`
+- `/usr/bin/rpi-idp-provisioner.sh`
+- `/usr/bin/rpi-sb-provisioner.sh`
+- `/usr/bin/rpi-fde-provisioner.sh`
+- `/usr/bin/rpi-naked-provisioner.sh`
 
 **Logging:** `/var/log/rpi-sb-provisioner/<serial>/provisioner.log`
 
-**State tracking:** `/var/run/rpi-sb-state/<serial>/provisioner`
+**State tracking:** `<STYLE>-PROVISIONER-STARTED`, `-FINISHED` or `-ABORTED` rows in the state database, such as `SB-PROVISIONER-FINISHED`
+
+**Time limit:** six hours for the whole unit (`RuntimeMaxSec=6h`), as a backstop; each fastboot command has its own limit (see [Time limits](#time-limits))
+
+**Boot image generator** (`rpi-sb-image-bootimg-generator@.service`) is a separate one-shot unit, started by the web UI when an OS image is uploaded, that builds a signed `boot.img` for updating devices already in the field. It runs no customisation hooks and is more tightly sandboxed than the provisioners. See [boot-img-generator.md](boot-img-generator.md).
 
 ### Why This Design?
 
@@ -238,12 +247,45 @@ Shared utilities used by all phases:
 
 - USB path resolution
 
-- Fastboot route selection, including optional TCP data-plane image transfer
-  when the device advertises split USB+TCP mode and an Ethernet route is up
+- Fastboot route selection, including TCP image transfer when an Ethernet
+  route to the device is up and answers with the device's own serial number
 
-- Error handling
+- Bounded commands (`run_bounded`, `timeout_fatal_secs`, `fastboot_flash`)
+  and failure reporting
+
+- The `provision-failed` hook (`run_provision_failed_hook`)
 
 - Temporary directory management (`make_temp_dir`, `cleanup_orphans`)
+
+### Time limits
+
+No step waits for ever. Each fastboot call runs under `timeout` with a
+limit suited to its work:
+
+| Variable                     | Default  | Used for                                              |
+|------------------------------|----------|-------------------------------------------------------|
+| `FASTBOOT_CONTROL_TIMEOUT`   | 30 s     | `getvar`, LED and other quick commands                |
+| `FASTBOOT_STORAGE_TIMEOUT`   | 120 s    | Partition tables, LUKS format and open                |
+| `FASTBOOT_ERASE_TIMEOUT`     | 900 s    | Erasing the whole device                              |
+| `FASTBOOT_PRESENCE_TIMEOUT`  | 10 s     | Checking the board is there before a long command     |
+
+A flash is allowed 120 s plus time in proportion to its size, at an assumed
+5.5 MiB/s. Before any command longer than the presence limit, the board must
+answer `getvar version` within `FASTBOOT_PRESENCE_TIMEOUT`, and a board that
+goes away part-way through a long command is given up on after the same
+time. rpiboot is stopped after three `Failed control transfer` refusals with
+no second stage reached. Customisation hooks are limited to
+`RPI_SB_HOOK_TIMEOUT` seconds, 1800 by default. The units' own limits
+(above) are a backstop.
+
+When a bounded command fails, the per-device log records why, including the
+reason the device gave for refusing it, and `PROVISION_FAILED_REASON` is set
+to one of `device-refused`, `board-absent`, `board-lost`, `bootcode-refused`,
+`timed-out` or `command-failed`. A service stopped by a signal is recorded
+as aborted. The `provision-failed` hook then runs with
+`PROVISION_FAILED_CONTEXT` (`bootstrap` or `provisioning`),
+`PROVISION_FAILED_PERMANENT` (`1` for a failure that retrying will not fix,
+such as no OS image or a refused bootcode) and `PROVISION_FAILED_REASON`.
 
 **Phase-specific scripts**
 
@@ -284,19 +326,25 @@ A web service provides monitoring, configuration, and API access.
 **Technology:** C++ using Drogon web framework
 
 **Purpose:**
-\* Web-based configuration interface
-\* Real-time device monitoring
-\* Manufacturing database access
-\* REST API for integration
-\* WebSocket support for live updates
+- Web-based configuration interface
+- Real-time device monitoring
+- Manufacturing database access
+- REST API for integration
+- WebSocket support for live updates
 
 ### Architecture
 
+`rpi-provisioner-ui.service` listens on `127.0.0.1`, port 3142 for HTTP and 3143 for HTTPS with a self-signed certificate kept in `/var/lib/rpi-sb-provisioner/tls/`. `--address`, `--port`, `--https-port`, `--disable-https` and `--allowed-host` change this.
+
+**Pages** (the navigation bar): Devices, Options, Customisation, Services, Manufacturing Database, Audit Log and Code Scanner, plus Sign in, or the signed-in user's name (API tokens) and Sign out.
+
+**Access:** operators sign in with a system account in the `rpi-sb-provisioner` group, checked through PAM (`/etc/pam.d/rpi-provisioner-ui`); scripts send an API token as `Authorization: Bearer`. Unless `RPI_SB_PROVISIONER_PUBLIC_DASHBOARD` is turned off, the devices page, a device's own page and the code scanner can be viewed without signing in, but never its logs, keys or settings. Every state-changing route is POST-only and needs the session's CSRF token. Requests for a host name the service does not answer to are refused. Signing in to a non-loopback address needs HTTPS.
+
 **HTTP endpoints:**
 
-- `/options/*` - Configuration management
+- `/options/*` - Configuration management, including `/options/bootloader-config`, the bootloader configuration editor
 
-- `/devices/*` - Device status and logs
+- `/devices/*` - Device status, logs and keys
 
 - `/api/v2/services` - Service monitoring
 
@@ -306,6 +354,10 @@ A web service provides monitoring, configuration, and API access.
 
 - `/images/list`, `/analyze-image` - OS image management (traditional and IDP artefacts)
 
+- `/login`, `/logout`, `/auth/*`, `/api/v2/tokens` - Sign-in and API tokens
+
+- `/auditlog` - Audit log
+
 - `/internal/state-changed`, `/internal/manufacturing-recorded` - Local-only notifications from provisioning scripts to refresh WebUI state promptly
 
 **WebSocket endpoints:**
@@ -314,25 +366,27 @@ A web service provides monitoring, configuration, and API access.
 
 - `/ws/sha256` - Live hash calculation progress
 
+- `/ws/progress`, `/ws/boot-package` - Upload and boot package progress
+
 **Views:** Server-side templates (CSP files compiled to C++)
 
 **Data sources:**
 
 - systemd API (D-Bus) - Service status
 
-- Filesystem - Logs, state files, configuration
+- Filesystem - Logs, configuration
 
-- SQLite - Manufacturing database, audit log
+- SQLite - State database, manufacturing database, audit log
 
 ### Why This Design?
 
-- **Separation of concerns:** Web service only monitors; shell scripts do the work
+- **Separation of concerns:** The web service monitors and configures; the shell scripts do the provisioning
 
-- **Local-only privileged service:** The Web service runs as the system service user and performs configuration, key-storage and database operations directly. Internal notification endpoints are restricted to loopback clients and a per-boot shared token.
+- **Privileged but confined:** The web service runs as root, because it writes the configuration and hooks the provisioners run as root, but is sandboxed by systemd (see [Privilege Separation](#privilege-separation)). Internal notification endpoints are restricted to loopback clients and a per-boot shared token.
 
 - **Standard protocols:** HTTP REST API and WebSockets for integration
 
-- **Stateless monitoring:** Service reads state from filesystem; does not maintain critical state
+- **Stateless monitoring:** Service reads state from the state database; does not maintain critical state
 
 - **Fail-safe:** If web service crashes, provisioning continues unaffected
 
@@ -348,9 +402,11 @@ Simple key-value file format:
     CUSTOMER_KEY_FILE_PEM=/path/to/key.pem
     GOLD_MASTER_OS_FILE=/path/to/image.img
 
-**Read by:** All shell scripts via `read_config` function
+**Read by:** All shell scripts via `read_config` function, and by systemd as each unit's `EnvironmentFile`, after the package defaults in `/usr/share/rpi-sb-provisioner/defaults/config`
 
-**Modified by:** Web service or manual editing
+**Modified by:** Web service or manual editing. The web service accepts only the provisioner's own settings, on one line each. The file is readable by root only.
+
+The bootloader configuration devices get is chosen on the Options page: **Default**, the package's `/var/lib/rpi-sb-provisioner/bootloader.secure` (secure boot) or `bootloader.naked` (other styles), or **Custom**, `/etc/rpi-sb-provisioner/bootloader.conf`, written by the editor at `/options/bootloader-config`. Saving checks the file and the EEPROM's size limit. Custom sets `RPI_DEVICE_BOOTLOADER_CONFIG_FILE`; Default clears it.
 
 **Why:** Simple, transparent, version-controllable, easy to backup
 
@@ -420,24 +476,24 @@ This keeps persistent key material and the token PIN encrypted at rest and
 avoids the deprecated OpenSSL ENGINE path for HSM signing. See the
 [PKCS#11 / HSM Support guide](hsm-support.md) for supported tokens and setup.
 
-### State Tracking (`/var/run/rpi-sb-state/`)
+### State Tracking (`/srv/rpi-sb-provisioner/state.db`)
 
-Directory structure:
+Each script records every state change as a new row in the `devices` table of
+an SQLite database, through `record_state()` in
+`/var/lib/rpi-sb-provisioner/state-recording`. A row holds:
 
-    /var/run/rpi-sb-state/
-      <serial>/
-        bootstrap      # Bootstrap phase state
-        triage         # Triage phase state
-        provisioner    # Provisioning phase state
+- Serial number
+- Endpoint (the USB path)
+- State, such as `BOOTSTRAP-STARTED`, `SB-PROVISIONER-WRITING-ROOTFS` or `TRIAGE-ABORTED`
+- Image summary, IP address and board type
+- Timestamp
 
-State files contain:
-\* Phase status (STARTED, FINISHED, ABORTED)
-\* Timestamps
-\* USB path information
+After each write the script notifies the web service at
+`/internal/state-changed`, so the Devices page updates at once.
 
 **Purpose:** Allow web service and external tools to monitor progress without interfacing with systemd
 
-**Why tmpfs:** State is ephemeral; cleared on reboot; should not persist
+**Persistence:** The database survives reboots, so a device's history stays visible
 
 ### Logging (`/var/log/rpi-sb-provisioner/`)
 
@@ -448,44 +504,53 @@ Directory structure:
         bootstrap.log       # Bootstrap phase operations
         triage.log          # Triage phase operations
         provisioner.log     # Provisioning phase operations
-        keypair/            # Device-unique keys (if enabled)
+        keypair/            # Device keys, root-only, unless
+                            # RPI_DEVICE_RETRIEVE_KEYPAIR names a directory
           <serial>.der      # Private key, PEM-encoded. Only written while the
                             # OTP key-slot is unlocked; normally absent.
           <serial>.pub      # Public key, PEM-encoded
+      early/                # Bootstrap logs until the serial is known
+      bootimg-generator/    # Boot image generator logs
+
+The log tree is readable by root and the `rpi-sb-provisioner` group only.
 
 **Log format:** Timestamped entries with explicit command output
 
-**Retention:** Persists across reboots; managed by logrotate
+**Retention:** Persists across reboots. The package installs no log rotation for it
 
 **Why:** Comprehensive audit trail; troubleshooting; compliance
 
-### Locking (`/var/lock/rpi-sb-provisioner/`)
+### Locking
 
-Per-device lock directories prevent race conditions:
+Bootstrap takes a per-device lock directory, so a device that re-enumerates
+mid-run is not bootstrapped twice:
 
-    /var/lock/rpi-sb-provisioner/
+    /var/lock/rpi-sb-bootstrap/
       <serial>/
 
-**Acquired by:** Each phase before starting operations
+It is removed when bootstrap ends, successfully or not. While one exists,
+a triage that fails during bootstrap's USB churn does not run the
+`provision-failed` hook.
 
-**Released by:** Phase completion or failure cleanup
-
-**Why:** Prevents duplicate provisioning if device reconnects during process
+The provisioners share cached images in `RPI_SB_WORKDIR`, and build them under
+`flock` locks in `/var/lock/rpi-sb-provisioner/` (such as
+`pre-boot-auth-images.lock` and `rootfs-image.lock`), so concurrent devices do
+not build the same image twice.
 
 ### Manufacturing Database (SQLite)
 
 Optional database recording device information.
 
-**Location:** Configurable (typically `/var/lib/rpi-sb-provisioner/manufacturing.db`)
+**Location:** `RPI_SB_PROVISIONER_MANUFACTURING_DB`, by default `/srv/rpi-sb-provisioner/manufacturing.db`
 
 **Schema:** Single table with device attributes:
-\* Serial number
-\* Board type and revision
-\* MAC addresses (Ethernet, Wi-Fi, Bluetooth)
-\* Storage information
-\* Security configuration
-\* Provisioning timestamp
-\* OS image details
+- Serial number
+- Board type and revision
+- MAC addresses (Ethernet, Wi-Fi, Bluetooth)
+- Storage information
+- Security configuration
+- Provisioning timestamp
+- OS image details
 
 **Purpose:** Track provisioned devices for inventory, warranty, and compliance
 
@@ -569,7 +634,7 @@ Partition 1 contains:
 
 - **No signature file:** Unlike secure boot mode, there is no `boot.sig` file. The `boot.img` is loaded without verification.
 
-The storage layout is similar to secure boot mode (boot partition + LUKS2 container), but without boot authentication.
+The storage layout is similar to secure boot mode (boot partition + LUKS2 container), but without boot authentication. On Zero 2 W, which has no EEPROM and cannot load `boot.img`, the boot partition holds the pre-boot files directly.
 
 ### Boot Chain
 
@@ -634,17 +699,17 @@ Partition 1 contains boot files directly (traditional Raspberry Pi layout):
 | **EEPROM authentication**           | ✓ Customer key                | ✓ RPi retail key                     | ✓ RPi retail key         | Defined by artefact                   |
 | **Pre-boot environment auth**       | ✓ Customer key                | ✗ No                                 | N/A                      | Defined by artefact                   |
 | **Storage encryption**              | ✓ Yes (LUKS2)                 | ✓ Yes (LUKS2)                        | ✗ No                     | Defined by artefact                   |
-| **Device-unique keys**              | ✓ Yes                         | ✓ Yes                                | ✗ No                     | Defined by artefact                   |
+| **Device-unique keys**              | ✓ Yes                         | ✓ Yes                                | ✓ Created, not used for storage | Defined by artefact            |
 | **Customer firmware signing**       | ✓ Yes                         | ✗ No                                 | ✗ No                     | Defined by artefact                   |
 | **OTP customer key**                | ✓ Yes (permanent)             | ✗ No (RPi retail)                    | ✗ No (RPi retail)        | Defined by artefact                   |
-| **OTP encryption key**              | ✓ Yes                         | ✓ Yes                                | ✗ No                     | Defined by artefact                   |
+| **OTP encryption key**              | ✓ Yes                         | ✓ Yes                                | ✗ Not used               | Defined by artefact                   |
 | **Storage extractable**             | ✗ No (encrypted)              | ✗ No (encrypted)                     | ✓ Yes (unencrypted)      | Defined by artefact                   |
 | **Firmware substitution**           | ✗ No (customer-signed only)   | ✓ Yes (any RPi firmware)             | ✓ Yes (any RPi firmware) | Defined by artefact                   |
 | **Pre-boot environment modifiable** | ✗ No (signature verification) | ✓ Yes (no verification)              | N/A                      | Defined by artefact                   |
 | **Provisioning time**               | Longest                       | Medium                               | Fastest                  | Depends on artefact                   |
 | **Security level**                  | Maximum                       | Medium                               | Minimal                  | Defined by artefact                   |
 | **Image format**                    | Raw `.img`                    | Raw `.img`                           | Raw `.img`               | JSON descriptor + sparse images       |
-| **Partition creation**              | Host-side                     | Host-side                            | Host-side                | Device-side (fastbootd)               |
+| **Partition creation**              | Host-commanded (`oem partinit`, `oem partapp`) | Host-commanded (`oem partinit`, `oem partapp`) | The image's own table | Device-side from the descriptor (fastbootd) |
 | **Use case**                        | Production devices            | Encryption without boot restrictions | Development, testing     | Pre-built images from `rpi-image-gen` |
 
 # Data Flow
@@ -659,9 +724,9 @@ Partition 1 contains boot files directly (traditional Raspberry Pi layout):
        ↓
     4. Bootstrap script:
        - Acquires device lock
-       - Loads device via rpiboot
-       - Programs security keys (if secure-boot)
-       - Updates EEPROM firmware
+       - Runs the bootstrap hook
+       - Updates the EEPROM (Pi 4/5), programming the key hash into
+         OTP if secure-boot
        - Boots device into fastboot mode
        - Updates state: BOOTSTRAP-FINISHED
        ↓
@@ -672,25 +737,24 @@ Partition 1 contains boot files directly (traditional Raspberry Pi layout):
     7. udev starts rpi-sb-triage@<serial>.service
        ↓
     8. Triage script:
-       - Reads configuration
-       - Determines PROVISIONING_STYLE
-       - Starts appropriate provisioner service
+       - Checks the OS image
+       - Ensures the device key, captures the public key
+       - Selects the provisioner from the image and PROVISIONING_STYLE
        - Updates state: TRIAGE-FINISHED
+       - Starts the provisioner service
        ↓
     9. Provisioner service starts
        ↓
     10. Provisioner script:
-        - Partitions storage
-        - Creates encryption (if enabled)
-        - Deploys OS image
-        - Configures boot firmware
+        - Erases storage
+        - Partitions it and creates encryption (if enabled)
+        - Flashes the OS image
         - Records manufacturing data
-        - Updates state: PROVISIONER-FINISHED
-        - Powers down device
+        - Runs the post-flash hook
+        - Turns off the power LED
+        - Updates state: <STYLE>-PROVISIONER-FINISHED
        ↓
-    11. Device LEDs turn off
-       ↓
-    12. Provisioning complete
+    11. Provisioning complete; the Devices page shows it finished
 
 Each stage also records the individual step it is entering -- image
 preparation, signing, storage erase, each partition write, and so on -- via
@@ -704,9 +768,9 @@ UI change.
     Web Browser → HTTP Request → provisioner-service
                                          ↓
                                 systemd D-Bus API (service status)
-                                /var/run/rpi-sb-state/ (state files)
+                                state.db (provisioning state)
                                 /var/log/rpi-sb-provisioner/ (logs)
-                                SQLite database (manufacturing data)
+                                manufacturing.db, audit.db (SQLite)
                                          ↓
                                 HTTP Response / WebSocket message
                                          ↓
@@ -744,19 +808,19 @@ UI change.
 
 **Dependency management:** Service ordering and dependencies are explicit
 
-## Why Filesystem-Based State?
+## Why File-Based State?
 
-**Transparency:** State is visible in filesystem; no hidden state
+**Transparency:** State is in an SQLite file and plain logs; no hidden state
 
-**Simplicity:** No database or complex state management needed
+**Simplicity:** No database server; scripts write rows with `sqlite3`
 
-**Integration:** External tools can monitor state by reading files
+**Integration:** External tools can monitor state by reading `state.db` and the logs
 
-**Durability:** Logs persist; ephemeral state is in tmpfs
+**Durability:** State and logs persist across reboots
 
 ## Why Separate Web Service?
 
-**Security:** Web service runs with minimal privileges; cannot disrupt provisioning
+**Security:** Web service is sandboxed, and the provisioning services do not depend on it
 
 **Reliability:** Provisioning continues if web service fails
 
@@ -768,22 +832,24 @@ UI change.
 
 ## Privilege Separation
 
-- **Bootstrap/provisioning scripts:** Run as root (required for device access and storage operations)
+- **Bootstrap/provisioning scripts:** Run as root (required for device access and storage operations), with `NoNewPrivileges` and without the capabilities no step uses, such as loading kernel modules, rebooting, setting the clock or tracing processes. The boot image generator is confined further.
 
-- **Web service:** Runs as unprivileged user; uses sudo only for specific read operations
+- **Web service:** Runs as root, because it writes the configuration and hooks the provisioners run as root, but its unit keeps only `CAP_DAC_OVERRIDE`, sees `/usr`, `/boot` and `/etc` read-only apart from `/etc/rpi-sb-provisioner`, gets a private `/tmp`, runs under a system-call filter, and may open only `/dev/vcio`, `/dev/vcio_crypto` and USB or hidraw devices (for HSMs). Operators must sign in (see [Web Service](#4-web-service-provisioner-service)).
 
-- **Configuration:** Protected by filesystem permissions
+- **Configuration:** `/etc/rpi-sb-provisioner/config` is readable by root only; images, logs, manufacturing records and hooks are readable by root and the `rpi-sb-provisioner` group only
 
 - **Signing keys:** Stored with restricted permissions; never exposed via API
 
 ## Attack Surface Minimization
 
 - **No network services on provisioned devices:** Routine provisioning control
-  uses USB. When the host and target share an Ethernet link, fastbootd may
-  route bulk `flash` commands over TCP while control-plane commands remain on
-  USB.
-
-- **No persistent state on provisioned devices during provisioning:** Device powers down after completion
+  uses USB. When the device reports a network address that answers, the host
+  uses TCP: a fastbootd in split mode (`-i usb+tcp`) takes only `flash` over
+  TCP and keeps control on USB; any other fastbootd takes every command over
+  TCP. The route is used only if it reports the serial number seen over USB,
+  except in split mode, whose network side does not report it. This catches a
+  misrouted board, not an attacker on the network, so keep flashing on USB on
+  an untrusted network.
 
 - **Minimal dependencies:** Uses standard Linux tools; reduces potential vulnerabilities
 
@@ -795,9 +861,9 @@ UI change.
 
 - **Manufacturing database:** Optional tracking of all provisioned devices
 
-- **Audit log:** Web service API access tracked with client information
+- **Audit log:** Web service access tracked with the operator and client address, including every sign-in attempt, API token use and hook change (`/srv/rpi-sb-provisioner/audit.db`)
 
-- **State files:** Phase transitions recorded
+- **State database:** Phase transitions recorded
 
 # Extensibility
 
@@ -818,7 +884,10 @@ Customisation scripts can be installed at hook points such as `bootstrap`,
 `provision-failed`. Scripts receive stage-specific positional arguments plus
 environment variables (`TARGET_USB_PATH`, `TARGET_DEVICE_PATH`, and related
 identity fields). Post-flash hooks also receive manufacturing metadata after
-`metadata_gather`.
+`metadata_gather`. Hooks live in `/etc/rpi-sb-provisioner/scripts/` as
+`<provisioner>-<stage>.sh`; one that is not executable is skipped, and a new hook
+uploaded through the web UI starts disabled. Each hook is limited to
+`RPI_SB_HOOK_TIMEOUT` seconds (1800 by default).
 
 See [customisation.md](api/customisation.md) for the full per-stage contract.
 
@@ -876,7 +945,7 @@ WebSocket API provides real-time updates for dashboards and monitoring tools.
 
 - Logs (useful for troubleshooting but not required for operation)
 
-- State files (ephemeral; recreated during provisioning)
+- State database (`/srv/rpi-sb-provisioner/state.db`; provisioning history only)
 
 - Cache directories (recreated as needed)
 
@@ -892,13 +961,13 @@ If provisioning fails, check in order:
 
 3.  **Shell scripts:** Logs in `/var/log/rpi-sb-provisioner/<serial>/` - Examine command output
 
-4.  **State files:** `/var/run/rpi-sb-state/<serial>/` - Verify phase transitions
+4.  **State:** the device's page in the web UI, or `state.db` - Verify phase transitions
 
 ## Common Issues
 
 **Device not detected:**
 
-- Check udev rules are installed: `/lib/udev/rules.d/60-rpi-sb-provisioner.rules`
+- Check udev rules are installed: `/usr/lib/udev/rules.d/60-rpi-sb-provisioner.rules`
 
 - Verify USB connection and device state
 
@@ -906,11 +975,13 @@ If provisioning fails, check in order:
 
 **Service not starting:**
 
-- Check systemd service files are installed: `/lib/systemd/system/rpi-sb-*.service`
+- Check systemd service files are installed: `/usr/lib/systemd/system/rpi-*.service`
 
-- Verify scripts are executable: `/usr/bin/rpi-sb-*.sh`
+- Verify scripts are executable: `/usr/bin/rpi-*.sh`
 
-- Check for lock directory conflicts: `/var/lock/rpi-sb-provisioner/`
+- Check for a stale bootstrap lock: `/var/lock/rpi-sb-bootstrap/<serial>/`
+
+- Check the device is on a permitted USB port (`/etc/rpi-sb-provisioner/usb-ports.d/`)
 
 **Provisioning fails:**
 
@@ -928,7 +999,7 @@ For implementation details, see:
 
 - [Configuration Reference](config_vars.md) - All configuration options
 
-- [API Documentation](api_endpoints.md) - Web service integration
+- [API Documentation](api/README.md) - Web service integration
 
 - [Device Guidance](device-guidance/) - Device-specific procedures
 

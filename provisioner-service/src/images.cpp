@@ -6,6 +6,7 @@
 #include <drogon/HttpSimpleController.h>
 #include <drogon/HttpTypes.h>
 #include <drogon/WebSocketController.h>
+#include "archive_policy.h"
 #include <drogon/RequestStream.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
@@ -45,6 +46,18 @@
 #include <images.h>
 #include "utils.h"
 #include "include/audit.h"
+#include "include/auth.h"
+
+// An image name becomes a path under IMAGES_PATH, and the client
+// chooses it. Only a bare name is accepted: path::operator/= replaces
+// the base outright when given an absolute path, so "/home" would name
+// /home itself. A leading dot would collide with the ".extracting"
+// directories.
+static bool isPlainImageName(const std::string& name) {
+    return !name.empty() && name[0] != '.' &&
+           name.find_first_of("/\\") == std::string::npos &&
+           name.find("..") == std::string::npos;
+}
 
 // WebSocket controller for SHA256 calculations
 // Defined outside the provisioner namespace to avoid registration issues
@@ -123,6 +136,13 @@ public:
             if (request.isMember("action") && request["action"].asString() == "get_sha256" && 
                 request.isMember("image_name")) {
                 std::string imageName = request["image_name"].asString();
+                if (!isPlainImageName(imageName)) {
+                    Json::Value response;
+                    response["status"] = "error";
+                    response["error"] = "The image name must be a plain name, without directories";
+                    wsConnPtr->send(response.toStyledString());
+                    return;
+                }
                 // Refuse sidecar requests up-front
                 try {
                     if (std::filesystem::path(imageName).extension() == ".sha256") {
@@ -310,6 +330,13 @@ public:
             if (request.isMember("action") && request["action"].asString() == "check_boot_package" && 
                 request.isMember("image_name")) {
                 std::string imageName = request["image_name"].asString();
+                if (!isPlainImageName(imageName)) {
+                    Json::Value response;
+                    response["status"] = "error";
+                    response["error"] = "The image name must be a plain name, without directories";
+                    wsConnPtr->send(response.toStyledString());
+                    return;
+                }
                 
                 // Register this connection as interested in this image
                 {
@@ -603,6 +630,11 @@ namespace provisioner {
                 if (!pimages[key].isMember("simage")) continue;
                 std::string name = pimages[key]["simage"].asString();
                 if (name.empty() || !seen.insert(name).second) continue;
+                // The provisioner flashes whatever this names, so it must stay
+                // inside the artefact. An absolute path would replace dirPath.
+                if (!isPlainImageName(name)) {
+                    return name + ": not a plain file name inside the artefact";
+                }
 
                 std::filesystem::path imgPath = dirPath / name;
                 if (!std::filesystem::is_regular_file(imgPath)) {
@@ -752,11 +784,6 @@ namespace provisioner {
                 return 0;
             }
             return static_cast<std::uintmax_t>(stat.f_bavail) * stat.f_frsize;
-        }
-
-        // Run an external command and return exit code
-        int runCommand(const std::string& cmd) {
-            return std::system(cmd.c_str());
         }
 
     } // namespace anonymous
@@ -1295,9 +1322,9 @@ namespace provisioner {
     void requestBootPackageCheck(const std::string& imageName) {
         LOG_INFO << "Checking boot package for: " << imageName;
         
-        // Check if provisioning style supports boot packages (secure-boot or fde-only)
+        // A boot package is a signed boot.img, so only secure boot has one
         auto provisioningStyle = provisioner::utils::getConfigValue("PROVISIONING_STYLE");
-        if (!provisioningStyle || (*provisioningStyle != "secure-boot" && *provisioningStyle != "fde-only")) {
+        if (!provisioningStyle || *provisioningStyle != "secure-boot") {
             std::string style = provisioningStyle ? *provisioningStyle : "unknown";
             LOG_INFO << "Boot package not supported for provisioning style: " << style;
             BootPackageWebSocketController::broadcastUpdate(imageName, false, "", "unsupported");
@@ -1493,6 +1520,12 @@ namespace provisioner {
             
             // Get the image name from the request
             std::string imageName = req->getParameter("name");
+            if (!imageName.empty() && !isPlainImageName(imageName)) {
+                callback(provisioner::utils::createErrorResponse(
+                    req, "The image name must be a plain name, without directories",
+                    drogon::k400BadRequest, "Invalid Request", "INVALID_IMAGE_NAME"));
+                return;
+            }
             if (imageName.empty()) {
                 auto resp = provisioner::utils::createErrorResponse(
                     req,
@@ -1735,6 +1768,12 @@ namespace provisioner {
 
             // Get the image name from the request
             std::string imageName = req->getParameter("name");
+            if (!imageName.empty() && !isPlainImageName(imageName)) {
+                callback(provisioner::utils::createErrorResponse(
+                    req, "The image name must be a plain name, without directories",
+                    drogon::k400BadRequest, "Invalid Request", "INVALID_IMAGE_NAME"));
+                return;
+            }
             if (imageName.empty()) {
                 auto resp = provisioner::utils::createErrorResponse(
                     req,
@@ -1804,6 +1843,7 @@ namespace provisioner {
 
             // Check cache for SHA256 result
             bool resultReady = false;
+            bool cached = false;
             std::string sha256;
             SHA256Status status = SHA256Status::PENDING;
             double progress = 0.0;
@@ -1812,6 +1852,7 @@ namespace provisioner {
                 std::lock_guard<std::mutex> lock(sha256Cache_mutex);
                 auto it = sha256Cache.find(imageName);
                 if (it != sha256Cache.end()) {
+                    cached = true;
                     status = it->second.status;
                     if (status == SHA256Status::COMPLETE) {
                         sha256 = it->second.value;
@@ -1838,8 +1879,8 @@ namespace provisioner {
             Json::Value result;
             
             if (!resultReady) {
-                // Return immediate status for pending calculations
-                if (status == SHA256Status::PENDING) {
+                // status starts as PENDING, so only the cache can say one is running
+                if (cached && status == SHA256Status::PENDING) {
                     result["sha256"] = "Calculating...";
                     result["status"] = "pending";
                     result["message"] = "SHA256 calculation is in progress.";
@@ -1941,12 +1982,18 @@ namespace provisioner {
                 }
                 const auto& file = parser.getFiles()[0];
                 std::string originalFilename = file.getFileName();
+                if (!isPlainImageName(originalFilename)) {
+                    callback(provisioner::utils::createErrorResponse(
+                        req, "The file name must be a plain name, without directories",
+                        drogon::k400BadRequest, "Invalid Request", "INVALID_UPLOAD_NAME"));
+                    return;
+                }
                 std::string finalFilename = generateUniqueFilename(originalFilename, IMAGES_PATH);
                 std::filesystem::path targetPath = std::filesystem::path(IMAGES_PATH) / finalFilename;
 
                 try {
                     file.saveAs(targetPath);
-                    AuditLog::logFileSystemAccess("UPLOAD", targetPath.string(), true, "",
+                    AuditLog::logFileSystemAccess("UPLOAD", targetPath.string(), true, auth::username(req),
                         "Original filename: " + originalFilename + (originalFilename != finalFilename ? ", renamed to: " + finalFilename : ""));
                     {
                         std::lock_guard<std::mutex> lock(sha256Cache_mutex);
@@ -1968,7 +2015,7 @@ namespace provisioner {
                     resp->setBody(result.toStyledString());
                 } catch (const std::exception& e) {
                     LOG_ERROR << "Failed to save uploaded file: " << e.what();
-                    AuditLog::logFileSystemAccess("UPLOAD", targetPath.string(), false, "",
+                    AuditLog::logFileSystemAccess("UPLOAD", targetPath.string(), false, auth::username(req),
                         "Upload failed: " + std::string(e.what()));
                     auto resp = provisioner::utils::createErrorResponse(
                         req, "Failed to save uploaded file", drogon::k500InternalServerError,
@@ -2086,6 +2133,12 @@ namespace provisioner {
 
                     ctx->originalFilename = header.filename;
                     if (ctx->originalFilename.empty()) return;
+                    if (!isPlainImageName(ctx->originalFilename)) {
+                        ctx->hadError = true;
+                        ctx->errorMessage = "The file name must be a plain name, without directories";
+                        ctx->errorCode = drogon::k400BadRequest;
+                        return;
+                    }
 
                     std::string lowerFilename = ctx->originalFilename;
                     std::transform(lowerFilename.begin(), lowerFilename.end(), lowerFilename.begin(), ::tolower);
@@ -2093,6 +2146,7 @@ namespace provisioner {
                     if (!isSupportedUpload(lowerFilename)) {
                         ctx->hadError = true;
                         ctx->errorMessage = "Unsupported file type. Accepted formats: .img, .img.xz, .img.zst, .tar.xz, .tar.zst";
+                        ctx->errorCode = drogon::k400BadRequest;
                         return;
                     }
 
@@ -2124,8 +2178,17 @@ namespace provisioner {
                             return;
                         }
 
-                        // Spawn worker thread for libarchive extraction
-                        std::string tempDirStr = ctx->tempDir.string();
+                        // Spawn worker thread for libarchive extraction. Canonical,
+                        // because SECURE_SYMLINKS refuses a symlink anywhere in the
+                        // path, and /srv/rpi-sb-provisioner is often one.
+                        std::string tempDirStr;
+                        try {
+                            tempDirStr = std::filesystem::canonical(ctx->tempDir).string();
+                        } catch (const std::exception& e) {
+                            ctx->hadError = true;
+                            ctx->errorMessage = "Failed to resolve extraction directory: " + std::string(e.what());
+                            return;
+                        }
                         ctx->extractionThread = std::thread([ctx, archiveReadCb, tempDirStr]() {
                             struct archive *a = archive_read_new();
                             archive_read_support_filter_xz(a);
@@ -2139,8 +2202,7 @@ namespace provisioner {
                             }
 
                             struct archive *ext = archive_write_disk_new();
-                            archive_write_disk_set_options(ext,
-                                ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM | ARCHIVE_EXTRACT_NO_OVERWRITE);
+                            archive_write_disk_set_options(ext, archive_policy::kExtractFlags);
                             archive_write_disk_set_standard_lookup(ext);
 
                             struct archive_entry *entry;
@@ -2148,14 +2210,13 @@ namespace provisioner {
                             size_t archiveBytesWritten = 0;
                             auto lastPublish = std::chrono::steady_clock::now() - std::chrono::seconds(1);
                             while ((r = archive_read_next_header(a, &entry)) == ARCHIVE_OK) {
-                                std::string entryPath = archive_entry_pathname(entry);
-                                if (!isArchivePathSafe(entryPath)) {
-                                    ctx->extractionError = "Archive contains unsafe path: " + entryPath;
+                                const char *rawEntryPath = archive_entry_pathname(entry);
+                                std::string entryPath = rawEntryPath ? rawEntryPath : "";
+                                std::string rejected;
+                                if (!archive_policy::admit(entry, tempDirStr, rejected)) {
+                                    ctx->extractionError = "Archive refused: " + rejected;
                                     break;
                                 }
-
-                                std::string fullPath = tempDirStr + "/" + entryPath;
-                                archive_entry_set_pathname(entry, fullPath.c_str());
 
                                 r = archive_write_header(ext, entry);
                                 if (r != ARCHIVE_OK) {
@@ -2465,7 +2526,7 @@ namespace provisioner {
                         if (!ctx->extractionOk) {
                             LOG_ERROR << "Archive extraction failed: " << ctx->extractionError;
                             if (std::filesystem::exists(ctx->tempDir)) std::filesystem::remove_all(ctx->tempDir);
-                            AuditLog::logFileSystemAccess("UPLOAD_ARCHIVE", ctx->finalDir.string(), false, "",
+                            AuditLog::logFileSystemAccess("UPLOAD_ARCHIVE", ctx->finalDir.string(), false, auth::username(ctx->req),
                                 "Archive extraction failed: " + ctx->extractionError);
                             publishProgress("error", "Archive extraction failed: " + ctx->extractionError);
                             auto resp = provisioner::utils::createErrorResponse(
@@ -2522,7 +2583,7 @@ namespace provisioner {
                             if (!sparseErr.empty()) {
                                 LOG_ERROR << "IDP sparse image validation failed: " << sparseErr;
                                 std::filesystem::remove_all(ctx->tempDir);
-                                AuditLog::logFileSystemAccess("UPLOAD_ARCHIVE", ctx->finalDir.string(), false, "",
+                                AuditLog::logFileSystemAccess("UPLOAD_ARCHIVE", ctx->finalDir.string(), false, auth::username(ctx->req),
                                     "IDP sparse image validation failed: " + sparseErr);
                                 publishProgress("error", "Sparse image validation failed: " + sparseErr);
                                 auto resp = provisioner::utils::createErrorResponse(
@@ -2548,7 +2609,7 @@ namespace provisioner {
                             std::filesystem::rename(ctx->tempDir, ctx->finalDir);
                         }
 
-                        AuditLog::logFileSystemAccess("UPLOAD_ARCHIVE", ctx->finalDir.string(), true, "",
+                        AuditLog::logFileSystemAccess("UPLOAD_ARCHIVE", ctx->finalDir.string(), true, auth::username(ctx->req),
                             "IDP artefact archive streamed and extracted: " + ctx->originalFilename + " -> " + ctx->artefactName);
 
                         // Write SHA256 sidecar
@@ -2610,7 +2671,7 @@ namespace provisioner {
                             ctx->fd = -1;
                         }
 
-                        AuditLog::logFileSystemAccess("UPLOAD", ctx->targetPath, true, "",
+                        AuditLog::logFileSystemAccess("UPLOAD", ctx->targetPath, true, auth::username(ctx->req),
                             "Compressed image decompressed: " + ctx->originalFilename + " -> " + ctx->finalFilename);
 
                         {
@@ -2643,7 +2704,7 @@ namespace provisioner {
                         ctx->callback(resp);
                     } else {
                         // ---- .img post-processing ----
-                        AuditLog::logFileSystemAccess("UPLOAD", ctx->targetPath, true, "",
+                        AuditLog::logFileSystemAccess("UPLOAD", ctx->targetPath, true, auth::username(ctx->req),
                             "Original filename: " + ctx->originalFilename +
                             (ctx->originalFilename != ctx->finalFilename ? ", renamed to: " + ctx->finalFilename : ""));
 
@@ -2668,6 +2729,7 @@ namespace provisioner {
                             ? "File uploaded successfully (renamed to avoid conflict)"
                             : "File uploaded successfully";
                         result["sha256"] = sha256Hex.empty() ? "Calculating..." : sha256Hex;
+                        publishProgress("complete");
                         resp->setBody(result.toStyledString());
                         ctx->callback(resp);
                     }
@@ -2675,7 +2737,7 @@ namespace provisioner {
             );
 
             stream->setStreamReader(std::move(reader));
-        });
+        }, {Post});
 
         app.registerHandler("/get-boot-package-info", [](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
             LOG_INFO << "Images::getBootPackageInfo";
@@ -2684,6 +2746,12 @@ namespace provisioner {
             AuditLog::logHandlerAccess(req, "/get-boot-package-info");
             
             std::string imageName = req->getParameter("name");
+            if (!imageName.empty() && !isPlainImageName(imageName)) {
+                callback(provisioner::utils::createErrorResponse(
+                    req, "The image name must be a plain name, without directories",
+                    drogon::k400BadRequest, "Invalid Request", "INVALID_IMAGE_NAME"));
+                return;
+            }
             if (imageName.empty()) {
                 auto resp = provisioner::utils::createErrorResponse(
                     req,
@@ -2696,9 +2764,9 @@ namespace provisioner {
                 return;
             }
             
-            // Check if provisioning style supports boot packages (secure-boot or fde-only)
+            // A boot package is a signed boot.img, so only secure boot has one
             auto provisioningStyle = provisioner::utils::getConfigValue("PROVISIONING_STYLE");
-            if (!provisioningStyle || (*provisioningStyle != "secure-boot" && *provisioningStyle != "fde-only")) {
+            if (!provisioningStyle || *provisioningStyle != "secure-boot") {
                 Json::Value result;
                 result["exists"] = false;
                 result["image_name"] = imageName;
@@ -2783,13 +2851,13 @@ namespace provisioner {
             // Add audit log entry for handler access
             AuditLog::logHandlerAccess(req, "/generate-boot-package");
             
-            // Check if provisioning style supports boot packages (secure-boot or fde-only)
+            // A boot package is a signed boot.img, so only secure boot has one
             auto provisioningStyle = provisioner::utils::getConfigValue("PROVISIONING_STYLE");
-            if (!provisioningStyle || (*provisioningStyle != "secure-boot" && *provisioningStyle != "fde-only")) {
+            if (!provisioningStyle || *provisioningStyle != "secure-boot") {
                 std::string style = provisioningStyle ? *provisioningStyle : "unknown";
                 auto resp = provisioner::utils::createErrorResponse(
                     req,
-                    "Boot package generation only supported in secure-boot or fde-only mode (current: " + style + ")",
+                    "Boot package generation only supported in secure-boot mode (current: " + style + ")",
                     drogon::k400BadRequest,
                     "Bad Request",
                     "UNSUPPORTED_PROVISIONING_STYLE"
@@ -2817,6 +2885,12 @@ namespace provisioner {
             }
             
             std::string imageName = req->getParameter("name");
+            if (!imageName.empty() && !isPlainImageName(imageName)) {
+                callback(provisioner::utils::createErrorResponse(
+                    req, "The image name must be a plain name, without directories",
+                    drogon::k400BadRequest, "Invalid Request", "INVALID_IMAGE_NAME"));
+                return;
+            }
             if (imageName.empty()) {
                 auto resp = provisioner::utils::createErrorResponse(
                     req,
@@ -2849,7 +2923,7 @@ namespace provisioner {
             triggerBootImgGeneration(imageName);
             
             // Log the action
-            AuditLog::logFileSystemAccess("GENERATE_BOOT_PACKAGE", imagePath.string(), true, "", 
+            AuditLog::logFileSystemAccess("GENERATE_BOOT_PACKAGE", imagePath.string(), true, auth::username(req), 
                 "Manual boot package generation requested");
             
             // Return success response
@@ -2861,7 +2935,7 @@ namespace provisioner {
             auto resp = drogon::HttpResponse::newHttpJsonResponse(result);
             resp->setStatusCode(drogon::k200OK);
             callback(resp);
-        });
+        }, {Post});
 
         app.registerHandler("/download-boot-package", [](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback) {
             LOG_INFO << "Images::downloadBootPackage";
@@ -2870,6 +2944,12 @@ namespace provisioner {
             AuditLog::logHandlerAccess(req, "/download-boot-package");
             
             std::string imageName = req->getParameter("name");
+            if (!imageName.empty() && !isPlainImageName(imageName)) {
+                callback(provisioner::utils::createErrorResponse(
+                    req, "The image name must be a plain name, without directories",
+                    drogon::k400BadRequest, "Invalid Request", "INVALID_IMAGE_NAME"));
+                return;
+            }
             if (imageName.empty()) {
                 auto resp = provisioner::utils::createErrorResponse(
                     req,
@@ -2924,7 +3004,7 @@ namespace provisioner {
                 }
                 
                 // Log the download
-                AuditLog::logFileSystemAccess("DOWNLOAD", packagePath.string(), true, "",
+                AuditLog::logFileSystemAccess("DOWNLOAD", packagePath.string(), true, auth::username(req),
                     "Boot package downloaded for image: " + imageName);
                 
                 // Send the file
@@ -2953,6 +3033,12 @@ namespace provisioner {
             AuditLog::logHandlerAccess(req, "/analyze-image");
 
             std::string imageName = req->getParameter("name");
+            if (!imageName.empty() && !isPlainImageName(imageName)) {
+                callback(provisioner::utils::createErrorResponse(
+                    req, "The image name must be a plain name, without directories",
+                    drogon::k400BadRequest, "Invalid Request", "INVALID_IMAGE_NAME"));
+                return;
+            }
             if (imageName.empty()) {
                 auto resp = provisioner::utils::createErrorResponse(
                     req,
@@ -3020,6 +3106,12 @@ namespace provisioner {
 
             // Get the image name from the request
             std::string imageName = req->getParameter("name");
+            if (!imageName.empty() && !isPlainImageName(imageName)) {
+                callback(provisioner::utils::createErrorResponse(
+                    req, "The image name must be a plain name, without directories",
+                    drogon::k400BadRequest, "Invalid Request", "INVALID_IMAGE_NAME"));
+                return;
+            }
             if (imageName.empty()) {
                 auto resp = provisioner::utils::createErrorResponse(
                     req,
@@ -3055,7 +3147,7 @@ namespace provisioner {
                         if (std::filesystem::exists(sidecarPath)) {
                             std::filesystem::remove(sidecarPath);
                         }
-                        AuditLog::logFileSystemAccess("DELETE", imagePath.string(), true, "", 
+                        AuditLog::logFileSystemAccess("DELETE", imagePath.string(), true, auth::username(req), 
                             "IDP artefact directory deleted: " + imageName);
                     } else {
                         std::filesystem::remove(imagePath);
@@ -3065,7 +3157,7 @@ namespace provisioner {
                         if (std::filesystem::exists(sidecarPath)) {
                             std::filesystem::remove(sidecarPath);
                         }
-                        AuditLog::logFileSystemAccess("DELETE", imagePath.string(), true, "",
+                        AuditLog::logFileSystemAccess("DELETE", imagePath.string(), true, auth::username(req),
                             "Image file deleted: " + imageName);
                     }
 
@@ -3078,7 +3170,7 @@ namespace provisioner {
                     if (goldMaster && !goldMaster->empty()) {
                         std::filesystem::path goldMasterPath(*goldMaster);
                         if (goldMasterPath == imagePath || goldMasterPath.filename() == imageName) {
-                            if (provisioner::utils::setConfigValue("GOLD_MASTER_OS_FILE", "")) {
+                            if (provisioner::utils::setConfigValue("GOLD_MASTER_OS_FILE", "", auth::username(req))) {
                                 LOG_INFO << "Cleared GOLD_MASTER_OS_FILE after deleting selected image: " << imageName;
                             } else {
                                 LOG_WARN << "Failed to clear GOLD_MASTER_OS_FILE after deleting selected image: " << imageName;
@@ -3093,7 +3185,7 @@ namespace provisioner {
                     LOG_ERROR << "Failed to delete image: " << e.what();
                     
                     // Log failed file deletion
-                    AuditLog::logFileSystemAccess("DELETE", imagePath.string(), false, "", 
+                    AuditLog::logFileSystemAccess("DELETE", imagePath.string(), false, auth::username(req), 
                         "Failed to delete image: " + std::string(e.what()));
                     
                     auto resp = provisioner::utils::createErrorResponse(
@@ -3120,6 +3212,6 @@ namespace provisioner {
                 callback(resp);
                 return;
             }
-        });
+        }, {Post});
     }
 } // namespace provisioner

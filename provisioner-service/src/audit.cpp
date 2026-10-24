@@ -12,8 +12,11 @@
 #include <sstream>
 #include <filesystem>
 #include <sqlite3.h>
+#include <algorithm>
+#include <regex>
 
 #include "include/audit.h"
+#include "auth.h"
 #include "utils.h"
 
 namespace provisioner {
@@ -98,21 +101,21 @@ namespace provisioner {
     }
     
     std::string AuditLog::getClientIP(const HttpRequestPtr &req) {
-        std::string clientIP = req->getPeerAddr().toIp();
-        
-        // Check for X-Forwarded-For header (if behind a proxy)
-        auto xff = req->getHeader("X-Forwarded-For");
-        if (!xff.empty()) {
-            // Extract the original client IP (first in the list)
-            size_t commaPos = xff.find(',');
-            if (commaPos != std::string::npos) {
-                clientIP = xff.substr(0, commaPos);
-            } else {
-                clientIP = xff;
-            }
+        const std::string peer = req->getPeerAddr().toIp();
+
+        // X-Forwarded-For is only evidence when a local reverse proxy sent
+        // it; from anyone else it is whatever they chose to write. Even then
+        // only the last entry is the proxy's own: the ones before it arrived
+        // from the client.
+        const bool fromLocalProxy = peer == "127.0.0.1" || peer == "::1" || peer == "::ffff:127.0.0.1";
+        const std::string xff = req->getHeader("X-Forwarded-For");
+        if (!fromLocalProxy || xff.empty()) {
+            return peer;
         }
-        
-        return clientIP;
+        std::string last = xff.substr(xff.rfind(',') == std::string::npos ? 0 : xff.rfind(',') + 1);
+        last.erase(0, last.find_first_not_of(" \t"));
+        last.erase(last.find_last_not_of(" \t") + 1);
+        return last.empty() ? peer : last;
     }
     
     void AuditLog::logHandlerAccess(const HttpRequestPtr &req, const std::string &handlerPath) {
@@ -140,8 +143,8 @@ namespace provisioner {
         std::string userAgent = req->getHeader("User-Agent");
         
         const char* insert_sql = 
-            "INSERT INTO audit_log (timestamp, event_type, client_ip, user_agent, handler_path) "
-            "VALUES (?, 'HANDLER_ACCESS', ?, ?, ?);";
+            "INSERT INTO audit_log (timestamp, event_type, client_ip, user_agent, handler_path, username) "
+            "VALUES (?, 'HANDLER_ACCESS', ?, ?, ?, ?);";
             
         sqlite3_stmt* stmt;
         rc = sqlite3_prepare_v2(db, insert_sql, -1, &stmt, nullptr);
@@ -157,6 +160,8 @@ namespace provisioner {
         sqlite3_bind_text(stmt, 2, clientIP.c_str(), clientIP.length(), SQLITE_TRANSIENT);
         sqlite3_bind_text(stmt, 3, userAgent.c_str(), userAgent.length(), SQLITE_TRANSIENT);
         sqlite3_bind_text(stmt, 4, handlerPath.c_str(), handlerPath.length(), SQLITE_TRANSIENT);
+        const std::string user = auth::username(req);
+        sqlite3_bind_text(stmt, 5, user.c_str(), user.length(), SQLITE_TRANSIENT);
         
         rc = sqlite3_step(stmt);
         if (rc != SQLITE_DONE) {
@@ -220,6 +225,53 @@ namespace provisioner {
         sqlite3_close(db);
     }
     
+    void AuditLog::logAuthentication(const HttpRequestPtr &req, const std::string &username,
+                                     const std::string &operation, bool success,
+                                     const std::string &detail) {
+        std::lock_guard<std::mutex> lock(dbMutex);
+
+        sqlite3* db;
+        if (sqlite3_open(AUDIT_DB_PATH.c_str(), &db) != SQLITE_OK) {
+            LOG_ERROR << "Failed to open audit database for authentication logging: " << sqlite3_errmsg(db);
+            sqlite3_close(db);
+            return;
+        }
+        sqlite3_busy_timeout(db, 5000);
+
+        auto time_t_now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+        std::tm tm_now;
+        localtime_r(&time_t_now, &tm_now);
+        std::stringstream timestamp;
+        timestamp << std::put_time(&tm_now, "%Y-%m-%d %H:%M:%S");
+
+        const char* insert_sql =
+            "INSERT INTO audit_log (timestamp, event_type, client_ip, user_agent, operation, success, username, additional_info) "
+            "VALUES (?, 'AUTHENTICATION', ?, ?, ?, ?, ?, ?);";
+        sqlite3_stmt* stmt;
+        if (sqlite3_prepare_v2(db, insert_sql, -1, &stmt, nullptr) != SQLITE_OK) {
+            LOG_ERROR << "Failed to prepare audit log statement: " << sqlite3_errmsg(db);
+            sqlite3_close(db);
+            return;
+        }
+
+        const std::string timestampStr = timestamp.str();
+        const std::string clientIP = getClientIP(req);
+        const std::string userAgent = req->getHeader("User-Agent");
+        sqlite3_bind_text(stmt, 1, timestampStr.c_str(), timestampStr.length(), SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 2, clientIP.c_str(), clientIP.length(), SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 3, userAgent.c_str(), userAgent.length(), SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 4, operation.c_str(), operation.length(), SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 5, success ? 1 : 0);
+        sqlite3_bind_text(stmt, 6, username.c_str(), username.length(), SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 7, detail.c_str(), detail.length(), SQLITE_TRANSIENT);
+
+        if (sqlite3_step(stmt) != SQLITE_DONE) {
+            LOG_ERROR << "Failed to insert authentication audit log entry: " << sqlite3_errmsg(db);
+        }
+        sqlite3_finalize(stmt);
+        sqlite3_close(db);
+    }
+
     void AuditLog::logSystemdAccess(const std::string &service, const std::string &username) {
         std::lock_guard<std::mutex> lock(dbMutex);
         
@@ -277,9 +329,26 @@ namespace provisioner {
             
             // Get query parameters for filtering
             std::string eventType = req->getParameter("event_type");
-            std::string startDate = req->getParameter("start_date");
-            std::string endDate = req->getParameter("end_date");
-            std::string limit = req->getParameter("limit");  // Default to 100 entries
+            // The browser sends datetime-local, "YYYY-MM-DDTHH:MM", but entries
+            // are stored as "YYYY-MM-DD HH:MM:SS". Compared as they were, 'T'
+            // sorts after ' ', so a start dropped its whole day and an end
+            // took all of its day. Anything else is not a date: ignored.
+            const auto asStoredTime = [](std::string v) -> std::string {
+                static const std::regex shape(R"((\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(:\d{2})?)");
+                std::smatch m;
+                if (!std::regex_match(v, m, shape)) return "";
+                return m[1].str() + " " + m[2].str() + (m[3].matched ? m[3].str() : ":00");
+            };
+            std::string startDate = asStoredTime(req->getParameter("start_date"));
+            std::string endDate = asStoredTime(req->getParameter("end_date"));
+            // Bound as an integer: an empty string bound as LIMIT matched
+            // nothing, so the log looked empty unless a limit was picked.
+            int limit = 100;
+            try {
+                const std::string limitParam = req->getParameter("limit");
+                if (!limitParam.empty()) limit = std::clamp(std::stoi(limitParam), 1, 1000);
+            } catch (const std::exception &) {
+            }
             
             // Open the audit database
             sqlite3* db;
@@ -317,7 +386,8 @@ namespace provisioner {
                 query << "AND timestamp <= ? ";
             }
             
-            query << "ORDER BY timestamp DESC LIMIT ?;";
+            // Timestamps are to the second, so id orders events within one.
+            query << "ORDER BY timestamp DESC, id DESC LIMIT ?;";
             
             sqlite3_stmt* stmt;
             rc = sqlite3_prepare_v2(db, query.str().c_str(), -1, &stmt, nullptr);
@@ -352,8 +422,7 @@ namespace provisioner {
                 sqlite3_bind_text(stmt, bindIndex++, endDate.c_str(), -1, SQLITE_STATIC);
             }
             
-            // Always bind the limit parameter
-            sqlite3_bind_text(stmt, bindIndex, limit.c_str(), -1, SQLITE_STATIC);
+            sqlite3_bind_int(stmt, bindIndex, limit);
             
             // Process query results
             std::vector<std::map<std::string, std::string>> auditEntries;
@@ -404,9 +473,10 @@ namespace provisioner {
                 viewData.insert("audit_entries", auditEntries);
                 viewData.insert("currentPage", std::string("auditlog"));
                 viewData.insert("event_type", eventType);
-                viewData.insert("start_date", startDate);
-                viewData.insert("end_date", endDate);
-                viewData.insert("limit", limit);
+                // Back in the form as the browser sent them, for datetime-local.
+                viewData.insert("start_date", startDate.empty() ? std::string() : req->getParameter("start_date"));
+                viewData.insert("end_date", endDate.empty() ? std::string() : req->getParameter("end_date"));
+                viewData.insert("limit", std::to_string(limit));
                 
                 auto resp = HttpResponse::newHttpViewResponse("auditlog.csp", viewData);
                 callback(resp);

@@ -12,6 +12,7 @@
 #include "include/manufacturing.h"
 #include "utils.h"
 #include "include/audit.h"
+#include "include/auth.h"
 
 namespace provisioner {
 
@@ -88,7 +89,7 @@ namespace provisioner {
                 LOG_ERROR << "Manufacturing database file does not exist: " << *dbPath;
                 
                 // Log failed file access to audit log
-                AuditLog::logFileSystemAccess("READ", *dbPath, false);
+                AuditLog::logFileSystemAccess("READ", *dbPath, false, auth::username(req));
                 
                 auto resp = utils::createErrorResponse(
                     req,
@@ -103,7 +104,7 @@ namespace provisioner {
             }
             
             // Log successful database access to audit log
-            AuditLog::logFileSystemAccess("READ", *dbPath, true);
+            AuditLog::logFileSystemAccess("READ", *dbPath, true, auth::username(req));
             
             // Open the database
             sqlite3 *db;
@@ -126,13 +127,9 @@ namespace provisioner {
 
             // Prepare SQL with optional pagination
             std::string sql = "SELECT * FROM devices ORDER BY provision_ts DESC";
-            if (limit > 0) {
-                sql += " LIMIT " + std::to_string(limit);
-                if (offset > 0) {
-                    sql += " OFFSET " + std::to_string(offset);
-                }
-            }
-            sql += ";";
+            // SQLite takes OFFSET only after a LIMIT; -1 is no limit.
+            sql += " LIMIT " + std::to_string(limit > 0 ? limit : -1) +
+                   " OFFSET " + std::to_string(offset > 0 ? offset : 0) + ";";
             
             sqlite3_stmt *stmt;
             rc = sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, nullptr);

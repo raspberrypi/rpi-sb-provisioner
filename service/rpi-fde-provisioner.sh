@@ -42,96 +42,6 @@ log() {
     echo "[${timestamp}] $*" >> /var/log/rpi-sb-provisioner/"${TARGET_DEVICE_SERIAL}"/provisioner.log
 }
 
-timeout_nonfatal() {
-    command="$*"
-    set +e
-    log "Running command with 10-second timeout: \"${command}\""
-    # shellcheck disable=SC2086
-    timeout 10 ${command}
-    command_exit_status=$?
-    
-    # Handle different exit codes from the timeout command
-    case ${command_exit_status} in
-        0)
-            # Command completed successfully within the time limit
-            log "\"$command\" succeeded with exit code 0."
-            ;;
-        124)
-            # Exit code 124 means the command timed out (TERM signal sent but command didn't exit)
-            log "\"${command}\" FAILED: Timed out after 10 seconds (exit code 124)."
-            ;;
-        125)
-            # Exit code 125 means the timeout command itself failed
-            log "\"${command}\" FAILED: The timeout command itself failed (exit code 125)."
-            ;;
-        126)
-            # Exit code 126 means the command was found but could not be executed
-            log "\"${command}\" FAILED: Command found but could not be executed (exit code 126)."
-            ;;
-        127)
-            # Exit code 127 means the command was not found
-            log "\"${command}\" FAILED: Command not found (exit code 127)."
-            ;;
-        137)
-            # Exit code 137 (128+9) means the command was killed by SIGKILL (kill -9)
-            log "\"${command}\" FAILED: Command was killed by SIGKILL (exit code 137)."
-            ;;
-        *)
-            # Any other non-zero exit code is a general failure
-            log "\"${command}\" FAILED: Command returned exit code ${command_exit_status}."
-            ;;
-    esac
-    set -e
-    return ${command_exit_status}
-}
-
-timeout_fatal() {
-    command="$*"
-    set +e
-    log "Running command with 30-second timeout: \"${command}\""
-    # shellcheck disable=SC2086
-    timeout 30 ${command}
-    command_exit_status=$?
-    
-    # Handle different exit codes from the timeout command
-    case ${command_exit_status} in
-        0)
-            # Command completed successfully within the time limit
-            log "\"$command\" succeeded with exit code 0."
-            ;;
-        124)
-            # Exit code 124 means the command timed out (TERM signal sent but command didn't exit)
-            record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "${TARGET_USB_PATH}"
-            die "\"${command}\" FAILED: Timed out after 30 seconds (exit code 124)."
-            ;;
-        125)
-            # Exit code 125 means the timeout command itself failed
-            record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "${TARGET_USB_PATH}"
-            die "\"${command}\" FAILED: The timeout command itself failed (exit code 125)."
-            ;;
-        126)
-            # Exit code 126 means the command was found but could not be executed
-            record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "${TARGET_USB_PATH}"
-            die "\"${command}\" FAILED: Command found but could not be executed (exit code 126)."
-            ;;
-        127)
-            # Exit code 127 means the command was not found
-            record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "${TARGET_USB_PATH}"
-            die "\"${command}\" FAILED: Command not found (exit code 127)."
-            ;;
-        137)
-            # Exit code 137 (128+9) means the command was killed by SIGKILL (kill -9)
-            record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "${TARGET_USB_PATH}"
-            die "\"${command}\" FAILED: Command was killed by SIGKILL (exit code 137)."
-            ;;
-        *)
-            # Any other non-zero exit code is a general failure
-            record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "${TARGET_USB_PATH}"
-            die "\"${command}\" FAILED: Command returned exit code ${command_exit_status}."
-            ;;
-    esac
-    set -e
-}
 TMP_DIR=""
 CLEANUP_DONE=0
 
@@ -263,7 +173,12 @@ cleanup() {
 
     exit ${returnvalue}
 }
-trap cleanup EXIT INT TERM
+# Signals exit with their own status so cleanup sees a failure. Trapped
+# directly, cleanup read the last command's status, often 0, and recorded a
+# killed run as a success.
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 ### Start the provisioner phase
 
@@ -332,6 +247,10 @@ if [ -z "${RPI_SB_WORKDIR}" ]; then
 elif [ ! -d "${RPI_SB_WORKDIR}" ]; then
     RPI_SB_WORKDIR=$(make_temp_dir "rpi-sb-provisioner.XXX")
     announce_stop "Finding the cache directory: Created ${RPI_SB_WORKDIR} (configured path isn't a directory)"
+    DELETE_PRIVATE_TMPDIR="true"
+elif ! workdir_is_private "${RPI_SB_WORKDIR}"; then
+    RPI_SB_WORKDIR=$(make_temp_dir "rpi-sb-provisioner.XXX")
+    announce_stop "Finding the cache directory: Created ${RPI_SB_WORKDIR} (configured path is not root's alone)"
     DELETE_PRIVATE_TMPDIR="true"
 else
     # Deliberately do nothing
@@ -496,7 +415,8 @@ prepare_pre_boot_auth_images_as_filesystems() {
 
         sync; sync; sync;
 
-        img2simg -s "${CRYPTROOT_BOOTFS_FILE}" "${RPI_SB_WORKDIR}"/bootfs-temporary.simg
+        make_sparse_image "${CRYPTROOT_BOOTFS_FILE}" "${RPI_SB_WORKDIR}"/bootfs-temporary.simg \
+            || die "Failed to sparse the boot image"
         rm -f "${CRYPTROOT_BOOTFS_FILE}"
         announce_stop "Boot Image partition extraction"
     fi # Slow path
@@ -622,7 +542,8 @@ prepare_pre_boot_auth_images_as_bootimg() {
 
         umount "${META_BOOTIMG_MOUNT_PATH}"
         rm -rf "${META_BOOTIMG_MOUNT_PATH}"
-        img2simg -s "${TMP_DIR}"/bootfs-temporary.img "${RPI_SB_WORKDIR}"/bootfs-temporary.simg
+        make_sparse_image "${TMP_DIR}"/bootfs-temporary.img "${RPI_SB_WORKDIR}"/bootfs-temporary.simg \
+            || die "Failed to sparse the boot image"
         rm -f "${TMP_DIR}"/bootfs-temporary.img
         announce_stop "Boot Image partition extraction"
     fi # Slow path
@@ -644,17 +565,17 @@ record_progress "STORAGE-ERASING"
 announce_start "Erase / Partition Device Storage"
 
 # Arbitrary sleeps to handle lack of correct synchronisation in fastbootd.
-fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" erase "${RPI_DEVICE_STORAGE_TYPE}"
+timeout_fatal_secs "${FASTBOOT_ERASE_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" erase "${RPI_DEVICE_STORAGE_TYPE}"
 sleep 2
-fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem partinit "${RPI_DEVICE_STORAGE_TYPE}" DOS
+timeout_fatal_secs "${FASTBOOT_STORAGE_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem partinit "${RPI_DEVICE_STORAGE_TYPE}" DOS
 sleep 2
-fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 0c "$(simg_expanded_size "${RPI_SB_WORKDIR}"/bootfs-temporary.simg)"
+timeout_fatal_secs "${FASTBOOT_STORAGE_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 0c "$(simg_expanded_size "${RPI_SB_WORKDIR}"/bootfs-temporary.simg)"
 sleep 2
-fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 83 # Grow to fill storage
+timeout_fatal_secs "${FASTBOOT_STORAGE_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 83 # Grow to fill storage
 sleep 2
-fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem cryptinit "${RPI_DEVICE_STORAGE_TYPE}"p2 root "${RPI_DEVICE_STORAGE_CIPHER}"
+timeout_fatal_secs "${FASTBOOT_STORAGE_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem cryptinit "${RPI_DEVICE_STORAGE_TYPE}"p2 root "${RPI_DEVICE_STORAGE_CIPHER}"
 sleep 2
-fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem cryptopen "${RPI_DEVICE_STORAGE_TYPE}"p2 cryptroot
+timeout_fatal_secs "${FASTBOOT_STORAGE_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem cryptopen "${RPI_DEVICE_STORAGE_TYPE}"p2 cryptroot
 sleep 2
 announce_stop "Erase / Partition Device Storage"
 
@@ -664,7 +585,8 @@ prepare_rootfs_image() {
     else
         mount -t ext4 "${TMP_DIR}"/rootfs-original.img "${TMP_DIR}"/rpi-rootfs-img-mount
         mke2fs -t ext4 -b 4096 -d "${TMP_DIR}"/rpi-rootfs-img-mount "${RPI_SB_WORKDIR}"/rootfs-temporary.img $((TARGET_STORAGE_ROOT_EXTENT / 4096))
-        img2simg -s "${RPI_SB_WORKDIR}"/rootfs-temporary.img "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
+        make_sparse_image "${RPI_SB_WORKDIR}"/rootfs-temporary.img "${RPI_SB_WORKDIR}"/rootfs-temporary.simg \
+            || die "Failed to sparse the rootfs image"
         umount "${TMP_DIR}"/rpi-rootfs-img-mount
         rm -f "${RPI_SB_WORKDIR}"/rootfs-temporary.img
         announce_stop "Resizing OS images: Resized to $((TARGET_STORAGE_ROOT_EXTENT))"
@@ -681,6 +603,14 @@ announce_start "Resizing rootfs image"
 # https://dl.google.com/android/repository/platform-tools-latest-darwin.zip
 # https://dl.google.com/android/repository/platform-tools-latest-windows.zip
 TARGET_STORAGE_ROOT_EXTENT="$(get_variable partition-size:mapper/cryptroot)"
+# Device-reported, and it sizes the shared rootfs cache: digits only, and no
+# more than 4 TiB.
+case "${TARGET_STORAGE_ROOT_EXTENT}" in
+    ""|*[!0-9]*) die "Device reported an invalid root partition size: '${TARGET_STORAGE_ROOT_EXTENT}'" ;;
+esac
+if [ "${#TARGET_STORAGE_ROOT_EXTENT}" -gt 13 ] || [ "${TARGET_STORAGE_ROOT_EXTENT}" -gt 4398046511104 ]; then
+    die "Device reported an implausible root partition size: ${TARGET_STORAGE_ROOT_EXTENT}"
+fi
 with_lock "${LOCK_BASE}/rootfs-image.lock" 600 prepare_rootfs_image
 announce_stop "Resizing rootfs image"
 
@@ -690,12 +620,13 @@ setup_fastboot_and_id_vars "${FASTBOOT_DEVICE_SPECIFIER}"
 # Prefer the TCP data-plane specifier when the daemon advertises split
 # mode (-i usb+tcp); fall back to whatever the control plane is using.
 FLASH_SPECIFIER="${FASTBOOT_TCP_FLASH_SPECIFIER:-${FASTBOOT_DEVICE_SPECIFIER}}"
+probe_flash_pipeline "${FLASH_SPECIFIER}"
 
 announce_start "Writing OS images"
 record_progress "WRITING-BOOTFS"
-fastboot -s "${FLASH_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}"p1 "${RPI_SB_WORKDIR}"/bootfs-temporary.simg
+fastboot_flash "${FLASH_SPECIFIER}" "${RPI_DEVICE_STORAGE_TYPE}"p1 "${RPI_SB_WORKDIR}"/bootfs-temporary.simg
 record_progress "WRITING-ROOTFS"
-fastboot -s "${FLASH_SPECIFIER}" flash mapper/cryptroot "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
+fastboot_flash "${FLASH_SPECIFIER}" mapper/cryptroot "${RPI_SB_WORKDIR}"/rootfs-temporary.simg
 announce_stop "Writing OS images"
 
 record_progress "FINALISING"
@@ -705,7 +636,7 @@ metadata_gather
 run_customisation_script "fde-provisioner" "post-flash" "${FASTBOOT_DEVICE_SPECIFIER}" "${TARGET_DEVICE_SERIAL}" "${RPI_DEVICE_STORAGE_TYPE}"
 
 announce_start "Set LED status"
-fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem led PWR 0
+timeout_nonfatal_secs "${FASTBOOT_CONTROL_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem led PWR 0 || true
 announce_stop "Set LED status"
 
 record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_FINISHED}" "${TARGET_USB_PATH}"

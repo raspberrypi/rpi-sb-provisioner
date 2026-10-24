@@ -33,7 +33,7 @@ This configuration is permanent and stored in the device OTP (one-time programma
 
 ## Part 1: Provisioner Configuration (Required for Secure Boot)
 
-Before provisioning Raspberry Pi 4 family devices with secure boot, configure the RPIBOOT GPIO in your provisioner:
+Before provisioning Raspberry Pi 4 family devices with secure boot, configure the RPIBOOT GPIO in your provisioner. In the web interface, the Options page shows **RPIBOOT GPIO Pin** under Device & Firmware once Raspberry Pi 4 and Secure Boot are selected. The list shows GPIO 8 even when nothing is saved, so choose your pin there, or set it in the configuration file:
 
 1.  Edit `/etc/rpi-sb-provisioner/config`
 
@@ -121,9 +121,9 @@ After GPIO 8 configuration is complete, the device can be provisioned.
 
 ## Determining Completion
 
-Monitor the device LEDs during provisioning:
+The Devices page in the web interface shows when the device has finished. The provisioner also turns off the power LED at the end:
 
-- **Both LEDs off** = Provisioning is complete
+- **Power LED off** = Provisioning is complete
 
 - The jumper wire can now be removed
 
@@ -131,13 +131,17 @@ Monitor the device LEDs during provisioning:
 
 - The device is ready for deployment
 
+# Bootloader Configuration
+
+Bootstrap writes a new EEPROM to every Raspberry Pi 4 family device, built from the newest bootloader in `/lib/firmware/raspberrypi/bootloader-2711/latest/` unless the Options page names a firmware. Its configuration is the one chosen on the Options page: **Default**, the package's configuration for the provisioning style, or **Custom**, edited at `/options/bootloader-config`. With **Boot selected storage first** on (`RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE`, the default), the selected storage type is moved to the front of `BOOT_ORDER`; both tiles show the boot order devices will get.
+
 # Important Points To Remember
 
 | Point                       | Explanation                                                                                    |
 |-----------------------------|------------------------------------------------------------------------------------------------|
 | **One-time setup**          | The GPIO configuration only needs to be done once per device. It is permanent.                 |
 | **GPIO 8 recommended**      | Use GPIO 8 for consistency. Other GPIO pins can work but GPIO 8 is the standard.               |
-| **Keep jumper connected**   | Do not remove the jumper wire during provisioning. Leave it connected until both LEDs are off. |
+| **Keep jumper connected**   | Do not remove the jumper wire during provisioning. Leave it connected until the power LED is off. |
 | **No re-connection needed** | You do not need to unplug and re-plug the device during provisioning.                          |
 | **Good cables matter**      | Use a high-quality USB cable. Poor cables cause connection problems.                           |
 
@@ -191,7 +195,7 @@ You can also extract and inspect the full EEPROM:
 
 - **Keep the jumper wire connected:** Do not remove the GPIO 8 to ground connection during provisioning
 
-- **Check the logs:** See the main troubleshooting section in the README
+- **Check the logs:** See [Troubleshooting](../user-guide.md#troubleshooting) in the user guide
 
 - **Verify the device was recognized:** Check that the provisioning system detected the device
 
@@ -213,7 +217,7 @@ You can also extract and inspect the full EEPROM:
 
 - Plug in USB cable
 
-- Wait for both LEDs to turn off
+- Wait for the power LED to turn off
 
 - Remove jumper wire and disconnect
 

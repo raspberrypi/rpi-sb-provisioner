@@ -12,7 +12,9 @@
 >
 > - `naked` mode (no encryption, no secure boot)
 >
-> Do NOT use `secure-boot` mode with Zero 2 W. It will not work.
+> Do NOT use `secure-boot` mode with Zero 2 W. It will not work. When Zero 2 W is chosen as the device family, the Options page hides Secure Boot, and NVMe storage.
+>
+> Bootstrap does not update an EEPROM on the Zero 2 W, as it has none, so the bootloader configuration and firmware choices on the Options page do not apply to it.
 
 # Connection Overview
 
@@ -44,9 +46,9 @@ No button pressing is required.
 
 ## Determining Completion
 
-Monitor the device status:
+The Devices page in the web interface shows when the device has finished. The provisioner also asks the device to turn off its LED:
 
-- When provisioning is complete, the activity LED will be off
+- When provisioning is complete, the LED is off
 
 - The device can be disconnected
 
@@ -144,7 +146,7 @@ After this, RPIBOOT mode should work normally.
 
 - **Use `fde-only` or `naked`:** These are the only supported modes for Zero 2 W
 
-- **Check the logs:** See the main troubleshooting section in the README
+- **Check the logs:** See [Troubleshooting](../user-guide.md#troubleshooting) in the user guide
 
 # Summary
 

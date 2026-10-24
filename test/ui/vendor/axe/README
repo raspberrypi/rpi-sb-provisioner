@@ -1,0 +1,12 @@
+axe-core 4.13.0, MPL-2.0; see LICENSE and LICENSE-3RD-PARTY.txt.
+
+The accessibility engine the browser tests inject into each page. It is
+kept with the tests, never served by the product, and loaded from here
+rather than a CDN, since stations are often offline.
+
+Taken from https://registry.npmjs.org/axe-core/-/axe-core-4.13.0.tgz,
+checked against the registry's integrity before copying:
+  sha512-UzGt8zg7Ny8djbYMhxl2zuEevVa7r2gJjYY5Lwr1xM7+XU2nd6CkIWFTVcCIbAP63vSz71NaVyyuSk9lHKcy0A==
+
+SHA-256 of the file as copied:
+c24f097bd2f451d4f933e8bc7d8d539f8672a2ebcb5cc9f9f3eec8ca9470a0c1  axe.min.js

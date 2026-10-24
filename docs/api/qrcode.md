@@ -2,17 +2,25 @@ The QR Code Verification API provides endpoints for validating QR codes against 
 
 # /api/v2/verify-qrcode
 
-**HTTP Method:** POST
+**HTTP Method:** GET, or POST
 
 **Description:** Verifies if a QR code value exists in the manufacturing database, typically used for device validation during scanning.
 
 **Request Format:**
+
+``` bash
+curl 'http://localhost:3142/api/v2/verify-qrcode?code=10000000abcdef'
+```
+
+`GET` needs no sign-in unless `RPI_SB_PROVISIONER_PUBLIC_DASHBOARD` is turned off. `POST` with a JSON body is kept for existing scripts. It needs an operator and, from a browser session, the CSRF token, as other writes do:
 
 ``` json
 {
   "qrcode": "10000000abcdef"
 }
 ```
+
+The code must be 1 to 256 printable characters and not only spaces.
 
 **Response Format:**
 
@@ -36,31 +44,16 @@ The endpoint returns a JSON object with verification results:
 
 **Error Responses:**
 
-If using an invalid HTTP method:
+If the code is missing, blank, not printable or longer than 256 characters, HTTP 400:
 
 ``` json
 {
-  "error": {
-    "status": 405,
-    "title": "Method Error",
-    "code": "METHOD_NOT_ALLOWED",
-    "detail": "Only POST method is allowed"
-  }
+  "error": "Missing or invalid code",
+  "error_code": "INVALID_PARAMETER"
 }
 ```
 
-If QR code parameter is missing:
-
-``` json
-{
-  "error": {
-    "status": 400,
-    "title": "Parameter Error",
-    "code": "INVALID_PARAMETER",
-    "detail": "Missing or invalid 'qrcode' parameter in request body"
-  }
-}
-```
+If the manufacturing database cannot be read, HTTP 500 with `error_code` `DB_ERROR`.
 
 **Notes:**
 

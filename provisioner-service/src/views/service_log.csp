@@ -51,13 +51,14 @@
         .pagination-container {
             margin-top: 15px;
             display: flex;
+            flex-wrap: wrap;
             gap: 15px;
             align-items: center;
             justify-content: center;
         }
         .pagination-button {
             padding: 8px 16px;
-            background-color: #007bff;
+            background-color: #0062cc;
             color: white;
             border: none;
             border-radius: 3px;
@@ -73,13 +74,15 @@
         .pagination-info {
             font-weight: bold;
         }
+        /* Unit names have no spaces to break at. */
+        h1 { overflow-wrap: anywhere; }
     </style>
 </head>
 <body>
     <%view navbar %>
 
     <main id="main-content">
-    <h1>Service Log: <%c++ $$ << @@.get<std::string>("service_name"); %></h1>
+    <h1>Service Log: <%c++ $$ << HttpViewData::htmlTranslate(@@.get<std::string>("service_name")); %></h1>
     
     <a href="/services" class="back-link">← Back to Services</a>
     
@@ -116,18 +119,21 @@
         <button class="pagination-button" id="lastPageBtn">Last</button>
     </div>
     
-    <div class="log-container" id="logContainer" role="log" aria-label="Service log entries" aria-live="polite">
+    <div class="log-container" id="logContainer" role="log" aria-label="Service log entries" aria-live="polite" tabindex="0">
     <%c++ 
     auto logEntries = @@.get<std::vector<std::string>>("log_entries");
+    // Keyed as the page's script keys them, so its first update moves nothing.
+    std::map<std::string, int> seenEntries;
     if(logEntries.size() > 0) {
         for(const auto& entry : logEntries) {
+            const int occurrence = ++seenEntries[entry];
     %>
-        <div class="log-entry"><%c++ $$ << entry; %></div>
+        <div class="log-entry" data-key="<%c++ $$ << occurrence << ':' << HttpViewData::htmlTranslate(entry); %>"><%c++ $$ << HttpViewData::htmlTranslate(entry); %></div>
     <%c++ 
         }
     } else {
     %>
-        <div class="log-entry">No log entries found for this service.</div>
+        <div class="log-entry" data-key="1:No log entries found for this service.">No log entries found for this service.</div>
     <%c++ } %>
     </div>
     
@@ -158,7 +164,7 @@
             let order = orderSelect.value;
             
             // Function to fetch logs via API
-            function fetchLogs() {
+            function fetchLogs(opts) {
                 const params = new URLSearchParams({
                     page: currentPage,
                     page_size: pageSize,
@@ -172,8 +178,10 @@
                 })
                 .then(response => response.json())
                 .then(data => {
-                    updateLogContainer(data.logs);
-                    updatePaginationInfo(data);
+                    const apply = () => { updateLogContainer(data.logs); updatePaginationInfo(data); };
+                    // An automatic update waits while log text is selected.
+                    if (opts && opts.auto) RpiLive.whenFree(logContainer, apply, document.getElementById('refresh-status'));
+                    else apply();
                 })
                 .catch(error => {
                     console.error('Error fetching logs:', error);
@@ -202,21 +210,21 @@
                 const wasAtBottom = isScrolledToBottom();
                 const previousScrollTop = logContainer.scrollTop;
                 
-                // Update content
-                logContainer.innerHTML = '';
-                if (logs.length > 0) {
-                    logs.forEach(entry => {
-                        const div = document.createElement('div');
-                        div.className = 'log-entry';
-                        div.textContent = entry;
-                        logContainer.appendChild(div);
-                    });
-                } else {
+                // Lines are keyed by their text and how often it has appeared,
+                // so new lines are added and those already shown stay put.
+                const next = logContainer.cloneNode(false);
+                const seen = new Map();
+                const lines = logs.length > 0 ? logs : ['No log entries found for this service.'];
+                lines.forEach(entry => {
+                    const n = (seen.get(entry) || 0) + 1;
+                    seen.set(entry, n);
                     const div = document.createElement('div');
                     div.className = 'log-entry';
-                    div.textContent = 'No log entries found for this service.';
-                    logContainer.appendChild(div);
-                }
+                    div.dataset.key = n + ':' + entry;
+                    div.textContent = entry;
+                    next.appendChild(div);
+                });
+                RpiLive.morph(logContainer, next);
                 
                 // Restore scroll position - keep at the same position
                 // unless user had manually scrolled to bottom

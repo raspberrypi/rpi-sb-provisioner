@@ -49,18 +49,20 @@ namespace keyregistry {
                                          const std::string& label,
                                          const utils::KeyInfo& info,
                                          bool wrapped,
-                                         bool activate);
+                                         bool activate,
+                                         const std::string& username);
 
     std::optional<std::string> addPkcs11Key(const std::string& uri,
                                             const std::string& label,
                                             const utils::KeyInfo& info,
-                                            bool activate);
+                                            bool activate,
+                                            const std::string& username);
 
-    bool removeKey(const std::string& id, std::string& errorOut);
+    bool removeKey(const std::string& id, std::string& errorOut, const std::string& username);
 
     // Set active key and sync CUSTOMER_KEY_* config vars. Returns true if the
     // secure-boot fingerprint changed (workdir cache should be invalidated).
-    bool activateKey(const std::string& id, std::string& errorOut);
+    bool activateKey(const std::string& id, std::string& errorOut, const std::string& username);
 
     void keyToJson(const RegistryKey& key, Json::Value& out);
     Json::Value snapshotToJson(const RegistrySnapshot& snapshot);

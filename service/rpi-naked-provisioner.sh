@@ -99,42 +99,6 @@ customisation_script_is_runnable() {
     [ -x "${SCRIPT_PATH}" ]
 }
 
-# TODO: Refactor these two functions to use the same logic, but with different consequences for failure.
-timeout_nonfatal() {
-    command="$*"
-    set +e
-    # shellcheck disable=SC2086
-    timeout 10 ${command}
-    command_exit_status=$?
-    if [ ${command_exit_status} -eq 124 ]; then
-        log "\"${command}\" failed, timed out."
-    elif [ ${command_exit_status} -ne 0 ]; then
-        log "\"${command}\" failed, exit status: ${command_exit_status}"
-    else
-        log "\"$command\" succeeded."
-    fi
-    set -e
-    return ${command_exit_status}
-}
-
-timeout_fatal() {
-    command="$*"
-    set +e
-    # shellcheck disable=SC2086
-    timeout 120 ${command}
-    command_exit_status=$?
-    if [ ${command_exit_status} -eq 124 ]; then
-        record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "${TARGET_USB_PATH}"
-        die "\"${command}\" failed, timed out."
-    elif [ ${command_exit_status} -ne 0 ]; then
-        record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_ABORTED}" "${TARGET_USB_PATH}"
-        die "\"$command\" failed, exit status: ${command_exit_status}"
-    else
-        log "\"$command\" succeeded."
-    fi
-    set -e
-}
-
 cleanup() {
     # Capture the exit status that triggered the trap BEFORE any other
     # command runs, otherwise $? is clobbered by the guard/assignment below
@@ -182,7 +146,12 @@ cleanup() {
 
     exit ${return_value}
 }
-trap cleanup EXIT INT TERM
+# Signals exit with their own status so cleanup sees a failure. Trapped
+# directly, cleanup read the last command's status, often 0, and recorded a
+# killed run as a success.
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # Start the provisioner phase
 
@@ -198,6 +167,10 @@ check_command_exists findmnt
 check_command_exists fastboot
 
 check_command_exists blockdev
+
+# Used to pad an OS image whose length is not a multiple of libsparse's block
+# size up to the next boundary; see align_image_for_fastboot().
+check_command_exists truncate
 
 check_command_exists grep
 
@@ -221,6 +194,10 @@ if [ -z "${RPI_SB_WORKDIR}" ]; then
 elif [ ! -d "${RPI_SB_WORKDIR}" ]; then
     RPI_SB_WORKDIR=$(make_temp_dir "rpi-sb-provisioner.XXX")
     announce_stop "Finding the cache directory: Created ${RPI_SB_WORKDIR} (configured path isn't a directory)"
+    DELETE_PRIVATE_TMPDIR="true"
+elif ! workdir_is_private "${RPI_SB_WORKDIR}"; then
+    RPI_SB_WORKDIR=$(make_temp_dir "rpi-sb-provisioner.XXX")
+    announce_stop "Finding the cache directory: Created ${RPI_SB_WORKDIR} (configured path is not root's alone)"
     DELETE_PRIVATE_TMPDIR="true"
 else
     # Deliberately do nothing
@@ -321,9 +298,15 @@ if customisation_script_is_runnable "naked-provisioner" "bootfs-mounted" || \
     announce_stop "OS Image Customisation"
 fi
 
+# Done before the erase, so an image we cannot pad costs the operator nothing.
+if ! align_image_for_fastboot "${FLASH_IMAGE}" "${TMP_DIR}"; then
+    die "${FASTBOOT_FLASH_IMAGE_ERROR}"
+fi
+FLASH_IMAGE="${FASTBOOT_FLASH_IMAGE}"
+
 record_progress "STORAGE-ERASING"
 announce_start "Erase Device Storage"
-fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" erase "${RPI_DEVICE_STORAGE_TYPE}"
+timeout_fatal_secs "${FASTBOOT_ERASE_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" erase "${RPI_DEVICE_STORAGE_TYPE}"
 sleep 3
 announce_stop "Erase Device Storage"
 
@@ -333,21 +316,22 @@ setup_fastboot_and_id_vars "${FASTBOOT_DEVICE_SPECIFIER}"
 # Prefer the TCP data-plane specifier when the daemon advertises split
 # mode (-i usb+tcp); fall back to whatever the control plane is using.
 FLASH_SPECIFIER="${FASTBOOT_TCP_FLASH_SPECIFIER:-${FASTBOOT_DEVICE_SPECIFIER}}"
+probe_flash_pipeline "${FLASH_SPECIFIER}"
 record_progress "WRITING-OS"
-fastboot -s "${FLASH_SPECIFIER}" flash "${RPI_DEVICE_STORAGE_TYPE}" "${FLASH_IMAGE}"
+fastboot_flash "${FLASH_SPECIFIER}" "${RPI_DEVICE_STORAGE_TYPE}" "${FLASH_IMAGE}"
 
 # If we customised the image, delete the modified copy immediately after flash.
 # The bootfs-mounted/rootfs-mounted scripts may have injected per-device material
 # (keys, certificates, unique configs), so the modified image must not linger on disk.
 if [ "${FLASH_IMAGE}" != "${GOLD_MASTER_OS_FILE}" ]; then
     rm -f "${FLASH_IMAGE}"
-    log "Deleted per-device customised image"
+    log "Deleted the temporary image copy"
 fi
 announce_stop "Writing OS images"
 
 record_progress "FINALISING"
 announce_start "Set LED status"
-fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem led PWR 0
+timeout_nonfatal_secs "${FASTBOOT_CONTROL_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem led PWR 0 || true
 announce_stop "Set LED status"
 
 metadata_gather

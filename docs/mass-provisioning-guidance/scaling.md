@@ -48,7 +48,7 @@ When utilizing Ethernet connectivity:
 
 - **Routing**: Network must be routable to the machine running rpi-sb-provisioner
 
-- **Firewall**: Ensure provisioning service ports are accessible (refer to API endpoints documentation)
+- **Firewall**: The provisioning machine connects to each device's fastboot daemon over TCP, so allow connections from it to the devices. The route is used only if the device answers on it; otherwise flashing stays on USB
 
 - **Bandwidth**: Sufficient bandwidth to support concurrent image transfers during provisioning
 
@@ -215,9 +215,9 @@ When expanding provisioning capacity, use multiple official Raspberry Pi powered
 
 - **Network Isolation**: Use dedicated provisioning networks when possible
 
-- **Access Controls**: Implement appropriate authentication and authorization
+- **Access Controls**: Operators sign in to the web interface with a system account in the `rpi-sb-provisioner` group, and scripts use API tokens. For access from other machines, use HTTPS, for example through the [nginx example](../../nginx-example/README.md)
 
-- **Audit Logging**: Maintain comprehensive logs of all provisioning activities
+- **Audit Logging**: The web interface's Audit Log records sign-ins, API token use and configuration changes; per-device logs are kept in `/var/log/rpi-sb-provisioner/`
 
 - **Physical Security**: Ensure secure physical access to provisioning infrastructure
 
@@ -315,6 +315,6 @@ For implementation details:
 
 - Configuration options: See [Configuration Reference](../config_vars.md)
 
-- API integration: See [API Documentation](../api_endpoints.md)
+- API integration: See [API Documentation](../api/README.md)
 
 - Device-specific procedures: See [Device Guidance](../device-guidance/)

@@ -10,6 +10,7 @@
 #include <drogon/HttpAppFramework.h>
 #include "utils.h"
 #include "include/audit.h"
+#include "include/auth.h"
 #include "include/schema_validator.h"
 #include "keywrap.h"
 #include "keyregistry.h"
@@ -36,7 +37,61 @@ namespace provisioner {
             }
         }
 
-        void invalidateWorkdirCache(const std::string& reason) {
+        // The workdir is emptied as root on every save, so a mistyped path
+        // such as /srv/rpi-sb-provisioner would take the images and the
+        // manufacturing database with it. Refuse any directory that is, or
+        // holds, something that matters.
+        bool workdirSafeToClear(const std::string& workdir, std::string& why) {
+            namespace fs = std::filesystem;
+            std::error_code ec;
+            const fs::path dir = fs::canonical(workdir, ec);
+            if (ec || !fs::path(workdir).is_absolute()) {
+                why = "RPI_SB_WORKDIR must be an existing absolute path";
+                return false;
+            }
+
+            std::vector<std::string> kept = {
+                "/", "/bin", "/boot", "/dev", "/etc", "/home", "/lib", "/media", "/mnt",
+                "/opt", "/proc", "/root", "/run", "/sbin", "/srv", "/sys", "/tmp", "/usr", "/var",
+                "/srv/rpi-sb-provisioner/images", "/etc/rpi-sb-provisioner",
+                "/var/log/rpi-sb-provisioner", "/var/lib/rpi-sb-provisioner",
+            };
+            for (const char *key : {"RPI_SB_PROVISIONER_MANUFACTURING_DB", "CUSTOMER_KEY_FILE_PEM",
+                                    "CUSTOMER_KEY_STORAGE_DIR", "GOLD_MASTER_OS_FILE"}) {
+                if (auto v = utils::getConfigValue(key); v && !v->empty()) kept.push_back(*v);
+            }
+            std::ifstream passwd("/etc/passwd");
+            for (std::string line; std::getline(passwd, line);) {
+                std::vector<std::string> f;
+                std::stringstream ss(line);
+                for (std::string part; std::getline(ss, part, ':');) f.push_back(part);
+                if (f.size() >= 6 && !f[5].empty()) kept.push_back(f[5]);
+            }
+
+            for (const auto &k : kept) {
+                const fs::path p = fs::weakly_canonical(k, ec);
+                if (ec) continue;
+                auto [d, q] = std::mismatch(dir.begin(), dir.end(), p.begin(), p.end());
+                if (d == dir.end()) {
+                    why = "RPI_SB_WORKDIR " + dir.string() + " holds " + p.string();
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        bool clearWorkdirContents(const std::string& workdir, const std::string& username) {
+            std::string why;
+            if (!workdirSafeToClear(workdir, why)) {
+                LOG_ERROR << "Not clearing the workdir: " << why;
+                AuditLog::logFileSystemAccess("DELETE_CONTENTS", workdir, false, username, why);
+                return false;
+            }
+            removeDirectoryContents(workdir);
+            return true;
+        }
+
+        void invalidateWorkdirCache(const std::string& reason, const std::string& username) {
             auto workdirValue = utils::getConfigValue("RPI_SB_WORKDIR");
             std::string workdir = workdirValue ? *workdirValue : "";
             if (workdir.empty()) {
@@ -44,31 +99,11 @@ namespace provisioner {
             }
             if (std::filesystem::exists(workdir) && std::filesystem::is_directory(workdir)) {
                 LOG_INFO << "Customer key changed - removing contents of RPI_SB_WORKDIR at " << workdir;
-                AuditLog::logFileSystemAccess("DELETE_CONTENTS", workdir, true, "", reason);
-                removeDirectoryContents(workdir);
+                AuditLog::logFileSystemAccess("DELETE_CONTENTS", workdir, true, username, reason);
+                clearWorkdirContents(workdir, username);
             } else {
                 LOG_WARN << "RPI_SB_WORKDIR path does not exist or is not a directory: " << workdir;
             }
-        }
-
-        bool validateCsrfForMutation(const HttpRequestPtr& req,
-                                     std::function<void(const HttpResponsePtr&)>& callback) {
-            if (req->getHeader("X-CSRF-Token").empty()) {
-                return true;
-            }
-            if (utils::validateCsrfToken(req)) {
-                return true;
-            }
-            LOG_WARN << "SECURITY: CSRF validation failed from " << AuditLog::getClientIP(req);
-            auto resp = provisioner::utils::createErrorResponse(
-                req,
-                "Invalid or expired security token. Please refresh the page and try again.",
-                drogon::k403Forbidden,
-                "Security Error",
-                "CSRF_VALIDATION_FAILED"
-            );
-            callback(resp);
-            return false;
         }
     }
 
@@ -96,11 +131,16 @@ namespace provisioner {
                 viewData.insert("currentPage", std::string("options"));
                 resp = HttpResponse::newHttpViewResponse("options.csp", viewData);
             } else {
+                // The Connect token is write-only, like the HSM PIN. Leaving it
+                // out, rather than masking it, means a client that writes these
+                // settings back cannot replace the token with the mask.
+                configValues.erase("RPI_CONNECT_API_KEY");
                 Json::Value jsonOptions;
                 for (const auto& [key, value] : configValues) {
                     jsonOptions[key] = value;
                 }
                 resp->setStatusCode(k200OK);
+                resp->setContentTypeCode(CT_APPLICATION_JSON);
                 resp->setBody(Json::FastWriter().write(jsonOptions));
             }
             
@@ -468,6 +508,11 @@ namespace provisioner {
                         jsonResponse["error"] = "Management API access token must not contain whitespace";
                     }
                 }
+            } else if (fieldName == "RPI_SB_PROVISIONER_PUBLIC_DASHBOARD") {
+                if (fieldValue != "" && fieldValue != "1") {
+                    jsonResponse["valid"] = false;
+                    jsonResponse["error"] = "Must be on (1) or off (empty)";
+                }
             } else if (fieldName == "RPI_CONNECT_DESCRIPTION") {
                 // Any non-empty string is valid; empty is fine (auto-generated description used)
             }
@@ -485,23 +530,6 @@ namespace provisioner {
             // Add audit log entry for handler access
             AuditLog::logHandlerAccess(req, "/options/set");
 
-            // SECURITY: Validate CSRF token for browser requests
-            // Only enforce if the X-CSRF-Token header is present (gradual rollout)
-            if (!req->getHeader("X-CSRF-Token").empty()) {
-                if (!utils::validateCsrfToken(req)) {
-                    LOG_WARN << "SECURITY: CSRF validation failed for /options/set from " << AuditLog::getClientIP(req);
-                    auto resp = provisioner::utils::createErrorResponse(
-                        req,
-                        "Invalid or expired security token. Please refresh the page and try again.",
-                        drogon::k403Forbidden,
-                        "Security Error",
-                        "CSRF_VALIDATION_FAILED"
-                    );
-                    callback(resp);
-                    return;
-                }
-            }
-
             auto body = req->getJsonObject();
             if (!body) {
                 LOG_ERROR << "Options::set: Invalid JSON body";
@@ -515,17 +543,38 @@ namespace provisioner {
                 callback(resp);
                 return;
             }
+            if (!body->isObject()) {
+                callback(provisioner::utils::createErrorResponse(
+                    req, "Send the settings as a JSON object", drogon::k400BadRequest,
+                    "Invalid Request", "INVALID_JSON"));
+                return;
+            }
             std::map<std::string, std::string> updates;
             for (const auto &key : body->getMemberNames()) {
-                const std::string value = body->get(key, "").asString();
-                LOG_INFO << "Options::set: " << key << " = " << value;
+                const Json::Value &raw = (*body)[key];
+                if (!raw.isString()) {
+                    callback(provisioner::utils::createErrorResponse(
+                        req, "Refused: " + key.substr(0, 64) + " must be a string", drogon::k400BadRequest,
+                        "Invalid Setting", "INVALID_CONFIG_ENTRY"));
+                    return;
+                }
+                const std::string value = raw.asString();
+                std::string why;
+                if (!utils::isWritableConfigEntry(key, value, why)) {
+                    callback(provisioner::utils::createErrorResponse(
+                        req, "Refused: " + why, drogon::k400BadRequest,
+                        "Invalid Setting", "INVALID_CONFIG_ENTRY"));
+                    return;
+                }
+                // Keys only: values include the Connect API key.
+                LOG_INFO << "Options::set: " << key;
                 updates[key] = value;
             }
 
             // Persist atomically under the shared config-write lock. Returns the
             // full merged config, which the side-effect handling below (workdir
             // clear, manufacturing DB creation) needs.
-            auto merged = utils::setConfigValues(updates);
+            auto merged = utils::setConfigValues(updates, auth::username(req));
             if (!merged) {
                 LOG_ERROR << "Failed to write configuration file";
                 auto resp = provisioner::utils::createErrorResponse(
@@ -546,7 +595,7 @@ namespace provisioner {
             if (!workdir.empty()) {
                 if (std::filesystem::exists(workdir) && std::filesystem::is_directory(workdir)) {
                     LOG_INFO << "Removing contents of RPI_SB_WORKDIR at " << workdir;
-                    removeDirectoryContents(workdir);
+                    clearWorkdirContents(workdir, auth::username(req));
                 } else {
                     LOG_WARN << "RPI_SB_WORKDIR path does not exist or is not a directory: " << workdir;
                 }
@@ -561,7 +610,7 @@ namespace provisioner {
                         LOG_ERROR << "Failed to create manufacturing DB file at " << mfg_db_path->second;
                         
                         // Log failed file creation to audit log
-                        AuditLog::logFileSystemAccess("CREATE", mfg_db_path->second, false);
+                        AuditLog::logFileSystemAccess("CREATE", mfg_db_path->second, false, auth::username(req));
                         
                         auto resp = provisioner::utils::createErrorResponse(
                             req,
@@ -577,7 +626,7 @@ namespace provisioner {
                     mfg_db.close();
                     
                     // Log successful file creation to audit log
-                    AuditLog::logFileSystemAccess("CREATE", mfg_db_path->second, true);
+                    AuditLog::logFileSystemAccess("CREATE", mfg_db_path->second, true, auth::username(req));
                     
                     // Set root read-write permissions (0600)
                     try {
@@ -585,12 +634,12 @@ namespace provisioner {
                             std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
                         
                         // Log successful permission change to audit log
-                        AuditLog::logFileSystemAccess("CHMOD", mfg_db_path->second, true);
+                        AuditLog::logFileSystemAccess("CHMOD", mfg_db_path->second, true, auth::username(req));
                     } catch (const std::filesystem::filesystem_error& e) {
                         LOG_ERROR << "Failed to set permissions on manufacturing DB file: " << e.what();
                         
                         // Log failed permission change to audit log
-                        AuditLog::logFileSystemAccess("CHMOD", mfg_db_path->second, false, "", e.what());
+                        AuditLog::logFileSystemAccess("CHMOD", mfg_db_path->second, false, auth::username(req), e.what());
                         
                         auto resp = provisioner::utils::createErrorResponse(
                             req,
@@ -609,7 +658,7 @@ namespace provisioner {
             auto resp = HttpResponse::newHttpResponse();
             resp->setStatusCode(k200OK);
             callback(resp);
-        });
+        }, {Post});
 
         // Add a new endpoint to clear the workdir contents when an image is selected
         app.registerHandler(OPTIONS_PATH + "/clear-workdir", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
@@ -635,33 +684,36 @@ namespace provisioner {
             if (std::filesystem::exists(workdir)) {
                 if (std::filesystem::is_directory(workdir)) {
                     // Log directory deletion to audit log
-                    AuditLog::logFileSystemAccess("DELETE_CONTENTS", workdir, true);
-                    
-                    removeDirectoryContents(workdir);
+                    AuditLog::logFileSystemAccess("DELETE_CONTENTS", workdir, true, auth::username(req));
+
+                    if (!clearWorkdirContents(workdir, auth::username(req))) {
+                        callback(provisioner::utils::createErrorResponse(
+                            req, "Not clearing RPI_SB_WORKDIR: it holds files the provisioner "
+                            "needs. Point it at a directory of its own.",
+                            drogon::k409Conflict, "Workdir Not Cleared", "WORKDIR_UNSAFE"));
+                        return;
+                    }
                 } else {
                     LOG_WARN << "RPI_SB_WORKDIR exists but is not a directory: " << workdir;
                 }
             } else {
                 LOG_INFO << "RPI_SB_WORKDIR does not exist: " << workdir << " - considered already cleared";
                 // Log skipped operation to audit log
-                AuditLog::logFileSystemAccess("SKIP_DELETE_CONTENTS", workdir, true, "", "Directory does not exist");
+                AuditLog::logFileSystemAccess("SKIP_DELETE_CONTENTS", workdir, true, auth::username(req), "Directory does not exist");
             }
             
             // Return success in all cases
             auto resp = HttpResponse::newHttpResponse();
             resp->setStatusCode(k200OK);
             callback(resp);
-        });
+        }, {Post});
 
-        // CSRF token endpoint - generates a new token for the session
+        // CSRF token endpoint - returns the token bound to the signed-in session
         app.registerHandler(OPTIONS_PATH + "/csrf-token", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
             LOG_INFO << "Options::csrf-token";
             
-            std::string sessionId = utils::getSessionIdFromRequest(req);
-            std::string token = utils::CsrfTokenManager::getInstance().generateToken(sessionId);
-            
             Json::Value response;
-            response["token"] = token;
+            response["token"] = auth::csrfToken(req);
             
             auto resp = HttpResponse::newHttpJsonResponse(response);
             resp->setStatusCode(k200OK);
@@ -753,22 +805,6 @@ namespace provisioner {
                 );
                 callback(resp);
                 return;
-            }
-
-            // SECURITY: Validate CSRF token for browser requests
-            if (!req->getHeader("X-CSRF-Token").empty()) {
-                if (!utils::validateCsrfToken(req)) {
-                    LOG_WARN << "SECURITY: CSRF validation failed for /options/firmware/set from " << AuditLog::getClientIP(req);
-                    auto resp = provisioner::utils::createErrorResponse(
-                        req,
-                        "Invalid or expired security token. Please refresh the page and try again.",
-                        drogon::k403Forbidden,
-                        "Security Error",
-                        "CSRF_VALIDATION_FAILED"
-                    );
-                    callback(resp);
-                    return;
-                }
             }
 
             auto body = req->getJsonObject();
@@ -881,7 +917,7 @@ namespace provisioner {
             }
 
             // Update config with the selected firmware path (atomic, locked).
-            if (!utils::setConfigValue("RPI_DEVICE_FIRMWARE_FILE", selectedFirmware)) {
+            if (!utils::setConfigValue("RPI_DEVICE_FIRMWARE_FILE", selectedFirmware, auth::username(req))) {
                 auto resp = provisioner::utils::createErrorResponse(
                     req,
                     "Failed to write configuration file",
@@ -905,8 +941,8 @@ namespace provisioner {
                 if (!workdir.empty()) {
                     if (std::filesystem::exists(workdir) && std::filesystem::is_directory(workdir)) {
                         LOG_INFO << "Firmware changed - removing contents of RPI_SB_WORKDIR at " << workdir;
-                        AuditLog::logFileSystemAccess("DELETE_CONTENTS", workdir, true, "", "firmware selection changed");
-                        removeDirectoryContents(workdir);
+                        AuditLog::logFileSystemAccess("DELETE_CONTENTS", workdir, true, auth::username(req), "firmware selection changed");
+                        clearWorkdirContents(workdir, auth::username(req));
                     } else {
                         LOG_WARN << "RPI_SB_WORKDIR path does not exist or is not a directory: " << workdir;
                     }
@@ -1068,22 +1104,6 @@ namespace provisioner {
                 return;
             }
 
-            // SECURITY: Validate CSRF token for browser requests
-            if (!req->getHeader("X-CSRF-Token").empty()) {
-                if (!utils::validateCsrfToken(req)) {
-                    LOG_WARN << "SECURITY: CSRF validation failed for /options/upload-key from " << AuditLog::getClientIP(req);
-                    auto resp = provisioner::utils::createErrorResponse(
-                        req,
-                        "Invalid or expired security token. Please refresh the page and try again.",
-                        drogon::k403Forbidden,
-                        "Security Error",
-                        "CSRF_VALIDATION_FAILED"
-                    );
-                    callback(resp);
-                    return;
-                }
-            }
-
             // Get the uploaded file
             MultiPartParser fileParser;
             if (fileParser.parse(req) != 0) {
@@ -1215,11 +1235,11 @@ namespace provisioner {
                     std::filesystem::perms::owner_read,
                     std::filesystem::perm_options::replace);
                 
-                AuditLog::logFileSystemAccess("UPLOAD_KEY", destPath, true);
+                AuditLog::logFileSystemAccess("UPLOAD_KEY", destPath, true, auth::username(req));
                 
             } catch (const std::exception& e) {
                 LOG_ERROR << "Failed to save key file: " << e.what();
-                AuditLog::logFileSystemAccess("UPLOAD_KEY", destPath, false, "", e.what());
+                AuditLog::logFileSystemAccess("UPLOAD_KEY", destPath, false, auth::username(req), e.what());
                 auto resp = provisioner::utils::createErrorResponse(
                     req,
                     "Failed to save key file",
@@ -1236,7 +1256,7 @@ namespace provisioner {
 
             if (!keyInfo.success) {
                 std::filesystem::remove(destPath);
-                AuditLog::logFileSystemAccess("UPLOAD_KEY", destPath, false, "",
+                AuditLog::logFileSystemAccess("UPLOAD_KEY", destPath, false, auth::username(req),
                                               keyInfo.errorMessage);
                 auto resp = provisioner::utils::createErrorResponse(
                     req,
@@ -1275,7 +1295,7 @@ namespace provisioner {
                         if (!raw.empty()) OPENSSL_cleanse(&raw[0], raw.size());
                         std::filesystem::remove(destPath);
                         LOG_ERROR << "Rejecting key upload: " << deviceKey.reason;
-                        AuditLog::logFileSystemAccess("WRAP_KEY", destPath, false, "",
+                        AuditLog::logFileSystemAccess("WRAP_KEY", destPath, false, auth::username(req),
                                                       "no usable device key");
                         callback(provisioner::utils::createDeviceKeyErrorResponse(
                             req, "store the uploaded signing key", deviceKey));
@@ -1283,21 +1303,16 @@ namespace provisioner {
                     }
 
                     std::string wrapped;
-                    if (provisioner::keywrap::wrap(raw, wrapped)) {
-                        std::ofstream kout(destPath, std::ios::binary | std::ios::trunc);
-                        kout.write(wrapped.data(), static_cast<std::streamsize>(wrapped.size()));
-                        kout.close();
-                        std::filesystem::permissions(destPath,
-                            std::filesystem::perms::owner_read,
-                            std::filesystem::perm_options::replace);
+                    if (provisioner::keywrap::wrap(raw, wrapped) &&
+                        utils::writeSecretFile(destPath, wrapped)) {
                         if (!raw.empty()) OPENSSL_cleanse(&raw[0], raw.size());
-                        AuditLog::logFileSystemAccess("WRAP_KEY", destPath, true);
+                        AuditLog::logFileSystemAccess("WRAP_KEY", destPath, true, auth::username(req));
                         LOG_INFO << "Customer PEM key wrapped at rest";
                     } else {
                         if (!raw.empty()) OPENSSL_cleanse(&raw[0], raw.size());
                         std::filesystem::remove(destPath);
                         LOG_ERROR << "Failed to device-wrap uploaded key; rejecting upload";
-                        AuditLog::logFileSystemAccess("WRAP_KEY", destPath, false, "",
+                        AuditLog::logFileSystemAccess("WRAP_KEY", destPath, false, auth::username(req),
                                                       "device wrap failed");
                         auto resp = provisioner::utils::createErrorResponse(
                             req,
@@ -1320,8 +1335,16 @@ namespace provisioner {
                 }());
 
             keyregistry::ensureMigratedFromConfig();
+            // An upload makes the key active, as scripts expect. The web page
+            // asks for activate=if-none: a key replaces the active one only
+            // when an operator chooses it, as an image does.
+            bool activate = true;
+            if (fileParser.getParameter<std::string>("activate") == "if-none") {
+                keyregistry::RegistrySnapshot current;
+                activate = !keyregistry::load(current) || current.activeKeyId.empty();
+            }
             const auto keyIdOpt = keyregistry::addPemKey(
-                destPath, safeFilename, keyInfo, keyWrapped, true);
+                destPath, safeFilename, keyInfo, keyWrapped, activate, auth::username(req));
             if (!keyIdOpt) {
                 std::filesystem::remove(destPath);
                 auto resp = provisioner::utils::createErrorResponse(
@@ -1335,7 +1358,7 @@ namespace provisioner {
                 return;
             }
 
-            invalidateWorkdirCache("customer key uploaded");
+            if (activate) invalidateWorkdirCache("customer key uploaded", auth::username(req));
 
             // Return success with the path and key metadata (parsed above,
             // before the key was wrapped at rest).
@@ -1344,6 +1367,7 @@ namespace provisioner {
             jsonResponse["path"] = destPath;
             jsonResponse["filename"] = safeFilename;
             jsonResponse["keyId"] = *keyIdOpt;
+            jsonResponse["activated"] = activate;
             
             // Include key metadata
             jsonResponse["keyInfo"]["algorithm"] = keyInfo.algorithm;
@@ -1407,7 +1431,6 @@ namespace provisioner {
                 callback(resp);
                 return;
             }
-            if (!validateCsrfForMutation(req, callback)) return;
 
             auto jsonBody = req->getJsonObject();
             if (!jsonBody || !jsonBody->isMember("id")) {
@@ -1420,7 +1443,7 @@ namespace provisioner {
 
             const std::string id = (*jsonBody)["id"].asString();
             std::string errorOut;
-            const bool fingerprintChanged = keyregistry::activateKey(id, errorOut);
+            const bool fingerprintChanged = keyregistry::activateKey(id, errorOut, auth::username(req));
             if (!errorOut.empty()) {
                 auto resp = provisioner::utils::createErrorResponse(
                     req, errorOut, drogon::k400BadRequest, "Activation Failed", "KEY_ACTIVATE_FAILED");
@@ -1429,7 +1452,7 @@ namespace provisioner {
             }
 
             if (fingerprintChanged) {
-                invalidateWorkdirCache("signing key activated");
+                invalidateWorkdirCache("signing key activated", auth::username(req));
             }
 
             Json::Value jsonResponse;
@@ -1454,7 +1477,6 @@ namespace provisioner {
                 callback(resp);
                 return;
             }
-            if (!validateCsrfForMutation(req, callback)) return;
 
             auto jsonBody = req->getJsonObject();
             if (!jsonBody || !jsonBody->isMember("id")) {
@@ -1466,7 +1488,7 @@ namespace provisioner {
             }
 
             std::string errorOut;
-            if (!keyregistry::removeKey((*jsonBody)["id"].asString(), errorOut)) {
+            if (!keyregistry::removeKey((*jsonBody)["id"].asString(), errorOut, auth::username(req))) {
                 auto resp = provisioner::utils::createErrorResponse(
                     req, errorOut, drogon::k400BadRequest, "Remove Failed", "KEY_REMOVE_FAILED");
                 callback(resp);
@@ -1494,7 +1516,6 @@ namespace provisioner {
                 callback(resp);
                 return;
             }
-            if (!validateCsrfForMutation(req, callback)) return;
 
             auto jsonBody = req->getJsonObject();
             if (!jsonBody || !jsonBody->isMember("uri")) {
@@ -1535,7 +1556,7 @@ namespace provisioner {
                 return std::nullopt;
             }();
 
-            const auto keyIdOpt = keyregistry::addPkcs11Key(uri, label, keyInfo, activate);
+            const auto keyIdOpt = keyregistry::addPkcs11Key(uri, label, keyInfo, activate, auth::username(req));
             if (!keyIdOpt) {
                 auto resp = provisioner::utils::createErrorResponse(
                     req, "Failed to register PKCS#11 key",
@@ -1545,7 +1566,7 @@ namespace provisioner {
             }
 
             if (activate && prevFp && *prevFp != keyInfo.fingerprint) {
-                invalidateWorkdirCache("PKCS#11 key activated");
+                invalidateWorkdirCache("PKCS#11 key activated", auth::username(req));
             }
 
             Json::Value jsonResponse;
@@ -1578,7 +1599,6 @@ namespace provisioner {
                 callback(resp);
                 return;
             }
-            if (!validateCsrfForMutation(req, callback)) return;
 
             auto jsonBody = req->getJsonObject();
             if (!jsonBody || !jsonBody->isMember("id")) {
@@ -1615,14 +1635,14 @@ namespace provisioner {
             const auto deviceKey = keywrap::deviceKeyStatus();
             if (deviceKey.state != keywrap::DeviceKeyState::Ok) {
                 LOG_ERROR << "Rejecting key wrap: " << deviceKey.reason;
-                AuditLog::logFileSystemAccess("WRAP_KEY", keyOpt->path, false, "",
+                AuditLog::logFileSystemAccess("WRAP_KEY", keyOpt->path, false, auth::username(req),
                                               "no usable device key");
                 callback(provisioner::utils::createDeviceKeyErrorResponse(
                     req, "encrypt the signing key at rest", deviceKey));
                 return;
             }
 
-            if (!utils::wrapFileInPlace(keyOpt->path)) {
+            if (!utils::wrapFileInPlace(keyOpt->path, auth::username(req))) {
                 Json::Value jsonResponse;
                 jsonResponse["success"] = false;
                 jsonResponse["error"] = "Could not encrypt key at rest on this device.";
@@ -1664,22 +1684,6 @@ namespace provisioner {
                 );
                 callback(resp);
                 return;
-            }
-
-            // SECURITY: Validate CSRF token for browser requests
-            if (!req->getHeader("X-CSRF-Token").empty()) {
-                if (!utils::validateCsrfToken(req)) {
-                    LOG_WARN << "SECURITY: CSRF validation failed for /options/validate-key from " << AuditLog::getClientIP(req);
-                    auto resp = provisioner::utils::createErrorResponse(
-                        req,
-                        "Invalid or expired security token. Please refresh the page and try again.",
-                        drogon::k403Forbidden,
-                        "Security Error",
-                        "CSRF_VALIDATION_FAILED"
-                    );
-                    callback(resp);
-                    return;
-                }
             }
 
             // Parse JSON body
@@ -1894,18 +1898,6 @@ namespace provisioner {
                 return;
             }
 
-            // SECURITY: Validate CSRF token for browser requests
-            if (!req->getHeader("X-CSRF-Token").empty()) {
-                if (!utils::validateCsrfToken(req)) {
-                    LOG_WARN << "SECURITY: CSRF validation failed for /options/provision-device-key from " << AuditLog::getClientIP(req);
-                    auto resp = provisioner::utils::createErrorResponse(
-                        req, "Invalid or expired security token. Please refresh the page and try again.",
-                        drogon::k403Forbidden, "Security Error", "CSRF_VALIDATION_FAILED");
-                    callback(resp);
-                    return;
-                }
-            }
-
             // Require the caller to have named the irreversible thing it is
             // asking for. A bare POST -- a stray retry, a replayed request --
             // must not be enough to write OTP.
@@ -1950,7 +1942,7 @@ namespace provisioner {
                      << " on explicit operator consent; this is irreversible";
             AuditLog::logFileSystemAccess("PROVISION_DEVICE_KEY",
                                           "otp:key-" + std::to_string(before.keyId),
-                                          true, "", "operator-confirmed OTP write");
+                                          true, auth::username(req), "operator-confirmed OTP write");
 
             keywrap::DeviceKeyStatus after;
             const bool ok = keywrap::provisionDeviceKey(after);
@@ -1958,7 +1950,7 @@ namespace provisioner {
                 LOG_ERROR << "Device key provisioning failed: " << after.reason;
                 AuditLog::logFileSystemAccess("PROVISION_DEVICE_KEY",
                                               "otp:key-" + std::to_string(before.keyId),
-                                              false, "", after.reason);
+                                              false, auth::username(req), after.reason);
                 callback(provisioner::utils::createDeviceKeyErrorResponse(
                     req, "generate a device key", after));
                 return;
@@ -2030,18 +2022,6 @@ namespace provisioner {
                 return;
             }
 
-            // SECURITY: Validate CSRF token for browser requests
-            if (!req->getHeader("X-CSRF-Token").empty()) {
-                if (!utils::validateCsrfToken(req)) {
-                    LOG_WARN << "SECURITY: CSRF validation failed for /options/migrate-secrets from " << AuditLog::getClientIP(req);
-                    auto resp = provisioner::utils::createErrorResponse(
-                        req, "Invalid or expired security token. Please refresh the page and try again.",
-                        drogon::k403Forbidden, "Security Error", "CSRF_VALIDATION_FAILED");
-                    callback(resp);
-                    return;
-                }
-            }
-
             auto jsonBody = req->getJsonObject();
             std::string target = (jsonBody && jsonBody->isMember("target"))
                                  ? (*jsonBody)["target"].asString() : "all";
@@ -2064,7 +2044,7 @@ namespace provisioner {
             bool ok = true;
 
             if (doPin && utils::isPkcs11PinConfigured()) {
-                bool r = utils::wrapFileInPlace(utils::PKCS11_PIN_FILE);
+                bool r = utils::wrapFileInPlace(utils::PKCS11_PIN_FILE, auth::username(req));
                 jsonResponse["pin"]["migrated"] = r;
                 ok = ok && r;
             }
@@ -2072,7 +2052,7 @@ namespace provisioner {
                 auto keyPathOpt = utils::getConfigValue("CUSTOMER_KEY_FILE_PEM");
                 std::string keyPath = keyPathOpt ? *keyPathOpt : "";
                 if (!keyPath.empty() && std::filesystem::exists(keyPath)) {
-                    bool r = utils::wrapFileInPlace(keyPath);
+                    bool r = utils::wrapFileInPlace(keyPath, auth::username(req));
                     jsonResponse["key"]["migrated"] = r;
                     ok = ok && r;
                 }
@@ -2129,22 +2109,6 @@ namespace provisioner {
                 return;
             }
 
-            // SECURITY: Validate CSRF token for browser requests
-            if (!req->getHeader("X-CSRF-Token").empty()) {
-                if (!utils::validateCsrfToken(req)) {
-                    LOG_WARN << "SECURITY: CSRF validation failed for /options/pkcs11-discover from " << AuditLog::getClientIP(req);
-                    auto resp = provisioner::utils::createErrorResponse(
-                        req,
-                        "Invalid or expired security token. Please refresh the page and try again.",
-                        drogon::k403Forbidden,
-                        "Security Error",
-                        "CSRF_VALIDATION_FAILED"
-                    );
-                    callback(resp);
-                    return;
-                }
-            }
-
             // Optional PIN (some tokens require login to list private objects).
             // Body is optional; absence just means "use the stored PIN if any".
             std::string pin;
@@ -2198,22 +2162,6 @@ namespace provisioner {
                 return;
             }
 
-            // SECURITY: Validate CSRF token for browser requests
-            if (!req->getHeader("X-CSRF-Token").empty()) {
-                if (!utils::validateCsrfToken(req)) {
-                    LOG_WARN << "SECURITY: CSRF validation failed for /options/set-pkcs11-pin from " << AuditLog::getClientIP(req);
-                    auto resp = provisioner::utils::createErrorResponse(
-                        req,
-                        "Invalid or expired security token. Please refresh the page and try again.",
-                        drogon::k403Forbidden,
-                        "Security Error",
-                        "CSRF_VALIDATION_FAILED"
-                    );
-                    callback(resp);
-                    return;
-                }
-            }
-
             // Parse JSON body
             auto jsonBody = req->getJsonObject();
             if (!jsonBody) {
@@ -2245,7 +2193,7 @@ namespace provisioner {
             
             // Handle empty PIN as a request to remove the PIN
             if (pin.empty()) {
-                if (utils::removePkcs11Pin()) {
+                if (utils::removePkcs11Pin(auth::username(req))) {
                     Json::Value jsonResponse;
                     jsonResponse["success"] = true;
                     jsonResponse["configured"] = false;
@@ -2293,7 +2241,7 @@ namespace provisioner {
                 if (deviceKey.state != keywrap::DeviceKeyState::Ok) {
                     LOG_ERROR << "Rejecting PIN save: " << deviceKey.reason;
                     AuditLog::logFileSystemAccess("WRITE_PIN", utils::PKCS11_PIN_FILE,
-                                                  false, "", "no usable device key");
+                                                  false, auth::username(req), "no usable device key");
                     callback(provisioner::utils::createDeviceKeyErrorResponse(
                         req, "store the HSM PIN", deviceKey));
                     return;
@@ -2301,7 +2249,7 @@ namespace provisioner {
             }
 
             // Save the PIN securely
-            if (utils::savePkcs11Pin(pin)) {
+            if (utils::savePkcs11Pin(pin, auth::username(req))) {
                 Json::Value jsonResponse;
                 jsonResponse["success"] = true;
                 jsonResponse["configured"] = true;

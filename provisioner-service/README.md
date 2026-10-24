@@ -16,4 +16,4 @@ The provisioner-service provides API endpoints for integration with other system
 
 - Manufacturing Database API - Access device provisioning data in JSON format with pagination support
 
-  - See [API Endpoints Documentation](docs/api_endpoints.md) for details
+  - See [API documentation](../docs/api/README.md) for details

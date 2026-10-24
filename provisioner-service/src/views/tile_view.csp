@@ -15,7 +15,7 @@
         align-items: center;
         justify-content: center;
         padding: 48px 20px;
-        color: #888;
+        color: #595959;
         text-align: center;
     }
     .tiles-empty-icon {
@@ -51,7 +51,7 @@
     }
 
     .device-tile.tile-active { border-color: #ffc107; }
-    .device-tile.tile-complete { border-color: #28a745; background: #f0faf2; }
+    .device-tile.tile-complete { border-color: #1e7e34; background: #f0faf2; }
     .device-tile.tile-error { border-color: #dc3545; background: #fdf0f1; }
     /* Device seen on a USB port excluded by the usb-ports.d rules: not a
        failure, so it is muted rather than flagged. */
@@ -78,25 +78,25 @@
         font-weight: 600;
         font-size: 1.05rem;
         color: #333;
-        overflow: hidden;
+        flex-wrap: wrap;
     }
+    /* Wrap rather than truncate: the operator needs the whole serial. */
     .tile-serial {
-        flex: 1;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        flex: 1 1 auto;
+        overflow-wrap: anywhere;
         font-family: monospace;
         font-size: 1rem;
     }
     .tile-badge {
         display: inline-block;
         font-weight: 700;
-        font-size: 11px;
+        font-size: 12px;
         line-height: 1;
         padding: 2px 7px;
         border-radius: 10px;
         color: #fff;
         flex-shrink: 0;
+        white-space: nowrap;
     }
     .tile-badge-gen { background: #d32f2f; }
     .tile-badge-model { background: #5c6bc0; }
@@ -136,8 +136,8 @@
         z-index: 1;
     }
     .tile-step.step-complete .tile-step-circle {
-        background: #28a745;
-        border-color: #28a745;
+        background: #1e7e34;
+        border-color: #1e7e34;
         color: #fff;
     }
     .tile-step.step-active .tile-step-circle {
@@ -151,7 +151,7 @@
         color: #fff;
     }
     .tile-step-label-full, .tile-step-label-short {
-        font-size: 11px;
+        font-size: 12px;
         color: #333;
         font-weight: 700;
         margin-top: 3px;
@@ -178,7 +178,7 @@
         background: #ccc;
         z-index: 0;
     }
-    .tile-step.step-complete .tile-step-line { background: #28a745; }
+    .tile-step.step-complete .tile-step-line { background: #1e7e34; }
 
     /* Current activity: the plain-language answer to "what is this board
        doing right now", with a live timer so a stall is visible. */
@@ -200,7 +200,7 @@
         margin-left: auto;
         flex-shrink: 0;
         font-size: 0.8rem;
-        color: #888;
+        color: #595959;
         font-variant-numeric: tabular-nums;
     }
     .device-tile.tile-complete .tile-activity-label { color: #1e7e34; }
@@ -231,7 +231,7 @@
     .tile-history-time {
         flex-shrink: 0;
         font-family: monospace;
-        color: #999;
+        color: #595959;
         font-variant-numeric: tabular-nums;
     }
     .tile-history-state {
@@ -254,7 +254,7 @@
     }
     .tile-meta-label {
         font-weight: 600;
-        color: #888;
+        color: #595959;
         flex-shrink: 0;
     }
     .tile-meta-value {
@@ -264,7 +264,7 @@
     .tile-reboot-label {
         text-align: center;
         font-size: 0.75rem;
-        color: #999;
+        color: #595959;
         font-style: italic;
         margin-top: 6px;
     }
@@ -307,7 +307,7 @@
         }
         .device-tile { padding: 10px; }
         .tile-step-label-full, .tile-step-label-short { display: none; }
-        .tile-step-circle { width: 20px; height: 20px; font-size: 9px; }
+        .tile-step-circle { width: 20px; height: 20px; font-size: 12px; }
         .tile-step-line { top: 10px; left: calc(50% + 10px); }
         .tile-step-line-left { top: 10px; width: calc(50% - 10px); }
     }
@@ -522,7 +522,7 @@
                 const leftLine = step.querySelector('.tile-step-line-left');
                 if (leftLine) {
                     const prevGreen = (i - 1 < parsed.step) || (i - 1 === parsed.step && parsed.status === 'complete');
-                    leftLine.style.background = prevGreen ? '#28a745' : '#ccc';
+                    leftLine.style.background = prevGreen ? '#1e7e34' : '#ccc';
                 }
             }
         }

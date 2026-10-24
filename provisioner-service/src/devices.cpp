@@ -25,6 +25,7 @@
 #include <sys/stat.h>
 #include <fnmatch.h>
 #include "utils.h"
+#include "auth.h"
 #include "include/audit.h"
 
 using namespace drogon;
@@ -104,7 +105,9 @@ namespace provisioner { std::string getTopologySnapshotString(); }
 class DevicesWebSocketController : public drogon::WebSocketController<DevicesWebSocketController> {
 public:
     static std::vector<drogon::WebSocketConnectionPtr> subscribers;
+    static std::vector<drogon::WebSocketConnectionPtr> anonymous;
     static std::mutex subscribersMutex;
+    static constexpr size_t kMaxAnonymous = 32;
 
     static void broadcast(const std::string &message) {
         std::lock_guard<std::mutex> lock(subscribersMutex);
@@ -125,10 +128,22 @@ public:
     }
 
     void handleNewConnection(const drogon::HttpRequestPtr& req, const drogon::WebSocketConnectionPtr& wsConnPtr) override {
-        (void)req;
+        bool refused = false;
         {
             std::lock_guard<std::mutex> lock(subscribersMutex);
-            subscribers.push_back(wsConnPtr);
+            // Viewers who have not signed in share a cap, so they cannot
+            // hold open enough sockets to starve the UI.
+            if (provisioner::auth::username(req).empty()) {
+                refused = anonymous.size() >= kMaxAnonymous;
+                if (!refused) anonymous.push_back(wsConnPtr);
+            }
+            if (!refused) subscribers.push_back(wsConnPtr);
+        }
+        if (refused) {
+            // Outside the lock: closing calls handleConnectionClosed at once,
+            // which takes it again.
+            wsConnPtr->forceClose();
+            return;
         }
         // Send initial snapshot
         wsConnPtr->send(provisioner::getTopologySnapshotString());
@@ -137,6 +152,7 @@ public:
     void handleConnectionClosed(const drogon::WebSocketConnectionPtr& wsConnPtr) override {
         std::lock_guard<std::mutex> lock(subscribersMutex);
         subscribers.erase(std::remove(subscribers.begin(), subscribers.end(), wsConnPtr), subscribers.end());
+        anonymous.erase(std::remove(anonymous.begin(), anonymous.end(), wsConnPtr), anonymous.end());
     }
 
     WS_PATH_LIST_BEGIN
@@ -145,6 +161,7 @@ public:
 };
 
 std::vector<drogon::WebSocketConnectionPtr> DevicesWebSocketController::subscribers;
+std::vector<drogon::WebSocketConnectionPtr> DevicesWebSocketController::anonymous;
 std::mutex DevicesWebSocketController::subscribersMutex;
 
 // (removed incorrect forward declaration of anonymous-namespace function)
@@ -1464,9 +1481,36 @@ namespace provisioner {
     // Special flags are keyed by real serial only — bootstrap.sh looks them
     // up via TARGET_DEVICE_SERIAL — so this resolution is required to keep
     // flag writes and reads aligned with what the bootstrap script honours.
+    // A serial or a USB path. Anything else, such as a NUL that would end
+    // the string early for SQLite, identifies no device.
+    static bool isDeviceIdentifier(const std::string &identifier)
+    {
+        static const std::string allowed =
+            "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:";
+        return !identifier.empty() && identifier.size() <= 64 &&
+               identifier.find_first_not_of(allowed) == std::string::npos;
+    }
+
+    // Where triage put a device's key file. A directory set on the Options
+    // page is tried first; keys from runs before it was set, or from a run
+    // that could not create it, stay with the device's logs.
+    static std::string keypairFile(const std::string &serial, const std::string &extension)
+    {
+        const std::string name = provisioner::utils::sanitize_path_component(serial) + extension;
+        const std::string fallback = "/var/log/rpi-sb-provisioner/" +
+                                     provisioner::utils::sanitize_path_component(serial) + "/keypair/" + name;
+        const auto dir = provisioner::utils::getConfigValue("RPI_DEVICE_RETRIEVE_KEYPAIR", false);
+        if (dir && !dir->empty()) {
+            const std::string configured = *dir + "/" + name;
+            std::error_code ec;
+            if (std::filesystem::is_regular_file(configured, ec)) return configured;
+        }
+        return fallback;
+    }
+
     static std::string resolveDeviceSerial(const std::string &identifier)
     {
-        if (identifier.empty()) return {};
+        if (!isDeviceIdentifier(identifier)) return {};
 
         sqlite3* db = nullptr;
         if (sqlite3_open("/srv/rpi-sb-provisioner/state.db", &db) != SQLITE_OK) {
@@ -1484,7 +1528,7 @@ namespace provisioner {
                 if (stmt) sqlite3_finalize(stmt);
                 continue;
             }
-            sqlite3_bind_text(stmt, 1, identifier.c_str(), -1, SQLITE_STATIC);
+            sqlite3_bind_text(stmt, 1, identifier.data(), static_cast<int>(identifier.size()), SQLITE_STATIC);
             if (sqlite3_step(stmt) == SQLITE_ROW) {
                 const unsigned char* s = sqlite3_column_text(stmt, 0);
                 if (s && *s) {
@@ -1668,6 +1712,7 @@ namespace provisioner {
                 }
                 viewData.insert("devices", devicesList);
                 viewData.insert("currentPage", std::string("devices"));
+                viewData.insert("anonymous", auth::username(req).empty());
                 resp = HttpResponse::newHttpViewResponse("devices.csp", viewData);
             } else {
                 // JSON response for API clients
@@ -1703,6 +1748,13 @@ namespace provisioner {
             // Add audit log entry for handler access
             AuditLog::logHandlerAccess(req, "/devices/" + serialno);
             
+            if (!serialno.empty() && !isDeviceIdentifier(serialno)) {
+                callback(provisioner::utils::createErrorResponse(
+                    req, "Device not found in database", drogon::k400BadRequest,
+                    "Device Not Found", "DEVICE_NOT_FOUND"));
+                return;
+            }
+
             if (serialno.empty()) {
                 LOG_ERROR << "Empty serial number in request";
                 auto resp = provisioner::utils::createErrorResponse(
@@ -1849,25 +1901,30 @@ namespace provisioner {
                 std::string serialDir = "/var/log/rpi-sb-provisioner/" + provisioner::utils::sanitize_path_component(device.serial);
                 std::string endpointDir = "/var/log/rpi-sb-provisioner/" + provisioner::utils::sanitize_path_component(device.port);
                 
-                auto tryReadLog = [](const std::string &primaryDir, const std::string &fallbackDir, const std::string &filename) -> std::string {
+                auto tryReadLog = [user = auth::username(req)](const std::string &primaryDir, const std::string &fallbackDir, const std::string &filename) -> std::string {
                     for (const auto &dir : {primaryDir, fallbackDir}) {
                         if (dir.empty()) continue;
                         std::string path = dir + "/" + filename;
                         std::ifstream f(path);
                         if (f.is_open()) {
-                            AuditLog::logFileSystemAccess("READ", path, true);
+                            AuditLog::logFileSystemAccess("READ", path, true, user);
                             std::stringstream buf;
                             buf << f.rdbuf();
                             return buf.str();
                         }
-                        AuditLog::logFileSystemAccess("READ", path, false);
+                        AuditLog::logFileSystemAccess("READ", path, false, user);
                     }
                     return {};
                 };
                 
-                provisioner_log = tryReadLog(serialDir, endpointDir, "provisioner.log");
-                bootstrap_log = tryReadLog(serialDir, endpointDir, "bootstrap.log");
-                triage_log = tryReadLog(serialDir, endpointDir, "triage.log");
+                // Logs can hold whatever a hook prints, and flags change what
+                // the next run does: a viewer who has not signed in sees neither.
+                const bool signedIn = !auth::username(req).empty();
+                if (signedIn) {
+                    provisioner_log = tryReadLog(serialDir, endpointDir, "provisioner.log");
+                    bootstrap_log = tryReadLog(serialDir, endpointDir, "bootstrap.log");
+                    triage_log = tryReadLog(serialDir, endpointDir, "triage.log");
+                }
 
                 // Query last 10 state changes for this device.
                 // When the device was looked up by endpoint (USB path), query
@@ -1906,7 +1963,8 @@ namespace provisioner {
                 // lowercased 8-char truncation, so findSpecialFlagFile probes
                 // both forms.
                 std::vector<std::map<std::string, std::string>> flagsList;
-                for (const auto &fd : specialFlagCatalogue()) {
+                static const std::vector<SpecialFlagInfo> noFlags;
+                for (const auto &fd : signedIn ? specialFlagCatalogue() : noFlags) {
                     std::map<std::string, std::string> flagMap;
                     flagMap["id"] = fd.id;
                     flagMap["label"] = fd.label;
@@ -1941,6 +1999,7 @@ namespace provisioner {
                 viewData.insert("flags", flagsList);
                 viewData.insert("stateHistory", stateHistory);
                 viewData.insert("currentPage", std::string("devices"));
+                viewData.insert("anonymous", !signedIn);
                 resp = HttpResponse::newHttpViewResponse("device_detail.csp", viewData);
             } else {
                 Json::Value root;
@@ -1965,6 +2024,13 @@ namespace provisioner {
             // Add audit log entry for handler access
             AuditLog::logHandlerAccess(req, "/devices/" + serialno + "/log/provisioner");
             
+            if (!serialno.empty() && !isDeviceIdentifier(serialno)) {
+                callback(provisioner::utils::createErrorResponse(
+                    req, "Device not found in database", drogon::k400BadRequest,
+                    "Device Not Found", "DEVICE_NOT_FOUND"));
+                return;
+            }
+
             if (serialno.empty()) {
                 LOG_ERROR << "Empty serial number in request";
                 auto resp = provisioner::utils::createErrorResponse(
@@ -1985,7 +2051,7 @@ namespace provisioner {
             if (!logFile.is_open()) {
                 LOG_ERROR << "Failed to open log file: " << logPath;
                 // Log failed file access to audit log
-                AuditLog::logFileSystemAccess("READ", logPath, false);
+                AuditLog::logFileSystemAccess("READ", logPath, false, auth::username(req));
                 
                 auto resp = provisioner::utils::createErrorResponse(
                     req,
@@ -2000,7 +2066,7 @@ namespace provisioner {
             }
 
             // Log successful file access to audit log
-            AuditLog::logFileSystemAccess("READ", logPath, true);
+            AuditLog::logFileSystemAccess("READ", logPath, true, auth::username(req));
             
             LOG_INFO << "Successfully opened log file: " << logPath;
             std::stringstream buffer;
@@ -2015,6 +2081,13 @@ namespace provisioner {
             auto resp = HttpResponse::newHttpResponse();
             LOG_INFO << "Bootstrap log request for serial: '" << serialno << "'";
             
+            if (!serialno.empty() && !isDeviceIdentifier(serialno)) {
+                callback(provisioner::utils::createErrorResponse(
+                    req, "Device not found in database", drogon::k400BadRequest,
+                    "Device Not Found", "DEVICE_NOT_FOUND"));
+                return;
+            }
+
             if (serialno.empty()) {
                 LOG_ERROR << "Empty serial number in request";
                 auto resp = provisioner::utils::createErrorResponse(
@@ -2059,6 +2132,13 @@ namespace provisioner {
             auto resp = HttpResponse::newHttpResponse();
             LOG_INFO << "Triage log request for serial: '" << serialno << "'";
             
+            if (!serialno.empty() && !isDeviceIdentifier(serialno)) {
+                callback(provisioner::utils::createErrorResponse(
+                    req, "Device not found in database", drogon::k400BadRequest,
+                    "Device Not Found", "DEVICE_NOT_FOUND"));
+                return;
+            }
+
             if (serialno.empty()) {
                 LOG_ERROR << "Empty serial number in request";
                 auto resp = provisioner::utils::createErrorResponse(
@@ -2103,6 +2183,13 @@ namespace provisioner {
             auto resp = HttpResponse::newHttpResponse();
             LOG_INFO << "Public key request for serial: '" << serialno << "'";
             
+            if (!serialno.empty() && !isDeviceIdentifier(serialno)) {
+                callback(provisioner::utils::createErrorResponse(
+                    req, "Device not found in database", drogon::k400BadRequest,
+                    "Device Not Found", "DEVICE_NOT_FOUND"));
+                return;
+            }
+
             if (serialno.empty()) {
                 LOG_ERROR << "Empty serial number in request";
                 auto resp = provisioner::utils::createErrorResponse(
@@ -2116,7 +2203,7 @@ namespace provisioner {
                 return;
             }
 
-            std::string keyPath = "/var/log/rpi-sb-provisioner/" + provisioner::utils::sanitize_path_component(serialno) + "/keypair/" + provisioner::utils::sanitize_path_component(serialno) + ".pub";
+            std::string keyPath = keypairFile(serialno, ".pub");
             std::ifstream keyFile(keyPath);
             if (!keyFile.is_open()) {
                 auto resp = provisioner::utils::createErrorResponse(
@@ -2155,7 +2242,7 @@ namespace provisioner {
                 AuditLog::logFileSystemAccess("DENIED_PRIVATE_KEY_ACCESS", 
                     "/var/log/rpi-sb-provisioner/" + serialno + "/keypair/" + serialno + ".der", 
                     false, 
-                    "", 
+                    auth::username(req), 
                     "Private key API is disabled for security. Client IP: " + AuditLog::getClientIP(req));
                 
                 auto resp = provisioner::utils::createErrorResponse(
@@ -2180,6 +2267,13 @@ namespace provisioner {
             // Add audit log entry for handler access
             AuditLog::logHandlerAccess(req, "/devices/" + serialno + "/key/private");
             
+            if (!serialno.empty() && !isDeviceIdentifier(serialno)) {
+                callback(provisioner::utils::createErrorResponse(
+                    req, "Device not found in database", drogon::k400BadRequest,
+                    "Device Not Found", "DEVICE_NOT_FOUND"));
+                return;
+            }
+
             if (serialno.empty()) {
                 LOG_ERROR << "Empty serial number in request";
                 auto resp = provisioner::utils::createErrorResponse(
@@ -2193,11 +2287,11 @@ namespace provisioner {
                 return;
             }
 
-            std::string keyPath = "/var/log/rpi-sb-provisioner/" + provisioner::utils::sanitize_path_component(serialno) + "/keypair/" + provisioner::utils::sanitize_path_component(serialno) + ".der";
+            std::string keyPath = keypairFile(serialno, ".der");
             std::ifstream keyFile(keyPath);
             if (!keyFile.is_open()) {
                 // Log failed file access to audit log
-                AuditLog::logFileSystemAccess("READ_PRIVATE_KEY", keyPath, false, "", 
+                AuditLog::logFileSystemAccess("READ_PRIVATE_KEY", keyPath, false, auth::username(req), 
                     "Private key file not found for serial: " + serialno + ", Client IP: " + AuditLog::getClientIP(req));
                 
                 auto resp = provisioner::utils::createErrorResponse(
@@ -2217,7 +2311,7 @@ namespace provisioner {
                      << " is being transmitted to " << AuditLog::getClientIP(req);
             
             // Log successful private key access to audit log
-            AuditLog::logFileSystemAccess("READ_PRIVATE_KEY", keyPath, true, "", 
+            AuditLog::logFileSystemAccess("READ_PRIVATE_KEY", keyPath, true, auth::username(req), 
                 "CRITICAL: Private key transmitted for serial: " + serialno + 
                 ", Client IP: " + AuditLog::getClientIP(req) + 
                 ", User-Agent: " + req->getHeader("User-Agent"));
@@ -2234,13 +2328,12 @@ namespace provisioner {
         app.registerHandler("/devices/_test/{scenario}", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback, const std::string &scenario) {
             auto resp = HttpResponse::newHttpResponse();
             
-            // Security: Only allow from localhost or with secret header
+            // Only from this machine. There used to be a header that let
+            // anyone else in too, but its value is in the public source.
             std::string clientIP = AuditLog::getClientIP(req);
-            std::string secretHeader = req->getHeader("X-Test-Secret");
-            bool isLocalhost = (clientIP == "127.0.0.1" || clientIP == "::1" || clientIP.find("localhost") != std::string::npos);
-            bool hasSecret = (secretHeader == "rpi-provisioner-test-2024");
+            bool isLocalhost = (clientIP == "127.0.0.1" || clientIP == "::1" || clientIP == "::ffff:127.0.0.1");
             
-            if (!isLocalhost && !hasSecret) {
+            if (!isLocalhost) {
                 resp->setStatusCode(k404NotFound);
                 resp->setBody("Not Found");
                 callback(resp);
@@ -2271,7 +2364,7 @@ namespace provisioner {
             resp->setContentTypeCode(CT_APPLICATION_JSON);
             resp->setBody(writer.write(result));
             callback(resp);
-        }); // devices/_test/{scenario} handler
+        }, {Post}); // devices/_test/{scenario} handler
 
         // ===== Special Flags Management =====
         // Flag labels and descriptions come from specialFlagCatalogue(), which
@@ -2422,7 +2515,7 @@ namespace provisioner {
                 if (std::filesystem::exists(filePath)) {
                     try {
                         std::filesystem::remove(filePath);
-                        AuditLog::logFileSystemAccess("DELETE_FLAG", filePath, true, "",
+                        AuditLog::logFileSystemAccess("DELETE_FLAG", filePath, true, auth::username(req),
                             "Special flag removed: " + flagId + " for device " + realSerial);
                         LOG_INFO << "Removed special flag: " << flagId << " for device " << realSerial;
                     } catch (const std::exception &e) {
@@ -2462,7 +2555,7 @@ namespace provisioner {
                 f << mode << "\n";
                 f.close();
 
-                AuditLog::logFileSystemAccess("SET_FLAG", filePath, true, "",
+                AuditLog::logFileSystemAccess("SET_FLAG", filePath, true, auth::username(req),
                     "Special flag set: " + flagId + " (" + mode + ") for device " + realSerial);
                 LOG_INFO << "Set special flag: " << flagId << " (" << mode << ") for device " << realSerial;
             }
@@ -2486,13 +2579,12 @@ namespace provisioner {
         app.registerHandler("/devices/_test", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
             auto resp = HttpResponse::newHttpResponse();
             
-            // Security: Only allow from localhost or with secret header
+            // Only from this machine. There used to be a header that let
+            // anyone else in too, but its value is in the public source.
             std::string clientIP = AuditLog::getClientIP(req);
-            std::string secretHeader = req->getHeader("X-Test-Secret");
-            bool isLocalhost = (clientIP == "127.0.0.1" || clientIP == "::1" || clientIP.find("localhost") != std::string::npos);
-            bool hasSecret = (secretHeader == "rpi-provisioner-test-2024");
+            bool isLocalhost = (clientIP == "127.0.0.1" || clientIP == "::1" || clientIP == "::ffff:127.0.0.1");
             
-            if (!isLocalhost && !hasSecret) {
+            if (!isLocalhost) {
                 resp->setStatusCode(k404NotFound);
                 resp->setBody("Not Found");
                 callback(resp);
@@ -2596,7 +2688,6 @@ namespace provisioner {
                                      peerIp == "::ffff:127.0.0.1");
             if (!isLoopback) {
                 resp->setStatusCode(k404NotFound);
-                resp->setBody("debug: non-loopback peer=" + peerIp);
                 callback(resp);
                 return;
             }
@@ -2604,9 +2695,6 @@ namespace provisioner {
             const std::string presented = req->getHeader("X-Internal-Token");
             if (presented.empty() || !tokensEqual(presented, internalToken)) {
                 resp->setStatusCode(k404NotFound);
-                resp->setBody("debug: token mismatch presented_len=" +
-                              std::to_string(presented.size()) +
-                              " expected_len=" + std::to_string(internalToken.size()));
                 callback(resp);
                 return;
             }
@@ -2614,10 +2702,14 @@ namespace provisioner {
             resp->setStatusCode(k204NoContent);
             callback(resp);
         };
+        // Each gets its own copy. registerHandler takes a forwarding reference,
+        // so passing the named lambda stored a reference to this local, which is
+        // gone when registerHandlers returns: every notification read a
+        // destroyed token and was refused.
         // Paired with record_state() in host-support/state-recording.
-        app.registerHandler("/internal/state-changed", internalNotify, {Post});
+        app.registerHandler("/internal/state-changed", decltype(internalNotify)(internalNotify), {Post});
         // Paired with the manufacturing.db INSERT in host-support/manufacturing-data.
-        app.registerHandler("/internal/manufacturing-recorded", internalNotify, {Post});
+        app.registerHandler("/internal/manufacturing-recorded", decltype(internalNotify)(internalNotify), {Post});
     }
 
 
