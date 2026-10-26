@@ -83,11 +83,10 @@ namespace {
 
     // What bootstrap and rpi-eeprom-config will make of the text.
     Findings check(const std::string &text) {
-        const bool secure = utils::getConfigValue("PROVISIONING_STYLE", false).value_or("secure-boot") == "secure-boot";
         Findings out;
         static const std::regex setting(R"(^([A-Za-z0-9_]+)=(.*)$)");
         static const std::regex hex(R"(^0[xX][0-9a-fA-F]{1,8}$)");
-        bool signedBoot = false;
+        size_t dropped = 0;
         std::istringstream in(text);
         std::string line;
         int n = 0;
@@ -113,21 +112,22 @@ namespace {
                 continue;
             }
             const std::string name = m[1], value = m[2];
-            // SIGNED_BOOT is not in the documentation, and is redundant once the
-            // key is in OTP, but the package's defaults carry it.
-            if (!knownSettings().empty() && !knownSettings().count(name) && name != "SIGNED_BOOT") {
+            // Bootstrap removes these lines before sending the configuration.
+            if (name == "SIGNED_BOOT") {
+                add(out.warnings, n, "SIGNED_BOOT is not sent to devices: a customer key in OTP turns signed "
+                                     "boot on, and without one it would stop an unsigned OS booting");
+                dropped += line.size() + 1;
+                continue;
+            }
+            if (!knownSettings().empty() && !knownSettings().count(name)) {
                 add(out.warnings, n, name + " is not a setting the Raspberry Pi documentation describes");
             }
             if (name == "BOOT_ORDER" && !std::regex_match(value, hex)) {
                 add(out.errors, n, "BOOT_ORDER is a hexadecimal number of up to eight digits, such as 0xf41");
             }
-            if (name == "SIGNED_BOOT" && value == "1") signedBoot = true;
         }
-        // Bootstrap ends the file with a newline and, for secure boot, adds
-        // SIGNED_BOOT=1 when it is missing: redundant once the key is in OTP,
-        // but it still has to fit.
-        out.bytes = text.size() + ((!text.empty() && text.back() != '\n') ? 1 : 0) +
-                    ((secure && !signedBoot) ? std::string("SIGNED_BOOT=1\n").size() : 0);
+        // Bootstrap ends the file with a newline and removes SIGNED_BOOT lines.
+        out.bytes = text.size() + ((!text.empty() && text.back() != '\n') ? 1 : 0) - dropped;
         if (out.bytes > kMaxBytes) {
             add(out.errors, 0, "The configuration comes to " + std::to_string(out.bytes) +
                                 " bytes on the device; the EEPROM holds at most " + std::to_string(kMaxBytes));

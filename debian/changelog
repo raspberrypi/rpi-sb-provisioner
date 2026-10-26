@@ -477,6 +477,13 @@ rpi-sb-provisioner (2.4.0) unstable; urgency=high
 
   * Label the settings JSON from /options/get as application/json.
 
+  * Never send SIGNED_BOOT in the bootloader configuration. A current
+    bootloader turns signed boot on whenever the customer key is in OTP,
+    and a custom configuration, which starts as a copy of the secure
+    default, gave naked and fde-only devices SIGNED_BOOT=1, so without a key
+    an unsigned OS would not boot. The secure default no longer carries it,
+    bootstrap removes it from its copy, and the editor warns about it.
+
  -- Tom Dewey <tom.dewey@raspberrypi.com>  Wed, 07 Oct 2026 08:48:02 +0100
 
 rpi-sb-provisioner (2.3.5) unstable; urgency=medium

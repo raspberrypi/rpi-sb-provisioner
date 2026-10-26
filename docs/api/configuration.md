@@ -839,7 +839,7 @@ Each setting's text is HTML. If the file is missing, HTTP 404 with `{"settings":
 }
 ```
 
-Errors are lines that are not plain ASCII, not a `NAME=value` setting, `[filter]` or `# comment`, an unclosed filter, or a `BOOT_ORDER` that is not a hexadecimal number of up to eight digits. `bytes` is the size on the device: with a final newline and, for `secure-boot`, the `SIGNED_BOOT=1` bootstrap adds when it is missing. More than `max_bytes`, the EEPROM's limit, is an error on line 0. Unknown setting names are only warnings.
+Errors are lines that are not plain ASCII, not a `NAME=value` setting, `[filter]` or `# comment`, an unclosed filter, or a `BOOT_ORDER` that is not a hexadecimal number of up to eight digits. `bytes` is the size on the device: with a final newline, and without `SIGNED_BOOT` lines, which bootstrap removes and which are warned about. More than `max_bytes`, the EEPROM's limit, is an error on line 0. Unknown setting names are only warnings.
 
 A body without a string `content` gets `400 INVALID_REQUEST`; content over 64 KiB gets `413 TOO_LARGE`.
 

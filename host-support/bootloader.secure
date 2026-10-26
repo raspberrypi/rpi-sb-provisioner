@@ -8,8 +8,3 @@ BOOT_ORDER=0xf2461
 
 # Disable self-update mode
 ENABLE_SELF_UPDATE=0
-
-# Select signed-boot mode in the EEPROM. This can be used to during development
-# to test the signed boot image. Once secure boot is enabled via OTP this setting
-# has no effect i.e. it is always 1.
-SIGNED_BOOT=1

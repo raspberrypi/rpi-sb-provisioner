@@ -351,11 +351,6 @@ check_command_exists() {
 #   - CUSTOMER_PUBLIC_KEY_FILE is set by init_signing_context()
 
 enforceSecureBootloaderConfig() {
-    if ! grep -Fxq "SIGNED_BOOT=1" "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"; then
-        echo "SIGNED_BOOT=1" >> "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
-        sed -i -e "s/SIGNED_BOOT=0//g" "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
-    fi
-
     # These directives are for the bootloader to load the ramdisk
     # Don't use the traditional boot flow, and instead look for boot.img/boot.sig
     echo "boot_ramdisk=1" >> "${RPI_SB_WORKDIR}/config.txt"
@@ -386,6 +381,13 @@ prepare_bootloader_config() {
         [ -z "$(tail -c 1 "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}")" ] || echo >> "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
     else
         log "Warning: bootloader configuration ${_bc_src} does not exist; using an empty one"
+    fi
+    # SIGNED_BOOT is never sent. A current bootloader applies it whenever the
+    # customer key is in OTP, and without a key it would put the bootloader in
+    # signed-boot mode, so an unsigned OS would not boot.
+    if grep -Eq '^[[:space:]]*SIGNED_BOOT[[:space:]]*=' "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"; then
+        log "Removing SIGNED_BOOT from the bootloader configuration: the key in OTP decides signed boot"
+        sed -i -E '/^[[:space:]]*SIGNED_BOOT[[:space:]]*=/d' "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
     fi
     maybe_reorder_boot_order_for_storage "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
     BOOTLOADER_CONFIG_SHA256="$(sha256sum < "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" | cut -d ' ' -f 1)"
@@ -460,13 +462,6 @@ update_eeprom() {
         if ! signing_available; then
             record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
             die "Signed EEPROM requested but no signing key is configured - refusing to build an unsigned EEPROM for a secure-boot device"
-        fi
-
-        if ! grep -q "SIGNED_BOOT=1" "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"; then
-            # If the OTP bit to require secure boot are set then then
-            # SIGNED_BOOT=1 is implicitly set in the EEPROM config.
-            # For debug in signed-boot mode it's normally useful to set this
-            log "Warning: SIGNED_BOOT=1 not found in \"${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}\""
         fi
 
         #update_version=$(strings "${src_image}" | grep BUILD_TIMESTAMP | sed 's/.*=//g')

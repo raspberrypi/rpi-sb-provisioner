@@ -106,7 +106,7 @@ Provisioning proceeds through three phases, each implemented as a systemd templa
 
 - Run the `bootstrap` customisation hook
 
-- Raspberry Pi 4 and 5 families only: build an EEPROM image from the newest `pieeprom-*.bin` under `/lib/firmware/raspberrypi/bootloader-<chip>/latest/`, or the firmware chosen on the Options page, with the bootloader configuration chosen there (Default or Custom). Bootstrap works on a copy, which it moves storage first in `BOOT_ORDER` when `RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE` is on, and to which it adds `SIGNED_BOOT=1` for secure boot. The image is flashed over rpiboot
+- Raspberry Pi 4 and 5 families only: build an EEPROM image from the newest `pieeprom-*.bin` under `/lib/firmware/raspberrypi/bootloader-<chip>/latest/`, or the firmware chosen on the Options page, with the bootloader configuration chosen there (Default or Custom). Bootstrap works on a copy, in which it moves storage first in `BOOT_ORDER` when `RPI_DEVICE_BOOT_ORDER_MATCH_STORAGE` is on and from which it removes any `SIGNED_BOOT`: a customer key in OTP turns signed boot on, and without one the setting would stop an unsigned OS booting. The image is flashed over rpiboot
 
 - Secure boot only: sign the EEPROM configuration (and, on Raspberry Pi 5, the bootcode) with the customer key, and program the key hash into OTP (`program_pubkey=1`), with JTAG lock, EEPROM write protection and, on Raspberry Pi 4, the RPIBOOT GPIO if configured
 
