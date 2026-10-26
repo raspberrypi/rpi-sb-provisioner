@@ -439,8 +439,10 @@ rpi-sb-provisioner (2.4.0) unstable; urgency=high
     Richard Oliver.
 
   * Offer the JTAG lock and EEPROM write protection only with secure boot,
-    the only style bootstrap applies them to, and record them in the
-    manufacturing database only then.
+    the only style bootstrap applies them to. The manufacturing record now
+    takes each from the bootloader configuration bootstrap actually sent,
+    and leaves it empty when none was sent, as with Skip EEPROM Update. It
+    used to be empty for every secure-boot device left unlocked.
 
   * Say when no RPIBOOT GPIO is set, rather than showing GPIO 8 selected
     while bootstrap programmed none.

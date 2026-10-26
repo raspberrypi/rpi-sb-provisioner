@@ -198,6 +198,19 @@ fi
 METADATA_DIR="${EARLY_LOG_DIRECTORY}/metadata"
 mkdir -p "${METADATA_DIR}"
 
+# The hardware locks are written once and cannot be read back, so the
+# manufacturing record takes what the bootloader configuration this run
+# served asked for. The early directory is keyed by a USB device number,
+# which is reused, so a record left by another device goes first.
+REQUESTED_LOCKS="${EARLY_LOG_DIRECTORY}/requested-locks"
+rm -f "${REQUESTED_LOCKS}"
+record_requested_locks() {
+    {
+        if grep -qx 'program_jtag_lock=1' "$1/config.txt"; then echo "jtag_lock=1"; else echo "jtag_lock=0"; fi
+        if grep -qx 'eeprom_write_protect=1' "$1/config.txt"; then echo "eeprom_write_protect=1"; else echo "eeprom_write_protect=0"; fi
+    } > "${REQUESTED_LOCKS}"
+}
+
 # Sets the global BOARD_TYPE (2-digit hex string of bits 4..11 of OTP
 # USER_BOARDREV; e.g. "17" for Pi 5, "18" for CM5) and BOARD_NAME for
 # logging.  Best-effort: if the metadata file is missing or unparseable
@@ -773,7 +786,8 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
             BOOTLOADER_SERVE_DIR="${REPROVISION_DIR:-${SECURE_BOOTLOADER_DIRECTORY}}"
             record_progress "EEPROM-UPDATING"
             ensure_recovery_support_files "${BOOTLOADER_SERVE_DIR}" "${BOOTCODE_FLASHING_NAME}"
-            [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal_secs 60 rpiboot -j "${METADATA_DIR}" -d "${BOOTLOADER_SERVE_DIR}" -p "${TARGET_USB_PATH}"
+            [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal_secs 60 rpiboot -j "${METADATA_DIR}" -d "${BOOTLOADER_SERVE_DIR}" -p "${TARGET_USB_PATH}" &&
+                record_requested_locks "${BOOTLOADER_SERVE_DIR}"
             extract_board_type
         else
             # NB: config.txt is the marker the branch above uses to decide the
@@ -912,7 +926,8 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                 BOOTLOADER_SERVE_DIR="${REPROVISION_DIR:-${SECURE_BOOTLOADER_DIRECTORY}}"
                 record_progress "EEPROM-UPDATING"
                 ensure_recovery_support_files "${BOOTLOADER_SERVE_DIR}" "${BOOTCODE_FLASHING_NAME}"
-                [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal_secs 60 rpiboot -j "${METADATA_DIR}" -d "${BOOTLOADER_SERVE_DIR}" -p "${TARGET_USB_PATH}"
+                [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal_secs 60 rpiboot -j "${METADATA_DIR}" -d "${BOOTLOADER_SERVE_DIR}" -p "${TARGET_USB_PATH}" &&
+                    record_requested_locks "${BOOTLOADER_SERVE_DIR}"
             extract_board_type
             else
                 log "No key specified, skipping eeprom update"
@@ -1074,7 +1089,8 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                     record_progress "EEPROM-UPDATING"
                     log "Updating EEPROM to latest version"
                     ensure_recovery_support_files "${NON_SECURE_BOOTLOADER_DIRECTORY}" "${BOOTCODE_FLASHING_NAME}"
-                    [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal_secs 60 rpiboot -j "${METADATA_DIR}" -d "${NON_SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}"
+                    [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal_secs 60 rpiboot -j "${METADATA_DIR}" -d "${NON_SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}" &&
+                        record_requested_locks "${NON_SECURE_BOOTLOADER_DIRECTORY}"
                     extract_board_type
                     log "EEPROM update completed. Device rebooted."
                 else
@@ -1113,6 +1129,10 @@ if [ -n "${TARGET_DEVICE_SERIAL}" ] && [ "${TARGET_DEVICE_SERIAL}" != "${TARGET_
         mv "${early_log_dir}/metadata" "${target_log_dir}/metadata"
     fi
     mv "${early_log_dir}/bootstrap.log" "${target_log_dir}/bootstrap.log"
+    # A run that sent no bootloader configuration asked for nothing, so an
+    # earlier run's record must not stand in for it.
+    rm -f "${target_log_dir}/requested-locks"
+    [ -f "${REQUESTED_LOCKS}" ] && mv "${REQUESTED_LOCKS}" "${target_log_dir}/requested-locks"
     # Also link into the endpoint-keyed directory so the web UI can find it by either key
     if [ -n "${TARGET_USB_PATH}" ]; then
         _endpoint_log_dir="/var/log/rpi-sb-provisioner/${TARGET_USB_PATH}"
@@ -1129,6 +1149,10 @@ elif [ -n "${TARGET_USB_PATH}" ]; then
         mv "${early_log_dir}/metadata" "${target_log_dir}/metadata"
     fi
     mv "${early_log_dir}/bootstrap.log" "${target_log_dir}/bootstrap.log"
+    # A run that sent no bootloader configuration asked for nothing, so an
+    # earlier run's record must not stand in for it.
+    rm -f "${target_log_dir}/requested-locks"
+    [ -f "${REQUESTED_LOCKS}" ] && mv "${REQUESTED_LOCKS}" "${target_log_dir}/requested-locks"
 else
     log "Warning: Neither serial nor USB path available, logs will remain in ${EARLY_LOG_DIRECTORY}"
     echo "[$(date +"%Y-%m-%d %H:%M:%S.$(date +%N | cut -c1-3)")] Warning: Neither serial nor USB path available, logs remain in ${EARLY_LOG_DIRECTORY}" >> "${EARLY_LOG_DIRECTORY}/bootstrap.log"
