@@ -484,6 +484,11 @@ rpi-sb-provisioner (2.4.0) unstable; urgency=high
     an unsigned OS would not boot. The secure default no longer carries it,
     bootstrap removes it from its copy, and the editor warns about it.
 
+  * Rebuild the fastboot gadget images with rpi-fastbootd
+    14.0.0~git20261026.adf29cb (pi-gen-micro #72). getvar secure now
+    answers from the bootloader's customer key report, so the manufacturing
+    database records secure boot, empty on every device until now.
+
  -- Tom Dewey <tom.dewey@raspberrypi.com>  Wed, 07 Oct 2026 08:48:02 +0100
 
 rpi-sb-provisioner (2.3.5) unstable; urgency=medium
