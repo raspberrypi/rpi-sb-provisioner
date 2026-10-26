@@ -90,15 +90,19 @@ class BootloaderConfig(UITest):
         self.assertIn((6, "A"), errors)
         self.assertEqual([5], [w["line"] for w in body["warnings"]])
 
-    def test_signed_boot_is_not_the_operators_concern(self):
-        # Secure boot is set by the key in OTP; the setting is redundant.
-        self.assertEqual([], self.check("SIGNED_BOOT=0\n")["warnings"])
+    def test_signed_boot_is_never_sent(self):
+        # The key in OTP turns signed boot on; without one the setting would
+        # stop an unsigned OS booting, so bootstrap removes it.
+        body = self.check("BOOT_UART=1\nSIGNED_BOOT=1\n")
+        self.assertEqual([2], [w["line"] for w in body["warnings"]])
+        self.assertIn("not sent", body["warnings"][0]["message"])
+        self.assertEqual(len("BOOT_UART=1\n"), body["bytes"])
 
     def test_counts_what_reaches_the_eeprom_against_its_limit(self):
-        self.assertEqual(len("BOOT_UART=1\nSIGNED_BOOT=1\n"), self.check("BOOT_UART=1")["bytes"],
-                         "bootstrap still adds SIGNED_BOOT=1 for secure boot, so it must fit")
-        self.station.set_config(PROVISIONING_STYLE="naked")
-        self.assertEqual(len("BOOT_UART=1\n"), self.check("BOOT_UART=1")["bytes"])
+        for style in ("secure-boot", "naked"):
+            with self.subTest(style=style):
+                self.station.set_config(PROVISIONING_STYLE=style)
+                self.assertEqual(len("BOOT_UART=1\n"), self.check("BOOT_UART=1")["bytes"])
         big = "# " + "x" * 4100 + "\n"
         self.assertTrue(any("at most 4076" in e["message"] for e in self.check(big)["errors"]))
 
