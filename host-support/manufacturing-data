@@ -308,21 +308,16 @@ metadata_gather() {
     DEVKEY_REVOKED_VALUE=$(signed_flag_value "$(metadata_get "secure-devkey")")
     SIGNED_BOOT_VALUE="${PUBKEY_PROGRAMMED_VALUE}"
 
-    # Bootstrap sends both locks only on the secure-boot path; recording
-    # them for another style would claim a lock the device never got.
-    JTAG_LOCKED_VALUE="NULL"
-    if [ -n "${RPI_DEVICE_LOCK_JTAG}" ] && [ "${PROVISIONING_STYLE}" = "secure-boot" ]; then
-        JTAG_LOCKED_VALUE="1"
-    elif [ "${SECURE}" = "1" ]; then
-        JTAG_LOCKED_VALUE="0"
-    fi
-
-    EEPROM_WP_VALUE="NULL"
-    if [ -n "${RPI_DEVICE_EEPROM_WP_SET}" ] && [ "${PROVISIONING_STYLE}" = "secure-boot" ]; then
-        EEPROM_WP_VALUE="1"
-    elif [ "${SECURE}" = "1" ]; then
-        EEPROM_WP_VALUE="0"
-    fi
+    # What the bootloader configuration bootstrap served asked of the device;
+    # the locks cannot be read back. No record means bootstrap sent none on
+    # this run, as with Skip EEPROM Update, so the request is unknown.
+    requested_lock() {
+        _locks="/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/requested-locks"
+        _v=$(sed -n "s/^$1=\([01]\)\$/\1/p" "${_locks}" 2>/dev/null | head -n 1)
+        echo "${_v:-NULL}"
+    }
+    JTAG_LOCKED_VALUE=$(requested_lock jtag_lock)
+    EEPROM_WP_VALUE=$(requested_lock eeprom_write_protect)
 
     eeprom_value() {
         v=$(metadata_get "$1")
