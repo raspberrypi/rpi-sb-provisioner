@@ -261,6 +261,18 @@ The token must not contain whitespace. Set from Options, **Cloud Services**, **C
 
 Description prefix used when registering devices with Raspberry Pi Connect. The provisioner appends the board type and serial number. Set from Options, **Cloud Services**, **Description Prefix**.
 
+## RPI_CONNECT_DEVICE_NAME
+
+**Optional**
+
+The name each device registered with Raspberry Pi Connect is given; without one, Connect would name it after its hostname, which a whole batch shares. `{board}` becomes the board in hostname form (`pi5`, `pi500`, `pi4b`, `pizero2w`, `cm5`, `cm5lite`) and `{serial}` the device's serial number, which the template must include. Defaults to `{board}-{serial}`, for example `cm5-8399ccde61e0280b`. Set from Options, **Cloud Services**, **Device Name**.
+
+## RPI_CONNECT_TAGS
+
+**Optional**
+
+Comma-separated [tags](https://www.raspberrypi.com/documentation/services/connect-for-organisations.html#device-identities) applied to each device registered with Raspberry Pi Connect, for example `production, line2`. Connect allows up to 10, each up to 30 lowercase letters, digits, hyphens or underscores; the provisioner leaves out, with a warning in the log, any that break these rules rather than lose the registration. Set from Options, **Cloud Services**, **Tags**.
+
 ## RPI_DEVICE_RETRIEVE_KEYPAIR
 
 **Optional**

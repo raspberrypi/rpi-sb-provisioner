@@ -15,6 +15,7 @@ class Options(UITest):
         super().setUp()
         self.station.set_config(PROVISIONING_STYLE="naked", RPI_DEVICE_FAMILY="5", RPI_DEVICE_STORAGE_TYPE="emmc",
                                 RPI_DEVICE_RPIBOOT_GPIO="", RPI_CONNECT_API_KEY="", RPI_CONNECT_DESCRIPTION="",
+                                RPI_CONNECT_DEVICE_NAME="", RPI_CONNECT_TAGS="",
                                 RPI_DEVICE_LOCK_JTAG="", RPI_DEVICE_EEPROM_WP_SET="", RPI_SB_WORKDIR="",
                                 RPI_DEVICE_FIRMWARE_FILE="", GOLD_MASTER_OS_FILE="")
         self.b.get("/options/get")
@@ -75,6 +76,24 @@ class Options(UITest):
         self.type_and_leave("RPI_CONNECT_API_KEY", "has a space")
         self.refused("RPI_CONNECT_API_KEY", "must not contain whitespace")
         self.assertEqual("", self.cfg("RPI_CONNECT_API_KEY"))
+
+    def test_connect_device_name_needs_the_serial(self):
+        self.type_and_leave("RPI_CONNECT_DEVICE_NAME", "line2-{board}")
+        self.refused("RPI_CONNECT_DEVICE_NAME", "must include {serial}")
+        self.type_and_leave("RPI_CONNECT_DEVICE_NAME", "line2-{model}-{serial}")
+        self.refused("RPI_CONNECT_DEVICE_NAME", "Unknown placeholder {model}")
+        self.assertEqual("", self.cfg("RPI_CONNECT_DEVICE_NAME"))
+        self.type_and_leave("RPI_CONNECT_DEVICE_NAME", "line2-{board}-{serial}")
+        self.saved("RPI_CONNECT_DEVICE_NAME", "line2-{board}-{serial}")
+
+    def test_connect_tags_follow_connect_rules(self):
+        self.type_and_leave("RPI_CONNECT_TAGS", "production, Kiosk")
+        self.refused("RPI_CONNECT_TAGS", 'Tag "Kiosk"')
+        self.type_and_leave("RPI_CONNECT_TAGS", ",".join(f"t{n}" for n in range(11)))
+        self.refused("RPI_CONNECT_TAGS", "at most 10 tags")
+        self.assertEqual("", self.cfg("RPI_CONNECT_TAGS"))
+        self.type_and_leave("RPI_CONNECT_TAGS", "production, line_2")
+        self.saved("RPI_CONNECT_TAGS", "production, line_2")
 
     def test_connect_key_is_hidden_until_asked(self):
         el = self.b.el("#RPI_CONNECT_API_KEY")

@@ -515,6 +515,45 @@ namespace provisioner {
                 }
             } else if (fieldName == "RPI_CONNECT_DESCRIPTION") {
                 // Any non-empty string is valid; empty is fine (auto-generated description used)
+            } else if (fieldName == "RPI_CONNECT_DEVICE_NAME") {
+                if (!fieldValue.empty()) {
+                    static const std::regex placeholder("\\{[^{}]*\\}");
+                    std::string unknown;
+                    for (std::sregex_iterator it(fieldValue.begin(), fieldValue.end(), placeholder), end; it != end; ++it) {
+                        if (it->str() != "{board}" && it->str() != "{serial}") {
+                            unknown = it->str();
+                            break;
+                        }
+                    }
+                    if (!unknown.empty()) {
+                        jsonResponse["valid"] = false;
+                        jsonResponse["error"] = "Unknown placeholder " + unknown.substr(0, 32) + ": use {board} or {serial}";
+                    } else if (fieldValue.find("{serial}") == std::string::npos) {
+                        // Without it, the whole batch shares one name: the problem this setting solves.
+                        jsonResponse["valid"] = false;
+                        jsonResponse["error"] = "Device name must include {serial}, so each device's name is its own";
+                    }
+                }
+            } else if (fieldName == "RPI_CONNECT_TAGS") {
+                static const std::regex tag("[a-z0-9_-]{1,30}");
+                std::vector<std::string> tags;
+                std::stringstream list(fieldValue);
+                for (std::string t; std::getline(list, t, ',');) {
+                    t.erase(0, t.find_first_not_of(" \t"));
+                    t.erase(t.find_last_not_of(" \t") + 1);
+                    if (!t.empty()) tags.push_back(t);
+                }
+                for (const auto& t : tags) {
+                    if (!std::regex_match(t, tag)) {
+                        jsonResponse["valid"] = false;
+                        jsonResponse["error"] = "Tag \"" + t.substr(0, 32) + "\": use up to 30 lowercase letters, digits, - or _";
+                        break;
+                    }
+                }
+                if (jsonResponse["valid"].asBool() && std::set<std::string>(tags.begin(), tags.end()).size() > 10) {
+                    jsonResponse["valid"] = false;
+                    jsonResponse["error"] = "Connect allows at most 10 tags per device";
+                }
             }
 
             auto resp = HttpResponse::newHttpResponse();

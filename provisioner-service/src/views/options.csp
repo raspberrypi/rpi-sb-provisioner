@@ -1029,6 +1029,8 @@
     std::string rpibootGpio = options.count("RPI_DEVICE_RPIBOOT_GPIO") ? options["RPI_DEVICE_RPIBOOT_GPIO"] : "";
     bool connectKeySaved = options.count("RPI_CONNECT_API_KEY") && !options["RPI_CONNECT_API_KEY"].empty();
     std::string connectDescription = options.count("RPI_CONNECT_DESCRIPTION") ? options["RPI_CONNECT_DESCRIPTION"] : "";
+    std::string connectDeviceName = options.count("RPI_CONNECT_DEVICE_NAME") ? options["RPI_CONNECT_DEVICE_NAME"] : "";
+    std::string connectTags = options.count("RPI_CONNECT_TAGS") ? options["RPI_CONNECT_TAGS"] : "";
     %>
 
     <form id="optionsForm" onsubmit="event.preventDefault();">
@@ -1681,6 +1683,36 @@
                 <div class="inline-help">
                     <span class="inline-help-icon">&#9432;</span>
                     <span>Optional prefix for the device identity description sent to Connect. The board type and serial number are always appended.</span>
+                </div>
+            </div>
+
+            <!-- Connect Device Name -->
+            <div class="field-group">
+                <label class="field-label" for="RPI_CONNECT_DEVICE_NAME">Device Name <span class="optional-badge">Optional</span></label>
+                <input type="text" class="field-input" id="RPI_CONNECT_DEVICE_NAME" name="RPI_CONNECT_DEVICE_NAME"
+                       value="<%c++ $$ << HttpViewData::htmlTranslate(connectDeviceName); %>"
+                       placeholder="{board}-{serial}"
+                       onblur="validateAndSaveField('RPI_CONNECT_DEVICE_NAME')">
+                <div id="feedback-RPI_CONNECT_DEVICE_NAME" class="field-feedback"></div>
+
+                <div class="inline-help">
+                    <span class="inline-help-icon">&#9432;</span>
+                    <span>The name each device has in Connect. <code>{board}</code> becomes the board, such as <code>pi5</code> or <code>cm5lite</code>, and <code>{serial}</code> its serial number, which the name must include. Left blank, it is <code>{board}-{serial}</code>, for example <code>cm5-8399ccde61e0280b</code>.</span>
+                </div>
+            </div>
+
+            <!-- Connect Tags -->
+            <div class="field-group">
+                <label class="field-label" for="RPI_CONNECT_TAGS">Tags <span class="optional-badge">Optional</span></label>
+                <input type="text" class="field-input" id="RPI_CONNECT_TAGS" name="RPI_CONNECT_TAGS"
+                       value="<%c++ $$ << HttpViewData::htmlTranslate(connectTags); %>"
+                       placeholder="e.g. production, line2"
+                       onblur="validateAndSaveField('RPI_CONNECT_TAGS')">
+                <div id="feedback-RPI_CONNECT_TAGS" class="field-feedback"></div>
+
+                <div class="inline-help">
+                    <span class="inline-help-icon">&#9432;</span>
+                    <span>Tags applied to each device in Connect, separated by commas: up to 10, each up to 30 lowercase letters, digits, hyphens or underscores.</span>
                 </div>
             </div>
         </div>

@@ -145,6 +145,10 @@ Format-Specific:
 
 - `RPI_CONNECT_API_KEY` - Must not contain whitespace
 
+- `RPI_CONNECT_DEVICE_NAME` - May use only the `{board}` and `{serial}` placeholders, and must include `{serial}`
+
+- `RPI_CONNECT_TAGS` - Comma-separated; at most 10, each up to 30 lowercase letters, digits, `-` or `_`
+
 - `RPI_SB_PROVISIONER_PUBLIC_DASHBOARD` - `1` (on) or empty (off)
 
 Boolean Toggles:
