@@ -141,7 +141,11 @@ Under **Available Images**, click **Upload New Image**, then drop a file or clic
 
 ### Cloud Services
 
-To register each device with Raspberry Pi Connect for Organisations, enter a **Connect Management API Access Token** (from the Settings tab of your Connect organisation) and, optionally, a **Description Prefix**.
+To register each device with Raspberry Pi Connect for Organisations, enter a **Connect Management API Access Token** (from the Settings tab of your Connect organisation). Optionally, also set:
+
+- **Description Prefix**: shown in the Connect audit log, before the board type and serial number.
+- **Device Name**: the device's name in Connect. `{board}` and `{serial}` are filled in for each device; left blank, the name is `{board}-{serial}`, for example `cm5-8399ccde61e0280b`.
+- **Tags**: comma-separated Connect tags for every device, such as `production, line2`.
 
 ### Web Interface
 

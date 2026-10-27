@@ -95,11 +95,37 @@ _connect_register_device() {
     _connect_base_url="${CONNECT_BASE_URL:-https://api.connect.raspberrypi.com}"
     _connect_url="${_connect_base_url}/organisation/device-identities"
 
+    # Without a name, Connect names the device after its hostname, which a
+    # whole batch shares. {board} reads like a hostname: pi5, cm5lite.
+    _connect_board=$(printf '%s' "${BOARD_STR}" | tr 'A-Z' 'a-z' | sed 's/+/plus/g; s/[^a-z0-9]//g')
+    case "${BOARD_STR}" in
+        Unsupported*) _connect_board="pi" ;;
+        CM*) ;;
+        *) _connect_board="pi${_connect_board}" ;;
+    esac
+
+    # Connect refuses the whole identity over one bad tag, so drop those.
+    _connect_tag_filter='[splits(",") | gsub("^\\s+|\\s+$"; "") | select(length > 0)]'
+    _connect_dropped=$(jq -nr --arg tags "${RPI_CONNECT_TAGS}" \
+        "\$tags | ${_connect_tag_filter}"' | map(select(test("^[a-z0-9_-]{1,30}$") | not)) | join(", ")')
+    if [ -n "${_connect_dropped}" ]; then
+        log "WARNING: Leaving out Connect tags that are not lowercase letters, digits, - or _ (30 at most): ${_connect_dropped}"
+    fi
+
     # Build JSON body (jq handles PEM newline escaping)
     _connect_body=$(jq -nc \
         --arg pk "${_connect_public_key_pem}" \
         --arg desc "${_connect_desc}" \
-        '{public_key: $pk, description: $desc}')
+        --arg name "${RPI_CONNECT_DEVICE_NAME}" \
+        --arg board "${_connect_board}" \
+        --arg serial "${TARGET_DEVICE_SERIAL}" \
+        --arg tags "${RPI_CONNECT_TAGS}" \
+        '{public_key: $pk, description: $desc,
+          device_name: ($name | if test("\\S") then . else "{board}-{serial}" end
+                        | gsub("\\{board\\}"; $board) | gsub("\\{serial\\}"; $serial))}
+         + ($tags | '"${_connect_tag_filter}"' | map(select(test("^[a-z0-9_-]{1,30}$"))) | unique | .[:10]
+            | if length > 0 then {tags: .} else {} end)')
+    _connect_name=$(printf '%s' "${_connect_body}" | jq -r '.device_name')
 
     # SHA256 hex digest of the request body
     _connect_body_hash=$(printf '%s' "${_connect_body}" | openssl dgst -sha256 -hex)
@@ -159,7 +185,7 @@ ${_connect_body_hash}"
         if [ -s "${_connect_tmpdir}/response.json" ]; then
             CONNECT_DEVICE_ID_VALUE=$(jq -r '.id // empty' "${_connect_tmpdir}/response.json" 2>/dev/null || true)
         fi
-        log "Connect device identity registered (ID: ${CONNECT_DEVICE_ID_VALUE})"
+        log "Connect device identity registered as ${_connect_name} (ID: ${CONNECT_DEVICE_ID_VALUE})"
     else
         CONNECT_REGISTERED_VALUE="0"
         log "WARNING: Connect device identity registration failed (HTTP ${_connect_http_code})"
