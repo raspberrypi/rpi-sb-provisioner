@@ -495,6 +495,11 @@ rpi-sb-provisioner (2.4.0) unstable; urgency=high
     {board}-{serial} by default, and the new Tags option applies up to ten
     Connect tags to every device.
 
+  * Bring a re-provisioned device's Connect registration up to date. Its key
+    is locked in OTP, so Connect refuses a second identity, and the device
+    was recorded as unregistered. The provisioner now finds the identity
+    holding the key and updates it, or the device it became.
+
  -- Tom Dewey <tom.dewey@raspberrypi.com>  Wed, 07 Oct 2026 08:48:02 +0100
 
 rpi-sb-provisioner (2.3.5) unstable; urgency=medium
