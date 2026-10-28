@@ -253,6 +253,8 @@ Raspberry Pi Connect management API access token. When configured, provisioned d
 
 Registration uses hardware-backed firmware crypto signing. The signing material remains hardware-held on the device, and Connect registration failures are logged as warnings rather than aborting provisioning.
 
+A device provisioned again keeps its key, so Connect refuses a second identity for it. The provisioner then finds the identity that holds the key and updates its description, name and tags. If the device has already signed in to Connect, the identity takes only the description, so the name and tags go to the device record, found by its serial number. The search reads at most 50 pages of 100 identities; set `CONNECT_LIST_MAX_PAGES` by hand for a larger organisation.
+
 The token must not contain whitespace. Set from Options, **Cloud Services**, **Connect Management API Access Token**, which is write-only: the page shows only that a token is saved, an empty field leaves it alone, and **Remove token** clears it. It is stored in `/etc/rpi-sb-provisioner/config`, which only root can read, and is kept out of the journal and the process list. The Connect server's certificate is verified; a development server with its own CA can be named with `CURL_CA_BUNDLE`, and a different server with `CONNECT_BASE_URL`, both set by hand.
 
 ## RPI_CONNECT_DESCRIPTION

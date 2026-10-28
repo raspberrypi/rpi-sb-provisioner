@@ -51,6 +51,81 @@ connect_register_device() {
     return "${_connect_rc}"
 }
 
+# One management API request, with the key from the header file. Prints
+# the HTTP status; the body is left in ${_connect_tmpdir}/api.json.
+connect_api() {
+    if [ -n "$3" ]; then
+        set -- "$1" "$2" -H "Content-Type: application/json" -d "$3"
+    else
+        set -- "$1" "$2"
+    fi
+    _connect_api_method=$1 _connect_api_url=$2
+    shift 2
+    curl -s --connect-timeout 10 --max-time 30 \
+        -o "${_connect_tmpdir}/api.json" -w '%{http_code}' \
+        -X "${_connect_api_method}" "${_connect_api_url}" \
+        -H "@${_connect_tmpdir}/auth-header" "$@"
+}
+
+# After a refused create: find the identity holding this device's key and
+# bring it up to date. Once Connect has exchanged an identity for a device
+# it ignores a new name and tags, so those then go to the device itself.
+connect_update_existing() {
+    _connect_key=$(printf '%s' "${_connect_public_key_pem}" | tr -d ' \r\n')
+    _connect_identity=""
+    _connect_page=1
+    while [ -z "${_connect_identity}" ] && [ "${_connect_page}" -le "${CONNECT_LIST_MAX_PAGES:-50}" ]; do
+        [ "$(connect_api GET "${_connect_url}?page=${_connect_page}&per_page=100")" = "200" ] || break
+        _connect_identity=$(jq -r --arg k "${_connect_key}" \
+            '[.device_identities[]? | select((.public_key // "") | gsub("[ \r\n]"; "") == $k) | .id] | first // empty' \
+            "${_connect_tmpdir}/api.json" 2>/dev/null || true)
+        _connect_pages=$(jq -r '.meta.total_pages // 1' "${_connect_tmpdir}/api.json" 2>/dev/null || echo 1)
+        [ "${_connect_page}" -lt "${_connect_pages}" ] || break
+        _connect_page=$((_connect_page + 1))
+    done
+    if [ -z "${_connect_identity}" ]; then
+        log "No existing Connect identity holds this device's key"
+        return 0
+    fi
+
+    # Same description, name and tags as the create asked for.
+    _connect_patch=$(printf '%s' "${_connect_body}" | jq -c 'del(.public_key)')
+    _connect_code=$(connect_api PATCH "${_connect_url}/${_connect_identity}" "${_connect_patch}")
+    if [ "${_connect_code}" != "200" ]; then
+        log "WARNING: Could not update Connect identity ${_connect_identity} (HTTP ${_connect_code}): $(cat "${_connect_tmpdir}/api.json" 2>/dev/null)"
+        return 0
+    fi
+    CONNECT_REGISTERED_VALUE="1"
+    CONNECT_DEVICE_ID_VALUE="${_connect_identity}"
+    log "Connect device identity ${_connect_identity} already held this device's key; updated it"
+
+    # A name the identity did not take means it has been exchanged.
+    _connect_kept=$(jq -r '.device_name // empty' "${_connect_tmpdir}/api.json" 2>/dev/null || true)
+    [ "${_connect_kept}" != "${_connect_name}" ] || return 0
+
+    # Connect searches name and serial as free text. Only an exact serial
+    # will do; older boards' serials may carry a 10000000 prefix there.
+    _connect_devices="${_connect_base_url}/organisation/devices?per_page=100&query=${TARGET_DEVICE_SERIAL}"
+    if [ "$(connect_api GET "${_connect_devices}")" != "200" ]; then
+        log "WARNING: Could not search Connect for device ${TARGET_DEVICE_SERIAL}; its name and tags are unchanged"
+        return 0
+    fi
+    _connect_device=$(jq -r --arg s "$(printf '%s' "${TARGET_DEVICE_SERIAL}" | tr 'A-F' 'a-f')" \
+        '[.devices[]? | select((.serial_number // "") | ascii_downcase | test("^1?0*" + $s + "$")) | .id]
+         | if length == 1 then .[0] else empty end' "${_connect_tmpdir}/api.json" 2>/dev/null || true)
+    if [ -z "${_connect_device}" ]; then
+        log "WARNING: No single Connect device has serial ${TARGET_DEVICE_SERIAL}; its name and tags are unchanged"
+        return 0
+    fi
+    _connect_patch=$(printf '%s' "${_connect_body}" | jq -c '{name: .device_name} + (if .tags then {tags} else {} end)')
+    _connect_code=$(connect_api PATCH "${_connect_base_url}/organisation/devices/${_connect_device}" "${_connect_patch}")
+    if [ "${_connect_code}" = "200" ]; then
+        log "Connect device ${_connect_device} renamed ${_connect_name}"
+    else
+        log "WARNING: Could not rename Connect device ${_connect_device} (HTTP ${_connect_code}): $(cat "${_connect_tmpdir}/api.json" 2>/dev/null)"
+    fi
+}
+
 _connect_register_device() {
     CONNECT_REGISTERED_VALUE="NULL"
     CONNECT_DEVICE_ID_VALUE=""
@@ -188,9 +263,15 @@ ${_connect_body_hash}"
         log "Connect device identity registered as ${_connect_name} (ID: ${CONNECT_DEVICE_ID_VALUE})"
     else
         CONNECT_REGISTERED_VALUE="0"
-        log "WARNING: Connect device identity registration failed (HTTP ${_connect_http_code})"
-        if [ -s "${_connect_tmpdir}/response.json" ]; then
-            log "Response: $(cat "${_connect_tmpdir}/response.json")"
+        log "Connect did not create a device identity (HTTP ${_connect_http_code}): $(cat "${_connect_tmpdir}/response.json" 2>/dev/null)"
+        # The key is locked in OTP, so a re-provisioned device brings the
+        # key it was first registered with. A bad token is not that.
+        case "${_connect_http_code}" in
+            401) ;;
+            4??) connect_update_existing ;;
+        esac
+        if [ "${CONNECT_REGISTERED_VALUE}" != "1" ]; then
+            log "WARNING: Connect device identity registration failed (HTTP ${_connect_http_code})"
         fi
     fi
 
