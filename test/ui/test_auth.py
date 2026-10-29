@@ -6,6 +6,7 @@ import time
 import unittest
 import urllib.parse
 
+from ui.harness import legibility as L
 from ui.harness.browser import Browser, OUTSIDER, OUTSIDER_PASSWORD
 from ui.harness.case import UITest
 
@@ -193,3 +194,55 @@ class Refusals(UITest):
         self.assertEqual("nosniff", r.getheader("X-Content-Type-Options"))
         self.assertIn("frame-ancestors 'none'", r.getheader("Content-Security-Policy", ""))
         self.assertIsNone(r.getheader("Access-Control-Allow-Origin"))
+
+
+class NobodyCanSignIn(UITest):
+    """The banner a station shows when no operator has a usable password."""
+    sign_in_first = False
+    BANNER = "Nobody can sign in to this station"
+    STAND_IN = "uitest-operator"
+
+    def setUp(self):
+        super().setUp()
+        self.b.sign_out()
+
+    def only_operator_is_stand_in(self, prepare=""):
+        """Leaves a fresh account as the group's only member.
+
+        Real accounts are never locked or expired: the harness reaches the
+        station over SSH as one of them, and sshd turns such an account away.
+        """
+        since = self.station.now()
+        members = self.station.sh("getent group rpi-sb-provisioner | cut -d: -f4").strip()
+        self.addCleanup(self.station.sh,
+                        f"gpasswd -M '{members}' rpi-sb-provisioner; userdel {self.STAND_IN} 2>/dev/null; true")
+        self.station.sh(f"useradd -M -N -s /usr/sbin/nologin {self.STAND_IN}\n{prepare}\n"
+                        f"gpasswd -M {self.STAND_IN} rpi-sb-provisioner")
+        return members, since
+
+    def test_no_banner_while_an_operator_can_sign_in(self):
+        self.b.get("/login")
+        self.assertNotIn(self.BANNER, self.b.text())
+
+    def test_banner_when_the_only_operator_has_no_password(self):
+        _, since = self.only_operator_is_stand_in()
+        self.b.get("/login")
+        self.assertIn(self.BANNER, self.b.text())
+        self.assertClean()
+        found = [f"{rule} ({impact}): {help_} at {nodes}" for rule, impact, help_, nodes, _ in L.audit(self.b.d)]
+        self.assertEqual([], found)
+        log = self.station.journal("rpi-provisioner-ui", since)
+        self.assertIn(f"nobody can sign in to the web UI: {self.STAND_IN} has no password", log)
+
+    def test_banner_when_the_only_operator_has_expired(self):
+        self.only_operator_is_stand_in(f"usermod -p not-a-real-hash {self.STAND_IN}\nchage -E 0 {self.STAND_IN}")
+        self.b.get("/login")
+        self.assertIn(self.BANNER, self.b.text())
+
+    def test_banner_goes_once_fixed(self):
+        members, _ = self.only_operator_is_stand_in()
+        self.b.get("/login")
+        self.assertIn(self.BANNER, self.b.text())
+        self.station.sh(f"gpasswd -M '{members}' rpi-sb-provisioner")
+        self.b.get("/login")
+        self.assertNotIn(self.BANNER, self.b.text())

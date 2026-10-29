@@ -13,12 +13,15 @@
 #include <ifaddrs.h>
 #include <netinet/in.h>
 #include <pwd.h>
+#include <shadow.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <mutex>
 #include <optional>
 #include <set>
@@ -230,6 +233,78 @@ namespace {
         return std::find(groups.begin(), groups.end(), operatorGid) != groups.end();
     }
 
+    // Why this account cannot get past PAM, or empty if it might. Mirrors the
+    // pam_unix checks; an account with no shadow entry here, such as one from a
+    // directory service, is given the benefit of the doubt.
+    std::string whyCannotSignIn(const std::string &user) {
+        std::vector<char> buf(16384);
+        struct spwd sp {};
+        struct spwd *spResult = nullptr;
+        if (getspnam_r(user.c_str(), &sp, buf.data(), buf.size(), &spResult) != 0 || !spResult) {
+            return "";
+        }
+        const long today = static_cast<long>(std::time(nullptr) / 86400);
+        const std::string_view hash = sp.sp_pwdp ? sp.sp_pwdp : "";
+        if (hash.empty()) return "has no password";
+        if (hash.front() == '!' || hash.front() == '*') return "has no password, or is locked";
+        if (sp.sp_expire >= 0 && today >= sp.sp_expire) return "has expired";
+        if (sp.sp_lstchg == 0) return "must change its password first";
+        if (sp.sp_max >= 0 && sp.sp_lstchg > 0 && today - sp.sp_lstchg > sp.sp_max) {
+            return "has an expired password";
+        }
+        return "";
+    }
+
+    // Empty if some operator could sign in; otherwise why none can, for the
+    // log. Primary-group members are looked for in /etc/passwd only, since
+    // walking a whole directory service on every sign-in page is not on.
+    std::string whyNobodyCanSignIn() {
+        std::vector<char> buf(16384);
+        struct group grp {};
+        struct group *grpResult = nullptr;
+        if (getgrnam_r(kOperatorGroup, &grp, buf.data(), buf.size(), &grpResult) != 0 || !grpResult) {
+            return std::string("the ") + kOperatorGroup + " group does not exist";
+        }
+        std::set<std::string> members;
+        for (char **m = grp.gr_mem; m && *m; ++m) members.insert(*m);
+        if (FILE *f = std::fopen("/etc/passwd", "re")) {
+            std::vector<char> pwBuf(16384);
+            struct passwd pw {};
+            struct passwd *pwResult = nullptr;
+            while (fgetpwent_r(f, &pw, pwBuf.data(), pwBuf.size(), &pwResult) == 0 && pwResult) {
+                if (pw.pw_gid == grp.gr_gid) members.insert(pw.pw_name);
+            }
+            std::fclose(f);
+        }
+        if (members.empty()) return std::string("the ") + kOperatorGroup + " group has no members";
+
+        std::string reasons;
+        for (const auto &member : members) {
+            const std::string why = whyCannotSignIn(member);
+            if (why.empty()) return "";
+            reasons += (reasons.empty() ? "" : "; ") + member + " " + why;
+        }
+        return reasons;
+    }
+
+    // Logs when this changes, not on every sign-in page.
+    bool nobodyCanSignIn() {
+        static std::mutex lastMutex;
+        static std::string last;
+        const std::string why = whyNobodyCanSignIn();
+        std::lock_guard<std::mutex> lock(lastMutex);
+        if (why != last) {
+            if (!why.empty()) {
+                LOG_WARN << "SECURITY: nobody can sign in to the web UI: " << why
+                         << ". Give an operator a password, with rpi-preseed or passwd.";
+            } else if (!last.empty()) {
+                LOG_INFO << "An operator can sign in to the web UI again";
+            }
+            last = why;
+        }
+        return !why.empty();
+    }
+
     int pamConversation(int count, const struct pam_message **messages,
                         struct pam_response **responses, void *data) {
         const auto *password = static_cast<const std::string *>(data);
@@ -415,6 +490,8 @@ namespace {
         data.insert("error", error);
         data.insert("anonymous", true);
         data.insert("currentPage", std::string("login"));
+        // Checked on every render, so the banner goes as soon as it is fixed.
+        data.insert("nobodyCanSignIn", nobodyCanSignIn());
         auto resp = HttpResponse::newHttpViewResponse("login.csp", data);
         resp->setStatusCode(code);
         resp->addHeader("Cache-Control", "no-store");
@@ -600,6 +677,7 @@ namespace {
 
     void install(HttpAppFramework &app, Config config) {
         g_config = std::move(config);
+        nobodyCanSignIn();
 
         app.registerPreRoutingAdvice([](const HttpRequestPtr &req, AdviceCallback &&stop, AdviceChainCallback &&pass) {
             // A name we do not answer to is a DNS rebinding attempt or a

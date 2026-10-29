@@ -89,6 +89,8 @@ Sign in with a system account on the provisioning computer. Only members of the 
 
     sudo adduser <username> rpi-sb-provisioner
 
+The account needs a password. An image built without one, such as the CM5 programming jig's default, locks the account, so nobody can sign in. Give it a password with rpi-preseed: put a `rpi-preseed.toml` with a `[user]` `name` and `password` on the boot partition and boot the station, or let Raspberry Pi Imager's OS customisation write it. This works only if the station has not applied a `rpi-preseed.toml` before. From a shell, `sudo passwd <username>` does the same. Until an operator can sign in, the sign-in page shows a red banner saying so, and the service log names each account and why: `journalctl -u rpi-provisioner-ui`.
+
 Treat membership like `sudo` access: the web interface runs as root, and an operator can do anything the provisioner can, including installing hook scripts that run as root.
 
 Once signed in, your user name appears at the right of the navigation bar (it opens [API tokens](#api-tokens)) beside **Sign out**. The navigation bar holds **Devices**, **Options**, **Customisation**, **Services**, **Manufacturing Database**, **Audit Log** and **Code Scanner**.
@@ -166,7 +168,7 @@ The help text beside each option explains it further; the [Configuration Referen
 
 Release 2.4.0 changes how the station is accessed. Before upgrading:
 
-- **Operators must sign in.** Add every operator to the `rpi-sb-provisioner` group (see [Sign in](#sign-in)).
+- **Operators must sign in.** Add every operator to the `rpi-sb-provisioner` group, and make sure the account has a password: a jig image built without one cannot sign in at all (see [Sign in](#sign-in)).
 - **Scripts need an API token.** Create one under [API tokens](#api-tokens) and send it as `Authorization: Bearer <token>`.
 - **State-changing routes are POST-only and need the CSRF token**, so anything driving the old GET routes stops working.
 - **Behind a reverse proxy**, give its name with `--allowed-host` and sign in over HTTPS. [nginx-example/README.md](../nginx-example/README.md) explains how to undo the old HTTP Basic setup.
