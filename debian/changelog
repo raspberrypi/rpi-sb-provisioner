@@ -6,6 +6,12 @@ rpi-sb-provisioner (2.4.0) unstable; urgency=high
       rpi-sb-provisioner group. The first user (UID 1000) is added when the
       group is created; add any other operator with
       "sudo adduser <name> rpi-sb-provisioner".
+    - That account needs a password. A CM5 programming jig image built
+      without one has its account locked, so nobody could sign in. Set one
+      first with rpi-preseed: a [user] name and password in rpi-preseed.toml
+      on the boot partition, or Raspberry Pi Imager's OS customisation. A
+      station where nobody can sign in says so in a red banner on the
+      sign-in page.
     - Scripts that call the API need a token: create one under API tokens
       and send it as "Authorization: Bearer <token>".
     - Every state-changing route is POST-only and needs the CSRF token, so
@@ -36,6 +42,11 @@ rpi-sb-provisioner (2.4.0) unstable; urgency=high
     an API token instead of a password: an operator creates one under API
     tokens, and the script sends it as "Authorization: Bearer". A token acts
     as its creator, only its hash is stored, and it cannot mint more tokens.
+
+  * Show a banner on the sign-in page, and log why, when no member of the
+    rpi-sb-provisioner group can sign in: no password, a locked or expired
+    account, or a password that must be changed first. An image built with
+    no password for its operator otherwise just refused every sign-in.
 
   * Let the devices page, a device's own page and the code scanner be seen
     without signing in, so a screen on the production line can show progress

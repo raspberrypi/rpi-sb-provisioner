@@ -55,10 +55,45 @@
             margin-bottom: 12px;
             font-size: 14px;
         }
+        .nobody-banner {
+            max-width: 720px;
+            margin: 24px auto 0;
+            padding: 20px 24px;
+            background: #a4161a;
+            color: #fff;
+            border-radius: 6px;
+            font-size: 16px;
+            line-height: 1.5;
+        }
+        .nobody-banner h2 {
+            font-size: 24px;
+            margin: 0 0 8px;
+        }
+        .nobody-banner p, .nobody-banner ul {
+            margin: 8px 0;
+        }
+        .nobody-banner code {
+            background: rgba(0, 0, 0, 0.3);
+            color: #fff;
+            padding: 1px 4px;
+            border-radius: 3px;
+        }
     </style>
 </head>
 <body>
     <%view navbar %>
+    <%c++ if(@@.get<bool>("nobodyCanSignIn")) { %>
+    <section class="nobody-banner" id="nobody-can-sign-in" aria-labelledby="nobody-can-sign-in-title">
+        <h2 id="nobody-can-sign-in-title">Nobody can sign in to this station</h2>
+        <p>No account in the <strong>rpi-sb-provisioner</strong> group has a password it can sign in with, so settings, images, keys and hooks are out of reach until one does.</p>
+        <p>Give the operator account a password, then reload this page:</p>
+        <ul>
+            <li>On a programming jig, put an <code>rpi-preseed.toml</code> with a <code>[user]</code> <code>name</code> and <code>password</code> on the boot partition and reboot. Raspberry Pi Imager writes this file for you. It only applies if the jig has not applied one before.</li>
+            <li>From a shell, run <code>sudo passwd &lt;account&gt;</code>, and <code>sudo adduser &lt;account&gt; rpi-sb-provisioner</code> if it is not in the group.</li>
+        </ul>
+        <p>The station's log names each account and why it cannot sign in: <code>journalctl -u rpi-provisioner-ui</code>.</p>
+    </section>
+    <%c++ } %>
     <main id="main-content" class="login-container">
         <h1>Raspberry Pi Secure Boot Provisioner</h1>
         <p class="login-hint">Sign in with a system account in the <strong>rpi-sb-provisioner</strong> group.</p>
