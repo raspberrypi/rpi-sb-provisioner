@@ -457,6 +457,10 @@ bool generateSelfSignedCertificate(const std::string& certPath, const std::strin
 
 int main(int argc, char* argv[])
 {
+    // The log goes to stdout, a pipe to the journal under systemd, and trantor
+    // flushes only errors: warnings sat in the buffer for hours otherwise.
+    setvbuf(stdout, nullptr, _IOLBF, 0);
+
     // Initialize libcurl globally
     curl_global_init(CURL_GLOBAL_DEFAULT);
     
