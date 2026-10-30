@@ -207,6 +207,12 @@ fi
 
 systemd-notify --ready --status="Provisioning started"
 
+# Held until this run ends, so the web UI cannot replace or delete the image
+# under it.
+if ! hold_gold_master_os; then
+    die "Could not lock the OS image ${GOLD_MASTER_OS_FILE} against replacement"
+fi
+
 # Re-check the OS image here as well as in triage: these units can be started
 # directly, and the configuration can change between triage selecting a
 # provisioner and that provisioner running.

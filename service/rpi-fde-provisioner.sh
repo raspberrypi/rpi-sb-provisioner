@@ -225,6 +225,12 @@ record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_STARTED}" "${TARGET_USB_PA
 
 systemd-notify --ready --status="Provisioning started"
 
+# Held until this run ends, so the web UI cannot replace or delete the image
+# under it.
+if ! hold_gold_master_os; then
+    die "Could not lock the OS image ${GOLD_MASTER_OS_FILE} against replacement"
+fi
+
 # Re-check the OS image here as well as in triage: these units can be started
 # directly, and the configuration can change between triage selecting a
 # provisioner and that provisioner running.
@@ -255,6 +261,10 @@ elif ! workdir_is_private "${RPI_SB_WORKDIR}"; then
 else
     # Deliberately do nothing
     announce_stop "Finding the cache directory: Using specified name"
+fi
+# A private directory dies with this run; a shared one is split by OS image.
+if [ -z "${DELETE_PRIVATE_TMPDIR}" ] && ! use_workdir_for_gold_master; then
+    die "Could not set up a cache for ${GOLD_MASTER_OS_FILE} in ${RPI_SB_WORKDIR}"
 fi
 
 augment_initramfs() {
