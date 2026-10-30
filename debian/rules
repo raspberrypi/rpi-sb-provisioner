@@ -50,6 +50,10 @@ override_dh_auto_configure:
 override_dh_auto_build:
 	dh_auto_build --sourcedirectory=provisioner-service
 
+# Run the tests that need no station
+override_dh_auto_test:
+	dh_auto_test --sourcedirectory=provisioner-service
+
 # Install the CMake project but exclude drogon tools
 override_dh_auto_install:
 	dh_auto_install --sourcedirectory=provisioner-service
