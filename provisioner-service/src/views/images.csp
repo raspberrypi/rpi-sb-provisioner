@@ -535,6 +535,8 @@
                     // The server just told us signing is unavailable; make the
                     // rest of the page agree if it still thinks otherwise.
                     if (signingMaterialAvailable()) refreshSigningStatus();
+                } else if (data.status === 'stale') {
+                    statusEl.innerHTML = '<span style="color: #8a6100;">Out of date: built from an earlier version of this image</span>';
                 } else if (data.status === 'unsupported') {
                     statusEl.innerHTML = '<span style="color: #595959;">Not applicable for this provisioning style</span>';
                 } else if (data.generating) {
@@ -694,16 +696,6 @@
                 // Refresh details panel if viewing this image
                 if (currentViewingImage && currentViewingImage.name === name) {
                     viewImage(currentViewingImage);
-                }
-                
-                // Clear workdir since image changed
-                try {
-                    await fetch('/options/clear-workdir', addCsrfHeader({
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' }
-                    }));
-                } catch (e) {
-                    console.warn('Could not clear workdir:', e);
                 }
                 
                 showSuccess('Image "' + name + '" selected');
@@ -1231,7 +1223,11 @@
                 resetUI();
 
                 if (xhr.status === 200) {
-                    showSuccess('Image uploaded successfully');
+                    // The server says whether it added or replaced, and the
+                    // sizes, which is how an operator spots a short file.
+                    let message = 'Uploaded ' + file.name;
+                    try { message = JSON.parse(xhr.responseText).message || message; } catch (e) {}
+                    showSuccess(message);
                     loadImageList();
                     toggleImageUpload();
                 } else {
@@ -1246,9 +1242,16 @@
                 }
             };
 
+            // The connection went: the station restarted, or the browser
+            // gave up. An image is only put in place once whole, so the
+            // station still has what it had before.
             xhr.onerror = function() {
                 resetUI();
-                showError('Upload failed');
+                showError('Upload failed: the connection to the station was lost. Nothing was changed; upload the image again.');
+            };
+            xhr.onabort = function() {
+                resetUI();
+                showError('Upload stopped. Nothing was changed.');
             };
 
             xhr.open('POST', '/upload-image');

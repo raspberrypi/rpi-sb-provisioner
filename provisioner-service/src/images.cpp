@@ -17,6 +17,7 @@
 #include <errno.h>
 #include <systemd/sd-bus.h>
 #include "utils.h"
+#include "osimage.h"
 #include "include/schema_validator.h"
 
 #include <archive.h>
@@ -57,6 +58,42 @@ static bool isPlainImageName(const std::string& name) {
     return !name.empty() && name[0] != '.' &&
            name.find_first_of("/\\") == std::string::npos &&
            name.find("..") == std::string::npos;
+}
+
+namespace osimage = provisioner::osimage;
+
+// Uploading an image under a name that exists replaces it. Refused while a
+// device is being provisioned from it: the provisioners open the image more
+// than once, and two builds mixed in one device is worse than waiting.
+// Checked when the upload starts, to fail fast, and again at the swap.
+static std::string whyImageIsBusy(const std::string& name) {
+    std::string why;
+    return osimage::ImageLock::tryExclusive(osimage::LOCK_DIR, name, why) ? "" : why;
+}
+
+// The boot package built from the image now at imageName, if any. The
+// generator writes the package-info file last, naming the package and the
+// image it was built from. Built from anything else -- an image replaced
+// since, or a run cut short -- the package is stale.
+struct BootPackage {
+    std::string name;
+    bool stale = false;
+};
+
+static std::optional<BootPackage> findBootPackage(const std::filesystem::path& imagesDir, const std::string& imageName,
+                                                  const std::string& imageBaseName) {
+    const std::filesystem::path outputDir = imagesDir / "bootimg-output";
+    std::ifstream info(outputDir / (imageBaseName + ".package-info.txt"));
+    std::string line, package, source;
+    while (std::getline(info, line)) {
+        if (line.rfind("Filename: ", 0) == 0) package = line.substr(10);
+        else if (line.rfind("Source identity: ", 0) == 0) source = line.substr(17);
+    }
+    std::error_code ec;
+    if (package.empty() || !isPlainImageName(package) || !std::filesystem::is_regular_file(outputDir / package, ec))
+        return std::nullopt;
+    const std::string imageNow = osimage::identity(imagesDir / imageName);
+    return BootPackage{package, source.empty() || source != imageNow};
 }
 
 // WebSocket controller for SHA256 calculations
@@ -957,6 +994,7 @@ namespace provisioner {
                         }
                         
                         // Calculate SHA256
+                        const std::string before = osimage::identity(imagePath);
                         std::string sha256 = calculateSHA256(imagePath, imageName, cancellationToken);
                         
                         // Check if calculation was cancelled
@@ -972,7 +1010,30 @@ namespace provisioner {
                             sha256Cache.erase(imageName);
                             continue; // Skip broadcasting
                         }
-                        
+
+                        // Written to or replaced while hashed: the hash describes
+                        // neither version. An upload records its own; otherwise,
+                        // hash again.
+                        if (before.empty() || osimage::identity(imagePath) != before) {
+                            LOG_INFO << "Discarding the SHA256 of " << imageName << ": it changed while it was hashed";
+                            const std::string recorded = osimage::readSidecarHash(imagePath);
+                            bool again = false;
+                            {
+                                std::lock_guard<std::mutex> lock(sha256Cache_mutex);
+                                auto it = sha256Cache.find(imageName);
+                                if (it == sha256Cache.end() || it->second.status == SHA256Status::PENDING) {
+                                    if (!recorded.empty()) {
+                                        sha256Cache.insert_or_assign(imageName, SHA256Result(recorded, SHA256Status::COMPLETE));
+                                    } else {
+                                        if (it != sha256Cache.end()) sha256Cache.erase(it);
+                                        again = true;
+                                    }
+                                }
+                            }
+                            if (again) requestSHA256Calculation(imageName);
+                            continue;
+                        }
+
                         // Update cache with result
                         std::lock_guard<std::mutex> lock(sha256Cache_mutex);
                         SHA256Result result(sha256, SHA256Status::COMPLETE, false);
@@ -983,29 +1044,19 @@ namespace provisioner {
                         }
                         sha256Cache.insert_or_assign(imageName, result);
                         
-                        // Write/refresh sidecar file with SHA256 to optimize future reads
-                        try {
-                            std::filesystem::path sidecarPath(IMAGES_PATH);
-                            sidecarPath /= imageName;
-                            sidecarPath += ".sha256";
-                            std::ofstream sidecarFile(sidecarPath, std::ios::out | std::ios::trunc);
-                            if (sidecarFile.is_open()) {
-                                sidecarFile << sha256 << "\n";
-                                sidecarFile.close();
-                                AuditLog::logFileSystemAccess("WRITE", sidecarPath.string(), true, "", 
-                                    std::string("Wrote SHA256 sidecar for: ") + imageName);
-                            } else {
-                                AuditLog::logFileSystemAccess("WRITE", sidecarPath.string(), false, "", 
-                                    std::string("Failed to open SHA256 sidecar for writing: ") + imageName);
-                            }
-                        } catch (const std::filesystem::filesystem_error& e) {
-                            LOG_ERROR << "Failed to write SHA256 sidecar (filesystem) for " << imageName << ": " << e.what();
-                        } catch (const std::ios_base::failure& e) {
-                            LOG_ERROR << "Failed to write SHA256 sidecar (io) for " << imageName << ": " << e.what();
-                        } catch (const std::exception& e) {
-                            LOG_ERROR << "Failed to write SHA256 sidecar for " << imageName << ": " << e.what();
+                        // Recorded against the image as it was hashed, so a replaced
+                        // image never inherits it.
+                        if (sha256.size() != 64) {
+                            // "file-read-error" and the like: nothing to record.
+                        } else if (const std::string failed = osimage::writeSidecar(imagePath, sha256, before); failed.empty()) {
+                            AuditLog::logFileSystemAccess("WRITE", osimage::sidecarPath(imagePath).string(), true, "",
+                                std::string("Wrote SHA256 sidecar for: ") + imageName);
+                        } else {
+                            LOG_ERROR << "Failed to write SHA256 sidecar for " << imageName << ": " << failed;
+                            AuditLog::logFileSystemAccess("WRITE", osimage::sidecarPath(imagePath).string(), false, "",
+                                "Failed to write SHA256 sidecar for " + imageName + ": " + failed);
                         }
-                        
+
                         // Log successful SHA256 calculation
                         AuditLog::logFileSystemAccess("SHA256_COMPLETE", imagePath.string(), true, "", 
                             "SHA256 calculated for: " + imageName + " = " + sha256);
@@ -1195,6 +1246,83 @@ namespace provisioner {
         }
     }
 
+    // Puts a whole, staged upload in place as name, under the image lock,
+    // and records its hash against what is now there. Fills result for the
+    // operator. On failure returns the response to send, with why set; the
+    // staged copy is removed either way.
+    drogon::HttpResponsePtr installUpload(const drogon::HttpRequestPtr& req,
+                                          const std::filesystem::path& staged,
+                                          const std::string& name,
+                                          const std::string& sha256,
+                                          Json::Value& result,
+                                          std::string& why) {
+        const std::filesystem::path target = std::filesystem::path(IMAGES_PATH) / name;
+        std::error_code ec;
+        auto refuse = [&](const std::string& reason, drogon::HttpStatusCode code, const char* kind) {
+            why = reason;
+            std::filesystem::remove_all(staged, ec);
+            AuditLog::logFileSystemAccess("UPLOAD", target.string(), false, auth::username(req), reason);
+            return provisioner::utils::createErrorResponse(req, reason, code, "Upload Error", kind);
+        };
+
+        const bool isDir = std::filesystem::is_directory(staged, ec);
+        if (!isDir) {
+            if (const std::string cut = osimage::checkWhole(staged); !cut.empty())
+                return refuse(cut, drogon::k422UnprocessableEntity, "IMAGE_CUT_SHORT");
+            // Flushed before the lock is taken, so a provisioning run that
+            // starts meanwhile waits only for the rename.
+            osimage::sync(staged);
+        }
+
+        std::optional<std::uintmax_t> previous;
+        if (std::filesystem::is_regular_file(target, ec)) previous = std::filesystem::file_size(target, ec);
+
+        bool replaced = false;
+        {
+            std::string busy;
+            auto lock = osimage::ImageLock::tryExclusive(osimage::LOCK_DIR, name, busy);
+            if (!lock) return refuse(busy, drogon::k409Conflict, "IMAGE_IN_USE");
+            if (const std::string failed = osimage::install(staged, target, replaced); !failed.empty())
+                return refuse("Could not put the image in place: " + failed,
+                              drogon::k500InternalServerError, "IMAGE_INSTALL_FAILED");
+        }
+        AuditLog::logFileSystemAccess("UPLOAD", target.string(), true, auth::username(req),
+                                      replaced ? "Replaced " + name : "Added " + name);
+
+        {
+            std::lock_guard<std::mutex> lock(sha256Cache_mutex);
+            sha256Cache.erase(name);
+        }
+        if (!sha256.empty()) {
+            if (const std::string failed = osimage::writeSidecar(target, sha256, osimage::identity(target));
+                !failed.empty())
+                LOG_WARN << "Could not write the SHA256 sidecar for " << name << ": " << failed;
+            if (!isDir) {
+                std::lock_guard<std::mutex> lock(sha256Cache_mutex);
+                sha256Cache.insert_or_assign(name, SHA256Result(sha256, SHA256Status::COMPLETE));
+            }
+        } else if (!isDir) {
+            requestSHA256Calculation(name);
+        }
+
+        result["replaced"] = replaced;
+        if (isDir) {
+            result["message"] = (replaced ? "Replaced " : "Uploaded ") + name;
+            return nullptr;
+        }
+        const std::uintmax_t size = std::filesystem::file_size(target, ec);
+        result["size"] = Json::UInt64(size);
+        if (previous) result["previous_size"] = Json::UInt64(*previous);
+        if (!replaced)
+            result["message"] = "Uploaded " + name + " (" + osimage::formatSize(size) + ")";
+        else if (previous)
+            result["message"] = "Replaced " + name + " (was " + osimage::formatSize(*previous) +
+                                ", now " + osimage::formatSize(size) + ")";
+        else
+            result["message"] = "Replaced " + name;
+        return nullptr;
+    }
+
     Images::Images() : inotifyFd(-1), watchDescriptor(-1) {
         std::filesystem::path image_dir(IMAGES_PATH);
         
@@ -1215,6 +1343,12 @@ namespace provisioner {
             }
         }
         
+        // Before anything reads the directory: what a crash, restart or power
+        // cut left mid-upload. No upload can be running yet.
+        for (const auto& name : osimage::sweep(IMAGES_PATH)) {
+            LOG_WARN << "Removed " << name << ", left by an upload or deletion that did not finish";
+        }
+
         // Initialize the SHA256 worker thread
         initSHA256Worker();
         
@@ -1240,11 +1374,17 @@ namespace provisioner {
         try {
             for (const auto& entry : std::filesystem::directory_iterator(IMAGES_PATH)) {
                 if (entry.is_regular_file()) {
-                    // Skip .sha256 sidecar files
-                    if (entry.path().extension() == ".sha256") {
+                    // Skip .sha256 sidecar files, and hidden names
+                    std::string imageName = entry.path().filename().string();
+                    if (entry.path().extension() == ".sha256" || imageName[0] == '.') {
                         continue;
                     }
-                    std::string imageName = entry.path().filename().string();
+                    // A sidecar still matching the image saves hashing it again.
+                    if (const std::string recorded = osimage::readSidecarHash(entry.path()); !recorded.empty()) {
+                        std::lock_guard<std::mutex> lock(sha256Cache_mutex);
+                        sha256Cache.insert_or_assign(imageName, SHA256Result(recorded, SHA256Status::COMPLETE));
+                        continue;
+                    }
                     LOG_INFO << "Queuing SHA256 calculation for existing image: " << imageName;
                     requestSHA256Calculation(imageName);
                 }
@@ -1355,21 +1495,9 @@ namespace provisioner {
         std::string packageName;
         
         try {
-            if (std::filesystem::exists(outputDir) && std::filesystem::is_directory(outputDir)) {
-                // Look for .deb files matching the pattern
-                for (const auto& entry : std::filesystem::directory_iterator(outputDir)) {
-                    if (entry.is_regular_file() && entry.path().extension() == ".deb") {
-                        // Check if this package was generated from the same source image
-                        std::string infoFile = imageBaseName + ".package-info.txt";
-                        std::filesystem::path infoPath = outputDir / infoFile;
-                        
-                        if (std::filesystem::exists(infoPath)) {
-                            exists = true;
-                            packageName = entry.path().filename().string();
-                            break;
-                        }
-                    }
-                }
+            if (const auto package = findBootPackage(IMAGES_PATH, imageName, imageBaseName); package && !package->stale) {
+                exists = true;
+                packageName = package->name;
             }
             
             // Broadcast result to all interested WebSocket clients
@@ -1428,8 +1556,9 @@ namespace provisioner {
                     if (event->len > 0) {
                         std::string filename(event->name);
                         
-                        // Only process regular files (not directories)
-                        if (!(event->mask & IN_ISDIR)) {
+                        // Only process regular files (not directories), and not
+                        // uploads still being written under a hidden name
+                        if (!(event->mask & IN_ISDIR) && filename[0] != '.') {
                             if (event->mask & IN_CREATE || event->mask & IN_MOVED_TO) {
                                 LOG_INFO << "New image file detected: " << filename;
                                 
@@ -1644,20 +1773,7 @@ namespace provisioner {
                             info.is_idp = true;
                             // Read SHA256 from sidecar file (hash of the original archive)
                             info.sha256 = "IDP Artefact";
-                            try {
-                                std::filesystem::path sidecarPath = entry.path();
-                                sidecarPath += ".sha256";
-                                if (std::filesystem::exists(sidecarPath)) {
-                                    std::ifstream in(sidecarPath);
-                                    std::string line;
-                                    if (in && std::getline(in, line)) {
-                                        while (!line.empty() && (line.back()==' ' || line.back()=='\t' || line.back()=='\n' || line.back()=='\r')) {
-                                            line.pop_back();
-                                        }
-                                        if (!line.empty()) info.sha256 = line;
-                                    }
-                                }
-                            } catch (...) {}
+                            if (std::string h = osimage::readSidecarHash(entry.path()); !h.empty()) info.sha256 = h;
                             // Sum up directory size
                             try {
                                 std::uintmax_t totalSize = 0;
@@ -1675,8 +1791,8 @@ namespace provisioner {
 
                     if (entry.is_regular_file()) {
                         std::filesystem::path imagePath = entry.path();
-                        // Skip SHA256 sidecar files from the listing
-                        if (imagePath.extension() == ".sha256") {
+                        // Skip SHA256 sidecar files, and uploads not yet whole
+                        if (imagePath.extension() == ".sha256" || imagePath.filename().string()[0] == '.') {
                             continue;
                         }
                         ImageInfo info;
@@ -1690,21 +1806,8 @@ namespace provisioner {
                         }
                         
                         // Get SHA256 - prefer sidecar file, then cache
-                        try {
-                            std::filesystem::path sidecarPath = imagePath;
-                            sidecarPath += ".sha256";
-                            if (std::filesystem::exists(sidecarPath)) {
-                                std::ifstream in(sidecarPath);
-                                std::string line;
-                                if (in && std::getline(in, line)) {
-                                    while (!line.empty() && (line.back()==' ' || line.back()=='\t' || line.back()=='\n' || line.back()=='\r')) {
-                                        line.pop_back();
-                                    }
-                                    info.sha256 = line;
-                                }
-                            }
-                        } catch (...) {}
-                        
+                        info.sha256 = osimage::readSidecarHash(imagePath);
+
                         if (info.sha256.empty()) {
                             std::lock_guard<std::mutex> lock(sha256Cache_mutex);
                             auto it = sha256Cache.find(info.name);
@@ -1810,29 +1913,11 @@ namespace provisioner {
                 Json::Value result;
                 result["name"] = imageName;
 
-                std::filesystem::path sidecarPath = imagePath;
-                sidecarPath += ".sha256";
-                if (std::filesystem::exists(sidecarPath)) {
-                    try {
-                        std::ifstream in(sidecarPath);
-                        std::string line;
-                        if (in && std::getline(in, line)) {
-                            while (!line.empty() && (line.back()==' ' || line.back()=='\t' || line.back()=='\n' || line.back()=='\r')) {
-                                line.pop_back();
-                            }
-                            result["sha256"] = line;
-                            result["status"] = "complete";
-                        } else {
-                            result["sha256"] = "IDP Artefact";
-                            result["status"] = "complete";
-                        }
-                    } catch (...) {
-                        result["sha256"] = "IDP Artefact";
-                        result["status"] = "error";
-                    }
+                result["status"] = "complete";
+                if (const std::string h = osimage::readSidecarHash(imagePath); !h.empty()) {
+                    result["sha256"] = h;
                 } else {
                     result["sha256"] = "IDP Artefact";
-                    result["status"] = "complete";
                     result["message"] = "No archive hash available (sidecar file missing).";
                 }
 
@@ -1918,33 +2003,6 @@ namespace provisioner {
                        s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
             };
 
-            // Helper: generate a unique filename (race-condition safe with timestamp fallback)
-            auto generateUniqueFilename = [](const std::string& originalName, const std::string& basePath) -> std::string {
-                std::filesystem::path targetDir(basePath);
-                std::filesystem::path originalPath = targetDir / originalName;
-
-                if (!std::filesystem::exists(originalPath)) {
-                    return originalName;
-                }
-
-                std::filesystem::path nameOnly = originalPath.stem();
-                std::filesystem::path extension = originalPath.extension();
-
-                for (int i = 1; i <= 9999; ++i) {
-                    std::string newName = nameOnly.string() + "_" + std::to_string(i) + extension.string();
-                    if (!std::filesystem::exists(targetDir / newName)) {
-                        return newName;
-                    }
-                }
-
-                auto now = std::chrono::system_clock::now();
-                auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
-                std::random_device rd;
-                std::mt19937 gen(rd());
-                std::uniform_int_distribution<> dis(1000, 9999);
-                return nameOnly.string() + "_" + std::to_string(timestamp) + "_" + std::to_string(dis(gen)) + extension.string();
-            };
-
             // Helper: strip archive extension to get the artefact name
             auto stripArchiveExtension = [&endsWith](const std::string& filename, const std::string& lowerFilename) -> std::string {
                 if (endsWith(lowerFilename, ".tar.xz"))  return filename.substr(0, filename.size() - 7);
@@ -1967,63 +2025,13 @@ namespace provisioner {
                        endsWith(lowerFilename, ".tar.zst");
             };
 
-            // ---- Non-stream fallback (if streaming is disabled) ----
+            // main() enables request streaming, so this handler always gets
+            // a stream; without one there is no way to stage the upload.
             if (!stream) {
-                LOG_WARN << "Request stream not available, falling back to buffered upload";
-                auto resp = drogon::HttpResponse::newHttpResponse();
-
-                drogon::MultiPartParser parser;
-                if (parser.parse(req) != 0 || parser.getFiles().size() != 1) {
-                    auto resp = provisioner::utils::createErrorResponse(
-                        req, "Invalid request: Expected exactly one file in multipart form data",
-                        drogon::k400BadRequest, "Invalid Request", "INVALID_UPLOAD_REQUEST");
-                    callback(resp);
-                    return;
-                }
-                const auto& file = parser.getFiles()[0];
-                std::string originalFilename = file.getFileName();
-                if (!isPlainImageName(originalFilename)) {
-                    callback(provisioner::utils::createErrorResponse(
-                        req, "The file name must be a plain name, without directories",
-                        drogon::k400BadRequest, "Invalid Request", "INVALID_UPLOAD_NAME"));
-                    return;
-                }
-                std::string finalFilename = generateUniqueFilename(originalFilename, IMAGES_PATH);
-                std::filesystem::path targetPath = std::filesystem::path(IMAGES_PATH) / finalFilename;
-
-                try {
-                    file.saveAs(targetPath);
-                    AuditLog::logFileSystemAccess("UPLOAD", targetPath.string(), true, auth::username(req),
-                        "Original filename: " + originalFilename + (originalFilename != finalFilename ? ", renamed to: " + finalFilename : ""));
-                    {
-                        std::lock_guard<std::mutex> lock(sha256Cache_mutex);
-                        sha256Cache.erase(finalFilename);
-                    }
-                    requestSHA256Calculation(finalFilename);
-                    triggerBootImgGeneration(finalFilename);
-
-                    resp->setStatusCode(drogon::k200OK);
-                    resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
-                    Json::Value result;
-                    result["success"] = true;
-                    result["is_idp"] = false;
-                    result["filename"] = finalFilename;
-                    result["renamed"] = (originalFilename != finalFilename);
-                    if (originalFilename != finalFilename) result["original_filename"] = originalFilename;
-                    result["message"] = result["renamed"].asBool() ? "File uploaded successfully (renamed to avoid conflict)" : "File uploaded successfully";
-                    result["sha256"] = "Calculating...";
-                    resp->setBody(result.toStyledString());
-                } catch (const std::exception& e) {
-                    LOG_ERROR << "Failed to save uploaded file: " << e.what();
-                    AuditLog::logFileSystemAccess("UPLOAD", targetPath.string(), false, auth::username(req),
-                        "Upload failed: " + std::string(e.what()));
-                    auto resp = provisioner::utils::createErrorResponse(
-                        req, "Failed to save uploaded file", drogon::k500InternalServerError,
-                        "Upload Error", "UPLOAD_SAVE_ERROR", e.what());
-                    callback(resp);
-                    return;
-                }
-                callback(resp);
+                LOG_ERROR << "Request stream not available for an image upload";
+                callback(provisioner::utils::createErrorResponse(
+                    req, "This station cannot accept image uploads: request streaming is off",
+                    drogon::k500InternalServerError, "Upload Error", "UPLOAD_NOT_STREAMED"));
                 return;
             }
 
@@ -2065,15 +2073,19 @@ namespace provisioner {
                 std::string errorMessage;
                 drogon::HttpStatusCode errorCode = drogon::k500InternalServerError;
 
-                // .img direct-write state
+                // .img direct-write state. targetPath is the staging file,
+                // set once this upload owns it; finalPath is where the image
+                // goes once it is whole.
                 int fd = -1;
                 size_t totalBytesWritten = 0;
                 std::string targetPath;
+                std::filesystem::path finalPath;
 
                 // Archive / compressed-img shared state (libarchive producer-consumer)
                 std::string artefactName;
                 std::filesystem::path tempDir;
                 std::filesystem::path finalDir;
+                bool ownsTempDir = false;
                 std::mutex bufferMutex;
                 std::condition_variable bufferCv;
                 std::deque<std::vector<char>> chunks;
@@ -2128,8 +2140,35 @@ namespace provisioner {
             auto reader = drogon::RequestStreamReader::newMultipartReader(
                 req,
                 // ---- headerCb: called when a new multipart part header is parsed ----
-                [ctx, endsWith, generateUniqueFilename, stripArchiveExtension, stripImgCompressionExtension, isSupportedUpload, archiveReadCb](drogon::MultipartHeader &&header) {
+                [ctx, endsWith, stripArchiveExtension, stripImgCompressionExtension, isSupportedUpload, archiveReadCb](drogon::MultipartHeader &&header) {
                     if (ctx->hadError) return;
+
+                    // Both image paths write to a staging file, which install()
+                    // puts in place only once the image is whole. O_EXCL: a
+                    // second upload of one name is refused, not interleaved.
+                    auto stageImage = [&ctx]() {
+                        if (const std::string busy = whyImageIsBusy(ctx->finalFilename); !busy.empty()) {
+                            ctx->hadError = true;
+                            ctx->errorMessage = busy;
+                            ctx->errorCode = drogon::k409Conflict;
+                            return false;
+                        }
+                        ctx->finalPath = std::filesystem::path(IMAGES_PATH) / ctx->finalFilename;
+                        const auto staging = osimage::stagingPath(IMAGES_PATH, ctx->finalFilename);
+                        ctx->fd = ::open(staging.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
+                        if (ctx->fd < 0) {
+                            ctx->hadError = true;
+                            if (errno == EEXIST) {
+                                ctx->errorMessage = "Another upload of " + ctx->finalFilename + " is in progress";
+                                ctx->errorCode = drogon::k409Conflict;
+                            } else {
+                                ctx->errorMessage = "Failed to create the upload file: " + std::string(strerror(errno));
+                            }
+                            return false;
+                        }
+                        ctx->targetPath = staging.string();
+                        return true;
+                    };
 
                     ctx->originalFilename = header.filename;
                     if (ctx->originalFilename.empty()) return;
@@ -2170,8 +2209,20 @@ namespace provisioner {
 
                         LOG_INFO << "Streaming archive upload (IDP artefact): " << ctx->originalFilename;
 
+                        if (const std::string busy = whyImageIsBusy(ctx->artefactName); !busy.empty()) {
+                            ctx->hadError = true;
+                            ctx->errorMessage = busy;
+                            ctx->errorCode = drogon::k409Conflict;
+                            return;
+                        }
                         try {
-                            std::filesystem::create_directories(ctx->tempDir);
+                            if (!std::filesystem::create_directory(ctx->tempDir)) {
+                                ctx->hadError = true;
+                                ctx->errorMessage = "Another upload of " + ctx->artefactName + " is in progress";
+                                ctx->errorCode = drogon::k409Conflict;
+                                return;
+                            }
+                            ctx->ownsTempDir = true;
                         } catch (const std::exception& e) {
                             ctx->hadError = true;
                             ctx->errorMessage = "Failed to create extraction directory: " + std::string(e.what());
@@ -2266,19 +2317,12 @@ namespace provisioner {
                     } else if (ctx->isCompressedImg) {
                         // --- Compressed .img streaming path ---
                         // Decompress on-the-fly via libarchive format_raw, write plain .img
-                        std::string imgFilename = stripImgCompressionExtension(ctx->originalFilename, lowerFilename);
-                        ctx->finalFilename = generateUniqueFilename(imgFilename, IMAGES_PATH);
-                        ctx->targetPath = (std::filesystem::path(IMAGES_PATH) / ctx->finalFilename).string();
+                        ctx->finalFilename = stripImgCompressionExtension(ctx->originalFilename, lowerFilename);
 
                         LOG_INFO << "Streaming compressed .img upload: " << ctx->originalFilename
                                  << " -> " << ctx->finalFilename;
 
-                        ctx->fd = ::open(ctx->targetPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
-                        if (ctx->fd < 0) {
-                            ctx->hadError = true;
-                            ctx->errorMessage = "Failed to open target file: " + std::string(strerror(errno));
-                            return;
-                        }
+                        if (!stageImage()) return;
 
                         // Spawn decompression worker thread
                         ctx->extractionThread = std::thread([ctx, archiveReadCb]() {
@@ -2373,20 +2417,14 @@ namespace provisioner {
                         });
                     } else {
                         // --- .img direct-write path ---
-                        ctx->finalFilename = generateUniqueFilename(ctx->originalFilename, IMAGES_PATH);
-                        ctx->targetPath = (std::filesystem::path(IMAGES_PATH) / ctx->finalFilename).string();
+                        ctx->finalFilename = ctx->originalFilename;
 
-                        LOG_INFO << "Streaming .img upload: " << ctx->originalFilename << " -> " << ctx->finalFilename;
+                        LOG_INFO << "Streaming .img upload: " << ctx->originalFilename;
 
                         // Initialize inline SHA256 for plain .img
                         ctx->sha256Hasher = std::make_unique<provisioner::utils::SHA256Hasher>();
 
-                        ctx->fd = ::open(ctx->targetPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
-                        if (ctx->fd < 0) {
-                            ctx->hadError = true;
-                            ctx->errorMessage = "Failed to open target file: " + std::string(strerror(errno));
-                            return;
-                        }
+                        if (!stageImage()) return;
 
                         // Pre-allocate disk space using Content-Length as an upper bound
                         if (ctx->contentLength > 0) {
@@ -2474,7 +2512,7 @@ namespace provisioner {
                             { std::lock_guard<std::mutex> lock(ctx->bufferMutex); ctx->streamFinished = true; }
                             ctx->bufferCv.notify_one();
                             if (ctx->extractionThread.joinable()) ctx->extractionThread.join();
-                            if (ctx->isArchive && std::filesystem::exists(ctx->tempDir))
+                            if (ctx->isArchive && ctx->ownsTempDir && std::filesystem::exists(ctx->tempDir))
                                 std::filesystem::remove_all(ctx->tempDir);
                         }
                         if (!ctx->targetPath.empty()) ::unlink(ctx->targetPath.c_str());
@@ -2594,50 +2632,22 @@ namespace provisioner {
                             }
                         }
 
-                        // Replace any existing artefact directory with minimal downtime.
-                        // Move the old directory aside first (atomic rename), then rename
-                        // the new one into place (atomic rename), then delete the old one.
-                        // This avoids a window where finalDir doesn't exist at all, which
-                        // would cause /analyze-image to return 404 during a concurrent request.
-                        if (std::filesystem::exists(ctx->finalDir)) {
-                            auto oldDir = std::filesystem::path(IMAGES_PATH) / ("." + ctx->artefactName + ".old");
-                            if (std::filesystem::exists(oldDir)) std::filesystem::remove_all(oldDir);
-                            std::filesystem::rename(ctx->finalDir, oldDir);
-                            std::filesystem::rename(ctx->tempDir, ctx->finalDir);
-                            std::filesystem::remove_all(oldDir);
-                        } else {
-                            std::filesystem::rename(ctx->tempDir, ctx->finalDir);
+                        Json::Value result;
+                        std::string why;
+                        if (auto failed = installUpload(ctx->req, ctx->tempDir, ctx->artefactName, sha256Hex, result, why)) {
+                            publishProgress("error", why);
+                            ctx->callback(failed);
+                            return;
                         }
-
                         AuditLog::logFileSystemAccess("UPLOAD_ARCHIVE", ctx->finalDir.string(), true, auth::username(ctx->req),
                             "IDP artefact archive streamed and extracted: " + ctx->originalFilename + " -> " + ctx->artefactName);
 
-                        // Write SHA256 sidecar
-                        if (!sha256Hex.empty()) {
-                            std::filesystem::path sidecarPath = ctx->finalDir;
-                            sidecarPath += ".sha256";
-                            try {
-                                std::ofstream sidecarFile(sidecarPath, std::ios::out | std::ios::trunc);
-                                if (sidecarFile.is_open()) {
-                                    sidecarFile << sha256Hex << "\n";
-                                    sidecarFile.close();
-                                    LOG_INFO << "Wrote IDP archive SHA256 sidecar: " << sidecarPath.string();
-                                }
-                            } catch (const std::exception& e) {
-                                LOG_ERROR << "Failed to write IDP SHA256 sidecar: " << e.what();
-                            }
-                        }
-
-                        // Build success response
                         auto resp = drogon::HttpResponse::newHttpResponse();
                         resp->setStatusCode(drogon::k200OK);
                         resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
-                        Json::Value result;
                         result["success"] = true;
-                        result["message"] = "IDP artefact uploaded and extracted successfully";
                         result["filename"] = ctx->artefactName;
                         result["is_idp"] = true;
-                        result["renamed"] = false;
                         result["sha256"] = sha256Hex;
 
                         if (isIdpArtefactDirectory(ctx->finalDir)) {
@@ -2671,63 +2681,55 @@ namespace provisioner {
                             ctx->fd = -1;
                         }
 
-                        AuditLog::logFileSystemAccess("UPLOAD", ctx->targetPath, true, auth::username(ctx->req),
-                            "Compressed image decompressed: " + ctx->originalFilename + " -> " + ctx->finalFilename);
-
-                        {
-                            std::lock_guard<std::mutex> lock(sha256Cache_mutex);
-                            sha256Cache.erase(ctx->finalFilename);
+                        Json::Value result;
+                        std::string why;
+                        if (auto failed = installUpload(ctx->req, ctx->targetPath, ctx->finalFilename,
+                                                        ctx->workerSha256Result, result, why)) {
+                            publishProgress("error", why);
+                            ctx->callback(failed);
+                            return;
                         }
-
-                        // Store the worker-computed SHA256 in the cache directly
-                        if (!ctx->workerSha256Result.empty()) {
-                            std::lock_guard<std::mutex> lock(sha256Cache_mutex);
-                            sha256Cache.insert_or_assign(ctx->finalFilename,
-                                SHA256Result(ctx->workerSha256Result, SHA256Status::COMPLETE));
-                        }
-
                         triggerBootImgGeneration(ctx->finalFilename);
 
                         auto resp = drogon::HttpResponse::newHttpResponse();
                         resp->setStatusCode(drogon::k200OK);
                         resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
-                        Json::Value result;
                         result["success"] = true;
                         result["is_idp"] = false;
                         result["filename"] = ctx->finalFilename;
-                        result["renamed"] = (ctx->originalFilename != (ctx->finalFilename));
-                        if (ctx->originalFilename != ctx->finalFilename) result["original_filename"] = ctx->originalFilename;
-                        result["message"] = "Compressed image uploaded and decompressed successfully";
                         result["sha256"] = ctx->workerSha256Result.empty() ? "Calculating..." : ctx->workerSha256Result;
                         publishProgress("complete");
                         resp->setBody(result.toStyledString());
                         ctx->callback(resp);
                     } else {
                         // ---- .img post-processing ----
-                        AuditLog::logFileSystemAccess("UPLOAD", ctx->targetPath, true, auth::username(ctx->req),
-                            "Original filename: " + ctx->originalFilename +
-                            (ctx->originalFilename != ctx->finalFilename ? ", renamed to: " + ctx->finalFilename : ""));
-
-                        {
-                            std::lock_guard<std::mutex> lock(sha256Cache_mutex);
-                            sha256Cache.erase(ctx->finalFilename);
+                        // The part's end closes the file; still open means it never came.
+                        if (ctx->fd >= 0) {
+                            ::close(ctx->fd);
+                            ctx->fd = -1;
+                            ::unlink(ctx->targetPath.c_str());
+                            publishProgress("error", "The upload ended early");
+                            ctx->callback(provisioner::utils::createErrorResponse(
+                                ctx->req, "The upload ended early", drogon::k400BadRequest,
+                                "Upload Error", "STREAM_ERROR"));
+                            return;
                         }
-
-                        requestSHA256Calculation(ctx->finalFilename);
+                        Json::Value result;
+                        std::string why;
+                        if (auto failed = installUpload(ctx->req, ctx->targetPath, ctx->finalFilename,
+                                                        sha256Hex, result, why)) {
+                            publishProgress("error", why);
+                            ctx->callback(failed);
+                            return;
+                        }
                         triggerBootImgGeneration(ctx->finalFilename);
 
                         auto resp = drogon::HttpResponse::newHttpResponse();
                         resp->setStatusCode(drogon::k200OK);
                         resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
-                        Json::Value result;
                         result["success"] = true;
                         result["is_idp"] = false;
                         result["filename"] = ctx->finalFilename;
-                        result["renamed"] = (ctx->originalFilename != ctx->finalFilename);
-                        if (ctx->originalFilename != ctx->finalFilename) result["original_filename"] = ctx->originalFilename;
-                        result["message"] = result["renamed"].asBool()
-                            ? "File uploaded successfully (renamed to avoid conflict)"
-                            : "File uploaded successfully";
                         result["sha256"] = sha256Hex.empty() ? "Calculating..." : sha256Hex;
                         publishProgress("complete");
                         resp->setBody(result.toStyledString());
@@ -2808,27 +2810,17 @@ namespace provisioner {
             result["status"] = "not_found";
             
             try {
-                if (std::filesystem::exists(outputDir) && std::filesystem::is_directory(outputDir)) {
-                    // Look for .deb files matching the pattern: rpi-sb-boot-update_*_all.deb
-                    for (const auto& entry : std::filesystem::directory_iterator(outputDir)) {
-                        if (entry.is_regular_file() && entry.path().extension() == ".deb") {
-                            std::string filename = entry.path().filename().string();
-                            // Check if this package was generated from the same source image
-                            // by checking for the package-info file
-                            std::string infoFile = imageBaseName + ".package-info.txt";
-                            std::filesystem::path infoPath = outputDir / infoFile;
-                            
-                            if (std::filesystem::exists(infoPath)) {
-                                result["exists"] = true;
-                                result["package_name"] = filename;
-                                result["package_path"] = entry.path().string();
-                                result["status"] = "available";
-                                break;
-                            }
-                        }
+                if (const auto package = findBootPackage(IMAGES_PATH, imageName, imageBaseName)) {
+                    if (package->stale) {
+                        result["status"] = "stale";
+                    } else {
+                        result["exists"] = true;
+                        result["package_name"] = package->name;
+                        result["package_path"] = (outputDir / package->name).string();
+                        result["status"] = "available";
                     }
                 }
-                
+
                 auto resp = drogon::HttpResponse::newHttpJsonResponse(result);
                 callback(resp);
             } catch (const std::exception& e) {
@@ -3128,6 +3120,13 @@ namespace provisioner {
             imagePath /= imageName;
 
             if (std::filesystem::exists(imagePath)) {
+                std::string busy;
+                auto inUse = osimage::ImageLock::tryExclusive(osimage::LOCK_DIR, imageName, busy);
+                if (!inUse) {
+                    callback(provisioner::utils::createErrorResponse(
+                        req, busy, drogon::k409Conflict, "Image In Use", "IMAGE_IN_USE"));
+                    return;
+                }
                 try {
                     // Cancel any ongoing SHA256 calculation for this image
                     cancelSHA256Calculation(imageName);
@@ -3139,8 +3138,14 @@ namespace provisioner {
                     }
                     
                     if (std::filesystem::is_directory(imagePath)) {
-                        // IDP artefact directory -- remove recursively
-                        std::filesystem::remove_all(imagePath);
+                        // IDP artefact directory -- out of the way in one rename,
+                        // then removed: a crash midway leaves a hidden name the
+                        // startup sweep finishes, not half an artefact.
+                        const auto doomed = std::filesystem::path(IMAGES_PATH) / ("." + imageName + ".old");
+                        std::filesystem::remove_all(doomed);
+                        std::filesystem::rename(imagePath, doomed);
+                        osimage::sync(IMAGES_PATH);
+                        std::filesystem::remove_all(doomed);
                         // Also remove the sidecar .sha256 file if it exists
                         std::filesystem::path sidecarPath = imagePath;
                         sidecarPath += ".sha256";

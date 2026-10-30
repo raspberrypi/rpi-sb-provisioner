@@ -1,5 +1,6 @@
 #include "customisation.h"
 #include "utils.h"
+#include "osimage.h"
 #include "auth.h"
 #include "include/audit.h"
 #include <filesystem>
@@ -149,6 +150,8 @@ namespace provisioner {
             fd = -1;
             if (closed != 0) return fail("close");
             if (rename(tmp.c_str(), path.c_str()) != 0) return fail("rename");
+            // The rename survives a power cut only once the directory is synced.
+            provisioner::osimage::sync(std::filesystem::path(path).parent_path());
             return "";
         }
 
