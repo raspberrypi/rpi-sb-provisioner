@@ -354,6 +354,7 @@ target_sources(rpi-provisioner-ui
     src/auth.cpp
     src/api_tokens.cpp
     src/utils.cpp
+    src/osimage.cpp
     src/keywrap.cpp
     src/keyregistry.cpp
     src/pkcs11_common.cpp
@@ -403,6 +404,12 @@ target_link_libraries(rpi-sb-keyhelper
     OpenSSL::Crypto
     ${RPIFWCRYPTO_LIBRARY}
 )
+
+# Tests that need no station. ctest runs them, and so does the package build.
+enable_testing()
+add_executable(osimage_test tests/osimage_test.cpp src/osimage.cpp)
+target_include_directories(osimage_test PRIVATE src)
+add_test(NAME osimage COMMAND osimage_test)
 
 # Install directives
 # Only install our executable and service file, not any of the FetchContent dependencies
