@@ -1,4 +1,5 @@
 #include "utils.h"
+#include "osimage.h"
 #include <fstream>
 #include <filesystem>
 #include <algorithm>
@@ -1324,7 +1325,17 @@ namespace provisioner {
                 return std::nullopt;
             }
 
+            // Readers see the old file or the new; a power cut must too, so
+            // the data reaches the disk before the rename, and the rename
+            // before we say it is saved.
+            if (!osimage::sync(tmp)) {
+                LOG_ERROR << "Failed to sync temp config file: " << strerror(errno);
+                std::error_code rmec;
+                std::filesystem::remove(tmp, rmec);
+                return std::nullopt;
+            }
             std::filesystem::rename(tmp, target, ec);
+            if (!ec) osimage::sync(target.parent_path());
             if (ec) {
                 LOG_ERROR << "Failed to atomically replace config file: " << ec.message();
                 std::error_code rmec;
