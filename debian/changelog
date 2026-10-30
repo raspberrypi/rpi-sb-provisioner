@@ -22,6 +22,8 @@ rpi-sb-provisioner (2.4.0) unstable; urgency=high
     - New hooks are uploaded disabled, and a new signing key is used only
       once chosen, unless it is the first.
     - Upgrading empties the workdir cache, so the first device re-signs.
+    - Uploading an OS image under a name already on the station replaces
+      it, rather than adding name_1.img. Rename the file first to keep both.
 
   * SECURITY: Require operators to sign in to the web UI. It runs as root and
     asked for no credentials at all, so any local user -- or any web page open
@@ -51,6 +53,28 @@ rpi-sb-provisioner (2.4.0) unstable; urgency=high
     rpi-sb-provisioner group can sign in: no password, a locked or expired
     account, or a password that must be changed first. An image built with
     no password for its operator otherwise just refused every sign-in.
+
+  * Replace an OS image uploaded under a name the station already has. It was
+    kept as name_1.img without a word, and devices went on getting the old
+    image, which looked like an upload cut short. The page now says what was
+    replaced, with the old and new sizes.
+
+  * Make adding, replacing and deleting an OS image safe against a restart or
+    power cut at any point. An upload is written under a hidden name and put
+    in place whole, and anything left part way is removed at startup. An
+    image a device is being provisioned from is not replaced or deleted until
+    that device finishes. The SHA-256, boot package and secure boot and FDE
+    caches each record which image they came from, and are rebuilt when it
+    changes; each image now has its own cache in RPI_SB_WORKDIR.
+
+  * Refuse an OS image whose partition table needs more than the file holds,
+    and say how much is missing. Such an image was incomplete before it was
+    uploaded, and failed later, mid-provision.
+
+  * Stop showing the SHA-256 of an image still being uploaded. It was taken
+    half a second after the file appeared, and could stand for the image.
+
+  * Sync configuration and hook saves to disk before reporting them saved.
 
   * Show why the station refused an image upload or deletion. The page read
     the reason from the wrong field, so every refusal -- no space left, a

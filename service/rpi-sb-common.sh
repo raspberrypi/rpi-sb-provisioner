@@ -925,6 +925,66 @@ classify_gold_master_os() {
     return 1
 }
 
+# os_image_identity ${path}
+#
+# Prints an image's device, inode, size and modification time, exactly as the
+# web UI forms it (osimage.cpp). A replaced image always has a new inode, so
+# anything built from an image is keyed on this.
+os_image_identity() {
+    stat -c '%d:%i:%s:%.9Y' "$1" 2>/dev/null
+}
+
+# hold_gold_master_os [${path}]
+#
+# Holds a shared lock on the image at path, by default GOLD_MASTER_OS_FILE, on
+# fd 8, until this script exits. The web UI will not replace or delete an image while it is held: a
+# run opens the image more than once, and must not see two builds. The lock
+# goes with the process, so a crash never leaves the image marked in use. The
+# UI holds it exclusively only for a rename, so a short wait is plenty.
+OS_IMAGE_LOCK_DIR="${OS_IMAGE_LOCK_DIR:-/srv/rpi-sb-provisioner/locks/os-image}"
+hold_gold_master_os() {
+    _hgm_path="${1:-${GOLD_MASTER_OS_FILE}}"
+    [ -n "${_hgm_path}" ] || return 0
+    mkdir -p "${OS_IMAGE_LOCK_DIR}" || return 1
+    command exec 8>>"${OS_IMAGE_LOCK_DIR}/$(basename "${_hgm_path}").lock" || return 1
+    flock -s -w 30 8
+}
+
+# use_workdir_for_gold_master
+#
+# Points RPI_SB_WORKDIR at a cache for this OS image alone, named by its
+# identity, so a replaced or newly selected image starts with an empty cache
+# rather than flashing another's. Holds the cache shared, on fd 7, until this
+# script exits, and removes other images' caches once no run holds them. Call
+# with the image held, after RPI_SB_WORKDIR has been checked.
+use_workdir_for_gold_master() {
+    _uwg_id="$(os_image_identity "${GOLD_MASTER_OS_FILE}")"
+    [ -n "${_uwg_id}" ] || return 1
+    _uwg_parent="${RPI_SB_WORKDIR}"
+    _uwg_dir="${_uwg_parent}/image-$(printf '%s' "${_uwg_id}" | tr ':.' '--')"
+    _uwg_try=0
+    while :; do
+        mkdir -p "${_uwg_dir}" || return 1
+        command exec 7>>"${_uwg_dir}/.in-use" || return 1
+        flock -s 7 || return 1
+        # Another run's sweep may have removed it between mkdir and lock.
+        [ "$(stat -c %i "${_uwg_dir}/.in-use" 2>/dev/null)" = "$(stat -L -c %i "/proc/$$/fd/7")" ] && break
+        _uwg_try=$((_uwg_try + 1))
+        [ "${_uwg_try}" -lt 5 ] || return 1
+    done
+
+    for _uwg_old in "${_uwg_parent}"/image-*; do
+        [ -d "${_uwg_old}" ] && [ "${_uwg_old}" != "${_uwg_dir}" ] || continue
+        flock -n -x "${_uwg_old}/.in-use" rm -rf "${_uwg_old}" 2>/dev/null || true
+    done
+    # Caches from before per-image directories: built from an unknown image.
+    rm -f "${_uwg_parent}/bootfs-temporary.simg" "${_uwg_parent}/rootfs-temporary.simg" \
+          "${_uwg_parent}/rootfs-temporary.img" "${_uwg_parent}/cryptroot-bootfs.img"
+
+    RPI_SB_WORKDIR="${_uwg_dir}"
+    export RPI_SB_WORKDIR
+}
+
 # The block size libsparse uses, and so the granularity fastboot's host-side
 # sparse writer can express a hole at.
 FASTBOOT_SPARSE_BLOCK_SIZE=4096

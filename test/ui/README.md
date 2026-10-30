@@ -24,6 +24,7 @@ Never mark a station that provisions real devices. Everything the tests change i
     export RPI_SB_TEST_SSH="ssh -i ~/.ssh/station-key user@station"   # omit for this machine
     export RPI_SB_TEST_USER=operator RPI_SB_TEST_PASSWORD=...
     export RPI_SB_TEST_OUTSIDER=someone RPI_SB_TEST_OUTSIDER_PASSWORD=...   # optional: an account outside the group
+    export RPI_SB_TEST_SIGNING_KEY=~/usbboot/secure-boot-example/example-private.pem   # optional: boot package tests
     test/ui/run.py                 # everything
     test/ui/run.py auth escaping   # test_auth.py and test_escaping.py
     test/ui/run.py -k revoke       # tests whose names contain "revoke"

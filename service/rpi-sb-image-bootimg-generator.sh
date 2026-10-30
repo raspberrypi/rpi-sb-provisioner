@@ -131,6 +131,17 @@ log "  - Key material: $([ -n "${CUSTOMER_KEY_PKCS11_NAME}" ] && echo "PKCS11" |
 TMP_DIR=$(make_temp_dir)
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
+# Held while this run reads the image, so the web UI cannot swap it midway.
+if ! hold_gold_master_os "${IMAGE_PATH}"; then
+    die "Could not lock ${IMAGE_PATH} against replacement"
+fi
+SOURCE_IDENTITY="$(os_image_identity "${IMAGE_PATH}")"
+
+# The package-info file marks a package as ready and names the image it was
+# built from, so it goes first and is written last: a run cut short leaves
+# none, and the web UI offers no half-built package.
+rm -f "${OUTPUT_DIR}/$(basename "${IMAGE_FILENAME}" | sed 's/\.[^.]*$//').package-info.txt"
+
 announce_start "Image analysis"
 
 # Use kpartx to map the partitions
@@ -380,8 +391,10 @@ dpkg-deb --build --root-owner-group "${PKG_DIR}" "${OUTPUT_DIR}/${PACKAGE_FULL_N
 if [ $? -eq 0 ]; then
     log "Debian package created: ${OUTPUT_DIR}/${PACKAGE_FULL_NAME}.deb"
     
-    # Generate package info file
-    cat > "${OUTPUT_DIR}/${IMAGE_BASE}.package-info.txt" << EOF
+    # Generate package info file, once everything it names is on the disk
+    sync -f "${OUTPUT_DIR}"
+    PACKAGE_INFO_TMP="${OUTPUT_DIR}/.${IMAGE_BASE}.package-info.txt.tmp"
+    cat > "${PACKAGE_INFO_TMP}" << EOF
 Debian Package Information
 ==========================
 
@@ -392,6 +405,7 @@ Filename: ${PACKAGE_FULL_NAME}.deb
 
 Source Image: ${IMAGE_FILENAME}
 Image SHA256: ${IMAGE_SHA256}
+Source identity: ${SOURCE_IDENTITY}
 
 Installation:
   sudo dpkg -i ${PACKAGE_FULL_NAME}.deb
@@ -408,6 +422,9 @@ Contents:
 Note: A reboot is required after installation for changes to take effect.
       The config.txt is embedded inside boot.img and will be used after reboot.
 EOF
+    sync "${PACKAGE_INFO_TMP}"
+    mv -f "${PACKAGE_INFO_TMP}" "${OUTPUT_DIR}/${IMAGE_BASE}.package-info.txt"
+    sync -f "${OUTPUT_DIR}"
     
     log "Package info: ${OUTPUT_DIR}/${IMAGE_BASE}.package-info.txt"
 else

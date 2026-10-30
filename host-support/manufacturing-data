@@ -442,19 +442,26 @@ metadata_gather() {
     metadata_expect EEPROM_UNIQUE_ID '[0-9A-Za-z._:-]{1,64}' ""
     metadata_expect BOOTLOADER_BUILD_TS '[0-9]{1,18}' ""
 
+    # The sidecar reads "<sha256> <identity>", and speaks for the image only
+    # while the identity matches (osimage.cpp): a replaced image must not be
+    # recorded under its predecessor's hash. An IDP artefact's sidecar from
+    # before identities holds an archive hash nothing can recompute, so a
+    # bare hash is believed for a directory.
     OS_IMAGE_FILENAME="${IMAGE_SUMMARY:-}"
     OS_IMAGE_SHA256=""
-    if [ -n "${GOLD_MASTER_OS_FILE}" ] && [ -f "${GOLD_MASTER_OS_FILE}" ]; then
-        if [ -f "${GOLD_MASTER_OS_FILE}.sha256" ]; then
+    _os_identity="$(stat -c '%d:%i:%s:%.9Y' "${GOLD_MASTER_OS_FILE:-/nonexistent}" 2>/dev/null)"
+    _os_recorded=""
+    if [ -n "${_os_identity}" ] && [ -f "${GOLD_MASTER_OS_FILE}.sha256" ]; then
+        _os_recorded="$(head -n1 "${GOLD_MASTER_OS_FILE}.sha256" | awk '{print $2}')"
+        if [ "${_os_recorded}" = "${_os_identity}" ] || { [ -z "${_os_recorded}" ] && [ -d "${GOLD_MASTER_OS_FILE}" ]; }; then
             OS_IMAGE_SHA256="$(head -n1 "${GOLD_MASTER_OS_FILE}.sha256" | awk '{print $1}')"
         fi
-        if [ -z "${OS_IMAGE_SHA256}" ] && command -v sha256sum >/dev/null 2>&1; then
-            OS_IMAGE_SHA256="$(sha256sum "${GOLD_MASTER_OS_FILE}" | awk '{print $1}')"
-            printf '%s\n' "${OS_IMAGE_SHA256}" > "${GOLD_MASTER_OS_FILE}.sha256" 2>/dev/null || true
-        fi
-    elif [ -n "${GOLD_MASTER_OS_FILE}" ] && [ -d "${GOLD_MASTER_OS_FILE}" ]; then
-        if [ -f "${GOLD_MASTER_OS_FILE}.sha256" ]; then
-            OS_IMAGE_SHA256="$(head -n1 "${GOLD_MASTER_OS_FILE}.sha256" | awk '{print $1}')"
+    fi
+    if [ -z "${OS_IMAGE_SHA256}" ] && [ -f "${GOLD_MASTER_OS_FILE}" ] && command -v sha256sum >/dev/null 2>&1; then
+        OS_IMAGE_SHA256="$(sha256sum "${GOLD_MASTER_OS_FILE}" | awk '{print $1}')"
+        _os_sidecar_tmp="$(dirname "${GOLD_MASTER_OS_FILE}")/.$(basename "${GOLD_MASTER_OS_FILE}").sha256.$$.tmp"
+        if printf '%s %s\n' "${OS_IMAGE_SHA256}" "${_os_identity}" > "${_os_sidecar_tmp}" 2>/dev/null; then
+            mv -f "${_os_sidecar_tmp}" "${GOLD_MASTER_OS_FILE}.sha256" 2>/dev/null || rm -f "${_os_sidecar_tmp}"
         fi
     fi
 

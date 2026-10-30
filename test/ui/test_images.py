@@ -105,7 +105,7 @@ class Images(UITest):
 
     def test_list_shows_the_station_images(self):
         names = [i.get_attribute("data-name") for i in self.b.all("#image-list .firmware-item")]
-        on_disk = self.station.sh(f"ls {IMAGES} | grep -v '\\.sha256$'").split()
+        on_disk = self.station.sh(f"ls {IMAGES} | grep -v '\\.sha256$' | grep -vx bootimg-output").split()
         self.assertEqual(sorted(on_disk), sorted(names))
         self.assertClean()
 
@@ -123,7 +123,7 @@ class Images(UITest):
         self.assertEqual(str(len(raw)), self.station.sh(f"stat -c %s {IMAGES}/uitest-packed.img").strip())
 
     def test_upload_an_idp_artefact(self):
-        src = self.station.sh(f"ls -d {IMAGES}/*/ 2>/dev/null | grep -v uitest | head -1").strip().rstrip("/")
+        src = self.station.sh(f"ls -d {IMAGES}/*/ 2>/dev/null | grep -v -e uitest -e bootimg-output | head -1").strip().rstrip("/")
         if not src:
             self.skipTest("no IDP artefact on the station to copy")
         archive = base64.b64decode(self.station.sh(f"tar -C {src} -cf - . | xz | base64 -w0"))
@@ -352,3 +352,143 @@ class Images(UITest):
         self.b.wait_text("#image-details", "Needs a signing key", timeout=20)
         self.assertEqual([], self.b.all("[id^='generate-boot-btn-']"), "no generate button without a key")
 
+
+class ImageCaches(UITest):
+    """The provisioners' per-image caches, driven through rpi-sb-common.sh."""
+    WORKDIR = "/srv/rpi-sb-provisioner/uitest-workdir"
+
+    def setUp(self):
+        super().setUp()
+        self.station.sh(f"rm -rf {self.WORKDIR} {IMAGES}/uitest-cache* && install -d -m 0700 {self.WORKDIR}")
+        self.addCleanup(lambda: self.station.sh(
+            f"systemctl stop uitest-cache-hold 2>/dev/null; rm -rf {self.WORKDIR} {IMAGES}/uitest-cache*",
+            check=False))
+
+    def cache_for(self, image):
+        """The directory a provisioning run would cache in, for image now."""
+        return self.station.sh(f"""
+            . /usr/bin/rpi-sb-common.sh
+            GOLD_MASTER_OS_FILE={IMAGES}/{image} RPI_SB_WORKDIR={self.WORKDIR}
+            use_workdir_for_gold_master || exit 1
+            touch "$RPI_SB_WORKDIR/rootfs-temporary.simg"
+            echo "$RPI_SB_WORKDIR"
+        """).strip()
+
+    def replace(self, image):
+        self.station.sh(f"head -c 4096 /dev/urandom > {IMAGES}/.{image}.new && mv {IMAGES}/.{image}.new {IMAGES}/{image}")
+
+    def test_a_replaced_image_gets_a_fresh_cache(self):
+        self.station.sh(f"touch {self.WORKDIR}/rootfs-temporary.simg")
+        self.replace("uitest-cache.img")
+        first = self.cache_for("uitest-cache.img")
+        self.assertTrue(first.startswith(f"{self.WORKDIR}/image-"))
+        self.assertEqual(first, self.cache_for("uitest-cache.img"), "the same image keeps its cache")
+        self.assertEqual("", self.station.sh(f"ls {self.WORKDIR}/rootfs-temporary.simg 2>/dev/null || true").strip(),
+                         "a cache from before per-image directories is of an unknown image")
+
+        self.replace("uitest-cache.img")
+        second = self.cache_for("uitest-cache.img")
+        self.assertNotEqual(first, second)
+        self.assertEqual("no", self.station.sh(f"test -e {first} && echo yes || echo no").strip(),
+                         "nothing holds the old cache, so it goes")
+
+    def test_a_cache_in_use_is_kept(self):
+        self.replace("uitest-cache.img")
+        first = self.cache_for("uitest-cache.img")
+        self.station.sh(f"systemd-run --quiet --collect --unit=uitest-cache-hold flock -s {first}/.in-use sleep 600"
+                        f" && sleep 1")
+        self.replace("uitest-cache.img")
+        self.cache_for("uitest-cache.img")
+        self.assertEqual("yes", self.station.sh(f"test -e {first}/rootfs-temporary.simg && echo yes || echo no").strip(),
+                         "a run still flashing from the old image keeps its cache")
+        self.station.sh("systemctl stop uitest-cache-hold")
+        self.cache_for("uitest-cache.img")
+        self.assertEqual("no", self.station.sh(f"test -e {first} && echo yes || echo no").strip())
+
+
+class BootPackages(UITest):
+    """A boot package is offered only while it was built from the image now at
+    its name. Needs a signing key: RPI_SB_TEST_SIGNING_KEY names a PEM file,
+    such as usbboot's secure-boot-example/example-private.pem."""
+    KEY = "/etc/rpi-sb-provisioner/keys/uitest-signing.pem"
+    OUTPUT = f"{IMAGES}/bootimg-output"
+
+    def setUp(self):
+        super().setUp()
+        source = os.environ.get("RPI_SB_TEST_SIGNING_KEY")
+        if not source:
+            self.skipTest("set RPI_SB_TEST_SIGNING_KEY to a PEM signing key")
+        with open(source, "rb") as f:
+            self.station.put(self.KEY, f.read(), mode="0600")
+        self.station.set_config(PROVISIONING_STYLE="secure-boot", RPI_DEVICE_FAMILY="5",
+                                CUSTOMER_KEY_FILE_PEM=self.KEY, CUSTOMER_KEY_PKCS11_NAME="",
+                                GOLD_MASTER_OS_FILE="", RPI_SB_WORKDIR="")
+        # The generator makes the output directory; leave none where there was none.
+        had_output = self.station.sh(f"test -d {self.OUTPUT} && echo yes || echo no").strip() == "yes"
+        self.addCleanup(lambda: self.station.sh(
+            f"rm -f {self.KEY} {IMAGES}/uitest-sb* {self.OUTPUT}/uitest-sb*"
+            + ("" if had_output else f"; rm -rf {self.OUTPUT}"), check=False))
+
+    def put_image(self, name, cmdline):
+        """A small Raspberry Pi OS shaped image, put in place as an upload is."""
+        self.station.sh(f"""
+            set -e
+            I=$(mktemp /var/tmp/uitest-sb.XXXXXX)
+            truncate -s 48M "$I"
+            echo 'start=2048, size=81920, type=c' | sfdisk -q "$I"
+            L=$(losetup --show -f -P "$I")
+            mkfs.vfat -n BOOT "${{L}}p1" >/dev/null
+            M=$(mktemp -d)
+            mount "${{L}}p1" "$M"
+            printf 'arm_64bit=1\\nauto_initramfs=1\\n' > "$M/config.txt"
+            echo '{cmdline}' > "$M/cmdline.txt"
+            umount "$M"; rmdir "$M"; losetup -d "$L"
+            mv "$I" {IMAGES}/.{name}.new
+            mv {IMAGES}/.{name}.new {IMAGES}/{name}
+        """)
+
+    def package(self, name, want, timeout=240):
+        deadline = time.time() + timeout
+        while True:
+            status, info = self.b.fetch(f"/get-boot-package-info?name={name}")
+            if status == 200 and info.get("status") == want:
+                return info
+            if time.time() > deadline:
+                self.fail(f"boot package for {name} never became {want!r}: {status} {info}")
+            time.sleep(2)
+
+    def generate(self, name):
+        status, body = self.b.fetch(f"/generate-boot-package?name={name}", "POST", {})
+        self.assertIn(status, (200, 202), body)
+        return self.package(name, "available")
+
+    def source_identity(self, name):
+        base = name.rsplit(".", 1)[0]
+        return self.station.sh(f"sed -n 's/^Source identity: //p' {self.OUTPUT}/{base}.package-info.txt").strip()
+
+    def test_a_boot_package_follows_its_image(self):
+        self.put_image("uitest-sb.img", "console=serial0 root=PARTUUID=one rootfstype=ext4")
+        self.generate("uitest-sb.img")
+        identity = self.station.sh(f"stat -c '%d:%i:%s:%.9Y' {IMAGES}/uitest-sb.img").strip()
+        self.assertEqual(identity, self.source_identity("uitest-sb.img"))
+
+        # Replaced without regenerating: the old package must not pass for it.
+        self.put_image("uitest-sb.img", "console=serial0 root=PARTUUID=two rootfstype=ext4")
+        self.package("uitest-sb.img", "stale", timeout=10)
+        self.b.get("/options/get")
+        self.b.press(self.b.el("#image-list .firmware-item[data-name='uitest-sb.img']"))
+        self.b.wait_text("#image-details", "Out of date", timeout=20)
+        self.assertClean()
+
+        self.generate("uitest-sb.img")
+        self.assertNotEqual(identity, self.source_identity("uitest-sb.img"))
+
+    def test_an_unfinished_package_is_not_offered(self):
+        self.put_image("uitest-sb2.img", "console=serial0 root=PARTUUID=three rootfstype=ext4")
+        self.generate("uitest-sb2.img")
+        # The generator removes the info file first and writes it last; a run
+        # cut short in between leaves the package files without it.
+        self.station.sh(f"rm {self.OUTPUT}/uitest-sb2.package-info.txt")
+        status, info = self.b.fetch("/get-boot-package-info?name=uitest-sb2.img")
+        self.assertEqual(200, status)
+        self.assertNotEqual("available", info.get("status"))

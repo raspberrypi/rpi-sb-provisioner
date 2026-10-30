@@ -117,6 +117,8 @@ Click **Options**. The page is titled **Configuration Options**, and changes are
 
 Under **Available Images**, click **Upload New Image**, then drop a file or click **Choose a file…**. Select an uploaded image to use it. Each image shows its details (IDP artefacts show their **IDP Metadata**), and offers **Deselect Image**, **Delete Image** and, for disk images, **Generate Boot Package** (with signing material configured) and **Clear Cached Files**.
 
+Uploading an image under a name the station already has replaces it, and the page says so, with the old and new sizes. An upload is put in place only once it is whole: a disk image whose partition table needs more than the file holds is refused, and if the station restarts or loses power part way, the image already there is untouched. An image a device is being provisioned from cannot be replaced or deleted until that device finishes.
+
 ### Device & Firmware
 
 - **Device Family**: Raspberry Pi 5, Raspberry Pi 4 or Raspberry Pi Zero 2 W.
@@ -174,6 +176,7 @@ Release 2.4.0 changes how the station is accessed. Before upgrading:
 - **Behind a reverse proxy**, give its name with `--allowed-host` and sign in over HTTPS. [nginx-example/README.md](../nginx-example/README.md) explains how to undo the old HTTP Basic setup.
 - **New hook scripts arrive disabled**, and **a new signing key is used only once chosen**, unless it is the first.
 - **The workdir cache is emptied**, so the first device after the upgrade is signed afresh.
+- **Uploading under an existing name replaces the image**, instead of adding `name_1.img`. Rename the file first to keep both.
 
 # Preparing devices
 
@@ -270,7 +273,7 @@ Use `rpi-fde-provisioner@`, `rpi-naked-provisioner@` or `rpi-idp-provisioner@` f
 
 ## Step 2: clear the cache
 
-If a work directory is set, stale cached files can be cleared from **Options → OS Image**: select the image and click **Clear Cached Files**. This empties the whole work directory. From the command line, substituting your `RPI_SB_WORKDIR`:
+If a work directory is set, each OS image has its own cache in it, so a replaced or newly selected image never uses another's. Cached files can still be cleared from **Options → OS Image**: select the image and click **Clear Cached Files**. This empties the whole work directory. From the command line, substituting your `RPI_SB_WORKDIR`:
 
     sudo find /srv/rpi-sb-provisioner/workdir -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
 
