@@ -52,6 +52,10 @@ rpi-sb-provisioner (2.4.0) unstable; urgency=high
     account, or a password that must be changed first. An image built with
     no password for its operator otherwise just refused every sign-in.
 
+  * Show why the station refused an image upload or deletion. The page read
+    the reason from the wrong field, so every refusal -- no space left, a
+    damaged archive -- said only "Upload failed".
+
   * Let the devices page, a device's own page and the code scanner be seen
     without signing in, so a screen on the production line can show progress
     again. Viewers who have not signed in see serial numbers, USB ports,
