@@ -1001,7 +1001,7 @@
                 await loadImageList();
             } else {
                 const errorData = await response.json().catch(() => ({}));
-                showError(errorData.message || 'Failed to delete image');
+                showError(errorData.error || errorData.message || 'Failed to delete image');
             }
         } catch (error) {
             console.error('Error deleting image:', error);
@@ -1235,9 +1235,11 @@
                     loadImageList();
                     toggleImageUpload();
                 } else {
+                    // createErrorResponse puts the reason in "error": reading
+                    // only "message" left every refusal as "Upload failed".
                     try {
                         const error = JSON.parse(xhr.responseText);
-                        showError(error.message || 'Upload failed');
+                        showError(error.error || error.message || 'Upload failed');
                     } catch (e) {
                         showError('Upload failed');
                     }
