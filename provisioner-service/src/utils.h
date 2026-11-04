@@ -78,7 +78,15 @@ namespace provisioner {
             std::string filepath;       // Full path to file
             std::string releaseChannel; // e.g., "default", "latest", "beta"
             uintmax_t size;             // File size in bytes
+            int mfgVersion = 0;         // MFG_VER the image declares; a board refuses one older than its OTP's
         };
+
+        /**
+         * The manufacture version a bootloader image declares, as "MFG_VER: n"
+         * among its strings, as rpi-sb-common.sh's bootloader_image_mfg_version
+         * reads it. Images from before 2026-05-11 declare none and count as 0.
+         */
+        int bootloaderMfgVersion(const std::string& path);
         
         // ===== Key Information =====
         

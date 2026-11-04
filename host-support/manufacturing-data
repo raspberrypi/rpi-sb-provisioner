@@ -426,6 +426,16 @@ metadata_gather() {
     JTAG_LOCKED_VALUE=$(requested_lock jtag_lock)
     EEPROM_WP_VALUE=$(requested_lock eeprom_write_protect)
 
+    # The board's minimum bootloader manufacture version and the served
+    # image's, as bootstrap found them before writing the EEPROM. None when
+    # it wrote none, or the board did not say.
+    mfg_version() {
+        sed -n "s/^$1=\([0-9]\{1,3\}\)\$/\1/p" \
+            "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/mfg-versions" 2>/dev/null | head -n 1
+    }
+    BOARD_MFG_VERSION=$(mfg_version board_mfg_version)
+    BOOTLOADER_MFG_VERSION=$(mfg_version bootloader_mfg_version)
+
     eeprom_value() {
         v=$(metadata_get "$1")
         case "${v}" in
@@ -520,6 +530,8 @@ metadata_gather() {
                     bootloader_build_timestamp integer  DEFAULT NULL,
                     customer_key_fingerprint char(64)   DEFAULT NULL,
                     customer_key_label varchar(255)     DEFAULT NULL,
+                    mfg_version     integer             DEFAULT NULL,
+                    bootloader_mfg_version integer      DEFAULT NULL,
                     provision_ts    timestamp           default current_timestamp"
 
         # Check if the table exists
@@ -567,7 +579,9 @@ metadata_gather() {
                     eeprom_unique_id,           \
                     bootloader_build_timestamp, \
                     customer_key_fingerprint,   \
-                    customer_key_label          \
+                    customer_key_label,         \
+                    mfg_version,                \
+                    bootloader_mfg_version      \
                 ) VALUES (                      \
                     $(sql_text "${BOARD_STR}"),               \
                     $(sql_text "${TARGET_DEVICE_SERIAL}"),    \
@@ -596,7 +610,9 @@ metadata_gather() {
                     ${EEPROM_UNIQUE_ID_SQL},      \
                     ${BOOTLOADER_BUILD_TS_SQL},  \
                     ${CUSTOMER_KEY_FINGERPRINT_SQL}, \
-                    ${CUSTOMER_KEY_LABEL_SQL}    \
+                    ${CUSTOMER_KEY_LABEL_SQL},   \
+                    $(sql_int "${BOARD_MFG_VERSION}"), \
+                    $(sql_int "${BOOTLOADER_MFG_VERSION}") \
         );" > /dev/null 2>&1
 
         # Nudge the UI service to re-read after a manufacturing.db row write.
@@ -658,4 +674,6 @@ export_manufacturing_env() {
     export BOOTLOADER_BUILD_TIMESTAMP="${BOOTLOADER_BUILD_TS:-}"
     export CUSTOMER_KEY_FINGERPRINT="${CUSTOMER_KEY_FINGERPRINT:-}"
     export CUSTOMER_KEY_LABEL="${CUSTOMER_KEY_LABEL:-}"
+    export MFG_VERSION="${BOARD_MFG_VERSION:-}"
+    export BOOTLOADER_MFG_VERSION="${BOOTLOADER_MFG_VERSION:-}"
 }

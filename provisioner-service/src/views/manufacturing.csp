@@ -176,7 +176,7 @@
         // in turn covers every column the devices table exposes (see
         // EXPECTED_SCHEMA in host-support/manufacturing-data) except the
         // internal row id.
-        const COLUMN_COUNT = 30;
+        const COLUMN_COUNT = 32;
         
         function totalPages() {
             return Math.max(1, Math.ceil(allData.length / pageSize));
@@ -219,6 +219,8 @@
                             <th scope="col">EEPROM JEDEC</th>
                             <th scope="col">EEPROM Unique ID</th>
                             <th scope="col">Bootloader Build Date</th>
+                            <th scope="col" title="Manufacture version of the bootloader written to the device. A board refuses one older than its own.">Bootloader MFG Version</th>
+                            <th scope="col" title="The oldest bootloader manufacture version the board runs, from its OTP. Blank when the board did not report it.">Board MFG Version</th>
                             <th scope="col" title="Label of the signing key that was active when this device was provisioned">Signing Key Label</th>
                             <th scope="col" title="SHA256 fingerprint of the active signing key at provision time. Match this against the Active key on the Options page when re-provisioning.">Signing Key Hash</th>
                         </tr>
@@ -258,6 +260,8 @@
                             <td style="font-family: monospace;">${escapeHtml(device.eeprom_jedec)}</td>
                             <td style="font-family: monospace;">${escapeHtml(device.eeprom_unique_id)}</td>
                             <td>${escapeHtml(formatBuildTimestamp(device.bootloader_build_timestamp))}</td>
+                            <td>${escapeHtml(device.bootloader_mfg_version)}</td>
+                            <td>${escapeHtml(device.mfg_version)}</td>
                             <td>${escapeHtml(device.customer_key_label)}</td>
                             <td style="font-family: monospace;">${escapeHtml(device.customer_key_fingerprint)}</td>
                         </tr>
@@ -435,7 +439,7 @@
                 'OS Image Filename','OS Image SHA256',
                 'Connect Registered','Connect Device ID',
                 'EEPROM Size','EEPROM JEDEC',
-                'EEPROM Unique ID','Bootloader Build Date',
+                'EEPROM Unique ID','Bootloader Build Date','Bootloader MFG Version','Board MFG Version',
                 'Signing Key Label','Signing Key Hash'
             ];
 
@@ -459,6 +463,7 @@
                     csvEscape(d.eeprom_size), csvEscape(d.eeprom_jedec),
                     csvEscape(d.eeprom_unique_id),
                     csvEscape(formatBuildTimestamp(d.bootloader_build_timestamp)),
+                    csvEscape(d.bootloader_mfg_version), csvEscape(d.mfg_version),
                     csvEscape(d.customer_key_label),
                     csvEscape(d.customer_key_fingerprint)
                 ].join(','));

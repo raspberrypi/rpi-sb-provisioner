@@ -802,6 +802,7 @@ namespace provisioner {
                 fw["filepath"] = info.filepath;
                 fw["releaseChannel"] = info.releaseChannel;
                 fw["size"] = std::to_string(info.size);
+                fw["mfgVersion"] = info.mfgVersion;
                 firmwareList.append(fw);
             }
 

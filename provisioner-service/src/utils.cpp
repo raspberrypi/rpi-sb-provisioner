@@ -35,6 +35,41 @@ namespace provisioner {
         
         // ===== Firmware Scanning Implementation =====
         
+        int bootloaderMfgVersion(const std::string& path) {
+            // Every listing reads every image, a few MB each, so remember them
+            // by path and modification time.
+            static std::mutex cacheMutex;
+            static std::map<std::string, std::pair<std::filesystem::file_time_type, int>> cache;
+            std::error_code ec;
+            const auto mtime = std::filesystem::last_write_time(path, ec);
+            if (ec) return 0;
+            {
+                std::lock_guard<std::mutex> lock(cacheMutex);
+                if (auto it = cache.find(path); it != cache.end() && it->second.first == mtime) return it->second.second;
+            }
+            std::ifstream in(path, std::ios::binary);
+            const std::string data((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+            // As strings(1) shows it: a printable run of just "MFG_VER:", spaces
+            // and up to three digits.
+            int version = 0;
+            static const std::string tag = "MFG_VER:";
+            for (size_t at = data.find(tag); at != std::string::npos; at = data.find(tag, at + 1)) {
+                size_t i = at + tag.size();
+                while (i < data.size() && (data[i] == ' ' || data[i] == '\t')) ++i;
+                const size_t start = i;
+                while (i < data.size() && i - start < 4 && std::isdigit(static_cast<unsigned char>(data[i]))) ++i;
+                const bool begun = at == 0 || !std::isprint(static_cast<unsigned char>(data[at - 1]));
+                const bool ended = i == data.size() || !std::isprint(static_cast<unsigned char>(data[i]));
+                if (begun && i > start && i - start <= 3 && ended) {
+                    version = std::stoi(data.substr(start, i - start));
+                    break;
+                }
+            }
+            std::lock_guard<std::mutex> lock(cacheMutex);
+            cache[path] = {mtime, version};
+            return version;
+        }
+
         std::vector<FirmwareInfo> scanFirmwareDirectory(const std::string& deviceFamily) {
             std::vector<FirmwareInfo> firmwareList;
             
@@ -122,6 +157,7 @@ namespace provisioner {
                     } catch (const std::filesystem::filesystem_error&) {
                         info.size = 0;
                     }
+                    info.mfgVersion = bootloaderMfgVersion(preferredFilepath);
                     
                     firmwareList.push_back(info);
                 }

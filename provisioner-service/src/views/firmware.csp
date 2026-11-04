@@ -328,7 +328,7 @@
         const chosen = firmwareListData.find(fw => fw.filepath === selectedPath);
         const newest = firmwareListData.filter(fw => fw.releaseChannel === 'latest')
             .map(fw => fw.version).sort().pop();
-        if (chosen) el.textContent = 'Selected: ' + chosen.version + ' (' + chosen.releaseChannel + ')';
+        if (chosen) el.textContent = 'Selected: ' + chosen.version + ' (' + chosen.releaseChannel + '), manufacture version ' + chosen.mfgVersion;
         else if (selectedPath) el.textContent = 'Selected: ' + selectedPath.split('/').pop();
         else if (newest) el.textContent = 'Automatic: ' + newest + ' (newest in latest)';
         else el.textContent = 'Automatic: newest for each device';
@@ -383,7 +383,8 @@
             
             const metaDiv = document.createElement('div');
             metaDiv.className = 'firmware-item-meta';
-            metaDiv.textContent = fw.filename + ' • ' + sizeKB + ' KB';
+            // A board refuses a bootloader older than the version in its OTP.
+            metaDiv.textContent = fw.filename + ' • ' + sizeKB + ' KB • manufacture version ' + fw.mfgVersion;
             
             info.appendChild(versionDiv);
             info.appendChild(metaDiv);
