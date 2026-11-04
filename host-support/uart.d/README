@@ -1,0 +1,55 @@
+UART capture
+============
+
+A programming jig can wire a UART on the provisioning host to the serial
+console of the board in each head. Mapping the head's USB port to that UART
+here makes rpi-sb-uart-capture keep everything the board prints: bootloader,
+firmware, kernel and fastbootd messages, fastboot errors among them.
+
+Directories
+-----------
+
+    /usr/share/rpi-sb-provisioner/uart.d/    package-supplied mappings
+    /etc/rpi-sb-provisioner/uart.d/          local administrator mappings
+
+Files are merged by basename with the /etc copy winning, as in usb-ports.d:
+an empty /etc file of the same name masks a package's mapping. Restart the
+service after a change:
+
+    sudo systemctl restart rpi-sb-uart-capture
+
+File format
+-----------
+
+One mapping per line, in a *.conf file:
+
+    <usb-port> <tty> [baud]
+
+The port is a USB topology path as in usb-ports.d, but exact: no globs, as
+one UART belongs to one head. The baud rate defaults to 115200. Blank lines
+are ignored, as is anything from a '#' to the end of a line. A port or a tty
+may be mapped only once.
+
+    # CM5 programming jig: the head's console is on GPIO 14 and 15.
+    4-1 /dev/ttyAMA0
+
+The service is confined to ttyAMA, ttyS, ttyUSB and ttyACM devices. It opens
+the UART read-only and never writes to it, as the host's TX reaches the
+board's console. Nothing else may use the UART: no login prompt, and no
+console= on the host's kernel command line.
+
+Where the output goes
+---------------------
+
+    /var/log/rpi-sb-provisioner/uart/<port>.log
+        Every line from the port, timestamped in UTC. Rotated to .1 at 8 MiB.
+
+    /var/log/rpi-sb-provisioner/<serial>/uart.log
+        The lines of one device: from up to 30 seconds before its bootstrap
+        started, to 15 seconds after its provisioner finished or a stage
+        aborted, so that the board's reboot is included. Shown on the
+        device's page as the UART log.
+
+Escape sequences, carriage returns and other control characters are dropped.
+Each device log is rebuilt from the port log when its window opens, so a
+restart of the capture service loses nothing captured before it.
