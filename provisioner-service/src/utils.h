@@ -77,6 +77,7 @@ namespace provisioner {
             std::string filename;       // e.g., "pieeprom-2024-01-15.bin"
             std::string filepath;       // Full path to file
             std::string releaseChannel; // e.g., "default", "latest", "beta"
+            std::vector<std::string> channels; // every channel holding this version, releaseChannel first
             uintmax_t size;             // File size in bytes
             int mfgVersion = 0;         // MFG_VER the image declares; a board refuses one older than its OTP's
         };

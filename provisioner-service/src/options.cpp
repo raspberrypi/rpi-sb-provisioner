@@ -801,6 +801,9 @@ namespace provisioner {
                 fw["filename"] = info.filename;
                 fw["filepath"] = info.filepath;
                 fw["releaseChannel"] = info.releaseChannel;
+                Json::Value channels(Json::arrayValue);
+                for (const auto& c : info.channels) channels.append(c);
+                fw["channels"] = channels;
                 fw["size"] = std::to_string(info.size);
                 fw["mfgVersion"] = info.mfgVersion;
                 firmwareList.append(fw);

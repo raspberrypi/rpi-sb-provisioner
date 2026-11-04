@@ -318,6 +318,21 @@ class Firmware(UITest):
         self.b.get("/options/get")
         self.b.wait_text("#firmware-current", f"Selected: {version}")
 
+    def test_automatic_names_the_newest_of_latest_when_default_has_it_too(self):
+        # A release often promotes the newest of latest to default as well; the
+        # list shows it as default, but bootstrap still takes it from latest.
+        base = "/lib/firmware/raspberrypi/bootloader-2712"
+        planted = "pieeprom-2099-01-01.bin"
+        if not self.station.sh(f"ls {base}/latest/ 2>/dev/null | grep -m1 '^pieeprom-'", check=False).strip():
+            self.skipTest("no bootloader firmware installed on the station")
+        try:
+            self.station.sh(f"mkdir -p {base}/default && f=$(ls {base}/latest/pieeprom-*.bin | head -n1) && "
+                            f"cp $f {base}/latest/{planted} && cp $f {base}/default/{planted}")
+            self.b.get("/options/get")
+            self.b.wait_text("#firmware-current", "Automatic: 2099-01-01")
+        finally:
+            self.station.sh(f"rm -f {base}/latest/{planted} {base}/default/{planted}")
+
 
 class KeyUpload(UITest):
     """Adding a signing key works as adding an OS image does. The test VM has
