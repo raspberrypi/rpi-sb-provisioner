@@ -119,6 +119,14 @@ namespace {
                 dropped += line.size() + 1;
                 continue;
             }
+            // A recovery config.txt setting, which bootstrap never sends: it would
+            // let an EEPROM write go below the board's manufacture version.
+            if (name == "bootloader_allow_mfg_downgrade") {
+                add(out.warnings, n, "bootloader_allow_mfg_downgrade is not sent to devices: a board never "
+                                     "gets a bootloader older than its manufacture version allows");
+                dropped += line.size() + 1;
+                continue;
+            }
             if (!knownSettings().empty() && !knownSettings().count(name)) {
                 add(out.warnings, n, name + " is not a setting the Raspberry Pi documentation describes");
             }
@@ -126,7 +134,8 @@ namespace {
                 add(out.errors, n, "BOOT_ORDER is a hexadecimal number of up to eight digits, such as 0xf41");
             }
         }
-        // Bootstrap ends the file with a newline and removes SIGNED_BOOT lines.
+        // Bootstrap ends the file with a newline and removes SIGNED_BOOT and
+        // bootloader_allow_mfg_downgrade lines.
         out.bytes = text.size() + ((!text.empty() && text.back() != '\n') ? 1 : 0) - dropped;
         if (out.bytes > kMaxBytes) {
             add(out.errors, 0, "The configuration comes to " + std::to_string(out.bytes) +

@@ -98,6 +98,13 @@ class BootloaderConfig(UITest):
         self.assertIn("not sent", body["warnings"][0]["message"])
         self.assertEqual(len("BOOT_UART=1\n"), body["bytes"])
 
+    def test_the_downgrade_override_is_never_sent(self):
+        # It would let a write go below the board's manufacture version.
+        body = self.check("BOOT_UART=1\nbootloader_allow_mfg_downgrade=1\n")
+        self.assertEqual([2], [w["line"] for w in body["warnings"]])
+        self.assertIn("not sent", body["warnings"][0]["message"])
+        self.assertEqual(len("BOOT_UART=1\n"), body["bytes"])
+
     def test_counts_what_reaches_the_eeprom_against_its_limit(self):
         for style in ("secure-boot", "naked"):
             with self.subTest(style=style):
