@@ -154,6 +154,70 @@ record_state() {
             | curl --max-time 1 --connect-timeout 1 -fsS -X POST -o /dev/null -H @- \
                 "${notify_url}" >/dev/null 2>&1 || true
     fi
+
+    uart_window "${serial}" "${state}" "${endpoint}"
+}
+
+# uart_window() - Tells rpi-sb-uart-capture which device is on a port, so it
+# copies what the board prints on the port's UART into that device's uart.log.
+#
+# Parameters: $1 serial, $2 state, $3 USB port, as for record_state.
+#
+# Does nothing for a port uart.d does not map: the capture service creates the
+# port's log only for those. Bootstrap opens a window, reaching back up to
+# UART_PREROLL_SECS for the bootloader's first lines, but not into the tail of
+# the previous board's. Each later stage points it at the device's log once
+# the serial is known, and a provisioner finishing or any stage aborting
+# closes it.
+UART_WINDOW_DIR="${UART_WINDOW_DIR:-/run/rpi-sb-provisioner/uart}"
+UART_LOG_DIR="${UART_LOG_DIR:-/var/log/rpi-sb-provisioner/uart}"
+UART_PREROLL_SECS="${UART_PREROLL_SECS:-30}"
+# rpi-sb-uart-capture keeps copying this long after a window closes.
+UART_TAIL_SECS=15
+
+uart_window() {
+    _port=$3
+    case "${_port}" in ''|*[!0-9.-]*) return 0 ;; esac
+    [ -e "${UART_LOG_DIR}/${_port}.log" ] || return 0
+    # Bootstrap may know the board only by its device path.
+    case "$1" in
+        ''|*[!A-Za-z0-9]*) _dir=${_port} ;;
+        *) _dir=$1 ;;
+    esac
+    _window="${UART_WINDOW_DIR}/${_port}.window"
+    _start=$(sed -n 's/^start=//p' "${_window}" 2>/dev/null || true)
+    _end=$(sed -n 's/^end=//p' "${_window}" 2>/dev/null || true)
+    case "$2" in
+        BOOTSTRAP-STARTED)
+            _from=$(( $(date +%s) - UART_PREROLL_SECS ))
+            if [ -n "${_end}" ]; then
+                _after=$(( $(date -u -d "${_end}" +%s 2>/dev/null || echo 0) + UART_TAIL_SECS + 1 ))
+                [ "${_after}" -gt "${_from}" ] && _from=${_after}
+            fi
+            _start=$(date -u -d "@${_from}" +%Y-%m-%dT%H:%M:%S.000Z)
+            _end=""
+            ;;
+        *-STARTED)
+            [ -n "${_start}" ] && [ -z "${_end}" ] || return 0
+            ;;
+        *-ABORTED|*PROVISIONER-FINISHED)
+            [ -n "${_start}" ] && [ -z "${_end}" ] || return 0
+            _end=$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)
+            # Keep the log the window already feeds.
+            _dir=""
+            ;;
+        *)
+            return 0
+            ;;
+    esac
+    _log="/var/log/rpi-sb-provisioner/${_dir}/uart.log"
+    [ -n "${_dir}" ] || _log=$(sed -n 's/^log=//p' "${_window}" 2>/dev/null || true)
+    mkdir -p "${UART_WINDOW_DIR}" || return 0
+    {
+        echo "start=${_start}"
+        [ -z "${_end}" ] || echo "end=${_end}"
+        echo "log=${_log}"
+    } > "${_window}.tmp" && mv -f "${_window}.tmp" "${_window}" || true
 }
 
 # record_progress() - Record a fine-grained progress state for the device the
