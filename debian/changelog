@@ -27,6 +27,9 @@ rpi-sb-provisioner (2.4.0) unstable; urgency=high
     - A board's first run adds an rpiboot pass that reads its bootloader
       manufacture version, and a board that needs a newer bootloader than
       the chosen firmware now stops before anything is written to it.
+    - The new rpi-sb-uart-capture service is enabled, and does nothing
+      until uart.d maps a port. On a CM5 programming jig, install
+      cm5-programming-jig-gpio-config 1.0.6 or later to map the head.
     - Needs rpiboot 20261103~150646 and rpi-eeprom 28.36-1 or later.
 
   * Refuse to write a bootloader older than the board accepts. Each board
@@ -47,6 +50,14 @@ rpi-sb-provisioner (2.4.0) unstable; urgency=high
   * Never send bootloader_allow_mfg_downgrade, which would let an EEPROM
     write go below a board's manufacture version. Bootstrap removes it, and
     the bootloader editor says so.
+
+  * Capture the serial console of the board on each jig head. A jig maps a
+    head's USB port to a host UART in the new uart.d, and the new
+    rpi-sb-uart-capture service keeps everything the board prints, from
+    the bootloader to fastbootd's errors, in the device's uart.log and on
+    its page as the UART Log, and all of a port's output in
+    /var/log/rpi-sb-provisioner/uart/<port>.log. It only ever reads the
+    UART, and a restart of the service loses nothing already captured.
 
   * SECURITY: Require operators to sign in to the web UI. It runs as root and
     asked for no credentials at all, so any local user -- or any web page open

@@ -505,12 +505,15 @@ Directory structure:
         bootstrap.log       # Bootstrap phase operations
         triage.log          # Triage phase operations
         provisioner.log     # Provisioning phase operations
+        uart.log            # The board's serial console, where uart.d maps
+                            # its port to a UART
         keypair/            # Device keys, root-only, unless
                             # RPI_DEVICE_RETRIEVE_KEYPAIR names a directory
           <serial>.der      # Private key, PEM-encoded. Only written while the
                             # OTP key-slot is unlocked; normally absent.
           <serial>.pub      # Public key, PEM-encoded
       early/                # Bootstrap logs until the serial is known
+      uart/<usb-port>.log   # Everything from each mapped port, rotated at 8 MiB
       bootimg-generator/    # Boot image generator logs
 
 The log tree is readable by root and the `rpi-sb-provisioner` group only.
@@ -520,6 +523,18 @@ The log tree is readable by root and the `rpi-sb-provisioner` group only.
 **Retention:** Persists across reboots. The package installs no log rotation for it
 
 **Why:** Comprehensive audit trail; troubleshooting; compliance
+
+### UART capture (`rpi-sb-uart-capture.service`)
+
+A jig can wire a host UART to the console of the board in each head, and map the head's USB port to it in `uart.d` (`/usr/share/rpi-sb-provisioner/uart.d/`, overridden by basename from `/etc/rpi-sb-provisioner/uart.d/`). `rpi-sb-uart-capture`, a small Drogon-free C++ daemon, opens each mapped UART read-only and appends every line, timestamped in UTC with escape sequences dropped, to the port's log.
+
+`record_state` tells it which device is on the port through `/run/rpi-sb-provisioner/uart/<usb-port>.window`:
+
+- `BOOTSTRAP-STARTED` opens a window reaching back 30 seconds, for the bootloader's first lines, but not into the previous board's;
+- each later `-STARTED` points it at the device's directory once the serial is known;
+- a provisioner finishing, or any stage aborting, closes it. Lines are still copied for 15 seconds, to catch the reboot.
+
+On a new window the daemon rebuilds the device's `uart.log` from the port's log, then appends to it, so the device page shows the console live and a restart of the daemon loses nothing. It never writes to a UART, since the host's TX reaches the board's console.
 
 ### Locking
 
