@@ -27,6 +27,7 @@ rpi-sb-provisioner (2.4.0) unstable; urgency=high
     - A board's first run adds an rpiboot pass that reads its bootloader
       manufacture version, and a board that needs a newer bootloader than
       the chosen firmware now stops before anything is written to it.
+    - Needs rpiboot 20261103~150646 and rpi-eeprom 28.36-1 or later.
 
   * Refuse to write a bootloader older than the board accepts. Each board
     records in OTP the oldest bootloader manufacture version (MFG_VER) it
@@ -35,9 +36,8 @@ rpi-sb-provisioner (2.4.0) unstable; urgency=high
     board's version in an rpiboot pass that writes nothing, and stops before
     any EEPROM or OTP write, with the permanent failure bootloader-too-old,
     naming the version needed and the firmware's. The version comes from
-    MFG_VER, or from HARDWARE_INFO where rpiboot is older than 20261028, and
-    is remembered per serial. A board that does not report it, from an older
-    recovery.bin, is provisioned as before.
+    rpiboot's MFG_VER, and is remembered per serial. A board that does not
+    report it, from an older recovery.bin, is provisioned as before.
 
   * Record each board's manufacture version and its bootloader's: in the
     manufacturing record (mfg_version, bootloader_mfg_version), the post-flash
