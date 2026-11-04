@@ -497,6 +497,12 @@ pre {
     overflow-x: auto;
 }
 
+.log-note {
+    margin: 4px 0 0;
+    color: #5c636a;
+    font-size: 0.9em;
+}
+
 /* Confirm Action Styles */
 .icon {
     width: 48px;

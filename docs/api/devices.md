@@ -105,7 +105,7 @@ HTTP 400:
 }
 ```
 
-The bootstrap and triage log endpoints answer the same way.
+The bootstrap, triage and UART log endpoints answer the same way.
 
 ## /devices/{serialno}/log/bootstrap
 
@@ -138,6 +138,22 @@ Plain text log file content.
 **Response Format:**
 
 Plain text log file content.
+
+## /devices/{serialno}/log/uart
+
+**HTTP Method:** GET
+
+**Description:** Returns what the device printed on its serial console, where the station captures one; see `/usr/share/rpi-sb-provisioner/uart.d/README`. Each line starts with the time it arrived, in UTC.
+
+**Path Parameters:**
+
+| Parameter | Type   | Required | Description                 |
+|-----------|--------|----------|-----------------------------|
+| serialno  | String | Yes      | Serial number of the device |
+
+**Response Format:**
+
+Plain text log file content, or `LOG_NOT_FOUND` when nothing was captured.
 
 # Per-device flags
 

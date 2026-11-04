@@ -506,6 +506,14 @@
         <h2>Triage Log</h2>
         <div class="log-content"><%c++ $$ << HttpViewData::htmlTranslate(@@.get<std::string>("triage_log")); %></div>
     </div>
+
+    <%c++ if (!@@.get<std::string>("uart_log").empty()) { %>
+    <div class="log-section" id="uart-log">
+        <h2>UART Log</h2>
+        <p class="log-note">What the board printed on its serial console, captured by the jig.</p>
+        <div class="log-content"><%c++ $$ << HttpViewData::htmlTranslate(@@.get<std::string>("uart_log")); %></div>
+    </div>
+    <%c++ } %>
     <%c++ } else { %>
     <div class="signin-prompt" style="background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 24px; margin-bottom: 24px;">
         <a id="signin-for-more" href="/login?next=<%c++ $$ << HttpViewData::htmlTranslate(drogon::utils::urlEncodeComponent("/devices/" + @@.get<std::string>("device.serial"))); %>">Sign in</a>
