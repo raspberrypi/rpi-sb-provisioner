@@ -996,7 +996,7 @@ read_board_mfg_version() {
     _mv_known=""
     if [ -n "${TARGET_DEVICE_SERIAL}" ] && [ "${TARGET_DEVICE_SERIAL}" != "${TARGET_DEVICE_PATH}" ]; then
         _mv_known="${MFG_VERSION_CACHE}/${TARGET_DEVICE_SERIAL}"
-        BOARD_MFG_VER=$(sed -n '1{/^[0-9]\{1,3\}$/p}' "${_mv_known}" 2>/dev/null)
+        BOARD_MFG_VER=$(sed -n '1{/^[0-9]\{1,3\}$/p}' "${_mv_known}" 2>/dev/null) || true
         if [ -n "${BOARD_MFG_VER}" ]; then
             log "Board manufacture version ${BOARD_MFG_VER}, as read before"
             return 0

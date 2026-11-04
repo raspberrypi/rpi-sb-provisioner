@@ -13,8 +13,9 @@ SERIAL = "mfgv0001"
 # Runs check_bootloader_mfg_version from the installed rpi-sb-common.sh, as
 # bootstrap would, against a stand-in rpiboot that reports {hardware} and
 # prints what it was asked to serve. Bootstrap's own log, die and
-# record_state print instead.
+# record_state print instead. Under set -e, as bootstrap is.
 CHECK = r"""
+set -e
 . /usr/bin/rpi-sb-common.sh
 W=$(mktemp -d)
 RPI_SB_WORKDIR=$W METADATA_DIR=$W/meta MFG_VERSIONS=$W/mfg-versions MFG_VERSION_CACHE=$W/cache
@@ -30,7 +31,7 @@ record_state() {{ echo "STATE: $2"; }}
 timeout_fatal_secs() {{ shift; "$@"; }}
 rpiboot() {{
     echo "RPIBOOT: $(ls "$4" | tr '\n' ' ')| $(tr '\n' ';' < "$4/config.txt")"
-    printf '{{\n\t"USER_SERIAL_NUM": "{serial}"{hardware}\n}}\n' > "$2/{serial}.json"
+    printf '{{\n\t"USER_SERIAL_NUM": "{serial}"{hardware}\n}}\n' > "$2/board.json"
 }}
 S=$W/serve
 mkdir -p "$S"
