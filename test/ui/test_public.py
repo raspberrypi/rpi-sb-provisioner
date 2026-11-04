@@ -137,6 +137,7 @@ class Public(UITest):
 
     def test_device_logs_keys_and_flags_stay_closed(self):
         for path in (f"/devices/{KNOWN}/log/triage", f"/devices/{KNOWN}/log/provisioner",
+                     f"/devices/{KNOWN}/log/uart",
                      f"/devices/{KNOWN}/key/public", f"/devices/{KNOWN}/key/private",
                      f"/devices/{KNOWN}/flags", "/devices/_test"):
             with self.subTest(path=path):

@@ -1919,7 +1919,7 @@ namespace provisioner {
                 // falling back to the endpoint/USB-path-keyed directory.
                 // This handles devices where the serial isn't available from the
                 // bootloader and we can only identify by USB path.
-                std::string provisioner_log, bootstrap_log, triage_log;
+                std::string provisioner_log, bootstrap_log, triage_log, uart_log;
                 
                 std::string serialDir = "/var/log/rpi-sb-provisioner/" + provisioner::utils::sanitize_path_component(device.serial);
                 std::string endpointDir = "/var/log/rpi-sb-provisioner/" + provisioner::utils::sanitize_path_component(device.port);
@@ -1950,6 +1950,7 @@ namespace provisioner {
                     provisioner_log = tryReadLog(serialDir, endpointDir, "provisioner.log");
                     bootstrap_log = tryReadLog(serialDir, endpointDir, "bootstrap.log");
                     triage_log = tryReadLog(serialDir, endpointDir, "triage.log");
+                    uart_log = tryReadLog(serialDir, endpointDir, "uart.log");
                     mfgVersions = describeMfgVersions(tryReadLog(serialDir, endpointDir, "mfg-versions"));
                 }
 
@@ -2024,6 +2025,7 @@ namespace provisioner {
                 viewData.insert("provisioner_log", provisioner_log);
                 viewData.insert("bootstrap_log", bootstrap_log);
                 viewData.insert("triage_log", triage_log);
+                viewData.insert("uart_log", uart_log);
                 viewData.insert("flags", flagsList);
                 viewData.insert("stateHistory", stateHistory);
                 viewData.insert("currentPage", std::string("devices"));
@@ -2206,6 +2208,57 @@ namespace provisioner {
             resp->setBody(buffer.str());
             callback(resp);
         }); // devices/:serialno/log/triage handler
+
+        app.registerHandler("/devices/{serialno}/log/uart", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback, const std::string &serialno) {
+            auto resp = HttpResponse::newHttpResponse();
+            LOG_INFO << "UART log request for serial: '" << serialno << "'";
+            
+            if (!serialno.empty() && !isDeviceIdentifier(serialno)) {
+                callback(provisioner::utils::createErrorResponse(
+                    req, "Device not found in database", drogon::k400BadRequest,
+                    "Device Not Found", "DEVICE_NOT_FOUND"));
+                return;
+            }
+
+            if (serialno.empty()) {
+                LOG_ERROR << "Empty serial number in request";
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Serial number is required",
+                    drogon::k400BadRequest,
+                    "Missing Parameter",
+                    "MISSING_SERIAL"
+                );
+                callback(resp);
+                return;
+            }
+
+            std::string logPath = "/var/log/rpi-sb-provisioner/" + provisioner::utils::sanitize_path_component(serialno) + "/uart.log";
+            LOG_INFO << "Attempting to open log file at: " << logPath;
+            
+            std::ifstream logFile(logPath);
+            if (!logFile.is_open()) {
+                LOG_ERROR << "Failed to open log file: " << logPath;
+                auto resp = provisioner::utils::createErrorResponse(
+                    req,
+                    "Log file not found",
+                    drogon::k400BadRequest,
+                    "Log Not Found",
+                    "LOG_NOT_FOUND",
+                    "Attempted path: " + logPath
+                );
+                callback(resp);
+                return;
+            }
+
+            LOG_INFO << "Successfully opened log file: " << logPath;
+            std::stringstream buffer;
+            buffer << logFile.rdbuf();
+            resp->setStatusCode(k200OK);
+            resp->setContentTypeCode(CT_TEXT_PLAIN);
+            resp->setBody(buffer.str());
+            callback(resp);
+        }); // devices/:serialno/log/uart handler
 
         app.registerHandler("/devices/{serialno}/key/public", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback, const std::string &serialno) {
             auto resp = HttpResponse::newHttpResponse();
