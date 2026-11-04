@@ -49,6 +49,7 @@ fi
 # restriction stays inactive and every port is accepted; see the README in
 # /usr/share/rpi-sb-provisioner/usb-ports.d for the file format.
 mkdir -p /etc/rpi-sb-provisioner/usb-ports.d
+mkdir -p /etc/rpi-sb-provisioner/uart.d
 mkdir -p /srv/rpi-sb-provisioner
 mkdir -p /srv/rpi-sb-provisioner/tmp
 mkdir -p /srv/rpi-sb-bootstrap

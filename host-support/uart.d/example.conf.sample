@@ -1,0 +1,9 @@
+# Example UART mapping for rpi-sb-provisioner.
+#
+# Copy this file to /etc/rpi-sb-provisioner/uart.d/ with a .conf extension to
+# activate it, then restart rpi-sb-uart-capture. See the README alongside.
+#
+#     cp example.conf.sample /etc/rpi-sb-provisioner/uart.d/50-jig.conf
+
+# <usb-port> <tty> [baud]
+1-1.2 /dev/ttyUSB0 115200

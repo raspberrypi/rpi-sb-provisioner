@@ -405,15 +405,25 @@ target_link_libraries(rpi-sb-keyhelper
     ${RPIFWCRYPTO_LIBRARY}
 )
 
+# Captures the serial console of the board on each jig head. Drogon-free for
+# the same reason: it runs all the time, as root, reading what a board sends.
+add_executable(rpi-sb-uart-capture
+    src/uartcapture_main.cpp
+    src/uartcapture.cpp
+)
+
 # Tests that need no station. ctest runs them, and so does the package build.
 enable_testing()
 add_executable(osimage_test tests/osimage_test.cpp src/osimage.cpp)
 target_include_directories(osimage_test PRIVATE src)
 add_test(NAME osimage COMMAND osimage_test)
+add_executable(uartcapture_test tests/uartcapture_test.cpp src/uartcapture.cpp)
+target_include_directories(uartcapture_test PRIVATE src)
+add_test(NAME uartcapture COMMAND uartcapture_test $<TARGET_FILE:rpi-sb-uart-capture>)
 
 # Install directives
 # Only install our executable and service file, not any of the FetchContent dependencies
-install(TARGETS rpi-provisioner-ui rpi-sb-keyhelper
+install(TARGETS rpi-provisioner-ui rpi-sb-keyhelper rpi-sb-uart-capture
     RUNTIME DESTINATION /usr/bin
 )
 

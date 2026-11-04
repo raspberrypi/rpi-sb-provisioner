@@ -34,6 +34,9 @@ host-support/kernel_modules.list                    /var/lib/rpi-sb-provisioner
 host-support/usb-ports.d/README                     /usr/share/rpi-sb-provisioner/usb-ports.d
 host-support/usb-ports.d/example.conf.sample        /usr/share/rpi-sb-provisioner/usb-ports.d
 
+host-support/uart.d/README                          /usr/share/rpi-sb-provisioner/uart.d
+host-support/uart.d/example.conf.sample             /usr/share/rpi-sb-provisioner/uart.d
+
 host-support/config                                 /usr/share/rpi-sb-provisioner/defaults
 host-support/bootimg-package-config                 /usr/share/rpi-sb-provisioner/defaults
 
