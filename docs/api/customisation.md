@@ -292,7 +292,7 @@ All hooks also receive device-identity environment variables:
 | `FASTBOOT_DEVICE_SPECIFIER` | What to pass to `fastboot -s`, once the device is in fastboot |
 | `RPI_DEVICE_STORAGE_TYPE` | Storage block device (for example `mmcblk0`) |
 
-`post-flash` hooks also receive the device's manufacturing record. Names are the manufacturing database columns in upper case: `BOARDNAME`, `SERIAL`, `ETH_MAC`, `WIFI_MAC`, `BT_MAC`, `MMC_SIZE`, `MMC_CID`, `RPI_DUID`, `BOARD_REVISION`, `PROCESSOR`, `MEMORY`, `MANUFACTURER`, `SECURE`, `JTAG_LOCKED`, `EEPROM_WRITE_PROTECTED`, `PUBKEY_PROGRAMMED`, `DEVKEY_REVOKED`, `SIGNED_BOOT_ENABLED`, `OS_IMAGE_FILENAME`, `OS_IMAGE_SHA256`, `CONNECT_REGISTERED`, `CONNECT_DEVICE_ID`, `EEPROM_SIZE`, `EEPROM_JEDEC`, `EEPROM_UNIQUE_ID`, `BOOTLOADER_BUILD_TIMESTAMP`, `CUSTOMER_KEY_FINGERPRINT` and `CUSTOMER_KEY_LABEL`. A value not recorded is empty.
+`post-flash` hooks also receive the device's manufacturing record. Names are the manufacturing database columns in upper case: `BOARDNAME`, `SERIAL`, `ETH_MAC`, `WIFI_MAC`, `BT_MAC`, `MMC_SIZE`, `MMC_CID`, `RPI_DUID`, `BOARD_REVISION`, `PROCESSOR`, `MEMORY`, `MANUFACTURER`, `SECURE`, `JTAG_LOCKED`, `EEPROM_WRITE_PROTECTED`, `PUBKEY_PROGRAMMED`, `DEVKEY_REVOKED`, `SIGNED_BOOT_ENABLED`, `OS_IMAGE_FILENAME`, `OS_IMAGE_SHA256`, `CONNECT_REGISTERED`, `CONNECT_DEVICE_ID`, `EEPROM_SIZE`, `EEPROM_JEDEC`, `EEPROM_UNIQUE_ID`, `BOOTLOADER_BUILD_TIMESTAMP`, `CUSTOMER_KEY_FINGERPRINT`, `CUSTOMER_KEY_LABEL`, `MFG_VERSION` and `BOOTLOADER_MFG_VERSION`. A value not recorded is empty.
 
 A hook runs only while enabled, and exiting non-zero fails the device's run. Its output goes to the provisioner's log for the device. Always name the device to fastboot (`fastboot -s "$1" ...`) and give each call its own limit (`timeout 30 fastboot ...`), because fastboot waits for ever for a device that has gone.
 
@@ -327,6 +327,7 @@ Manufacturing metadata is not available on failure.
 
 | `PROVISION_FAILED_REASON` | Meaning |
 | --- | --- |
+| `bootloader-too-old` | The bootloader to be written is older than the board's manufacture version, from its OTP, allows. Nothing was written. Choose newer firmware; the failure is marked permanent. |
 | `bootcode-refused` | The board refused its bootcode. It may already hold a customer key in OTP and need the reprovision flag, or the USB cable or connection may be faulty. The failure is marked permanent. |
 | `board-absent` | The board did not answer before a long fastboot command. |
 | `board-lost` | The board went away part-way through a long fastboot command. |
