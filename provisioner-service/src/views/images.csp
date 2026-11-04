@@ -175,7 +175,7 @@
     </div>
     
     <div class="inline-help">
-        <span class="inline-help-icon">&#9432;</span>
+        <span class="inline-help-icon" aria-hidden="true"></span>
         <span>Select a base OS image, or an <strong>IDP (Image Definition Product)</strong> artefact built by rpi-image-gen. Plain images (.img, .img.xz, .img.zst) need configuring by hand below. IDP artefacts (.tar.xz, .tar.zst) carry their own device and encryption configuration and fill those settings in for you.</span>
     </div>
 </div>

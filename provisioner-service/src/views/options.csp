@@ -730,6 +730,27 @@
             margin-top: 1px;
         }
 
+        /* Drawn, not the U+24D8 glyph: no font on Raspberry Pi OS has it. */
+        .inline-help-icon,
+        .inline-info-icon {
+            box-sizing: border-box;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 1.15em;
+            height: 1.15em;
+            border: 1.5px solid currentColor;
+            border-radius: 50%;
+        }
+
+        .inline-help-icon::before,
+        .inline-info-icon::before {
+            content: "i";
+            font-size: 0.75em;
+            font-weight: bold;
+            line-height: 1;
+        }
+
         /* ===== Irreversible-action warnings =====
            Reserved for changes that cannot be undone on the device: OTP
            writes, and locks that remove Raspberry Pi engineers' ability to
@@ -1145,7 +1166,7 @@
                 </select>
                 <div id="feedback-RPI_DEVICE_RPIBOOT_GPIO" class="field-feedback"></div>
                 <div class="inline-info" style="margin-top: 8px;">
-                    <span class="inline-info-icon" aria-hidden="true">&#9432;</span>
+                    <span class="inline-info-icon" aria-hidden="true"></span>
                     <span>Raspberry Pi 4 family devices require a GPIO pin to enter RPIBOOT mode (unlike Raspberry Pi 5, which has a power button). <strong>GPIO 8 is strongly recommended</strong> for consistency across your fleet.</span>
                 </div>
                 <div class="inline-danger" style="margin-top: 8px;">
@@ -1295,7 +1316,7 @@
 
                 <!-- Notice when secure boot is unavailable -->
                 <div class="inline-help" id="no-secure-boot-notice" <%c++ if(deviceFamily != "2W") $$ << "style=\"display: none;\""; %>>
-                    <span class="inline-help-icon">&#9432;</span>
+                    <span class="inline-help-icon" aria-hidden="true"></span>
                     <span>Secure Boot is not available for Zero 2 W. Select FDE Only or Naked provisioning.</span>
                 </div>
             </div>
@@ -1522,7 +1543,7 @@
                                 <label for="pkcs11-alias">Key Label</label>
                                 <input type="text" id="pkcs11-alias" placeholder="e.g. my-signing-key" oninput="updatePkcs11Preview()" onblur="savePkcs11Value()">
                                 <div class="inline-help" style="margin-top: 6px;">
-                                    <span class="inline-help-icon" aria-hidden="true">&#9432;</span>
+                                    <span class="inline-help-icon" aria-hidden="true"></span>
                                     <span>The PKCS#11 object label of your key on the token. Used to build the URI below.</span>
                                 </div>
                                 <div id="feedback-CUSTOMER_KEY_PKCS11_NAME" class="field-feedback"></div>
@@ -1573,14 +1594,14 @@
                         </div>
 
                         <div class="inline-help">
-                            <span class="inline-help-icon">&#9432;</span>
+                            <span class="inline-help-icon" aria-hidden="true"></span>
                             <span>PKCS#11 keys are typically stored on a Hardware Security Module (HSM). Enter the keypair alias and PIN - the full URI will be generated automatically and the key will be validated.</span>
                         </div>
                     </div>
                 </div>
 
                 <div class="inline-help">
-                    <span class="inline-help-icon">&#9432;</span>
+                    <span class="inline-help-icon" aria-hidden="true"></span>
                     <span>Upload or save multiple signing keys. The <strong>Active</strong> key is used for provisioning; the secure-boot key hash is recorded in the manufacturing database so you can match devices when re-provisioning.</span>
                 </div>
             </div>
@@ -1606,7 +1627,7 @@
                 <div id="feedback-RPI_SB_WORKDIR" class="field-feedback"></div>
                 
                 <div class="inline-help">
-                    <span class="inline-help-icon">&#9432;</span>
+                    <span class="inline-help-icon" aria-hidden="true"></span>
                     <span>Cache location for OS assets between provisioning sessions. Recommended for production use.</span>
                 </div>
             </div>
@@ -1621,7 +1642,7 @@
                 <div id="feedback-RPI_SB_PROVISIONER_MANUFACTURING_DB" class="field-feedback"></div>
                 
                 <div class="inline-help">
-                    <span class="inline-help-icon">&#9432;</span>
+                    <span class="inline-help-icon" aria-hidden="true"></span>
                     <span>SQLite database storing device info: serial numbers, MAC addresses, hardware details. Use local storage only.</span>
                 </div>
             </div>
@@ -1666,7 +1687,7 @@
                 <button type="button" class="pin-remove-btn" id="connect-key-remove" onclick="removeConnectKey()" <%c++ if (!connectKeySaved) $$ << "hidden"; %>>Remove token</button>
 
                 <div class="inline-help">
-                    <span class="inline-help-icon">&#9432;</span>
+                    <span class="inline-help-icon" aria-hidden="true"></span>
                     <span>When set, each provisioned device will be registered with Raspberry Pi Connect using its firmware ECDSA identity key.</span>
                 </div>
             </div>
@@ -1681,7 +1702,7 @@
                 <div id="feedback-RPI_CONNECT_DESCRIPTION" class="field-feedback"></div>
 
                 <div class="inline-help">
-                    <span class="inline-help-icon">&#9432;</span>
+                    <span class="inline-help-icon" aria-hidden="true"></span>
                     <span>Optional prefix for the device identity description sent to Connect. The board type and serial number are always appended.</span>
                 </div>
             </div>
@@ -1696,7 +1717,7 @@
                 <div id="feedback-RPI_CONNECT_DEVICE_NAME" class="field-feedback"></div>
 
                 <div class="inline-help">
-                    <span class="inline-help-icon">&#9432;</span>
+                    <span class="inline-help-icon" aria-hidden="true"></span>
                     <span>The name each device has in Connect. <code>{board}</code> becomes the board, such as <code>pi5</code> or <code>cm5lite</code>, and <code>{serial}</code> its serial number, which the name must include. Left blank, it is <code>{board}-{serial}</code>, for example <code>cm5-8399ccde61e0280b</code>.</span>
                 </div>
             </div>
@@ -1711,7 +1732,7 @@
                 <div id="feedback-RPI_CONNECT_TAGS" class="field-feedback"></div>
 
                 <div class="inline-help">
-                    <span class="inline-help-icon">&#9432;</span>
+                    <span class="inline-help-icon" aria-hidden="true"></span>
                     <span>Tags applied to each device in Connect, separated by commas: up to 10, each up to 30 lowercase letters, digits, hyphens or underscores.</span>
                 </div>
             </div>

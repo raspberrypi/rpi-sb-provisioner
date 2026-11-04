@@ -566,6 +566,9 @@ rpi-sb-provisioner (2.4.0) unstable; urgency=high
     was recorded as unregistered. The provisioner now finds the identity
     holding the key and updates it, or the device it became.
 
+  * Draw the web UI's info icon instead of using the U+24D8 glyph, which no
+    font on Raspberry Pi OS has, so a CM5 programming jig showed a blank.
+
  -- Tom Dewey <tom.dewey@raspberrypi.com>  Wed, 07 Oct 2026 08:48:02 +0100
 
 rpi-sb-provisioner (2.3.5) unstable; urgency=medium
