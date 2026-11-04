@@ -49,6 +49,8 @@ The endpoint returns a JSON array where each element represents a provisioned de
     "eeprom_jedec": "ef4018",
     "eeprom_unique_id": "0123456789abcdef",
     "bootloader_build_timestamp": "1780326171",
+    "mfg_version": "1",
+    "bootloader_mfg_version": "2",
     "provision_ts": "2025-04-28 13:53:28"
   },
   ...
@@ -89,6 +91,8 @@ Every value is a JSON string, numbers included, and a database `NULL` is returne
 | eeprom_size            | EEPROM size in bytes, when reported by fastboot                                                                                                                                                                                                          |
 | eeprom_jedec           | EEPROM JEDEC identifier, when reported by fastboot                                                                                                                                                                                                       |
 | eeprom_unique_id       | EEPROM unique identifier, when reported by fastboot                                                                                                                                                                                                      |
+| mfg_version            | The oldest bootloader manufacture version the board runs, from its OTP; null when the board did not report it |
+| bootloader_mfg_version | Manufacture version of the bootloader written to the device; null when no EEPROM was written |
 | bootloader_build_timestamp | Bootloader build timestamp, when reported by fastboot                                                                                                                                                                                                |
 | provision_ts           | Timestamp of when the device was provisioned                                                                                                                                                                                                            |
 

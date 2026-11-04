@@ -24,6 +24,29 @@ rpi-sb-provisioner (2.4.0) unstable; urgency=high
     - Upgrading empties the workdir cache, so the first device re-signs.
     - Uploading an OS image under a name already on the station replaces
       it, rather than adding name_1.img. Rename the file first to keep both.
+    - A board's first run adds an rpiboot pass that reads its bootloader
+      manufacture version, and a board that needs a newer bootloader than
+      the chosen firmware now stops before anything is written to it.
+
+  * Refuse to write a bootloader older than the board accepts. Each board
+    records in OTP the oldest bootloader manufacture version (MFG_VER) it
+    runs, a counter that only rises; newer boards, such as Pi 5s with an
+    alternate Ethernet PHY, need newer bootloaders. Bootstrap now reads the
+    board's version in an rpiboot pass that writes nothing, and stops before
+    any EEPROM or OTP write, with the permanent failure bootloader-too-old,
+    naming the version needed and the firmware's. The version comes from
+    MFG_VER, or from HARDWARE_INFO where rpiboot is older than 20261028, and
+    is remembered per serial. A board that does not report it, from an older
+    recovery.bin, is provisioned as before.
+
+  * Record each board's manufacture version and its bootloader's: in the
+    manufacturing record (mfg_version, bootloader_mfg_version), the post-flash
+    hook environment (MFG_VERSION, BOOTLOADER_MFG_VERSION) and the device's
+    page. The Options page shows each firmware's manufacture version.
+
+  * Never send bootloader_allow_mfg_downgrade, which would let an EEPROM
+    write go below a board's manufacture version. Bootstrap removes it, and
+    the bootloader editor says so.
 
   * SECURITY: Require operators to sign in to the web UI. It runs as root and
     asked for no credentials at all, so any local user -- or any web page open

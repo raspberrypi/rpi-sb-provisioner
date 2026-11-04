@@ -281,7 +281,8 @@ no second stage reached. Customisation hooks are limited to
 When a bounded command fails, the per-device log records why, including the
 reason the device gave for refusing it, and `PROVISION_FAILED_REASON` is set
 to one of `device-refused`, `board-absent`, `board-lost`, `bootcode-refused`,
-`timed-out` or `command-failed`. A service stopped by a signal is recorded
+`timed-out` or `command-failed`; bootstrap sets `bootloader-too-old` when it
+refuses a bootloader older than the board's manufacture version. A service stopped by a signal is recorded
 as aborted. The `provision-failed` hook then runs with
 `PROVISION_FAILED_CONTEXT` (`bootstrap` or `provisioning`),
 `PROVISION_FAILED_PERMANENT` (`1` for a failure that retrying will not fix,
