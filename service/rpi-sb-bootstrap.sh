@@ -211,6 +211,18 @@ record_requested_locks() {
     } > "${REQUESTED_LOCKS}"
 }
 
+# Bootloader manufacture versions. OTP records the oldest bootloader a board
+# runs. recovery.bin from 2026-09-23 refuses an older image, and an earlier one
+# writes it regardless, so the board's version is read in a pass that writes
+# nothing, and a bootloader too old is refused before any EEPROM or OTP write.
+# OTP only counts up, so a version read once stands for that serial.
+MFG_VERSIONS="${EARLY_LOG_DIRECTORY}/mfg-versions"
+rm -f "${MFG_VERSIONS}"
+MFG_VERSION_CACHE="/var/lib/rpi-sb-provisioner/mfg-version"
+BOARD_MFG_VER=""
+BOARD_MFG_VER_READ=""
+# read_board_mfg_version and check_bootloader_mfg_version are in rpi-sb-common.sh.
+
 # Sets the global BOARD_TYPE (2-digit hex string of bits 4..11 of OTP
 # USER_BOARDREV; e.g. "17" for Pi 5, "18" for CM5) and BOARD_NAME for
 # logging.  Best-effort: if the metadata file is missing or unparseable
@@ -388,6 +400,12 @@ prepare_bootloader_config() {
     if grep -Eq '^[[:space:]]*SIGNED_BOOT[[:space:]]*=' "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"; then
         log "Removing SIGNED_BOOT from the bootloader configuration: the key in OTP decides signed boot"
         sed -i -E '/^[[:space:]]*SIGNED_BOOT[[:space:]]*=/d' "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
+    fi
+    # Lifts the bootloader's refusal of an image older than the board's
+    # manufacture version; never sent.
+    if grep -q 'bootloader_allow_mfg_downgrade' "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"; then
+        log "Removing bootloader_allow_mfg_downgrade from the bootloader configuration"
+        sed -i '/bootloader_allow_mfg_downgrade/d' "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
     fi
     maybe_reorder_boot_order_for_storage "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}"
     BOOTLOADER_CONFIG_SHA256="$(sha256sum < "${RPI_DEVICE_BOOTLOADER_CONFIG_FILE}" | cut -d ' ' -f 1)"
@@ -781,6 +799,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
             BOOTLOADER_SERVE_DIR="${REPROVISION_DIR:-${SECURE_BOOTLOADER_DIRECTORY}}"
             record_progress "EEPROM-UPDATING"
             ensure_recovery_support_files "${BOOTLOADER_SERVE_DIR}" "${BOOTCODE_FLASHING_NAME}"
+            [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && check_bootloader_mfg_version "${BOOTLOADER_SERVE_DIR}"
             [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal_secs 60 rpiboot -j "${METADATA_DIR}" -d "${BOOTLOADER_SERVE_DIR}" -p "${TARGET_USB_PATH}" &&
                 record_requested_locks "${BOOTLOADER_SERVE_DIR}"
             extract_board_type
@@ -921,6 +940,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                 BOOTLOADER_SERVE_DIR="${REPROVISION_DIR:-${SECURE_BOOTLOADER_DIRECTORY}}"
                 record_progress "EEPROM-UPDATING"
                 ensure_recovery_support_files "${BOOTLOADER_SERVE_DIR}" "${BOOTCODE_FLASHING_NAME}"
+                [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && check_bootloader_mfg_version "${BOOTLOADER_SERVE_DIR}"
                 [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal_secs 60 rpiboot -j "${METADATA_DIR}" -d "${BOOTLOADER_SERVE_DIR}" -p "${TARGET_USB_PATH}" &&
                     record_requested_locks "${BOOTLOADER_SERVE_DIR}"
             extract_board_type
@@ -1084,6 +1104,7 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
                     record_progress "EEPROM-UPDATING"
                     log "Updating EEPROM to latest version"
                     ensure_recovery_support_files "${NON_SECURE_BOOTLOADER_DIRECTORY}" "${BOOTCODE_FLASHING_NAME}"
+                    [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && check_bootloader_mfg_version "${NON_SECURE_BOOTLOADER_DIRECTORY}"
                     [ "${SPECIAL_FLAG_SKIP_EEPROM}" -eq 0 ] && timeout_fatal_secs 60 rpiboot -j "${METADATA_DIR}" -d "${NON_SECURE_BOOTLOADER_DIRECTORY}" -p "${TARGET_USB_PATH}" &&
                         record_requested_locks "${NON_SECURE_BOOTLOADER_DIRECTORY}"
                     extract_board_type
@@ -1126,8 +1147,9 @@ if [ -n "${TARGET_DEVICE_SERIAL}" ] && [ "${TARGET_DEVICE_SERIAL}" != "${TARGET_
     mv "${early_log_dir}/bootstrap.log" "${target_log_dir}/bootstrap.log"
     # A run that sent no bootloader configuration asked for nothing, so an
     # earlier run's record must not stand in for it.
-    rm -f "${target_log_dir}/requested-locks"
+    rm -f "${target_log_dir}/requested-locks" "${target_log_dir}/mfg-versions"
     [ -f "${REQUESTED_LOCKS}" ] && mv "${REQUESTED_LOCKS}" "${target_log_dir}/requested-locks"
+    [ -f "${MFG_VERSIONS}" ] && mv "${MFG_VERSIONS}" "${target_log_dir}/mfg-versions"
     # Also link into the endpoint-keyed directory so the web UI can find it by either key
     if [ -n "${TARGET_USB_PATH}" ]; then
         _endpoint_log_dir="/var/log/rpi-sb-provisioner/${TARGET_USB_PATH}"
@@ -1146,8 +1168,9 @@ elif [ -n "${TARGET_USB_PATH}" ]; then
     mv "${early_log_dir}/bootstrap.log" "${target_log_dir}/bootstrap.log"
     # A run that sent no bootloader configuration asked for nothing, so an
     # earlier run's record must not stand in for it.
-    rm -f "${target_log_dir}/requested-locks"
+    rm -f "${target_log_dir}/requested-locks" "${target_log_dir}/mfg-versions"
     [ -f "${REQUESTED_LOCKS}" ] && mv "${REQUESTED_LOCKS}" "${target_log_dir}/requested-locks"
+    [ -f "${MFG_VERSIONS}" ] && mv "${MFG_VERSIONS}" "${target_log_dir}/mfg-versions"
 else
     log "Warning: Neither serial nor USB path available, logs will remain in ${EARLY_LOG_DIRECTORY}"
     echo "[$(date +"%Y-%m-%d %H:%M:%S.$(date +%N | cut -c1-3)")] Warning: Neither serial nor USB path available, logs remain in ${EARLY_LOG_DIRECTORY}" >> "${EARLY_LOG_DIRECTORY}/bootstrap.log"

@@ -985,6 +985,98 @@ use_workdir_for_gold_master() {
     export RPI_SB_WORKDIR
 }
 
+# Bootloader manufacture version checks, for bootstrap. They use its log,
+# die and record_state, and these globals: METADATA_DIR, MFG_VERSIONS,
+# MFG_VERSION_CACHE, BOARD_MFG_VER, BOARD_MFG_VER_READ, RPI_SB_WORKDIR,
+# BOOTSTRAP_ABORTED, BOOTLOADER_UPDATE_IMAGE and the TARGET_* ones.
+# Arguments: $1 = the directory about to be served for an EEPROM write.
+read_board_mfg_version() {
+    [ -n "${BOARD_MFG_VER_READ}" ] && return 0
+    BOARD_MFG_VER_READ=1
+    _mv_known=""
+    if [ -n "${TARGET_DEVICE_SERIAL}" ] && [ "${TARGET_DEVICE_SERIAL}" != "${TARGET_DEVICE_PATH}" ]; then
+        _mv_known="${MFG_VERSION_CACHE}/${TARGET_DEVICE_SERIAL}"
+        BOARD_MFG_VER=$(sed -n '1{/^[0-9]\{1,3\}$/p}' "${_mv_known}" 2>/dev/null)
+        if [ -n "${BOARD_MFG_VER}" ]; then
+            log "Board manufacture version ${BOARD_MFG_VER}, as read before"
+            return 0
+        fi
+    fi
+    # The same recovery code and support files, with nothing to write.
+    _mv_dir=$(mktemp -d "${RPI_SB_WORKDIR}/mfg-version.XXXXXX")
+    for _mv_f in "$1"/*; do
+        case "$(basename "${_mv_f}")" in
+            pieeprom.*|config.txt|bootloader.sha256) ;;
+            *) cp -a "${_mv_f}" "${_mv_dir}/" ;;
+        esac
+    done
+    printf 'set_reboot_order=0x3\nrecovery_reboot=1\n' > "${_mv_dir}/config.txt"
+    log "Reading the board's manufacture version before writing its EEPROM"
+    timeout_fatal_secs 60 rpiboot -j "${METADATA_DIR}" -d "${_mv_dir}" -p "${TARGET_USB_PATH}"
+    rm -rf "${_mv_dir}"
+    _mv_json=$(find "${METADATA_DIR}" -maxdepth 1 -type f -name '*.json' 2>/dev/null | head -n1)
+    [ -n "${_mv_json}" ] && BOARD_MFG_VER=$(board_mfg_version "${_mv_json}")
+    if [ -n "${BOARD_MFG_VER}" ] && [ -n "${_mv_known}" ]; then
+        mkdir -p "${MFG_VERSION_CACHE}"
+        echo "${BOARD_MFG_VER}" > "${_mv_known}"
+    fi
+}
+
+# Arguments: $1 = the directory about to be served for an EEPROM write.
+# Dies, permanently, if its bootloader is older than the board accepts.
+check_bootloader_mfg_version() {
+    # Lifts recovery.bin's own check; nothing here sends it, nor may a cache.
+    if grep -q 'bootloader_allow_mfg_downgrade' "$1/config.txt" 2>/dev/null; then
+        log "Warning: removing bootloader_allow_mfg_downgrade from the recovery configuration"
+        sed -i '/bootloader_allow_mfg_downgrade/d' "$1/config.txt"
+    fi
+    [ -f "$1/pieeprom.bin" ] || return 0
+    _cm_image=$(bootloader_image_mfg_version "$1/pieeprom.bin")
+    read_board_mfg_version "$1"
+    printf 'board_mfg_version=%s\nbootloader_mfg_version=%s\n' "${BOARD_MFG_VER}" "${_cm_image}" > "${MFG_VERSIONS}"
+    if [ -z "${BOARD_MFG_VER}" ]; then
+        log "The board did not report its manufacture version (recovery.bin too old to); not checked"
+        return 0
+    fi
+    log "Bootloader manufacture version: the board needs ${BOARD_MFG_VER} or later, the image is ${_cm_image}"
+    if [ "${_cm_image}" -lt "${BOARD_MFG_VER}" ]; then
+        record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_ABORTED}" "${TARGET_USB_PATH}"
+        PROVISION_FAILED_REASON=bootloader-too-old
+        mark_permanent_failure
+        if [ -n "${BOOTLOADER_UPDATE_IMAGE}" ]; then
+            _cm_what="the selected firmware, $(basename "${BOOTLOADER_UPDATE_IMAGE}"),"
+        else
+            _cm_what="the bootloader this station built from the selected firmware"
+        fi
+        die "This board needs bootloader manufacture version ${BOARD_MFG_VER} or later; ${_cm_what} is version ${_cm_image}. Choose newer firmware under Options."
+    fi
+}
+
+# bootloader_image_mfg_version ${pieeprom}
+#
+# Prints the manufacture version a bootloader image declares, as "MFG_VER: n"
+# among its strings. Images from before 2026-05-11 declare none and count as
+# 0: no board needs less.
+bootloader_image_mfg_version() {
+    _bim=$(tr -c '[:print:]' '\n' < "$1" 2>/dev/null | sed -nE 's/^MFG_VER:[[:space:]]*([0-9]{1,3})$/\1/p' | head -n1)
+    echo "${_bim:-0}"
+}
+
+# board_mfg_version ${metadata_json}
+#
+# Prints the oldest bootloader manufacture version a board runs, from OTP via
+# rpiboot's metadata: MFG_VER where rpiboot decodes it, else bits 16-23 of
+# HARDWARE_INFO, which recovery.bin reports even to an older rpiboot. Prints
+# nothing when the metadata holds neither, as from an older recovery.bin.
+board_mfg_version() {
+    _bmv=$(sed -nE 's/.*"MFG_VER"[[:space:]]*:[[:space:]]*"([0-9]{1,3})".*/\1/p' "$1" 2>/dev/null | head -n1)
+    if [ -z "${_bmv}" ]; then
+        _bmv_hw=$(sed -nE 's/.*"HARDWARE_INFO"[[:space:]]*:[[:space:]]*"([0-9a-fA-F]{1,8})".*/\1/p' "$1" 2>/dev/null | head -n1)
+        [ -n "${_bmv_hw}" ] && _bmv=$(( (0x${_bmv_hw} >> 16) & 0xff ))
+    fi
+    echo "${_bmv}"
+}
+
 # The block size libsparse uses, and so the granularity fastboot's host-side
 # sparse writer can express a hole at.
 FASTBOOT_SPARSE_BLOCK_SIZE=4096
