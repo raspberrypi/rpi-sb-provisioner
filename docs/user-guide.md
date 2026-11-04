@@ -251,7 +251,7 @@ When the Devices page shows it as finished. The provisioner turns off the device
 ## In the web interface
 
 - **Devices** shows every connected device, live. Choose between **Device cards** (the default), **Topology map** and **Port tree**, a text view of the USB topology.
-- Click a device to open its page: its current state, **State History**, **Per-device Overrides**, and its **Provisioner Log**, **Bootstrap Log** and **Triage Log**. Logs and overrides need an operator.
+- Click a device to open its page: its current state, **State History**, **Per-device Overrides**, and its **Provisioner Log**, **Bootstrap Log** and **Triage Log**, and its **UART Log** where the station captures the board's serial console. Logs and overrides need an operator.
 - **Services** (page title **System Services**) lists the provisioning units with their load and run state. **View Logs** shows a unit's journal.
 
 ## On the command line
@@ -260,6 +260,15 @@ When the Devices page shows it as finished. The provisioner turns off the device
     tail -f /var/log/rpi-sb-provisioner/<serial>/provisioner.log
 
 Each device's directory under `/var/log/rpi-sb-provisioner/` also holds `bootstrap.log` and `triage.log`. The logs are readable by root and the `rpi-sb-provisioner` group.
+
+### The board's serial console
+
+A jig that wires a host UART to the console of the board in each head can keep everything the board prints: bootloader, firmware, kernel and fastbootd messages, fastboot errors among them. Map the head's USB port to the UART in `/etc/rpi-sb-provisioner/uart.d/`, one `<usb-port> <tty> [baud]` per line, and restart `rpi-sb-uart-capture`:
+
+    echo '1-1.2 /dev/ttyUSB0 115200' | sudo tee /etc/rpi-sb-provisioner/uart.d/50-jig.conf
+    sudo systemctl restart rpi-sb-uart-capture
+
+Each board's lines, from just before bootstrap to just after it reboots, go to `uart.log` in its directory; every line from the port goes to `/var/log/rpi-sb-provisioner/uart/<usb-port>.log`. The capture only reads the UART, and nothing else on the host may use it. A jig package can ship the mapping instead, as `cm5-programming-jig-gpio-config` does; see `/usr/share/rpi-sb-provisioner/uart.d/README`.
 
 # Troubleshooting
 
