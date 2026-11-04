@@ -220,6 +220,29 @@ namespace provisioner {
 
     // Tracker state
     namespace {
+        // The device page's line for bootstrap's mfg-versions record: the
+        // manufacture version of the bootloader it served, against the oldest
+        // the board's OTP accepts. "" when bootstrap wrote no EEPROM.
+        std::string describeMfgVersions(const std::string& record) {
+            std::string board, image, line;
+            std::istringstream in(record);
+            auto digits = [](const std::string& v) {
+                return !v.empty() && v.size() <= 3 && std::all_of(v.begin(), v.end(), ::isdigit);
+            };
+            while (std::getline(in, line)) {
+                const auto eq = line.find('=');
+                if (eq == std::string::npos) continue;
+                const std::string key = line.substr(0, eq), value = line.substr(eq + 1);
+                if (!digits(value)) continue;
+                if (key == "board_mfg_version") board = value;
+                else if (key == "bootloader_mfg_version") image = value;
+            }
+            if (image.empty()) return "";
+            return "manufacture version " + image + (board.empty()
+                ? "; the board did not report the oldest it accepts"
+                : "; the board accepts " + board + " or later");
+        }
+
         std::thread topologyThread;
         std::atomic<bool> topologyRunning{false};
         std::mutex topologyMutex;
@@ -1920,10 +1943,14 @@ namespace provisioner {
                 // Logs can hold whatever a hook prints, and flags change what
                 // the next run does: a viewer who has not signed in sees neither.
                 const bool signedIn = !auth::username(req).empty();
+                // Bootstrap's record of the board's minimum bootloader
+                // manufacture version and the image it served, a record too.
+                std::string mfgVersions;
                 if (signedIn) {
                     provisioner_log = tryReadLog(serialDir, endpointDir, "provisioner.log");
                     bootstrap_log = tryReadLog(serialDir, endpointDir, "bootstrap.log");
                     triage_log = tryReadLog(serialDir, endpointDir, "triage.log");
+                    mfgVersions = describeMfgVersions(tryReadLog(serialDir, endpointDir, "mfg-versions"));
                 }
 
                 // Query last 10 state changes for this device.
@@ -1993,6 +2020,7 @@ namespace provisioner {
                 viewData.insert("device.ip_address", device.ip_address);
                 viewData.insert("device.state", device.state);
                 viewData.insert("device.image", device.image);
+                viewData.insert("device.mfg_versions", mfgVersions);
                 viewData.insert("provisioner_log", provisioner_log);
                 viewData.insert("bootstrap_log", bootstrap_log);
                 viewData.insert("triage_log", triage_log);

@@ -1,7 +1,13 @@
 """Bootloader manufacture versions: a board's OTP names the oldest bootloader
 it runs, and bootstrap refuses an older one before writing anything."""
+import http.client
+import time
+import urllib.parse
+
 from ui.harness.case import UITest
 
+MFG = "/srv/rpi-sb-provisioner/manufacturing.db"
+STATE = "/srv/rpi-sb-provisioner/state.db"
 SERIAL = "mfgv0001"
 
 # Runs check_bootloader_mfg_version from the installed rpi-sb-common.sh, as
@@ -132,3 +138,75 @@ class BootstrapCheck(UITest):
         self.assertIn("bad=[]", out)
         self.assertIn("embedded=0", out, "MFG_VER: must start a string, as strings(1) shows it")
 
+
+class Records(UITest):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.station.sql(MFG, f"""
+            delete from devices where serial='{SERIAL}';
+            insert into devices(boardname,serial,eth_mac,wifi_mac,bt_mac,mmc_size,mmc_cid,rpi_duid,
+              board_revision,processor,memory,manufacturer,secure,mfg_version,bootloader_mfg_version) values
+              ('CM5','{SERIAL}','','','',0,'','','','','','',0,2,3);""")
+        cls.station.sql(STATE, f"""
+            delete from devices where serial='{SERIAL}';
+            insert into devices(serial,endpoint,state,image,ip_address,board_type) values
+              ('{SERIAL}','3-9','PROVISIONER-FINISHED','','','18');""")
+        cls.station.sh(f"mkdir -p /var/log/rpi-sb-provisioner/{SERIAL} && printf "
+                       f"'board_mfg_version=2\\nbootloader_mfg_version=3\\n' "
+                       f"> /var/log/rpi-sb-provisioner/{SERIAL}/mfg-versions")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.station.sql(MFG, f"delete from devices where serial='{SERIAL}';")
+        cls.station.sql(STATE, f"delete from devices where serial='{SERIAL}';")
+        cls.station.sh(f"rm -rf /var/log/rpi-sb-provisioner/{SERIAL}")
+        super().tearDownClass()
+
+    def test_the_upgrade_adds_the_columns(self):
+        columns = self.station.sh(f"sqlite3 {MFG} 'pragma table_info(devices);' | cut -d'|' -f2").split()
+        self.assertIn("mfg_version", columns)
+        self.assertIn("bootloader_mfg_version", columns)
+
+    def test_the_manufacturing_page_shows_both(self):
+        self.b.get("/manu-db")
+        self.b.wait_text("table", SERIAL, timeout=20)
+        headers = [h.text for h in self.b.all("thead th")]
+        self.assertIn("Bootloader MFG Version", headers)
+        self.assertIn("Board MFG Version", headers)
+        status, body = self.b.fetch("/api/v2/manufacturing?limit=200")
+        mine = [d for d in body if d.get("serial") == SERIAL]
+        self.assertEqual(1, len(mine), body)
+        self.assertEqual(("2", "3"), (mine[0]["mfg_version"], mine[0]["bootloader_mfg_version"]))
+        self.assertClean()
+
+    def test_the_device_page_says_which_bootloader_it_got(self):
+        self.b.get(f"/devices/{SERIAL}")
+        self.assertEqual("manufacture version 3; the board accepts 2 or later",
+                         self.b.el("#info-mfg-versions").text)
+        self.assertClean()
+
+    def test_a_viewer_who_has_not_signed_in_does_not_see_it(self):
+        u = urllib.parse.urlsplit(self.b.base)
+        c = http.client.HTTPConnection(u.hostname, u.port, timeout=30)
+        self.station.set_config(RPI_SB_PROVISIONER_PUBLIC_DASHBOARD="1")
+        time.sleep(1)
+        c.request("GET", f"/devices/{SERIAL}", headers={"Accept": "text/html"})
+        r = c.getresponse()
+        page = r.read().decode(errors="replace")
+        self.assertEqual(200, r.status)
+        self.assertNotIn("info-mfg-versions", page)
+
+    def test_the_firmware_list_gives_each_image_its_version(self):
+        self.station.set_config(RPI_DEVICE_FAMILY="5")
+        status, body = self.b.fetch("/options/firmware/list")
+        self.assertEqual(200, status, body)
+        if not body.get("firmwareList"):
+            self.skipTest("no bootloader-2712 firmware on the station")
+        for fw in body["firmwareList"]:
+            want = self.station.sh(f". /usr/bin/rpi-sb-common.sh; bootloader_image_mfg_version {fw['filepath']}").strip()
+            self.assertEqual(int(want), fw["mfgVersion"], fw["filepath"])
+        self.b.get("/options/get")
+        self.b.click("#firmware-expand-btn")
+        self.b.wait_text("#firmware-list", "manufacture version", timeout=20)
+        self.assertClean()

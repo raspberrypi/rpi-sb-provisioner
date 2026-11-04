@@ -379,6 +379,12 @@
             <span class="info-label">Image:</span>
             <span id="info-image" data-field="image"><%c++ $$ << HttpViewData::htmlTranslate(@@.get<std::string>("device.image")); %></span>
         </div>
+        <%c++ if (!@@.get<std::string>("device.mfg_versions").empty()) { %>
+        <div class="info-row">
+            <span class="info-label">Bootloader version:</span>
+            <span id="info-mfg-versions"><%c++ $$ << HttpViewData::htmlTranslate(@@.get<std::string>("device.mfg_versions")); %></span>
+        </div>
+        <%c++ } %>
     </div>
 
     <div class="detail-progress" id="progress-stepper" role="group" aria-label="Provisioning progress">

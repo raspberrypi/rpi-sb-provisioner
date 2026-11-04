@@ -219,7 +219,9 @@ namespace provisioner {
             "#   EEPROM_SIZE, EEPROM_JEDEC, EEPROM_UNIQUE_ID  Bootloader SPI flash identity\n"
             "#   BOOTLOADER_BUILD_TIMESTAMP  Bootloader image build time (Unix epoch)\n"
             "#   CUSTOMER_KEY_FINGERPRINT    Active signing key SHA256 fingerprint\n"
-            "#   CUSTOMER_KEY_LABEL          Active signing key label\n";
+            "#   CUSTOMER_KEY_LABEL          Active signing key label\n"
+            "#   MFG_VERSION                 Oldest bootloader manufacture version the board runs (empty if unknown)\n"
+            "#   BOOTLOADER_MFG_VERSION      Manufacture version of the bootloader written\n";
 
         std::string buildDefaultScriptTemplate(const std::string& provisioner, const std::string& stage) {
             std::string content = "#!/bin/sh\n\n";
