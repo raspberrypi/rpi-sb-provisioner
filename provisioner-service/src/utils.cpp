@@ -151,6 +151,13 @@ namespace provisioner {
                     }
                     
                     info.releaseChannel = preferredChannel;
+                    // The newest of "latest" is often in "default" too, which
+                    // releaseChannel prefers: bootstrap still takes it from latest.
+                    for (const auto& channel : releaseDirs) {
+                        for (const auto& [c, filepath] : channelsAndPaths) {
+                            if (c == channel) { info.channels.push_back(c); break; }
+                        }
+                    }
                     
                     try {
                         info.size = std::filesystem::file_size(preferredFilepath);

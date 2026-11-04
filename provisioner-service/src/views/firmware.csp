@@ -326,7 +326,7 @@
     function showCurrentFirmware(selectedPath) {
         const el = document.getElementById('firmware-current');
         const chosen = firmwareListData.find(fw => fw.filepath === selectedPath);
-        const newest = firmwareListData.filter(fw => fw.releaseChannel === 'latest')
+        const newest = firmwareListData.filter(fw => (fw.channels || []).includes('latest'))
             .map(fw => fw.version).sort().pop();
         if (chosen) el.textContent = 'Selected: ' + chosen.version + ' (' + chosen.releaseChannel + '), manufacture version ' + chosen.mfgVersion;
         else if (selectedPath) el.textContent = 'Selected: ' + selectedPath.split('/').pop();
