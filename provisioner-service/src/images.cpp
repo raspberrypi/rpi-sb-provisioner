@@ -1831,11 +1831,11 @@ namespace provisioner {
                 LOG_ERROR << "Error scanning images directory: " << e.what();
             }
             
-            // Get current gold master for comparison
-            std::string currentGoldMaster;
-            auto goldMasterPath = provisioner::utils::getConfigValue("GOLD_MASTER_OS_FILE");
-            if (goldMasterPath) {
-                currentGoldMaster = *goldMasterPath;
+            // Matched by whole name, as /delete-image does. A substring test
+            // marked every image whose name the selected one contains (#366).
+            std::filesystem::path goldMaster;
+            if (auto configured = provisioner::utils::getConfigValue("GOLD_MASTER_OS_FILE")) {
+                goldMaster = *configured;
             }
             
             // Build JSON response
@@ -1848,7 +1848,7 @@ namespace provisioner {
                 imageObj["path"] = std::string(IMAGES_PATH) + "/" + info.name;
                 imageObj["sha256"] = info.sha256;
                 imageObj["size_mb"] = info.size / (1024.0 * 1024.0);
-                imageObj["is_gold_master"] = (currentGoldMaster.find(info.name) != std::string::npos);
+                imageObj["is_gold_master"] = !goldMaster.empty() && goldMaster.filename() == info.name;
                 imageObj["is_idp"] = info.is_idp;
                 imageObj["type"] = info.is_idp ? "idp" : "traditional";
                 imageArray.append(imageObj);

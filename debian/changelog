@@ -114,6 +114,11 @@ rpi-sb-provisioner (2.4.0) unstable; urgency=high
     the reason from the wrong field, so every refusal -- no space left, a
     damaged archive -- said only "Upload failed".
 
+  * Mark only the selected OS image as selected. Every image whose name the
+    selected one contained was marked too, such as os-image beside
+    os-image-ab-20261030T130400Z-9d1b1c3a, and could not then be chosen.
+    Provisioning always used the right image (#366).
+
   * Let the devices page, a device's own page and the code scanner be seen
     without signing in, so a screen on the production line can show progress
     again. Viewers who have not signed in see serial numbers, USB ports,

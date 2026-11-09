@@ -290,11 +290,16 @@
     
     let currentViewingImage = null;
     
+    // By whole name, as the server does: a substring test also marked every
+    // image whose name the selected one contains (#366).
+    function isSelectedImage(img) {
+        const path = document.getElementById('GOLD_MASTER_OS_FILE')?.value || '';
+        return path !== '' && path.split('/').pop() === img.name;
+    }
+
     function renderImageList() {
         const listEl = document.getElementById('image-list');
         const loadingEl = document.getElementById('image-loading');
-        const currentValue = document.getElementById('GOLD_MASTER_OS_FILE')?.value || '';
-        
         if (loadingEl) loadingEl.style.display = 'none';
         
         if (imageList.length === 0) {
@@ -305,7 +310,7 @@
         listEl.innerHTML = '';
         
         imageList.forEach(img => {
-            const isSelected = currentValue && currentValue.includes(img.name);
+            const isSelected = isSelectedImage(img);
             const isViewing = currentViewingImage && currentViewingImage.name === img.name;
             
             const item = document.createElement('div');
@@ -361,8 +366,7 @@
         
         // Show image details
         const detailsEl = document.getElementById('image-details');
-        const currentValue = document.getElementById('GOLD_MASTER_OS_FILE')?.value || '';
-        const isSelected = currentValue && currentValue.includes(img.name);
+        const isSelected = isSelectedImage(img);
         
         const sizeMB = img.size_mb ? img.size_mb.toFixed(1) + ' MB' : 'Unknown size';
         const sha256Display = img.sha256 && img.sha256.length > 10 && !img.sha256.includes('Calculating')
