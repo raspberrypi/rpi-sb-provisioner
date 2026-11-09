@@ -286,6 +286,27 @@ class Images(UITest):
         self.b.wait_text("#success-text", "cleared")
         self.assertEqual("", self.station.config().get("GOLD_MASTER_OS_FILE", "").strip("'"))
 
+    def test_only_the_selected_image_is_marked_selected(self):
+        # The names from #366: the selected one contains the names of others.
+        chosen = "uitest-os-ab-20261030T130400Z-9d1b1c3a"
+        others = ["uitest-os", "uitest-os-ab", "uitest-os-20261028T162012Z-afacfa96"]
+        self.station.sh(" && ".join(f"head -c 65536 /dev/zero > {IMAGES}/{n}" for n in [chosen] + others))
+        self.station.set_config(GOLD_MASTER_OS_FILE=f"{IMAGES}/{chosen}")
+        status, body = self.b.fetch("/images/list")
+        self.assertEqual(200, status)
+        marked = {i["name"] for i in body["images"] if i["is_gold_master"]}
+        self.assertEqual({chosen}, marked)
+        self.b.get("/options/get")
+        self.assertIn("Selected", self.item(chosen).text)
+        for name in others:
+            self.assertNotIn("Selected", self.item(name).text)
+        self.open_details("uitest-os-ab")
+        self.assertNotIn("Currently selected", self.b.el("#image-details").text)
+        self.b.press(self.detail_button("Use This Image"))
+        self.b.wait_text("#success-text", "selected")
+        self.assertEqual(f"{IMAGES}/uitest-os-ab",
+                         self.station.config().get("GOLD_MASTER_OS_FILE", "").strip("'"))
+
     def test_delete_asks_and_removes(self):
         self.station.sh(f"head -c 65536 /dev/zero > {IMAGES}/uitest-delete.img")
         self.b.get("/options/get")
