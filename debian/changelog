@@ -45,7 +45,8 @@ rpi-sb-provisioner (2.4.0) unstable; urgency=high
   * Record each board's manufacture version and its bootloader's: in the
     manufacturing record (mfg_version, bootloader_mfg_version), the post-flash
     hook environment (MFG_VERSION, BOOTLOADER_MFG_VERSION) and the device's
-    page. The Options page shows each firmware's manufacture version.
+    page. The Options page shows each firmware's manufacture version, and
+    each of these links rpi-eeprom's explanation of it (#368).
 
   * Never send bootloader_allow_mfg_downgrade, which would let an EEPROM
     write go below a board's manufacture version. Bootstrap removes it, and

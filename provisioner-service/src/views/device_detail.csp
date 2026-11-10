@@ -382,7 +382,8 @@
         <%c++ if (!@@.get<std::string>("device.mfg_versions").empty()) { %>
         <div class="info-row">
             <span class="info-label">Bootloader version:</span>
-            <span id="info-mfg-versions"><%c++ $$ << HttpViewData::htmlTranslate(@@.get<std::string>("device.mfg_versions")); %></span>
+            <span><span id="info-mfg-versions"><%c++ $$ << HttpViewData::htmlTranslate(@@.get<std::string>("device.mfg_versions")); %></span>.
+                <a id="info-mfg-versions-docs" href="https://github.com/raspberrypi/rpi-eeprom#minimum-bootloader-version-min_boot_ver" target="_blank" rel="noopener">About manufacture versions</a></span>
         </div>
         <%c++ } %>
     </div>
