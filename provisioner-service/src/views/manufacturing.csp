@@ -51,6 +51,8 @@
 
     <script src="/static/js/live-update.js"></script>
     <script>
+        const MFG_VER_DOCS = 'https://github.com/raspberrypi/rpi-eeprom#minimum-bootloader-version-min_boot_ver';
+
         // Prevent stored XSS by escaping untrusted data before HTML insertion
         function escapeHtml(str) {
             if (str === null || str === undefined) return '';
@@ -219,8 +221,8 @@
                             <th scope="col">EEPROM JEDEC</th>
                             <th scope="col">EEPROM Unique ID</th>
                             <th scope="col">Bootloader Build Date</th>
-                            <th scope="col" title="Manufacture version of the bootloader written to the device. A board refuses one older than its own.">Bootloader MFG Version</th>
-                            <th scope="col" title="The oldest bootloader manufacture version the board runs, from its OTP. Blank when the board did not report it.">Board MFG Version</th>
+                            <th scope="col" title="Manufacture version of the bootloader written to the device. A board refuses one older than its own."><a href="${MFG_VER_DOCS}" target="_blank" rel="noopener">Bootloader MFG Version</a></th>
+                            <th scope="col" title="The oldest bootloader manufacture version the board runs, from its OTP. Blank when the board did not report it."><a href="${MFG_VER_DOCS}" target="_blank" rel="noopener">Board MFG Version</a></th>
                             <th scope="col" title="Label of the signing key that was active when this device was provisioned">Signing Key Label</th>
                             <th scope="col" title="SHA256 fingerprint of the active signing key at provision time. Match this against the Active key on the Options page when re-provisioning.">Signing Key Hash</th>
                         </tr>

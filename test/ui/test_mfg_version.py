@@ -4,11 +4,15 @@ import http.client
 import time
 import urllib.parse
 
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+
 from ui.harness.case import UITest
 
 MFG = "/srv/rpi-sb-provisioner/manufacturing.db"
 STATE = "/srv/rpi-sb-provisioner/state.db"
 SERIAL = "mfgv0001"
+DOCS = "https://github.com/raspberrypi/rpi-eeprom#minimum-bootloader-version-min_boot_ver"
 
 # Runs check_bootloader_mfg_version from the installed rpi-sb-common.sh, as
 # bootstrap would, against a stand-in rpiboot that reports {hardware} and
@@ -175,6 +179,9 @@ class Records(UITest):
         headers = [h.text for h in self.b.all("thead th")]
         self.assertIn("Bootloader MFG Version", headers)
         self.assertIn("Board MFG Version", headers)
+        for h in self.b.all("thead th a"):
+            self.assertEqual(DOCS, h.get_attribute("href"))
+        self.assertEqual(2, len(self.b.all("thead th a")))
         status, body = self.b.fetch("/api/v2/manufacturing?limit=200")
         mine = [d for d in body if d.get("serial") == SERIAL]
         self.assertEqual(1, len(mine), body)
@@ -185,6 +192,7 @@ class Records(UITest):
         self.b.get(f"/devices/{SERIAL}")
         self.assertEqual("manufacture version 3; the board accepts 2 or later",
                          self.b.el("#info-mfg-versions").text)
+        self.assertEqual(DOCS, self.b.el("#info-mfg-versions-docs").get_attribute("href"))
         self.assertClean()
 
     def test_a_viewer_who_has_not_signed_in_does_not_see_it(self):
@@ -210,4 +218,17 @@ class Records(UITest):
         self.b.get("/options/get")
         self.b.click("#firmware-expand-btn")
         self.b.wait_text("#firmware-list", "manufacture version", timeout=20)
+        links = self.b.all("#firmware-list .mfg-version-link")
+        self.assertEqual(len(body["firmwareList"]), len(links))
+        self.assertEqual(DOCS, links[0].get_attribute("href"))
+        # Following the link leaves the release notes alone.
+        self.b.d.execute_script("arguments[0].addEventListener('click', e => e.preventDefault());", links[0])
+        links[0].click()
+        self.assertEqual([], self.b.all("#firmware-list .firmware-item.viewing"))
+        self.b.click("#firmware-list .firmware-item")
+        # The release notes, once fetched, redraw the pane: wait for them.
+        WebDriverWait(self.b.d, 20).until(lambda d: "Loading" not in d.find_element(By.ID, "firmware-notes").text)
+        self.assertIn("about manufacture versions", self.b.el("#firmware-mfg-version").text)
+        hrefs = [a.get_attribute("href") for a in self.b.all("#firmware-mfg-version a")]
+        self.assertEqual([DOCS, "https://github.com/raspberrypi/rpi-eeprom/blob/master/firmware-2712/versions.txt"], hrefs)
         self.assertClean()

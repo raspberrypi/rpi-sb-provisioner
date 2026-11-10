@@ -280,6 +280,26 @@
     // ===== Inline Firmware Browser =====
     let firmwareListData = [];
     let currentViewingFirmware = null;
+    const MFG_VER_DOCS = 'https://github.com/raspberrypi/rpi-eeprom#minimum-bootloader-version-min_boot_ver';
+
+    // rpi-eeprom's list of each release's manufacture version, for the family chosen.
+    function mfgVersionsListUrl() {
+        const family = document.querySelector('input[name="RPI_DEVICE_FAMILY"]:checked')?.value;
+        const chip = { '4': '2711', '5': '2712' }[family];
+        return chip ? `https://github.com/raspberrypi/rpi-eeprom/blob/master/firmware-${chip}/versions.txt` : '';
+    }
+
+    function mfgVersionLink(text) {
+        const a = document.createElement('a');
+        a.href = MFG_VER_DOCS;
+        a.target = '_blank';
+        a.rel = 'noopener';
+        a.className = 'mfg-version-link';
+        a.textContent = text;
+        // The item around it opens the release notes.
+        a.addEventListener('click', e => e.stopPropagation());
+        return a;
+    }
     
     function toggleFirmwareBrowser() {
         const browser = document.getElementById('firmware-browser');
@@ -384,7 +404,7 @@
             const metaDiv = document.createElement('div');
             metaDiv.className = 'firmware-item-meta';
             // A board refuses a bootloader older than the version in its OTP.
-            metaDiv.textContent = fw.filename + ' • ' + sizeKB + ' KB • manufacture version ' + fw.mfgVersion;
+            metaDiv.append(fw.filename + ' • ' + sizeKB + ' KB • ', mfgVersionLink('manufacture version ' + fw.mfgVersion));
             
             info.appendChild(versionDiv);
             info.appendChild(metaDiv);
@@ -416,6 +436,15 @@
         content += `<dl style="margin: 0 0 16px 0; font-size: 0.9rem;">`;
         content += `<dt style="font-weight: 600; color: #555;">Path</dt>`;
         content += `<dd style="margin: 4px 0 12px 0; font-family: monospace; word-break: break-all;">${escapeHtml(path)}</dd>`;
+        const fw = firmwareListData.find(f => f.filepath === path);
+        if (fw) {
+            const listUrl = mfgVersionsListUrl();
+            content += `<dt style="font-weight: 600; color: #555;">Manufacture version</dt>`;
+            content += `<dd id="firmware-mfg-version" style="margin: 4px 0 12px 0;">${escapeHtml(String(fw.mfgVersion))}. A board refuses a bootloader older than its own: `
+                + `<a href="${MFG_VER_DOCS}" target="_blank" rel="noopener">about manufacture versions</a>`
+                + (listUrl ? `, <a href="${listUrl}" target="_blank" rel="noopener">each release's version</a>` : '')
+                + `.</dd>`;
+        }
         content += `</dl>`;
         
         content += `<div style="display: flex; flex-direction: column; gap: 8px; margin-top: 16px; padding-top: 16px; border-top: 1px solid #e0e0e0;">`;
