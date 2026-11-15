@@ -1028,6 +1028,7 @@
     std::string deviceFamily = options.count("RPI_DEVICE_FAMILY") ? options["RPI_DEVICE_FAMILY"] : "5";
     std::string storageType = options.count("RPI_DEVICE_STORAGE_TYPE") ? options["RPI_DEVICE_STORAGE_TYPE"] : "sd";
     std::string storageCipher = options.count("RPI_DEVICE_STORAGE_CIPHER") ? options["RPI_DEVICE_STORAGE_CIPHER"] : "aes-xts-plain64";
+    std::string storageSectorSize = options.count("RPI_DEVICE_STORAGE_SECTOR_SIZE") ? options["RPI_DEVICE_STORAGE_SECTOR_SIZE"] : "";
     std::string keyFilePem = options.count("CUSTOMER_KEY_FILE_PEM") ? options["CUSTOMER_KEY_FILE_PEM"] : "";
     std::string keyPkcs11 = options.count("CUSTOMER_KEY_PKCS11_NAME") ? options["CUSTOMER_KEY_PKCS11_NAME"] : "";
     std::string goldMasterFile = options.count("GOLD_MASTER_OS_FILE") ? options["GOLD_MASTER_OS_FILE"] : "";
@@ -1349,6 +1350,55 @@
                     </label>
                 </div>
                 <div id="feedback-RPI_DEVICE_STORAGE_CIPHER" class="field-feedback"></div>
+
+                <label class="field-label">Encryption Sector Size</label>
+                <div class="tile-selector three-col">
+                    <label class="tile-option <%c++ if(storageSectorSize == "") $$ << "selected"; %>">
+                        <input type="radio" name="RPI_DEVICE_STORAGE_SECTOR_SIZE" value="" <%c++ if(storageSectorSize == "") $$ << "checked"; %>>
+                        <span class="tile-check">&#10003;</span>
+                        <div class="tile-header">
+                            <span class="tile-title">Device default</span>
+                        </div>
+                        <p class="tile-description">Sends nothing; the device chooses.</p>
+                    </label>
+
+                    <label class="tile-option <%c++ if(storageSectorSize == "512") $$ << "selected"; %>">
+                        <input type="radio" name="RPI_DEVICE_STORAGE_SECTOR_SIZE" value="512" <%c++ if(storageSectorSize == "512") $$ << "checked"; %>>
+                        <span class="tile-check">&#10003;</span>
+                        <div class="tile-header">
+                            <span class="tile-title">512 bytes</span>
+                        </div>
+                        <p class="tile-description">One encryption operation per 512 bytes.</p>
+                    </label>
+
+                    <label class="tile-option <%c++ if(storageSectorSize == "1024") $$ << "selected"; %>">
+                        <input type="radio" name="RPI_DEVICE_STORAGE_SECTOR_SIZE" value="1024" <%c++ if(storageSectorSize == "1024") $$ << "checked"; %>>
+                        <span class="tile-check">&#10003;</span>
+                        <div class="tile-header">
+                            <span class="tile-title">1024 bytes</span>
+                        </div>
+                        <p class="tile-description">One encryption operation per 1024 bytes. The fastboot gadget must accept a sector size.</p>
+                    </label>
+
+                    <label class="tile-option <%c++ if(storageSectorSize == "2048") $$ << "selected"; %>">
+                        <input type="radio" name="RPI_DEVICE_STORAGE_SECTOR_SIZE" value="2048" <%c++ if(storageSectorSize == "2048") $$ << "checked"; %>>
+                        <span class="tile-check">&#10003;</span>
+                        <div class="tile-header">
+                            <span class="tile-title">2048 bytes</span>
+                        </div>
+                        <p class="tile-description">One encryption operation per 2048 bytes. The fastboot gadget must accept a sector size.</p>
+                    </label>
+
+                    <label class="tile-option <%c++ if(storageSectorSize == "4096") $$ << "selected"; %>">
+                        <input type="radio" name="RPI_DEVICE_STORAGE_SECTOR_SIZE" value="4096" <%c++ if(storageSectorSize == "4096") $$ << "checked"; %>>
+                        <span class="tile-check">&#10003;</span>
+                        <div class="tile-header">
+                            <span class="tile-title">4096 bytes</span>
+                        </div>
+                        <p class="tile-description">One encryption operation per 4096 bytes. The fastboot gadget must accept a sector size.</p>
+                    </label>
+                </div>
+                <div id="feedback-RPI_DEVICE_STORAGE_SECTOR_SIZE" class="field-feedback"></div>
             </div>
 
             <!-- inline encryption-at-rest status styling. Deliberately mirrors

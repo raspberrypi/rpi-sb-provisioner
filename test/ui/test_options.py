@@ -184,6 +184,13 @@ class Options(UITest):
                 self.choose("RPI_DEVICE_STORAGE_CIPHER", cipher)
                 self.assertEqual(cipher, self.cfg("RPI_DEVICE_STORAGE_CIPHER"))
 
+    def test_sector_size(self):
+        self.choose("PROVISIONING_STYLE", "fde-only")
+        for size in ("4096", "2048", "1024", "512", ""):
+            with self.subTest(size=size):
+                self.choose("RPI_DEVICE_STORAGE_SECTOR_SIZE", size)
+                self.assertEqual(size, self.cfg("RPI_DEVICE_STORAGE_SECTOR_SIZE"))
+
     def test_workdir_is_checked_and_emptied_on_save(self):
         self.type_and_leave("RPI_SB_WORKDIR", "/no/such/parent/workdir")
         self.refused("RPI_SB_WORKDIR", "Parent directory does not exist")
