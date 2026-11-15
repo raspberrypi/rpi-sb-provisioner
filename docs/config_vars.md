@@ -130,6 +130,14 @@ If `RPI_DEVICE_STORAGE_CIPHER` is not specified, it defaults to `aes-xts-plain64
 
 `aes-xts-plain64` is recommended for Raspberry Pi 5 family devices (including Compute Module 5); all other Raspberry Pi devices are recommended to use `xchacha12,aes-adiantum-plain64` for improved performance.
 
+## RPI_DEVICE_STORAGE_SECTOR_SIZE
+
+**Optional**
+
+Specify the LUKS sector size, in bytes, for the `secure-boot` and `fde-only` styles. Supported values are `512`, `1024`, `2048` and `4096`, the sizes dm-crypt accepts.
+
+If `RPI_DEVICE_STORAGE_SECTOR_SIZE` is empty or not specified, nothing is passed to `oem cryptinit` and the device chooses, as it did before this setting existed. A value is passed to `oem cryptinit` as an argument after the cipher, so it needs a fastboot gadget whose `cryptinit` accepts one.
+
 ## RPI_DEVICE_FAMILY
 
 **Mandatory**
