@@ -1,0 +1,17 @@
+[Unit]
+Description=Stage a bootloader update for this provisioning station
+Documentation=https://github.com/raspberrypi/rpi-sb-provisioner
+
+# Started only from the web UI, when this station's firmware is too old for
+# rpi-fw-crypto. Not enabled, and never started by the package: it writes the
+# station's own bootloader at the next reboot.
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/rpi-sb-station-bootloader-update.sh
+StandardOutput=journal
+StandardError=journal
+# rpi-eeprom-update stages files in the boot partition and reads the SPI
+# EEPROM, so the filesystem is left writable.
+PrivateTmp=yes
+ProtectHome=yes
+NoNewPrivileges=yes

@@ -71,3 +71,4 @@ override_dh_installsystemd:
 	dh_installsystemd --name=rpi-sb-bootstrap@
 	dh_installsystemd --name=rpi-sb-triage@
 	dh_installsystemd --no-enable --name=rpi-sb-image-bootimg-generator@
+	dh_installsystemd --no-enable --no-start --name=rpi-sb-station-bootloader-update

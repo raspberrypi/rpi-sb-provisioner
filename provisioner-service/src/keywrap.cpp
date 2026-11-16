@@ -8,6 +8,9 @@
 #include <cstdint>
 #include <cstddef>
 #include <cstring>
+#include <ctime>
+#include <filesystem>
+#include <fstream>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -142,16 +145,39 @@ namespace {
         }
     }
 
+    // The running bootloader's build date, from the device tree, or empty.
+    std::string bootloaderBuildDate() {
+        std::ifstream f("/proc/device-tree/chosen/bootloader/build-timestamp", std::ios::binary);
+        unsigned char b[4];
+        if (!f.read(reinterpret_cast<char*>(b), sizeof(b))) return {};
+        const std::time_t t = (std::time_t(b[0]) << 24) | (b[1] << 16) | (b[2] << 8) | b[3];
+        std::tm tm{};
+        char out[32];
+        if (!gmtime_r(&t, &tm) || !std::strftime(out, sizeof(out), "%d %B %Y", &tm)) return {};
+        return out;
+    }
+
     DeviceKeyStatus probeDeviceKey() {
         DeviceKeyStatus status;
 
         if (rpi_fw_crypto_get_num_otp_keys() < 0) {
             status.state = DeviceKeyState::NoService;
-            status.reason = "The Raspberry Pi firmware crypto service is not available "
-                            "on this host, so secrets cannot be encrypted at rest.";
-            status.remedy = "This is expected in a build chroot or on non-Pi hardware. "
-                            "On a provisioning station, check that /dev/vcio_crypto exists and "
-                            "the firmware is up to date.";
+            std::error_code ec;
+            if (!std::filesystem::exists("/dev/vcio_crypto", ec)) {
+                status.reason = "The Raspberry Pi firmware crypto service is not available "
+                                "on this host: its kernel provides no /dev/vcio_crypto, so "
+                                "secrets cannot be encrypted at rest.";
+                status.remedy = "This is expected in a build chroot or on non-Pi hardware. "
+                                "On a provisioning station, update Raspberry Pi OS and reboot.";
+            } else {
+                const std::string built = bootloaderBuildDate();
+                status.reason = "This host's firmware does not answer the crypto service, so "
+                                "secrets cannot be encrypted at rest. Its bootloader"
+                                + (built.empty() ? std::string() : ", built " + built + ",")
+                                + " is likely too old to provide it.";
+                status.remedy = "Update this station's bootloader from the Options page, then reboot it.";
+                status.bootloaderUpdateMayHelp = true;
+            }
             return status;
         }
 

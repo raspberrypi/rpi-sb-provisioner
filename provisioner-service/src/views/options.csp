@@ -1362,6 +1362,7 @@
                 padding: 12px;
                 border-radius: 6px;
                 display: flex;
+                flex-wrap: wrap;
                 align-items: center;
                 gap: 10px;
             }
@@ -1372,7 +1373,8 @@
             .enc-status-icon { font-size: 1.5rem; flex-shrink: 0; line-height: 1; }
             .enc-warn .enc-status-icon { color: #8a6100; }
             .enc-ok   .enc-status-icon { color: #1e7e34; }
-            .enc-status-info { flex: 1; }
+            /* A button too wide to fit beside the text wraps below it. */
+            .enc-status-info { flex: 1 1 12rem; min-width: 0; }
             .enc-status-title { font-weight: 500; color: #333; }
             .enc-status-note { font-size: 0.8rem; color: #444; margin-top: 4px; }
             .enc-migrate-btn {
@@ -2504,6 +2506,7 @@
             if (!deviceKeyStatus || deviceKeyStatus.available) { el.innerHTML = ''; return; }
 
             const canFix = !!deviceKeyStatus.can_provision;
+            const canUpdate = !!deviceKeyStatus.can_update_bootloader;
             el.innerHTML =
                 '<div class="enc-status-box enc-error">' +
                   '<span class="enc-status-icon" aria-hidden="true">&#9888;</span>' +
@@ -2513,6 +2516,7 @@
                     '<span class="enc-row-feedback" id="device-key-feedback"></span>' +
                   '</div>' +
                   (canFix ? '<button type="button" class="enc-migrate-btn" id="device-key-provision-btn">Generate device key</button>' : '') +
+                  (canUpdate ? '<button type="button" class="enc-migrate-btn" id="station-bootloader-btn">Update this station\'s bootloader</button>' : '') +
                 '</div>';
 
             // Set as text, not markup: the reason carries a firmware error
@@ -2526,6 +2530,55 @@
 
             const btn = document.getElementById('device-key-provision-btn');
             if (btn) btn.addEventListener('click', function () { provisionDeviceKey(btn); });
+            const upd = document.getElementById('station-bootloader-btn');
+            if (upd) upd.addEventListener('click', function () { updateStationBootloader(upd); });
+        }
+
+        // What each result of rpi-sb-station-bootloader-update.sh means here.
+        const STATION_UPDATE_RESULTS = {
+            updated: 'Bootloader updated. Reboot this station when no board is being provisioned, to start using it.',
+            staged: 'Update staged. Reboot this station when no board is being provisioned, to apply it.',
+            current: 'The bootloader is already up to date, so it is not the cause. Update Raspberry Pi OS and reboot.',
+            'not-enabled': 'rpi-eeprom-update is disabled on this Compute Module. Update its bootloader with usbboot.',
+            frozen: 'The bootloader configuration sets FREEZE_VERSION=1, so it is not updated.',
+            failed: 'The update failed:'
+        };
+
+        async function updateStationBootloader(btn) {
+            const fb = document.getElementById('device-key-feedback');
+            const say = function (cls, text) { if (fb) { fb.className = 'enc-row-feedback' + cls; fb.textContent = ' ' + text; } };
+            if (!window.confirm(
+                'This updates this station\'s bootloader. A Raspberry Pi 5 writes it now: keep the power on ' +
+                'until it finishes. It runs from the next reboot, and nothing is rebooted now.\n\n' +
+                'A station with secure boot or a write-protected EEPROM will not take it.')) {
+                say('', 'Cancelled.');
+                return;
+            }
+            btn.disabled = true;
+            say('', 'Updating. Keep the power on…');
+            try {
+                const resp = await fetch('/options/update-station-bootloader', addCsrfHeader({ method: 'POST' }));
+                if (!resp.ok) {
+                    const data = await resp.json().catch(function () { return {}; });
+                    say(' error', apiErrorMessage(data, 'Could not start the update.'));
+                    btn.disabled = false;
+                    return;
+                }
+                let result = { state: 'running' };
+                for (let i = 0; i < 120 && (result.state === 'running' || result.state === 'none'); i++) {
+                    await new Promise(function (r) { setTimeout(r, 1000); });
+                    const r = await fetch('/options/station-bootloader-update', { headers: { 'Accept': 'application/json' } });
+                    if (r.ok) result = await r.json();
+                }
+                const text = STATION_UPDATE_RESULTS[result.state] || 'The update did not report a result.';
+                const lastLines = (result.output || '').trim().split('\n').slice(-4).join(' ');
+                say(result.state === 'staged' || result.state === 'updated' ? '' : ' error',
+                    result.state === 'failed' ? text + ' ' + lastLines : text);
+                btn.disabled = result.state !== 'failed';
+            } catch (e) {
+                say(' error', 'Could not reach the server.');
+                btn.disabled = false;
+            }
         }
 
         async function provisionDeviceKey(btn) {
