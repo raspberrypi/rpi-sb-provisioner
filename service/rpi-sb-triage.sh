@@ -132,6 +132,12 @@ log "OS image: ${GOLD_MASTER_OS_FILE} (${GOLD_MASTER_OS_KIND})"
 if [ -d "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL32}" ]; then
     cp -rf "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL32}/." "${LOG_DIRECTORY}/"
     rm -rf "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL32}"
+    # Bootstrap linked the port's log into the directory just merged.
+    _port_log="/var/log/rpi-sb-provisioner/${TARGET_USB_PATH}/bootstrap.log"
+    if [ -n "${TARGET_USB_PATH}" ] && [ -L "${_port_log}" ] &&
+       [ "$(readlink "${_port_log}")" = "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL32}/bootstrap.log" ]; then
+        ln -sf "${LOG_DIRECTORY}/bootstrap.log" "${_port_log}"
+    fi
 fi
 
 setup_fastboot_and_id_vars "${TARGET_DEVICE_SERIAL}"
