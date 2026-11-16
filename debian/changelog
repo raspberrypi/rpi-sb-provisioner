@@ -509,6 +509,10 @@ rpi-sb-provisioner (2.4.0) unstable; urgency=high
   * Stop writing bootstrap's first lines to /bootstrap.log, in the root of
     the filesystem. Upgrading removes the file.
 
+  * Show a failed bootstrap's own log on the device's page. It was left
+    where the web UI does not look, so the page could show a duplicate
+    descriptor's "Bootstrap already in progress", or a previous board's log.
+
   * Allow up to 15 minutes to erase the device before IDP provisioning,
     rather than 30 seconds, so an erase that discards the whole device
     has time to finish on slow eMMC.
