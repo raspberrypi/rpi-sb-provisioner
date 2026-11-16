@@ -950,27 +950,18 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
             log "Keywriting completed. Silently rebooting for next phase."
         fi
 
-        # Cache signed fastboot assets in the persistent workdir so that
-        # subsequent runs (which take the cached-bootloader path above) do
-        # not need to re-sign them.  Only recreate when the cache is missing
-        # (e.g. after a workdir clear).
+        # Signed fastboot assets are cached in the workdir, keyed on what they
+        # are built from. Only the package's postinst empties the workdir, so
+        # an rpiboot or gadget upgrade, or a new key, kept serving stale files.
+        FASTBOOT_ASSETS_ID="$(fastboot_assets_identity)" ||
+            die "Cannot read the files the fastboot assets are built from"
+        if [ "$(cat "${RPI_SB_WORKDIR}/fastboot-assets.id" 2>/dev/null)" != "${FASTBOOT_ASSETS_ID}" ]; then
+            rm -f "${RPI_SB_WORKDIR}/fastboot-assets.id" "${RPI_SB_WORKDIR}/bootfiles.bin" \
+                  "${RPI_SB_WORKDIR}/boot.img" "${RPI_SB_WORKDIR}/boot.sig"
+        fi
         if [ ! -f "${RPI_SB_WORKDIR}/bootfiles.bin" ]; then
-            case $TARGET_DEVICE_FAMILY in
-                2712)
-                    FASTBOOT_SIGN_DIR=$(mktemp -d)
-                    cd "${FASTBOOT_SIGN_DIR}"
-                    tar -vxf /usr/share/rpiboot/mass-storage-gadget64/bootfiles.bin
-                    # shellcheck disable=SC2046
-                    log_stderr rpi-sign-bootcode --debug -c 2712 -i 2712/bootcode5.bin -o 2712/bootcode5.bin.signed $(get_sign_bootcode_key_args) -v 0 -n 16
-                    mv -f "2712/bootcode5.bin.signed" "2712/bootcode5.bin"
-                    tar -vcf "${RPI_SB_WORKDIR}/bootfiles.bin" -- *
-                    cd -
-                    rm -rf "${FASTBOOT_SIGN_DIR}"
-                    ;;
-                *)
-                    cp /usr/share/rpiboot/mass-storage-gadget64/bootfiles.bin "${RPI_SB_WORKDIR}/bootfiles.bin"
-                    ;;
-            esac
+            build_fastboot_bootfiles "${RPI_SB_WORKDIR}/bootfiles.bin" ||
+                die "Cannot build the signed fastboot bootfiles.bin"
         fi
 
         # As with the EEPROM signature above, a boot.sig left behind by a run
@@ -996,6 +987,8 @@ if [ "$ALLOW_SIGNED_BOOT" -eq 1 ]; then
             fi
             announce_stop "Signing fastboot image"
         fi
+
+        echo "${FASTBOOT_ASSETS_ID}" > "${RPI_SB_WORKDIR}/fastboot-assets.id"
 
         # Stage cached assets into the per-run fastboot directory
         cp "${RPI_SB_WORKDIR}/bootfiles.bin" "${FASTBOOT_STAGING_DIR}/bootfiles.bin"

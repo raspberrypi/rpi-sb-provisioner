@@ -985,6 +985,54 @@ use_workdir_for_gold_master() {
     export RPI_SB_WORKDIR
 }
 
+# Fastboot assets, for bootstrap, which supplies log, die, log_stderr and the
+# TARGET_* and CUSTOMER_PUBLIC_KEY_FILE globals.
+: "${RPIBOOT_BOOTFILES:=/usr/share/rpiboot/mass-storage-gadget64/bootfiles.bin}"
+
+# build_fastboot_bootfiles ${output}
+#
+# rpiboot's bootfiles.bin, with BCM2712's bootcode signed and the customer
+# public key added as pubkey.bin for each chip, as usbboot's sign.sh does. In
+# rpiboot mode the bootloader takes the key that verifies boot.img from the
+# host, not SPI flash; without it the board stops with "Missing RSA public
+# key" (#371).
+build_fastboot_bootfiles() {
+    _bfb_dir=$(mktemp -d) || return 1
+    # Chained, not set -e: errexit is off inside a function called with ||.
+    if (
+        cd "${_bfb_dir}" &&
+        tar -xf "${RPIBOOT_BOOTFILES}" &&
+        if [ "${TARGET_DEVICE_FAMILY}" = 2712 ]; then
+            # shellcheck disable=SC2046
+            log_stderr rpi-sign-bootcode --debug -c 2712 -i 2712/bootcode5.bin -o 2712/bootcode5.bin.signed $(get_sign_bootcode_key_args) -v 0 -n 16 &&
+            mv -f 2712/bootcode5.bin.signed 2712/bootcode5.bin
+        fi &&
+        rpi-bootloader-key-convert "${CUSTOMER_PUBLIC_KEY_FILE}" --output pubkey.bin &&
+        [ -s pubkey.bin ] &&
+        for _chip in 2711 2712; do
+            if [ -d "${_chip}" ]; then cp -f pubkey.bin "${_chip}/pubkey.bin" || exit 1; fi
+        done &&
+        rm -f pubkey.bin &&
+        tar -cf "$1.tmp" -- *
+    ); then
+        mv -f "$1.tmp" "$1"
+        _bfb_rc=$?
+    else
+        rm -f "$1.tmp"
+        _bfb_rc=1
+    fi
+    rm -rf "${_bfb_dir}"
+    return "${_bfb_rc}"
+}
+
+# What the cached signed fastboot assets are built from: rpiboot's bootfiles,
+# the gadget, the customer key and the family.
+fastboot_assets_identity() {
+    _fai=$(sha256sum "$(readlink -f "${RPIBOOT_BOOTFILES}")" \
+                     "$(get_fastboot_gadget)" "${CUSTOMER_PUBLIC_KEY_FILE}") || return 1
+    printf '%s %s\n' "$(printf '%s\n' "${_fai}" | cut -d' ' -f1 | tr '\n' ' ')" "${TARGET_DEVICE_FAMILY}"
+}
+
 # Bootloader manufacture version checks, for bootstrap. They use its log,
 # die and record_state, and these globals: METADATA_DIR, MFG_VERSIONS,
 # MFG_VERSION_CACHE, BOARD_MFG_VER, BOARD_MFG_VER_READ, RPI_SB_WORKDIR,
