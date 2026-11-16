@@ -1033,6 +1033,40 @@ fastboot_assets_identity() {
     printf '%s %s\n' "$(printf '%s\n' "${_fai}" | cut -d' ' -f1 | tr '\n' ' ')" "${TARGET_DEVICE_FAMILY}"
 }
 
+# rpiboot succeeds once the board has its files, whether or not it then boots
+# them: a board that refuses boot.img stops with an LED code, gone from USB.
+# So bootstrap waits for the fastboot gadget on the board's port, and says why
+# it never came, from the board's console where uart.d maps the port.
+: "${FASTBOOT_ARRIVAL_TIMEOUT:=90}"
+await_fastboot_gadget() {
+    if [ -z "${TARGET_USB_PATH}" ]; then
+        log "Not checking that the board reached fastboot: its USB port is unknown"
+        return 0
+    fi
+    _ag_port="${USB_SYSFS_DIR:-/sys/bus/usb/devices}/${TARGET_USB_PATH}"
+    _ag_end=$(( $(date +%s) + FASTBOOT_ARRIVAL_TIMEOUT ))
+    while [ "$(date +%s)" -lt "${_ag_end}" ]; do
+        if [ "$(cat "${_ag_port}/idVendor" "${_ag_port}/idProduct" 2>/dev/null | tr '\n' ':')" = "18d1:4e40:" ]; then
+            log "The board is up as a fastboot device"
+            return 0
+        fi
+        sleep 0.5
+    done
+    _ag_said=$(uart_boot_errors "${TARGET_USB_PATH}" "$1")
+    if printf '%s' "${_ag_said}" | grep -q -e 'Bad signature' -e 'Missing RSA public key'; then
+        PROVISION_FAILED_REASON=boot-image-refused
+        mark_permanent_failure
+        log "The board refused the fastboot boot image, so it never came up as a fastboot device. It could not verify boot.img; retrying will not help. Its console said:"
+    else
+        PROVISION_FAILED_REASON=fastboot-not-reached
+        log "The board did not come up as a fastboot device within ${FASTBOOT_ARRIVAL_TIMEOUT} seconds of being sent the fastboot image.${_ag_said:+ Its console said:}"
+    fi
+    printf '%s\n' "${_ag_said}" | while IFS= read -r _ag_line; do
+        [ -z "${_ag_line}" ] || log "    ${_ag_line}"
+    done
+    die "Bootstrap failed: ${PROVISION_FAILED_REASON}"
+}
+
 # Bootloader manufacture version checks, for bootstrap. They use its log,
 # die and record_state, and these globals: METADATA_DIR, MFG_VERSIONS,
 # MFG_VERSION_CACHE, BOARD_MFG_VER, BOARD_MFG_VER_READ, RPI_SB_WORKDIR,

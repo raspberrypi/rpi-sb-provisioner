@@ -220,6 +220,17 @@ uart_window() {
     } > "${_window}.tmp" && mv -f "${_window}.tmp" "${_window}" || true
 }
 
+# uart_boot_errors() - Prints the bootloader's errors from a port's console
+# since an ISO 8601 UTC time, as the capture service stamps each line, without
+# the stamps. Prints nothing for a port uart.d does not map.
+uart_boot_errors() {
+    case "$1" in ''|*[!0-9.-]*) return 0 ;; esac
+    [ -r "${UART_LOG_DIR}/$1.log" ] || return 0
+    awk -v since="$2" '$1 >= since' "${UART_LOG_DIR}/$1.log" |
+        grep -E 'Bad signature|Missing RSA public key|Customer public key not loaded|not found: pubkey|BOOT ERROR|Error [0-9]+ loading' |
+        cut -d' ' -f2- | sed 's/^ *[0-9.]* //' | head -n 8
+}
+
 # record_progress() - Record a fine-grained progress state for the device the
 # calling script is working on.
 #
