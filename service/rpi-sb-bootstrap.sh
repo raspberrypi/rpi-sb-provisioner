@@ -31,6 +31,12 @@ HOLDING_LOCKFILE=0
 
 log() {
     log_file="${BOOTSTRAP_LOG_FILE:-${EARLY_LOG_DIRECTORY}/bootstrap.log}"
+    # Once triage has merged the filed log into the full serial's directory,
+    # what is left goes to the journal alone, not into a new directory.
+    if [ -n "${BOOTSTRAP_LOG_FILE}" ] && [ ! -d "${BOOTSTRAP_LOG_FILE%/*}" ]; then
+        printf "[%s] %s\n" "$(date +"%Y-%m-%d %H:%M:%S.$(date +%N | cut -c1-3)")" "$*"
+        return 0
+    fi
     timestamp=$(date +"%Y-%m-%d %H:%M:%S.$(date +%N | cut -c1-3)")
     message="$*"
     
@@ -91,6 +97,9 @@ cleanup() {
     # Clean up orphaned resources
     cleanup_orphans
 
+    if [ "${returnvalue}" -ne 0 ] && [ "${HOLDING_LOCKFILE}" -eq 1 ]; then
+        file_bootstrap_logs
+    fi
     if [ "${returnvalue}" -ne 0 ] && [ "${BOOTSTRAP_SKIP_FAILURE_HOOK:-0}" -ne 1 ]; then
         case ${PROVISIONING_STYLE} in
             "secure-boot")
@@ -256,21 +265,40 @@ extract_board_type() {
     log "rpiboot metadata: USER_BOARDREV=0x${user_boardrev} -> board_type=0x${BOARD_TYPE} (${BOARD_NAME})"
 }
 
-# Create symlinks so the web UI can find pre-fastboot logs while bootstrap is running.
-# The USB endpoint (e.g. "1-1.2") is always a clean path-safe identifier and is stored
-# in the DB, so the web UI can fall back to it when the serial-keyed directory has no logs.
-# When the serial IS a real serial (not a device-path fallback), also symlink by serial.
-# These symlinks are replaced by real files when bootstrap completes (see mv below).
-if [ -n "${TARGET_USB_PATH}" ]; then
-    _endpoint_log_dir="/var/log/rpi-sb-provisioner/${TARGET_USB_PATH}"
-    mkdir -p "${_endpoint_log_dir}"
-    ln -sf "${EARLY_LOG_DIRECTORY}/bootstrap.log" "${_endpoint_log_dir}/bootstrap.log"
-fi
-if [ -n "${TARGET_DEVICE_SERIAL}" ] && [ "${TARGET_DEVICE_SERIAL}" != "${TARGET_DEVICE_PATH}" ]; then
-    _serial_log_dir="/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}"
-    mkdir -p "${_serial_log_dir}"
-    ln -sf "${EARLY_LOG_DIRECTORY}/bootstrap.log" "${_serial_log_dir}/bootstrap.log"
-fi
+# Moves this run's logs from the early directory to the device's, by serial
+# or else by USB port, and links the port's log to them, for the web UI. Done
+# once, when bootstrap finishes or fails; the log follows.
+file_bootstrap_logs() {
+    [ -z "${BOOTSTRAP_LOGS_FILED}" ] || return 0
+    BOOTSTRAP_LOGS_FILED=1
+    if [ -n "${TARGET_DEVICE_SERIAL}" ] && [ "${TARGET_DEVICE_SERIAL}" != "${TARGET_DEVICE_PATH}" ]; then
+        _fl_dir="/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}"
+    elif [ -n "${TARGET_USB_PATH}" ]; then
+        _fl_dir="/var/log/rpi-sb-provisioner/${TARGET_USB_PATH}"
+    else
+        log "Warning: Neither serial nor USB path available, logs remain in ${EARLY_LOG_DIRECTORY}"
+        return 0
+    fi
+    mkdir -p "${_fl_dir}" || return 0
+    if [ -d "${EARLY_LOG_DIRECTORY}/metadata" ]; then
+        # Replaced, not moved into: mv nested it inside the last run's.
+        rm -rf "${_fl_dir}/metadata"
+        mv "${EARLY_LOG_DIRECTORY}/metadata" "${_fl_dir}/metadata" || true
+    fi
+    if mv -f "${EARLY_LOG_DIRECTORY}/bootstrap.log" "${_fl_dir}/bootstrap.log"; then
+        BOOTSTRAP_LOG_FILE="${_fl_dir}/bootstrap.log"
+    fi
+    # A run that sent no bootloader configuration asked for nothing, so an
+    # earlier run's record must not stand in for it.
+    rm -f "${_fl_dir}/requested-locks" "${_fl_dir}/mfg-versions"
+    if [ -f "${REQUESTED_LOCKS}" ]; then mv "${REQUESTED_LOCKS}" "${_fl_dir}/requested-locks" || true; fi
+    if [ -f "${MFG_VERSIONS}" ]; then mv "${MFG_VERSIONS}" "${_fl_dir}/mfg-versions" || true; fi
+    if [ -n "${TARGET_USB_PATH}" ] && [ "${_fl_dir}" != "/var/log/rpi-sb-provisioner/${TARGET_USB_PATH}" ]; then
+        if mkdir -p "/var/log/rpi-sb-provisioner/${TARGET_USB_PATH}"; then
+            ln -sf "${_fl_dir}/bootstrap.log" "/var/log/rpi-sb-provisioner/${TARGET_USB_PATH}/bootstrap.log" || true
+        fi
+    fi
+}
 
 die() {
     # shellcheck disable=SC2086
@@ -327,6 +355,18 @@ else
     # that produce multiple matching descriptors.
     BOOTSTRAP_SKIP_FAILURE_HOOK=1
     die "Bootstrap already in progress for ${TARGET_DEVICE_SERIAL}"
+fi
+
+# Lets the web UI show this run's log while it runs, by port and by serial;
+# file_bootstrap_logs replaces them. Only the run holding the device makes
+# them, or a duplicate descriptor's would show in its place.
+if [ -n "${TARGET_USB_PATH}" ]; then
+    mkdir -p "/var/log/rpi-sb-provisioner/${TARGET_USB_PATH}"
+    ln -sf "${EARLY_LOG_DIRECTORY}/bootstrap.log" "/var/log/rpi-sb-provisioner/${TARGET_USB_PATH}/bootstrap.log"
+fi
+if [ -n "${TARGET_DEVICE_SERIAL}" ] && [ "${TARGET_DEVICE_SERIAL}" != "${TARGET_DEVICE_PATH}" ]; then
+    mkdir -p "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}"
+    ln -sf "${EARLY_LOG_DIRECTORY}/bootstrap.log" "/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}/bootstrap.log"
 fi
 
 
@@ -1132,47 +1172,7 @@ timeout_fatal_secs 60 rpiboot -v -j "${METADATA_DIR}" -d "${FASTBOOT_STAGING_DIR
 extract_board_type
 set +e
 
-if [ -n "${TARGET_DEVICE_SERIAL}" ] && [ "${TARGET_DEVICE_SERIAL}" != "${TARGET_DEVICE_PATH}" ]; then
-    target_log_dir="/var/log/rpi-sb-provisioner/${TARGET_DEVICE_SERIAL}"
-    early_log_dir="${EARLY_LOG_DIRECTORY}"
-    
-    mkdir -p "${target_log_dir}"
-    if [ -d "${early_log_dir}/metadata" ]; then
-        mv "${early_log_dir}/metadata" "${target_log_dir}/metadata"
-    fi
-    mv "${early_log_dir}/bootstrap.log" "${target_log_dir}/bootstrap.log"
-    BOOTSTRAP_LOG_FILE="${target_log_dir}/bootstrap.log"
-    # A run that sent no bootloader configuration asked for nothing, so an
-    # earlier run's record must not stand in for it.
-    rm -f "${target_log_dir}/requested-locks" "${target_log_dir}/mfg-versions"
-    [ -f "${REQUESTED_LOCKS}" ] && mv "${REQUESTED_LOCKS}" "${target_log_dir}/requested-locks"
-    [ -f "${MFG_VERSIONS}" ] && mv "${MFG_VERSIONS}" "${target_log_dir}/mfg-versions"
-    # Also link into the endpoint-keyed directory so the web UI can find it by either key
-    if [ -n "${TARGET_USB_PATH}" ]; then
-        _endpoint_log_dir="/var/log/rpi-sb-provisioner/${TARGET_USB_PATH}"
-        mkdir -p "${_endpoint_log_dir}"
-        ln -sf "${target_log_dir}/bootstrap.log" "${_endpoint_log_dir}/bootstrap.log"
-    fi
-elif [ -n "${TARGET_USB_PATH}" ]; then
-    # No real serial available - move logs to the endpoint-keyed directory instead
-    target_log_dir="/var/log/rpi-sb-provisioner/${TARGET_USB_PATH}"
-    early_log_dir="${EARLY_LOG_DIRECTORY}"
-    
-    mkdir -p "${target_log_dir}"
-    if [ -d "${early_log_dir}/metadata" ]; then
-        mv "${early_log_dir}/metadata" "${target_log_dir}/metadata"
-    fi
-    mv "${early_log_dir}/bootstrap.log" "${target_log_dir}/bootstrap.log"
-    BOOTSTRAP_LOG_FILE="${target_log_dir}/bootstrap.log"
-    # A run that sent no bootloader configuration asked for nothing, so an
-    # earlier run's record must not stand in for it.
-    rm -f "${target_log_dir}/requested-locks" "${target_log_dir}/mfg-versions"
-    [ -f "${REQUESTED_LOCKS}" ] && mv "${REQUESTED_LOCKS}" "${target_log_dir}/requested-locks"
-    [ -f "${MFG_VERSIONS}" ] && mv "${MFG_VERSIONS}" "${target_log_dir}/mfg-versions"
-else
-    log "Warning: Neither serial nor USB path available, logs will remain in ${EARLY_LOG_DIRECTORY}"
-    echo "[$(date +"%Y-%m-%d %H:%M:%S.$(date +%N | cut -c1-3)")] Warning: Neither serial nor USB path available, logs remain in ${EARLY_LOG_DIRECTORY}" >> "${EARLY_LOG_DIRECTORY}/bootstrap.log"
-fi
+file_bootstrap_logs
 
 announce_stop "fastboot initialisation"
 record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_FINISHED}" "${TARGET_USB_PATH}"
