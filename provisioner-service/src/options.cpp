@@ -15,6 +15,13 @@
 #include "keywrap.h"
 #include "keyregistry.h"
 #include <openssl/crypto.h>
+#include <systemd/sd-bus.h>
+#include <cstring>
+
+namespace {
+    // Written by rpi-sb-station-bootloader-update.sh.
+    const char* const STATION_UPDATE_STATUS = "/run/rpi-sb-provisioner/station-bootloader-update.status";
+}
 
 namespace provisioner {
     namespace {
@@ -1906,6 +1913,7 @@ namespace provisioner {
             // Only a blank slot can be programmed; every other failure is a
             // property of the host that no action here would change.
             jsonResponse["can_provision"] = status.state == keywrap::DeviceKeyState::Blank;
+            jsonResponse["can_update_bootloader"] = status.bootloaderUpdateMayHelp;
             jsonResponse["device_unique"] = status.deviceUnique;
             if (status.keyId >= 0) jsonResponse["key_id"] = status.keyId;
             if (!status.reason.empty()) jsonResponse["reason"] = status.reason;
@@ -2012,6 +2020,73 @@ namespace provisioner {
             resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
             resp->setBody(Json::FastWriter().write(jsonResponse));
             callback(resp);
+        });
+
+        // Stages a bootloader update for this station, when its firmware is
+        // too old for rpi-fw-crypto. The UI cannot write the boot partition,
+        // so a oneshot unit runs rpi-eeprom-update -a; it never reboots.
+        app.registerHandler(OPTIONS_PATH + "/update-station-bootloader", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
+            AuditLog::logHandlerAccess(req, "/options/update-station-bootloader");
+            if (req->getMethod() != HttpMethod::Post) {
+                callback(provisioner::utils::createErrorResponse(
+                    req, "This endpoint only accepts POST requests",
+                    drogon::k405MethodNotAllowed, "Method Not Allowed", "METHOD_NOT_ALLOWED"));
+                return;
+            }
+            if (!keywrap::deviceKeyStatus().bootloaderUpdateMayHelp) {
+                callback(provisioner::utils::createErrorResponse(
+                    req, "This station's bootloader is not the cause of its device key problem.",
+                    drogon::k409Conflict, "Not Applicable", "NOT_APPLICABLE"));
+                return;
+            }
+            std::error_code ec;
+            std::filesystem::remove(STATION_UPDATE_STATUS, ec);
+
+            sd_bus *bus = nullptr;
+            sd_bus_error error = SD_BUS_ERROR_NULL;
+            sd_bus_message *reply = nullptr;
+            int r = sd_bus_open_system(&bus);
+            if (r >= 0) {
+                r = sd_bus_call_method(bus, "org.freedesktop.systemd1", "/org/freedesktop/systemd1",
+                                       "org.freedesktop.systemd1.Manager", "StartUnit", &error, &reply,
+                                       "ss", "rpi-sb-station-bootloader-update.service", "replace");
+            }
+            const std::string why = error.message ? error.message : (r < 0 ? strerror(-r) : "");
+            sd_bus_message_unref(reply);
+            sd_bus_error_free(&error);
+            sd_bus_unref(bus);
+
+            AuditLog::logFileSystemAccess("UPDATE_STATION_BOOTLOADER", "rpi-sb-station-bootloader-update.service",
+                                          r >= 0, auth::username(req), why);
+            if (r < 0) {
+                LOG_ERROR << "Could not start the station bootloader update: " << why;
+                callback(provisioner::utils::createErrorResponse(
+                    req, "Could not start the bootloader update: " + why,
+                    drogon::k500InternalServerError, "Update Not Started", "UPDATE_NOT_STARTED"));
+                return;
+            }
+            Json::Value jsonResponse;
+            jsonResponse["state"] = "running";
+            auto resp = HttpResponse::newHttpJsonResponse(jsonResponse);
+            resp->setStatusCode(k202Accepted);
+            callback(resp);
+        });
+
+        // The last station bootloader update's result, from its status file.
+        app.registerHandler(OPTIONS_PATH + "/station-bootloader-update", [](const HttpRequestPtr &req, std::function<void(const HttpResponsePtr &)> &&callback) {
+            Json::Value jsonResponse;
+            jsonResponse["state"] = "none";
+            std::ifstream in(STATION_UPDATE_STATUS);
+            std::string line, output;
+            bool inOutput = false;
+            while (in && std::getline(in, line)) {
+                if (inOutput) { output += line + "\n"; continue; }
+                if (line == "---") { inOutput = true; continue; }
+                const auto eq = line.find('=');
+                if (eq != std::string::npos && line.substr(0, eq) == "state") jsonResponse["state"] = line.substr(eq + 1);
+            }
+            jsonResponse["output"] = output;
+            callback(HttpResponse::newHttpJsonResponse(jsonResponse));
         });
 
         // Encryption-at-rest status endpoint (GET) - reports, per secret,

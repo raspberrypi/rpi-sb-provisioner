@@ -6,6 +6,7 @@ service/rpi-sb-bootstrap.sh                     /usr/bin
 service/rpi-sb-triage.sh                        /usr/bin
 service/rpi-sb-common.sh                        /usr/bin
 service/rpi-sb-image-bootimg-generator.sh       /usr/bin
+service/rpi-sb-station-bootloader-update.sh     /usr/bin
 service/rpi-sb-hsm-wrapper-parse.sh             /usr/bin
 service/rpi-sb-pkcs11-sign.sh                   /usr/bin
 service/rpi-sb-pem-sign.sh                      /usr/bin
@@ -17,6 +18,7 @@ service/rpi-idp-provisioner@.service                        /usr/lib/systemd/sys
 service/rpi-sb-bootstrap@.service                           /usr/lib/systemd/system
 service/rpi-sb-triage@.service                              /usr/lib/systemd/system
 service/rpi-sb-image-bootimg-generator@.service             /usr/lib/systemd/system
+service/rpi-sb-station-bootloader-update.service           /usr/lib/systemd/system
 
 
 host-support/cryptroot_initramfs                    /var/lib/rpi-sb-provisioner

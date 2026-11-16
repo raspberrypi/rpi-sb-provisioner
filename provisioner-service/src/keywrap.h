@@ -47,6 +47,9 @@ namespace provisioner {
             bool deviceUnique = false;  // slot carries the DEVICE flag
             std::string reason;         // what is wrong, in UI-presentable prose
             std::string remedy;         // what would fix it; empty when nothing can
+            // NoService on a host that has /dev/vcio_crypto: its firmware does
+            // not answer, and updating the bootloader is the likely fix.
+            bool bootloaderUpdateMayHelp = false;
         };
 
         // Stable lowercase name for a state, for JSON payloads and logs.
