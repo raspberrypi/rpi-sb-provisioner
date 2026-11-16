@@ -137,6 +137,13 @@ if [ -n "$RPI_SB_WORKDIR" ] && [ -d "$RPI_SB_WORKDIR" ]; then
     fi
 fi
 
+# Bootstrap logged its first lines to /bootstrap.log before it knew its log
+# directory. Removed only if every line is one of those.
+if [ -f /bootstrap.log ] && [ ! -L /bootstrap.log ] &&
+   ! grep -qv '^\[[0-9-]* [0-9:.]*\] ' /bootstrap.log; then
+    rm -f /bootstrap.log
+fi
+
 # Use the configured paths if set
 if [ -n "$RPI_SB_PROVISIONER_MANUFACTURING_DB" ]; then
     MFG_DB_PATH="$RPI_SB_PROVISIONER_MANUFACTURING_DB"

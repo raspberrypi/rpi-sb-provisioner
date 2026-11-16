@@ -138,6 +138,11 @@ trap 'exit 143' TERM
 
 # On pre-Pi4 devices, only TARGET_DEVICE_PATH is likely to be unique.
 TARGET_DEVICE_PATH="$1"
+# Set before anything is logged: unset, log wrote to /bootstrap.log. A device
+# number is reused, so each run starts its own log.
+EARLY_LOG_DIRECTORY="/var/log/rpi-sb-provisioner/early/${TARGET_DEVICE_PATH}"
+mkdir -p "${EARLY_LOG_DIRECTORY}"
+: > "${EARLY_LOG_DIRECTORY}/bootstrap.log"
 # TARGET_USB_PATH is a udev device path in the format "X-Y[.Z]" where:
 # - X is the USB bus number
 # - Y is the port number on that bus  
@@ -169,9 +174,6 @@ if [ -z "${TARGET_USB_PATH}" ] && [ -n "${TARGET_DEVICE_SERIAL}" ] && [ "${TARGE
     fi
 fi
 
-
-EARLY_LOG_DIRECTORY="/var/log/rpi-sb-provisioner/early/${TARGET_DEVICE_PATH}"
-mkdir -p "${EARLY_LOG_DIRECTORY}"
 
 # Enforce the USB port restriction before this device is given any state of
 # its own. On a fixed programming jig only the wired head ports should ever
