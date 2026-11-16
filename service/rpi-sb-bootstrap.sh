@@ -30,7 +30,7 @@ LOG_BASE="/var/log/rpi-sb-provisioner"
 HOLDING_LOCKFILE=0
 
 log() {
-    log_file="${EARLY_LOG_DIRECTORY}/bootstrap.log"
+    log_file="${BOOTSTRAP_LOG_FILE:-${EARLY_LOG_DIRECTORY}/bootstrap.log}"
     timestamp=$(date +"%Y-%m-%d %H:%M:%S.$(date +%N | cut -c1-3)")
     message="$*"
     
@@ -1125,6 +1125,7 @@ record_state "${TARGET_DEVICE_SERIAL}" "bootstrap-firmware-updated" "${TARGET_US
 announce_start "fastboot initialisation"
 record_state "${TARGET_DEVICE_SERIAL}" "bootstrap-fastboot-initialisation-started" "${TARGET_USB_PATH}"
 
+FASTBOOT_PASS_STARTED=$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)
 timeout_fatal_secs 60 rpiboot -v -j "${METADATA_DIR}" -d "${FASTBOOT_STAGING_DIR}" -p "${TARGET_USB_PATH}"
 extract_board_type
 set +e
@@ -1138,6 +1139,7 @@ if [ -n "${TARGET_DEVICE_SERIAL}" ] && [ "${TARGET_DEVICE_SERIAL}" != "${TARGET_
         mv "${early_log_dir}/metadata" "${target_log_dir}/metadata"
     fi
     mv "${early_log_dir}/bootstrap.log" "${target_log_dir}/bootstrap.log"
+    BOOTSTRAP_LOG_FILE="${target_log_dir}/bootstrap.log"
     # A run that sent no bootloader configuration asked for nothing, so an
     # earlier run's record must not stand in for it.
     rm -f "${target_log_dir}/requested-locks" "${target_log_dir}/mfg-versions"
@@ -1159,6 +1161,7 @@ elif [ -n "${TARGET_USB_PATH}" ]; then
         mv "${early_log_dir}/metadata" "${target_log_dir}/metadata"
     fi
     mv "${early_log_dir}/bootstrap.log" "${target_log_dir}/bootstrap.log"
+    BOOTSTRAP_LOG_FILE="${target_log_dir}/bootstrap.log"
     # A run that sent no bootloader configuration asked for nothing, so an
     # earlier run's record must not stand in for it.
     rm -f "${target_log_dir}/requested-locks" "${target_log_dir}/mfg-versions"
@@ -1172,6 +1175,8 @@ fi
 announce_stop "fastboot initialisation"
 record_state "${TARGET_DEVICE_SERIAL}" "${BOOTSTRAP_FINISHED}" "${TARGET_USB_PATH}"
 set -e
+
+await_fastboot_gadget "${FASTBOOT_PASS_STARTED}"
 
 # Consume any one-time special flags now that bootstrap has completed successfully
 consume_onetime_special_flags
