@@ -476,6 +476,12 @@ namespace provisioner {
                     jsonResponse["valid"] = false;
                     jsonResponse["error"] = "Cipher must be aes-xts-plain64 or xchacha12,aes-adiantum-plain64";
                 }
+            } else if (fieldName == "RPI_DEVICE_STORAGE_SECTOR_SIZE") {
+                if (!fieldValue.empty() && fieldValue != "512" && fieldValue != "1024" &&
+                    fieldValue != "2048" && fieldValue != "4096") {
+                    jsonResponse["valid"] = false;
+                    jsonResponse["error"] = "Sector size must be 512, 1024, 2048 or 4096";
+                }
             } else if (fieldName == "CUSTOMER_KEY_PKCS11_NAME") {
                 if (!fieldValue.empty()) {
                     // Basic validation for PKCS11 format

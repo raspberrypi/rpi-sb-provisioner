@@ -25,6 +25,7 @@ read_config
 compute_image_summary
 
 : "${RPI_DEVICE_STORAGE_CIPHER:=aes-xts-plain64}"
+check_storage_sector_size || exit 1
 
 die() {
     record_abort_once "${TARGET_DEVICE_SERIAL}" "${TARGET_USB_PATH}"
@@ -583,7 +584,7 @@ timeout_fatal_secs "${FASTBOOT_STORAGE_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_
 sleep 2
 timeout_fatal_secs "${FASTBOOT_STORAGE_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 83 # Grow to fill storage
 sleep 2
-timeout_fatal_secs "${FASTBOOT_STORAGE_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem cryptinit "${RPI_DEVICE_STORAGE_TYPE}"p2 root "${RPI_DEVICE_STORAGE_CIPHER}"
+timeout_fatal_secs "${FASTBOOT_STORAGE_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem cryptinit "${RPI_DEVICE_STORAGE_TYPE}"p2 root "${RPI_DEVICE_STORAGE_CIPHER}" ${RPI_DEVICE_STORAGE_SECTOR_SIZE:+"${RPI_DEVICE_STORAGE_SECTOR_SIZE}"}
 sleep 2
 timeout_fatal_secs "${FASTBOOT_STORAGE_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem cryptopen "${RPI_DEVICE_STORAGE_TYPE}"p2 cryptroot
 sleep 2
