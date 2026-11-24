@@ -100,7 +100,7 @@ cleanup() {
     if [ "${returnvalue}" -ne 0 ] && [ "${HOLDING_LOCKFILE}" -eq 1 ]; then
         file_bootstrap_logs
     fi
-    if [ "${returnvalue}" -ne 0 ] && [ "${BOOTSTRAP_SKIP_FAILURE_HOOK:-0}" -ne 1 ]; then
+    if [ "${returnvalue}" -ne 0 ]; then
         case ${PROVISIONING_STYLE} in
             "secure-boot")
                 run_provision_failed_hook "sb-provisioner" "bootstrap"
@@ -114,22 +114,17 @@ cleanup() {
         esac
     fi
 
-    if [ $returnvalue -eq 0 ]; then
+    if [ "${BOOTSTRAP_DUPLICATE:-0}" -eq 1 ]; then
+        systemd-notify --status="Another descriptor is bootstrapping this board" STOPPING=1
+    elif [ $returnvalue -eq 0 ]; then
         systemd-notify --status="Provisioning completed successfully" STOPPING=1
     else
         systemd-notify --status="Provisioning failed" STOPPING=1
     fi
     
-    if [ "${returnvalue}" -ne 0 ] && [ "${BOOTSTRAP_SKIP_FAILURE_HOOK:-0}" -ne 1 ]; then
+    if [ "${returnvalue}" -ne 0 ]; then
         # A `set -e` death never reaches die(), so without this the device
         # stays recorded in its last transitional state for ever.
-        #
-        # Gated on the same flag as the failure hook above. A device that
-        # produces multiple matching descriptors loses the lock race and dies
-        # here as a matter of course, which is why that path sets the flag and
-        # says not to record state for it -- recording it would put ABORTED on
-        # the Devices page for a device whose other descriptor is bootstrapping
-        # perfectly well, moments before it reports BOOTSTRAP-FINISHED.
         record_abort_once "${TARGET_DEVICE_SERIAL}" "${TARGET_USB_PATH}"
     fi
 
@@ -351,10 +346,12 @@ DEVICE_LOCK="${LOCK_BASE}/${TARGET_DEVICE_SERIAL}"
 if atomic_mkdir "$DEVICE_LOCK"; then
     HOLDING_LOCKFILE=1
 else
-    # Don't record state here, as this is an expected failure for devices
-    # that produce multiple matching descriptors.
-    BOOTSTRAP_SKIP_FAILURE_HOOK=1
-    die "Bootstrap already in progress for ${TARGET_DEVICE_SERIAL}"
+    # A board offers several USB descriptors and each starts a bootstrap; the
+    # one holding the lock does the work. The others have nothing to do, so
+    # they end cleanly rather than as failed units with ABORTED recorded.
+    log "Bootstrap already in progress for ${TARGET_DEVICE_SERIAL}; leaving the board to it"
+    BOOTSTRAP_DUPLICATE=1
+    exit 0
 fi
 
 # Lets the web UI show this run's log while it runs, by port and by serial;
