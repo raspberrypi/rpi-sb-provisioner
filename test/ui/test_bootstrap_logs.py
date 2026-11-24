@@ -91,3 +91,34 @@ class BootstrapLogFiling(UITest):
             [ "$early" -lt "$first_log" ] && echo ORDERED
         """, check=False)
         self.assertIn("ORDERED", out)
+
+
+class DuplicateDescriptor(UITest):
+    """A board offers several USB descriptors, and each starts a bootstrap;
+    those that find the board taken end cleanly, not as failed units."""
+    sign_in_first = False
+
+    def test_a_duplicate_ends_cleanly(self):
+        # The VM's USB keyboard stands in for the board; holding its lock
+        # makes this run the duplicate.
+        out = self.station.sh(r"""
+            S=10000000fedcba98
+            for d in /dev/bus/usb/*/*; do
+                [ "$(udevadm info --name=$d --query=property --property=ID_SERIAL_SHORT --value 2>/dev/null)" = $S ] && D=$d
+            done
+            L=/var/lock/rpi-sb-bootstrap/$S
+            # Its own unit name, so the journal holds this run alone.
+            U=uitest-duplicate-$$
+            Q="select count(*) from devices where serial='$S'"
+            before=$(sqlite3 /srv/rpi-sb-provisioner/state.db "$Q")
+            mkdir -p $L
+            systemd-run --wait --quiet -p Type=notify -p NotifyAccess=all --unit $U /usr/bin/rpi-sb-bootstrap.sh $D; echo "rc=$?"
+            echo "result=$(systemctl show -p Result --value $U 2>/dev/null)"
+            journalctl --no-pager -o cat -u $U | grep -E '^\[.*already in progress' | head -1
+            echo "new rows=$(( $(sqlite3 /srv/rpi-sb-provisioner/state.db "$Q") - before ))"
+            rmdir $L; systemctl reset-failed $U 2>/dev/null; true
+        """, check=False)
+        self.assertIn("rc=0", out)
+        self.assertNotIn("result=exit-code", out)
+        self.assertIn("leaving the board to it", out)
+        self.assertIn("new rows=0", out)
