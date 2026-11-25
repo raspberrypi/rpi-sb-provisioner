@@ -463,7 +463,8 @@ rpi-sb-provisioner (2.4.0) unstable; urgency=high
     work. A flash is allowed time in proportion to its size, rather than
     the fixed 600 seconds that stopped a healthy 5.7 GiB IDP flash at
     96% (#346), and the reason a device gives for refusing a command now
-    reaches the per-device log rather than only the journal.
+    reaches the per-device log rather than only the journal. A flash that
+    fails now fails the run, rather than the run reporting success (#335).
 
   * Give up within 10 seconds on a board that has gone, instead of waiting
     out a long step's whole budget: up to 15 minutes for an erase, or over
@@ -601,7 +602,9 @@ rpi-sb-provisioner (2.4.0) unstable; urgency=high
   * Rebuild the fastboot gadget images with rpi-fastbootd
     14.0.0~git20261026.adf29cb (pi-gen-micro #72). getvar secure now
     answers from the bootloader's customer key report, so the manufacturing
-    database records secure boot, empty on every device until now.
+    database records secure boot, empty on every device until now (#342).
+    oem cryptinit sizes the key for its cipher, so Adiantum, which takes a
+    256-bit key, no longer fails with "No such file or directory" (#364).
 
   * Name devices registered with Raspberry Pi Connect. With no name sent,
     Connect named each after its hostname, which a whole batch shares. The
