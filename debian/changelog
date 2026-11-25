@@ -531,6 +531,12 @@ rpi-sb-provisioner (2.4.0) unstable; urgency=high
     already taken failed, so each board left two or three failed units and
     the station reported itself degraded.
 
+  * Start the secure boot and FDE provisioners on a station with only
+    python3, which is all a fresh Trixie install has; both refused to run
+    without a "python" command (#244). They now identify the board before
+    checking tools, so such a failure is filed against it rather than as a
+    run with no serial. Reported by Timpy123.
+
   * Offer to update the provisioning station's own bootloader when it is too
     old for rpi-fw-crypto, which stops signing keys and HSM PINs being
     stored. The Options page tells this apart from a kernel without
