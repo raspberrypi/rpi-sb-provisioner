@@ -259,6 +259,35 @@ serial_is_safe() {
     [ "${#1}" -le 64 ]
 }
 
+# device_size_bytes ${value}
+#
+# Prints a size a device reports in bytes, in decimal. fastbootd gives sizes
+# as fastboot does, "0x1B0C00000"; plain decimal is accepted too. Fails on
+# anything else, on zero and on more than 4 TiB, checking the length before
+# any arithmetic so that no value can overflow past the check (#376).
+device_size_bytes() {
+    case "$1" in
+        0[xX]*)
+            _dsb=${1#0[xX]}
+            case "${_dsb}" in ""|*[!0-9a-fA-F]*) return 1 ;; esac
+            _dsb=${_dsb#"${_dsb%%[!0]*}"}
+            [ "${#_dsb}" -le 11 ] || return 1
+            _dsb=$((0x${_dsb:-0}))
+            ;;
+        ""|*[!0-9]*)
+            return 1
+            ;;
+        *)
+            # Leading zeros stripped, or arithmetic would read it as octal.
+            _dsb=${1#"${1%%[!0]*}"}
+            [ "${#_dsb}" -le 13 ] || return 1
+            _dsb=${_dsb:-0}
+            ;;
+    esac
+    [ "${_dsb}" -gt 0 ] && [ "${_dsb}" -le 4398046511104 ] || return 1
+    echo "${_dsb}"
+}
+
 # The workdir's contents are reused, flashed and written through as root, so
 # anyone else able to write there could supply their own boot image or plant
 # a symlink. It is used only when root alone can change it.
