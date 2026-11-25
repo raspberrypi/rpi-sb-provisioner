@@ -1142,7 +1142,7 @@
                         <div class="tile-header">
                             <span class="tile-title">NVMe</span>
                         </div>
-                        <p class="tile-description">NVMe SSD storage. Needs a Raspberry Pi 5, or an NVMe HAT on a Compute Module 4.</p>
+                        <p class="tile-description">NVMe SSD storage, on an M.2 HAT for a Raspberry Pi 5, or the carrier board of a Compute Module.</p>
                     </label>
                 </div>
                 <div id="feedback-RPI_DEVICE_STORAGE_TYPE" class="field-feedback"></div>
