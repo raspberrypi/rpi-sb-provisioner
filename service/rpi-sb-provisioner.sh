@@ -139,7 +139,7 @@ check_command_exists() {
 
 check_python_module_exists() {
     module_name=$1
-    if ! python -c "import ${module_name}" 1> /dev/null; then
+    if ! python3 -c "import ${module_name}" 1> /dev/null; then
         log "Failed to load Python module '${module_name}'"
         exit 1
     else
@@ -218,6 +218,10 @@ trap 'exit 143' TERM
 
 ### Start the provisioner phase
 
+# Identify the board first, so a missing tool is reported against it.
+check_command_exists fastboot
+setup_fastboot_and_id_vars "$1"
+
 # These tools are used to modify the supplied images, and deal with mounting and unmounting the images.
 check_command_exists losetup
 check_command_exists mknod
@@ -229,7 +233,7 @@ check_command_exists findmnt
 check_command_exists openssl
 
 # python is used by the Raspberry Pi usbboot scripts, and used as part of transforming the supplied key.
-check_command_exists python
+check_command_exists python3
 # pycryptodome is a python module used by the Raspberry Pi usbboot scripts
 check_python_module_exists Cryptodome
 
@@ -241,7 +245,6 @@ check_command_exists cp
 check_command_exists mount
 
 # Fastboot is used as a transfer mechanism to get images and metadata to and from the Raspberry Pi device
-check_command_exists fastboot
 check_command_exists simg_dump
 
 check_command_exists blockdev
@@ -253,8 +256,6 @@ check_command_exists img2simg
 check_command_exists mkfs.fat
 check_command_exists truncate
 check_command_exists systemd-notify
-
-setup_fastboot_and_id_vars "$1"
 
 record_state "${TARGET_DEVICE_SERIAL}" "${PROVISIONER_STARTED}" "${TARGET_USB_PATH}"
 
