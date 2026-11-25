@@ -193,6 +193,11 @@ class OptionLimits(Limits):
         self.assertValid("RPI_DEVICE_STORAGE_CIPHER", ["aes-xts-plain64", "xchacha12,aes-adiantum-plain64", ""])
         self.assertInvalid("RPI_DEVICE_STORAGE_CIPHER", ["aes", "xchacha12", "aes-xts-plain64 "], "Cipher must be")
 
+    def test_sector_size(self):
+        self.station.set_config(RPI_DEVICE_STORAGE_SECTOR_SIZE="")
+        self.assertValid("RPI_DEVICE_STORAGE_SECTOR_SIZE", ["512", "1024", "2048", "4096", ""])
+        self.assertInvalid("RPI_DEVICE_STORAGE_SECTOR_SIZE", ["256", "8192", "4k", "4096 ", "04096", "0", "-512"], "Sector size must be")
+
     def test_pkcs11_uri(self):
         self.station.set_config(CUSTOMER_KEY_PKCS11_NAME="pkcs11:object=k;type=private")
         self.assertValid("CUSTOMER_KEY_PKCS11_NAME", ["pkcs11:object=k;type=private"])

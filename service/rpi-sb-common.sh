@@ -548,6 +548,18 @@ _read_config() {
     fi
 }
 
+# RPI_DEVICE_STORAGE_SECTOR_SIZE is the LUKS sector size, in bytes, that
+# "oem cryptinit" is asked for. Empty leaves the choice to the device.
+check_storage_sector_size() {
+    case "${RPI_DEVICE_STORAGE_SECTOR_SIZE:-}" in
+        ""|512|1024|2048|4096) ;;
+        *)
+            echo "RPI_DEVICE_STORAGE_SECTOR_SIZE must be 512, 1024, 2048 or 4096, not '${RPI_DEVICE_STORAGE_SECTOR_SIZE}'" >&2
+            return 1
+            ;;
+    esac
+}
+
 # Initializes fastboot connection and device identification variables
 # Takes a fastboot device specifier (USB serial or network address) and:
 # 1. Verifies fastboot connectivity

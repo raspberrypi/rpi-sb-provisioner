@@ -645,6 +645,12 @@ rpi-sb-provisioner (2.4.0) unstable; urgency=high
   * Draw the web UI's info icon instead of using the U+24D8 glyph, which no
     font on Raspberry Pi OS has, so a CM5 programming jig showed a blank.
 
+  * Add RPI_DEVICE_STORAGE_SECTOR_SIZE, the LUKS sector size: 512, 1024,
+    2048 or 4096. Left empty, "oem cryptinit" is sent as before and the
+    device chooses. A value is sent after the cipher, and needs a fastboot
+    gadget whose cryptinit accepts it. The Options page sets it under
+    Encryption Sector Size.
+
  -- Tom Dewey <tom.dewey@raspberrypi.com>  Wed, 07 Oct 2026 08:48:02 +0100
 
 rpi-sb-provisioner (2.3.5) unstable; urgency=medium

@@ -137,6 +137,8 @@ Enumerated Values:
 
 - `RPI_DEVICE_STORAGE_CIPHER` - Must be `aes-xts-plain64` or `xchacha12,aes-adiantum-plain64`
 
+- `RPI_DEVICE_STORAGE_SECTOR_SIZE` - Must be empty, `512`, `1024`, `2048` or `4096`
+
 - `RPI_DEVICE_RPIBOOT_GPIO` - For Raspberry Pi 4 family secure-boot provisioning, must be one of `2`, `4`, `5`, `6`, `7`, or `8`
 
 Format-Specific:

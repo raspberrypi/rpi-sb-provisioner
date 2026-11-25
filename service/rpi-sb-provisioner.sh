@@ -31,6 +31,7 @@ if ! init_signing_context; then
 fi
 
 : "${RPI_DEVICE_STORAGE_CIPHER:=aes-xts-plain64}"
+check_storage_sector_size || exit 1
 
 # NOTE: get_signing_directives() is now provided by rpi-sb-common.sh
 die() {
@@ -507,7 +508,7 @@ timeout_fatal_secs "${FASTBOOT_STORAGE_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_
 sleep 2
 timeout_fatal_secs "${FASTBOOT_STORAGE_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem partapp "${RPI_DEVICE_STORAGE_TYPE}" 83 # Grow to fill storage
 sleep 2
-timeout_fatal_secs "${FASTBOOT_STORAGE_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem cryptinit "${RPI_DEVICE_STORAGE_TYPE}"p2 root "${RPI_DEVICE_STORAGE_CIPHER}"
+timeout_fatal_secs "${FASTBOOT_STORAGE_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem cryptinit "${RPI_DEVICE_STORAGE_TYPE}"p2 root "${RPI_DEVICE_STORAGE_CIPHER}" ${RPI_DEVICE_STORAGE_SECTOR_SIZE:+"${RPI_DEVICE_STORAGE_SECTOR_SIZE}"}
 sleep 2
 timeout_fatal_secs "${FASTBOOT_STORAGE_TIMEOUT}" fastboot -s "${FASTBOOT_DEVICE_SPECIFIER}" oem cryptopen "${RPI_DEVICE_STORAGE_TYPE}"p2 cryptroot
 sleep 2
