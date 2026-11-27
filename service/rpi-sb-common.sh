@@ -384,12 +384,19 @@ probe_flash_pipeline() {
             return 0
             ;;
     esac
-    if timeout_nonfatal_secs "${FASTBOOT_CONTROL_TIMEOUT}" fastboot -s "$1" getvar rpi-flash-pipeline; then
-        FLASH_PIPELINE=1
-        log "Device offers deferred flash writes"
-    else
-        log "Device does not offer deferred flash writes; continuing without"
-    fi
+    # fastboot exits 0 when the device answers FAIL, as one without the
+    # variable does, so only the answer itself says the pipeline is there.
+    _pfp_answer="$(timeout -k 5 "${FASTBOOT_CONTROL_TIMEOUT}" fastboot -s "$1" getvar rpi-flash-pipeline 2>&1 |
+        grep -oP 'rpi-flash-pipeline: \K[^\r\n]*' || true)"
+    case "${_pfp_answer}" in
+        supported|enabled)
+            FLASH_PIPELINE=1
+            log "Device offers deferred flash writes"
+            ;;
+        *)
+            log "Device does not offer deferred flash writes; continuing without"
+            ;;
+    esac
 }
 
 # Arguments: $1 = fastboot specifier, $2 = partition, $3 = image file.
